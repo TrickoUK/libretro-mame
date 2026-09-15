@@ -1722,6 +1722,10 @@ void ppc_device::ppccom_execute_mtsr()
 		// If that happens, bump the translation generation.
 		if (((oldval ^ newval) & 0x80ff'ffff) != 0)
 		{
+			// 603 TLB entries are tagged with the VSID, so the segment's fixed entries are now stale
+			if (m_cap & PPCCAP_603_MMU)
+				vtlb_flush_fixed(seg << 28, 0xf000'0000);
+
 			m_core->m_translation_generation++;
 		}
 	}
@@ -1806,7 +1810,15 @@ void ppc_device::ppccom_get_dsisr()
 
 void ppc_device::ppccom_execute_tlbie()
 {
-	vtlb_flush_address(m_core->param0);
+	// The 603 TLB is indexed by EA[15-19] alone, so tlbie invalidates that whole class.
+	if (m_cap & PPCCAP_603_MMU)
+	{
+		vtlb_flush_fixed(m_core->param0, 0x0001f000);
+	}
+	else
+	{
+		vtlb_flush_address(m_core->param0);
+	}
 
 	// A page table entry for this page may have changed; if code was compiled
 	// from it, make blocks re-check their mappings on the next entry.
