@@ -354,6 +354,27 @@ See the plan file's Phase 2 status note for full root-cause detail on each,
 including the full crash/stability investigation behind item 1's final
 architecture.
 
+### Phase 3 status: core option done, regression testing partially done (2026-09-16)
+
+- **`mame_psx_gpu_hle` core option** (category "video": disabled/2x/4x,
+  default disabled) toggles the GPU path and its resolution multiplier
+  without a rebuild - added following the exact `mame_lua_console`/
+  `mame_debug_plugin` pattern. `GPU_RES_SCALE` moved from a compile-time
+  constant to a runtime `psxgpu_device::gpu_scale()` query
+  (`osd_interface::gpu_render_scale()`). Verified both states: default
+  (disabled) boots at native resolution with no GPU context created at
+  all (identical to pre-feature behavior); `2x` reproduces the previously
+  verified GPU-rendered behavior exactly.
+- **Regression testing**: `starswep` (Namco System 11) **passed** - clean
+  boot, correct 512x480 scaling with that board's own 1.333 aspect ratio
+  (confirms the scaling isn't accidentally Brave-Blade-specific), stable
+  through an extended soak test. `nagano98` (Konami GV) **could not be
+  tested** - the romset in this project's ROM collection is a 128-byte
+  stub, not a real dump (confirmed via `unzip -l`), and no other
+  `konamigv.cpp` game in the collection has a real dump either. This is a
+  ROM-collection availability gap, not a code issue - revisit if a real
+  dump for any `konamigv.cpp` game becomes available.
+
 ### Other candidates (not currently being worked, kept for reference)
 
 Ranked by how self-contained/impactful their software rasterizer is. Line
