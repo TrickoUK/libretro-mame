@@ -29,7 +29,6 @@ TODO:
 - global offset is wrong in non-super22 testmode video test
 - acedrive/victlap testmode video test flickers
 - ss22 testmode video test screen#04 translucent polygon should be higher priority than sprite
-- ss22 testmode video test screen#13 geometry should not be lopsided (uses draw_direct_poly)
 - find out how/where vics num_sprites is determined exactly, currently a workaround is needed for airco22b and dirtdash
 - there's a sprite limit per scanline, eg. timecris submarine explosion smoke partially erases sprites on real hardware
 - propcycl attract mode, when the altar button is pressed, global fade should affect the background sprite
