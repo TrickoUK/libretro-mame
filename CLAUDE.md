@@ -237,43 +237,65 @@ independent of this feature and likely to bite future work too:
   was free again immediately after); `-j4` was reliable. Prefer `-j4` for
   this project's builds.
 
-### Phase 2 status: working, correctness/stability solid, performance is the open item (2026-09-16)
+### Phase 2 status: working, correctness/stability solid, performance acceptable but host-limited (2026-09-16)
 
 `psxgpu_device` now routes its four polygon primitives to the Phase 1 GPU
 service (see the plan file for full detail on each). **Confirmed by live
 visual testing: zero on-screen issues** (no crash, no black-frame flicker,
-no ground/sky edge flicker) at 2x internal resolution. Performance is the
-sole remaining open item. **All four bugs below were invisible to a clean
-compile and even to a crash-free soak test — they only showed up from
-watching actual gameplay.** Reinforces: always do a real visual
-`retroarch -v -L ... <rom>` smoke test after touching this code.
+no ground/sky edge flicker) at 2x internal resolution, with performance
+"a lot better" after the batching work below, though not a rock-solid
+60fps on this specific dev machine (see "Performance: final state" below
+for why that's believed to be host/environment-specific, not a core bug).
+**Every correctness bug below was invisible to a clean compile and even to
+a crash-free soak test — they only showed up from watching actual
+gameplay.** Reinforces: always do a real visual `retroarch -v -L ... <rom>`
+smoke test after touching this code.
 
 1. **Crash** (SIGSEGV in `end_frame_and_readback`, deep in Mesa): caused by
    leaving `retro_gpu_target`'s private EGL context current on the shared
-   thread across multiple calls — RetroArch's frontend can synchronously do
-   its own EGL work (context reinit) *inside* a MAME core call (e.g. when
-   our scaled-resolution `screen.configure()` propagates to
-   `SET_SYSTEM_AV_INFO`), and if our context was still bound at that moment
-   it corrupted RetroArch's own EGL state. **Fixed**, final form: a
-   `scoped_context` RAII helper used narrowly inside every individual
-   `retro_gpu_target` call (`retro_gpu_target.cpp`) — our context is only
-   ever current for the duration of a single call, never held across
-   several. A faster whole-frame-hold alternative was tried to address the
-   performance issue below but reintroduced a crash in a new form,
-   consistent with a Mesa/driver-level issue (not something fixable via
-   EGL bookkeeping alone) with RetroArch recreating its own context while
-   ours coexists on the GPU — see the plan file's Phase 2 status for the
-   full investigation. **This per-call design is the accepted, stable
-   architecture going forward**; its `eglMakeCurrent`-per-call overhead is
-   a known, deliberate tradeoff, not an oversight.
-2. **Performance** ("terribly slow"): `upload_texture()` — a full 256×256
-   decode + `glTexImage2D` — was firing on *every textured polygon*, not
-   once per frame. **Fixed** via `gpu_maybe_upload_texture_page()`
-   (`psx.cpp`), which caches the last-uploaded page/CLUT and skips
-   re-upload when unchanged (the common case for consecutive polygons).
-   Real, measured improvement, but **the per-call EGL context switching
-   from fix 1 is the dominant remaining cost** — performance is still not
-   good; see the plan file's "Next: performance" for follow-up options.
+   thread across multiple *separate MAME/RetroArch scheduler-visible calls*
+   — RetroArch's frontend can synchronously do its own EGL work (context
+   reinit) *inside* a MAME core call (e.g. when our scaled-resolution
+   `screen.configure()` propagates to `SET_SYSTEM_AV_INFO`), and if our
+   context was still bound at that moment it corrupted RetroArch's own EGL
+   state. Two designs that held the context across multiple *separate*
+   calls (even lazily-reacquired ones) both eventually crashed this way,
+   consistent with a Mesa/driver-level issue - not something fixable via
+   EGL bookkeeping alone - with RetroArch recreating its own context while
+   ours coexists on the GPU. **Fixed, final architecture**: every
+   `retro_gpu_target` call still defaults to acquiring/releasing its own
+   context individually (`scoped_context` in `retro_gpu_target.cpp`, safe
+   on its own) - see item 2 for how this coexists with good performance.
+2. **Performance** ("terribly slow", later "a lot better...but still not
+   full speed"), addressed in three real, independent steps:
+   - `upload_texture()` was decoding+uploading the full 256×256 texture
+     page on *every textured polygon*, not once per frame. **Fixed** via
+     `gpu_maybe_upload_texture_page()` (`psx.cpp`), caching the
+     last-uploaded page/CLUT and skipping re-upload when unchanged.
+   - Per-call EGL context acquisition (~1 `eglMakeCurrent` pair per
+     triangle) was then the dominant cost. **Fixed** by deferring all of a
+     frame's `upload_texture`/`set_clip_rect`/triangle calls into a
+     structured queue (`psxgpu_device::m_gpu_queue`, a `gpu_queued_cmd`
+     list, not opaque closures) and replaying the whole queue in gpu_
+     update_screen() as one tight, synchronous C++ loop bracketed by new
+     `osd::gpu_render_target::begin_batch()`/`end_batch()` calls - one
+     context acquisition per *frame* instead of per *call*. This is safe
+     where holding the context across multiple frame's worth of
+     *separately-scheduled* calls (item 1) was not: control never returns
+     to MAME's scheduler or RetroArch during the replay loop, so the risky
+     interleaving that caused item 1's crash is structurally impossible
+     here, not just unlikely. `scoped_context` checks a `m_batch_active`
+     flag and skips its own acquire/release when a batch already holds the
+     context (see its 4th constructor arg).
+   - Per-*triangle* GL draw-call overhead (one `glBufferData`+
+     `glDrawArrays` each) was still significant even with EGL switching
+     fixed. **Fixed** by having the queue replay loop merge consecutive
+     `TRIANGLE` commands sharing the same textured/blend state into one
+     larger vertex buffer and a single `osd::gpu_render_target::
+     submit_triangles()` call (new method, default implementation loops
+     `submit_triangle()` for any backend that doesn't override it) instead
+     of one draw call per triangle - a run only breaks on an actual state
+     change or an intervening `TEXTURE`/`CLUT` command.
 3. **Correctness** (periodic near-black frames, "game frame → black frame →
    game frame" with only a few edge/HUD shapes visible on the black ones):
    `begin_frame()`/`gpu_update_screen()` were unconditionally clearing the
@@ -300,9 +322,37 @@ watching actual gameplay.** Reinforces: always do a real visual
    around its own readback and restores it after. **Confirmed fixed by
    live visual testing.**
 
+**Performance: final state (2026-09-16).** After the three fixes in item 2,
+Brave Blade runs noticeably better but still isn't a locked 60fps on this
+dev machine - live testing (`btop`) showed short bursts of a single CPU
+core near 100%, consistent with the still-mostly-single-threaded
+CPU-emulation + GPU-submission pipeline. Investigated and ruled out as the
+cause: the `mame-dev` Distrobox container itself (identical Mesa 26.2.2
+inside and outside, hardware `radeonsi` acceleration confirmed active - not
+falling back to software rendering, no cgroup CPU quota limit, and the host
+CPU does reach its ~4.8GHz max under load rather than being hard-capped -
+Podman/Distrobox containers share the host kernel directly, not a VM, so
+there's little room for a "container tax" here). RetroArch's `video_threaded`
+option was also tried (now left enabled in `~/.config/retroarch/
+retroarch.cfg` - harmless, no measurable difference either way). The
+**one concrete, host-level factor found**: this machine's CPU governor is
+`powersave` **system-wide** (not container-specific - `cat /sys/devices/
+system/cpu/cpu*/cpufreq/scaling_governor`), typically running ~2.2GHz
+rather than its ~4.8GHz max, and Feral GameMode - which would normally push
+games to the `performance` governor - isn't actually registered as a
+running service on this system (`systemctl --user status gamemoded` finds
+nothing), so nothing is currently correcting for this during testing.
+**User's assessment (2026-09-16), after trying the above**: likely
+acceptable in a real/production emulator environment (i.e. this specific
+gap is believed to be a dev-machine power-management artifact, not a flaw
+in the core's rendering path) - deprioritized for now rather than chased
+further. If revisited, the CPU governor is the next concrete thing to
+test (switch to `performance` and re-measure) before looking for further
+code-level optimizations.
+
 See the plan file's Phase 2 status note for full root-cause detail on each,
-including the full performance/stability investigation behind fix 1's
-final form.
+including the full crash/stability investigation behind item 1's final
+architecture.
 
 ### Other candidates (not currently being worked, kept for reference)
 

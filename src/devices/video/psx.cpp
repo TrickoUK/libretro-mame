@@ -99,9 +99,10 @@ bool psxgpu_device::gpu_active()
 	{
 		m_gpu_active_checked = true;
 		m_gpu_render_target = machine().osd().get_gpu_render_target();
-		// Deliberately NOT priming begin_frame() here anymore - see the
-		// m_gpu_frame_active comment in psx.h. gpu_ensure_frame_active()
-		// acquires it lazily on first actual primitive submission instead.
+		// No context/frame priming here - all GPU work happens in one
+		// batched burst per frame in gpu_update_screen() (see the
+		// m_gpu_queue comment in psx.h), not incrementally as primitives
+		// are submitted.
 	}
 	return m_gpu_render_target != nullptr;
 }
@@ -531,20 +532,13 @@ void psxgpu_device::updatevisiblearea()
 
 		// screen.configure() can synchronously propagate to the libretro
 		// OSD's RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO callback when the size
-		// actually changes, and RetroArch's frontend handles that by doing
-		// its own EGL work right there, on this same thread - if our GPU
-		// context is the one currently bound at that moment (it normally is,
-		// for the whole frame - see retro_gpu_target.h), that corrupts
-		// RetroArch's own EGL state (this was the root cause of a
-		// reproducible crash). yield/resume hand the thread back for just
-		// this one call. No-ops if the target hasn't been constructed yet
-		// (m_gpu_render_target null - e.g. this runs before any real
-		// gameplay/gpu_active() has happened).
-		if (m_gpu_render_target)
-			m_gpu_render_target->yield_context();
+		// actually changes, and RetroArch's frontend reacts to that with its
+		// own EGL work right there, on this same thread - a real problem
+		// when our GPU context used to be held bound across multiple calls,
+		// but this runs before gpu_update_screen()'s batched GPU work for
+		// the frame even starts (see the m_gpu_queue comment in psx.h), so
+		// our context is never bound at this point - nothing to guard here.
 		screen().configure(scaled_width, scaled_height, visarea, HZ_TO_ATTOSECONDS(refresh));
-		if (m_gpu_render_target)
-			m_gpu_render_target->resume_context();
 	}
 	else
 	{
@@ -1600,9 +1594,13 @@ void psxgpu_device::gpu_maybe_set_clip_rect()
 		return;
 	}
 
-	m_gpu_render_target->set_clip_rect(
-		(int)n_drawarea_x1 * GPU_RES_SCALE, (int)n_drawarea_y1 * GPU_RES_SCALE,
-		(int)( n_drawarea_x2 + 1 ) * GPU_RES_SCALE - 1, (int)( n_drawarea_y2 + 1 ) * GPU_RES_SCALE - 1 );
+	gpu_queued_cmd cmd;
+	cmd.kind = gpu_queued_cmd::kind_t::CLIP;
+	cmd.clip_x1 = (int)n_drawarea_x1 * GPU_RES_SCALE;
+	cmd.clip_y1 = (int)n_drawarea_y1 * GPU_RES_SCALE;
+	cmd.clip_x2 = (int)( n_drawarea_x2 + 1 ) * GPU_RES_SCALE - 1;
+	cmd.clip_y2 = (int)( n_drawarea_y2 + 1 ) * GPU_RES_SCALE - 1;
+	m_gpu_queue.push_back( std::move( cmd ) );
 
 	m_gpu_drawarea_cached = true;
 	m_gpu_last_drawarea_x1 = n_drawarea_x1;
@@ -1611,29 +1609,25 @@ void psxgpu_device::gpu_maybe_set_clip_rect()
 	m_gpu_last_drawarea_y2 = n_drawarea_y2;
 }
 
-// Lazily (re)acquires the GPU target's context for this frame if it isn't
-// already bound - see the m_gpu_frame_active comment in psx.h for why this
-// replaced eagerly re-priming begin_frame() right after every readback.
-void psxgpu_device::gpu_ensure_frame_active()
-{
-	if( m_gpu_frame_active )
-		return;
-	m_gpu_frame_w = n_screenwidth * GPU_RES_SCALE;
-	m_gpu_frame_h = n_screenheight * GPU_RES_SCALE;
-	m_gpu_render_target->begin_frame( m_gpu_frame_w, m_gpu_frame_h );
-	m_gpu_frame_active = true;
-}
-
 void psxgpu_device::gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend )
 {
-	gpu_ensure_frame_active();
 	gpu_maybe_set_clip_rect();
-	osd::gpu_vertex tri[ 3 ] = { v0, v1, v2 };
-	m_gpu_render_target->submit_triangle( tri, textured, blend );
+
+	gpu_queued_cmd cmd;
+	cmd.kind = gpu_queued_cmd::kind_t::TRIANGLE;
+	cmd.tri[ 0 ] = v0; cmd.tri[ 1 ] = v1; cmd.tri[ 2 ] = v2;
+	cmd.textured = textured;
+	cmd.blend = blend;
+	m_gpu_queue.push_back( std::move( cmd ) );
+
 	if( n_points == 4 )
 	{
-		osd::gpu_vertex tri2[ 3 ] = { v1, v2, v3 };
-		m_gpu_render_target->submit_triangle( tri2, textured, blend );
+		gpu_queued_cmd cmd2;
+		cmd2.kind = gpu_queued_cmd::kind_t::TRIANGLE;
+		cmd2.tri[ 0 ] = v1; cmd2.tri[ 1 ] = v2; cmd2.tri[ 2 ] = v3;
+		cmd2.textured = textured;
+		cmd2.blend = blend;
+		m_gpu_queue.push_back( std::move( cmd2 ) );
 	}
 }
 
@@ -1748,10 +1742,10 @@ void psxgpu_device::gpu_maybe_upload_texture_page( int n_tx, int n_ty, int tp, i
 		return;
 	}
 
-	gpu_ensure_frame_active();
-	std::vector<uint32_t> texdata;
-	gpu_decode_texture_page( n_tx, n_ty, tp, n_clutx, n_cluty, texdata );
-	m_gpu_render_target->upload_texture( texdata.data(), 256, 256 );
+	gpu_queued_cmd cmd;
+	cmd.kind = gpu_queued_cmd::kind_t::TEXTURE;
+	gpu_decode_texture_page( n_tx, n_ty, tp, n_clutx, n_cluty, cmd.texdata );
+	m_gpu_queue.push_back( std::move( cmd ) );
 
 	m_gpu_last_tx = n_tx;
 	m_gpu_last_ty = n_ty;
@@ -1760,57 +1754,93 @@ void psxgpu_device::gpu_maybe_upload_texture_page( int n_tx, int n_ty, int tp, i
 	m_gpu_last_cluty = n_cluty;
 }
 
-// Reads back whatever polygons have been submitted to the GPU target since
-// the last call into bitmap, then immediately re-begins the target for the
-// next frame's incoming primitives WITHOUT clearing it (see
-// retro_gpu_target::resize_target()) - the target models PS1 VRAM, which is
-// persistent across frames, matching the original VRAM-scanout path. A game
-// that doesn't fully redraw the visible area every single refresh (common -
-// most games only resubmit what changed, clearing the rest via their own
-// fill-rectangle GP0 command) still shows correctly-persisted content from
-// prior frames instead of the un-resubmitted parts going black.
+// Replays this frame's queued upload_texture()/set_clip_rect()/triangle
+// commands (see the m_gpu_queue comment in psx.h), reads the result back
+// into bitmap, then clears the queue for the next frame. Consecutive
+// TRIANGLE commands sharing the same textured/blend state are merged into
+// one osd::gpu_render_target::submit_triangles() call instead of replayed
+// one triangle (one GL draw call) at a time - a run only needs to break on
+// an actual state change (different textured/blend) or an intervening
+// TEXTURE/CLIP command (which changes what subsequent triangles should
+// look like, so can't be reordered past). The GPU target itself is NOT
+// cleared here (see retro_gpu_target::resize_target()) - it models PS1
+// VRAM, which is persistent across frames, matching the original
+// VRAM-scanout path. A game that doesn't fully redraw the visible area
+// every single refresh (common - most games only resubmit what changed,
+// clearing the rest via their own fill-rectangle GP0 command) still shows
+// correctly-persisted content from prior frames instead of the
+// un-resubmitted parts going black.
 uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 {
-	// Make sure our context is bound before touching the target, even if no
-	// primitive happened to be submitted since the last readback (a no-op
-	// if a frame is already active) - see gpu_ensure_frame_active() and the
-	// m_gpu_frame_active comment in psx.h for why this is lazy rather than
-	// eagerly re-primed at the end of the previous call.
-	gpu_ensure_frame_active();
+	int w = n_screenwidth * GPU_RES_SCALE;
+	int h = n_screenheight * GPU_RES_SCALE;
 
-	// Use m_gpu_frame_w/h (what the active frame was actually begin_frame()'d
-	// with), NOT a fresh n_screenwidth/height recomputation - those can
-	// differ if a GP1 display-mode command ran between the primitive that
-	// lazily started this frame and this readback, and retro_gpu_target's
-	// actual FBO is still sized to the former (see the psx.h comment on
-	// m_gpu_frame_w/h - a mismatch here previously overflowed the readback
-	// buffer and crashed inside glReadPixels).
-	int w = m_gpu_frame_w;
-	int h = m_gpu_frame_h;
+	// One context acquisition for the whole burst below (begin_frame,
+	// every queued call, and the final readback) instead of one per call -
+	// see the begin_batch()/end_batch() comment in retro_gpu_target.h for
+	// why this specific usage (a tight synchronous loop with nothing else
+	// running in between) is safe where holding the context across
+	// multiple *separate* MAME calls was not.
+	m_gpu_render_target->begin_batch();
+	m_gpu_render_target->begin_frame( w, h );
+
+	std::vector<osd::gpu_vertex> run;
+	bool run_textured = false;
+	osd::gpu_blend_mode run_blend = osd::gpu_blend_mode::NONE;
+	auto flush_run = [ this, &run, &run_textured, &run_blend ]()
+	{
+		if( !run.empty() )
+		{
+			m_gpu_render_target->submit_triangles( run.data(), (int)run.size(), run_textured, run_blend );
+			run.clear();
+		}
+	};
+
+	for( auto &cmd : m_gpu_queue )
+	{
+		switch( cmd.kind )
+		{
+		case gpu_queued_cmd::kind_t::TRIANGLE:
+			if( !run.empty() && ( cmd.textured != run_textured || cmd.blend != run_blend ) )
+				flush_run();
+			run_textured = cmd.textured;
+			run_blend = cmd.blend;
+			run.push_back( cmd.tri[ 0 ] );
+			run.push_back( cmd.tri[ 1 ] );
+			run.push_back( cmd.tri[ 2 ] );
+			break;
+		case gpu_queued_cmd::kind_t::TEXTURE:
+			flush_run();
+			m_gpu_render_target->upload_texture( cmd.texdata.data(), 256, 256 );
+			break;
+		case gpu_queued_cmd::kind_t::CLIP:
+			flush_run();
+			m_gpu_render_target->set_clip_rect( cmd.clip_x1, cmd.clip_y1, cmd.clip_x2, cmd.clip_y2 );
+			break;
+		}
+	}
+	flush_run();
+	m_gpu_queue.clear();
 
 	std::vector<uint32_t> temp( (size_t)w * h );
 	m_gpu_render_target->end_frame_and_readback( temp.data() );
+	m_gpu_render_target->end_batch();
 
-	// bitmap is sized to the *current* n_screenwidth/height (updatevisiblearea()
-	// already reconfigured the screen to that before this runs), which can
-	// differ from w/h (the frame's actual FBO size, possibly from before a
-	// mid-frame display-mode change) - clamp to whichever is smaller so
-	// neither the source (temp) nor destination (bitmap) is ever read/written
-	// out of bounds. A mismatch here is an edge case (display mode changing
-	// between a primitive submission and this readback), not the common
-	// path - a cropped/incomplete frame is an acceptable outcome, a crash
-	// is not.
-	int copy_w = std::min( w, (int)n_screenwidth * GPU_RES_SCALE );
-	int copy_h = std::min( h, (int)n_screenheight * GPU_RES_SCALE );
+	// bitmap is sized by whatever updatevisiblearea() last configured the
+	// screen to, which should always match w/h exactly (both derived from
+	// the same n_screenwidth/n_screenheight at essentially the same point
+	// in time) - but clamp against bitmap's own reported dimensions rather
+	// than assume, since a mismatch here previously overflowed the
+	// readback buffer and crashed inside glReadPixels (see git history);
+	// cheap insurance, and a cropped/incomplete frame is an acceptable
+	// fallback outcome where a crash is not.
+	int copy_w = std::min( w, bitmap.width() );
+	int copy_h = std::min( h, bitmap.height() );
 	for( int y = 0; y < copy_h; y++ )
 	{
 		memcpy( &bitmap.pix( y, 0 ), &temp[ (size_t)y * w ], (size_t)copy_w * sizeof( uint32_t ) );
 	}
 
-	// Released now - the next frame's context is only reacquired lazily,
-	// on that frame's first actual GPU call, so our context is guaranteed
-	// NOT bound by the time control returns to RetroArch's frontend.
-	m_gpu_frame_active = false;
 	return 0;
 }
 

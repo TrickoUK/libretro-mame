@@ -77,6 +77,20 @@ public:
 	// uses per-vertex color only.
 	virtual void submit_triangle(const gpu_vertex tri[3], bool textured, gpu_blend_mode blend) = 0;
 
+	// submit `count` vertices (a multiple of 3, i.e. count/3 triangles) as
+	// one batch, all sharing the same textured/blend state - equivalent to
+	// calling submit_triangle() count/3 times, but as a single underlying
+	// draw call. Significantly cheaper for many triangles sharing state
+	// (the common case - see psxgpu_device::gpu_update_screen(), which
+	// groups its queued triangles into runs before calling this). Default
+	// implementation just loops submit_triangle() for callers/backends
+	// that don't need the batched path.
+	virtual void submit_triangles(const gpu_vertex *verts, int count, bool textured, gpu_blend_mode blend)
+	{
+		for (int i = 0; i + 3 <= count; i += 3)
+			submit_triangle(&verts[i], textured, blend);
+	}
+
 	// finish rendering and read the target back into a caller-owned RGBA8
 	// buffer (width*height*4 bytes, row 0 = top, matching bitmap_rgb32
 	// convention.
@@ -89,14 +103,19 @@ public:
 	// implementation/device pairing that doesn't need it.
 	virtual void set_clip_rect(int x1, int y1, int x2, int y2) {}
 
-	// Temporarily give up whatever context this target holds current on
-	// the calling thread, then reacquire it - for a caller that must let
-	// another EGL/GL client (e.g. the frontend) safely do its own context
-	// work in between, without the overhead of yielding around every
-	// single call. Default no-op for any implementation that doesn't hold
-	// a context this way (e.g. one that already re-acquires per-call).
-	virtual void yield_context() {}
-	virtual void resume_context() {}
+	// Optionally batch a run of upload_texture()/set_clip_rect()/
+	// submit_triangle() calls under a single context acquisition instead
+	// of each call acquiring its own - a significant win when many calls
+	// happen back-to-back with nothing else (e.g. no return to the host's
+	// own scheduler/frontend) interleaved between them. Only call these
+	// around a tight, synchronous run of calls where the caller can
+	// guarantee nothing else needs this thread's context in between -
+	// see retro_gpu_target's implementation for the concrete rationale.
+	// Default no-op pair for any implementation that doesn't support or
+	// need this (every call then just acquires its own context, as if
+	// begin_batch()/end_batch() were never called).
+	virtual void begin_batch() {}
+	virtual void end_batch() {}
 };
 
 } // namespace osd

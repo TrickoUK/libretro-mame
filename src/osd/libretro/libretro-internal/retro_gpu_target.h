@@ -42,10 +42,11 @@ public:
 	virtual void begin_frame(int width, int height) override;
 	virtual void upload_texture(const uint32_t *rgba_pixels, int width, int height) override;
 	virtual void submit_triangle(const osd::gpu_vertex tri[3], bool textured, osd::gpu_blend_mode blend) override;
+	virtual void submit_triangles(const osd::gpu_vertex *verts, int count, bool textured, osd::gpu_blend_mode blend) override;
 	virtual void end_frame_and_readback(uint32_t *rgba_out) override;
 	virtual void set_clip_rect(int x1, int y1, int x2, int y2) override;
-	virtual void yield_context() override;
-	virtual void resume_context() override;
+	virtual void begin_batch() override;
+	virtual void end_batch() override;
 
 	// true once EGL/GL initialization has succeeded; callers (and
 	// get_gpu_render_target()) should treat a failed-to-initialize
@@ -69,29 +70,38 @@ private:
 	// full context/surface teardown-and-recreate) synchronously from
 	// *inside* a MAME core call - concretely, in reaction to our
 	// scaled-resolution screen.configure() call propagating to
-	// RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO. Two designs were tried here:
-	// (1) hold our context for the whole begin_frame()..
-	// end_frame_and_readback() span (cheap - one switch per frame), with
-	// just the one known risky call site (psxgpu_device::
-	// updatevisiblearea()) bracketed via yield_context()/resume_context();
-	// (2) even a *lazily re-acquired* whole-frame hold, released at the
-	// very end of every readback so nothing is ever bound across a frame
-	// boundary we don't control. Both eventually crashed a few frames
-	// after a resolution change, with our own context ending up
-	// (impossibly, if our bookkeeping were the whole story) left "current"
-	// again without an intervening begin_frame() - strongly suggesting
-	// this is a Mesa/driver-level issue with RetroArch recreating its own
-	// EGL context/surface while ours coexists on the same GPU device, not
-	// something fixable purely through EGL call-level bookkeeping on our
-	// side. Reverted to the original, narrowest design: every public entry
-	// point below (see the scoped_context helper in the .cpp) individually
-	// saves/restores around itself, so our context is *only* current for
-	// the duration of a single call, at the cost of an eglMakeCurrent pair
-	// per call (confirmed stable via an extended soak test; confirmed slow
-	// with real per-polygon-heavy scenes - a known, accepted tradeoff for
-	// now). yield_context()/resume_context() are consequently no-ops here -
-	// see their definitions - kept as overrides only so a future, provably
-	// safe wider-hold design doesn't need to touch call sites again.
+	// RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO. Two earlier designs held our
+	// context across *multiple* MAME calls (once per frame, or lazily
+	// re-acquired and held until the next readback) to avoid per-call
+	// eglMakeCurrent overhead, and both eventually crashed a few frames
+	// after a resolution change - diagnostics showed our own context
+	// ending up "current" again without an intervening begin_frame(),
+	// impossible if our own bookkeeping were the whole story, strongly
+	// suggesting a Mesa/driver-level issue with RetroArch recreating its
+	// own EGL context/surface while ours coexists on the same GPU device
+	// *and control has actually returned to MAME/RetroArch's scheduler in
+	// between* - not something fixable purely through EGL call-level
+	// bookkeeping on our side.
+	//
+	// Every public entry point below therefore still individually
+	// saves/restores around itself by default (see the scoped_context
+	// helper in the .cpp) - safe on its own, but an eglMakeCurrent pair
+	// per call is too slow for a real polygon-heavy scene. begin_batch()/
+	// end_batch() add an opt-in fast path *psxgpu_device actually uses*:
+	// the caller queues a whole frame's worth of upload_texture()/
+	// set_clip_rect()/submit_triangle() calls in host memory (no GL calls
+	// at all yet), then replays the queue in one tight, synchronous C++
+	// loop bracketed by begin_batch()/end_batch() - during which control
+	// never returns to MAME's scheduler or RetroArch, so the risky
+	// interleaving above is structurally impossible, not just unlikely.
+	// scoped_context checks m_batch_active and skips its own
+	// eglMakeCurrent pair when a batch already has the context current -
+	// see its 4th constructor argument.
+	bool m_batch_active;
+	EGLDisplay m_batch_saved_display;
+	EGLSurface m_batch_saved_draw_surface;
+	EGLSurface m_batch_saved_read_surface;
+	EGLContext m_batch_saved_context;
 
 	uint32_t m_fbo;
 	uint32_t m_color_tex;

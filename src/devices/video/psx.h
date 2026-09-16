@@ -14,15 +14,18 @@
 
 #include <vector>
 
-#define PSXGPU_DEBUG_VIEWER ( 0 )
-
 // GPU-accelerated rendering (see CLAUDE.md "Chosen first target" /
-// /home/bazzite/.claude/plans/glowing-conjuring-raven.md Phase 2) - forward
-// declared here so psx.h doesn't need to pull in the full OSD interface
-// header; osd_interface::get_gpu_render_target() (declared in osdepend.h,
-// which psx.cpp includes) returns nullptr when unavailable, so this is
-// always safe to store even on OSDs/builds without the feature.
-namespace osd { class gpu_render_target; enum class gpu_blend_mode; struct gpu_vertex; }
+// /home/bazzite/.claude/plans/glowing-conjuring-raven.md Phase 2).
+// gpu_queued_cmd (below) embeds osd::gpu_vertex/gpu_blend_mode by value, so
+// this needs the full interface, not just a forward declaration of
+// osd::gpu_render_target - still a small, OSD-agnostic header (no EGL/GL),
+// so no build-time cost for OSDs/builds without the feature.
+// osd_interface::get_gpu_render_target() (declared in osdepend.h, which
+// psx.cpp includes) returns nullptr when unavailable, so m_gpu_render_target
+// below is always safe to store either way.
+#include "interface/gpurender.h"
+
+#define PSXGPU_DEBUG_VIEWER ( 0 )
 
 DECLARE_DEVICE_TYPE(CXD8514Q,  cxd8514q_device)
 DECLARE_DEVICE_TYPE(CXD8538Q,  cxd8538q_device)
@@ -239,36 +242,38 @@ private:
 	bool gpu_active();
 	bool m_gpu_active_checked = false;
 
-	// Whether the GPU target currently has an active begin_frame() with no
-	// matching end_frame_and_readback() yet - i.e. whether our EGL context
-	// is the one bound on this thread right now. Deliberately NOT re-primed
-	// eagerly right after end_frame_and_readback() in gpu_update_screen();
-	// instead begin_frame() for the next frame is only (re)acquired lazily,
-	// right before the first primitive of that frame is actually submitted
-	// (gpu_ensure_frame_active(), called from gpu_submit_triangle_pair()).
-	// This matters because RetroArch's frontend checks/reports this screen's
-	// geometry somewhere in its own per-frame loop *outside* any MAME call
-	// this device controls (not synchronously inside screen.configure(), as
-	// first assumed - confirmed by diagnostic logging showing the resulting
-	// SET_SYSTEM_AV_INFO firing with our context still bound from an eagerly
-	// re-primed begin_frame(), well outside updatevisiblearea()). The only
-	// way to guarantee our context is never bound at that unknown point is
-	// to guarantee it's released by the time control returns to RetroArch at
-	// all - i.e. never hold it across a frame boundary we don't control.
-	bool m_gpu_frame_active = false;
-	// The target-pixel dimensions the currently-active frame was actually
-	// begin_frame()'d with. n_screenwidth/height (and hence the "current"
-	// scaled size) can change mid-frame - a GP1 display-mode command can
-	// run between an earlier primitive submission (which lazily started
-	// the frame at the size current then) and gpu_update_screen()'s
-	// readback. Recomputing w/h fresh from n_screenwidth/height at readback
-	// time instead of using these would size the CPU-side readback buffer
-	// differently than retro_gpu_target's actual FBO, which still uses
-	// whatever begin_frame() last (re)sized it to - a heap-buffer-overflow
-	// SIGSEGV inside glReadPixels, not merely a visual glitch.
-	int m_gpu_frame_w = 0;
-	int m_gpu_frame_h = 0;
-	void gpu_ensure_frame_active();
+	// Per-call EGL context acquisition (one eglMakeCurrent pair per
+	// upload_texture()/submit_triangle()/set_clip_rect() call) was too slow
+	// for a real polygon-heavy scene. Rather than holding the context
+	// across multiple calls to amortize that cost - which was tried and
+	// found to eventually corrupt shared driver state once control returns
+	// to MAME/RetroArch's scheduler in between (see CLAUDE.md/plan file
+	// Phase 2 status) - primitive submission is deferred: gpu_submit_
+	// triangle_pair()/gpu_maybe_upload_texture_page()/gpu_maybe_set_clip_
+	// rect() queue commands here instead of calling m_gpu_render_target
+	// directly. gpu_update_screen() then replays the whole queue in one
+	// tight, synchronous loop bracketed by begin_batch()/end_batch() -
+	// control never returns to the scheduler during that loop, so the
+	// risky interleaving is structurally impossible, not just unlikely,
+	// while still paying only one context acquisition for the whole frame.
+	//
+	// A structured list (not opaque closures) so gpu_update_screen() can
+	// also merge consecutive TRIANGLE commands that share the same
+	// textured/blend state into one larger osd::gpu_render_target::
+	// submit_triangles() call instead of replaying them one triangle (one
+	// GL draw call) at a time - per-draw-call overhead, independent of the
+	// EGL context-switching problem above, is itself significant for a
+	// real polygon-heavy scene.
+	struct gpu_queued_cmd
+	{
+		enum class kind_t { TRIANGLE, TEXTURE, CLIP } kind;
+		osd::gpu_vertex tri[3];
+		bool textured = false;
+		osd::gpu_blend_mode blend = osd::gpu_blend_mode::NONE;
+		std::vector<uint32_t> texdata;
+		int clip_x1 = 0, clip_y1 = 0, clip_x2 = 0, clip_y2 = 0;
+	};
+	std::vector<gpu_queued_cmd> m_gpu_queue;
 	osd::gpu_blend_mode gpu_blend_mode_for( uint8_t n_cmd ) const;
 	bool gpu_decode_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty, std::vector<uint32_t> &out );
 	void gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend );

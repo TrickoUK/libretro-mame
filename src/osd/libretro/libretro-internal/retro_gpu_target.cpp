@@ -369,14 +369,17 @@ const char *fragment_shader_src =
 // Makes the target's EGL context current for the lifetime of this object,
 // restoring whatever was current on the calling thread beforehand when it
 // goes out of scope. Used individually inside every public entry point
-// below (never held across multiple calls) - see the header comment on
-// why this must stay scoped this narrowly: RetroArch's frontend can
-// perform its own EGL work synchronously from inside a MAME core call
-// (e.g. reacting to our scaled-resolution screen.configure()), and a
-// wider hold was found to eventually corrupt shared driver state even
-// with careful lazy reacquisition (see CLAUDE.md/plan file Phase 2
-// status for the full investigation). The resulting per-call
-// eglMakeCurrent overhead is a known, accepted performance cost for now.
+// below - see the header comment on m_batch_active for why: RetroArch's
+// frontend can perform its own EGL work synchronously from inside a MAME
+// core call, and holding our context across *multiple calls with control
+// returning to MAME/RetroArch's scheduler in between* was found to
+// eventually corrupt shared driver state, even with careful lazy
+// reacquisition. A per-call eglMakeCurrent pair is too slow for a real
+// polygon-heavy scene on its own, so when the caller has already
+// acquired the context itself via begin_batch() (a tight, synchronous
+// run of calls with nothing interleaved - safe for the same reason a
+// single call is safe), pass already_current=true to skip the redundant
+// acquire/release entirely.
 struct scoped_context
 {
 	EGLDisplay saved_display;
@@ -384,21 +387,29 @@ struct scoped_context
 	EGLSurface saved_read_surface;
 	EGLContext saved_context;
 	bool active;
+	bool owns_switch;
 
-	scoped_context(EGLDisplay display, EGLSurface surface, EGLContext context)
+	scoped_context(EGLDisplay display, EGLSurface surface, EGLContext context, bool already_current)
 	{
+		if (already_current)
+		{
+			active = true;
+			owns_switch = false;
+			return;
+		}
 		saved_display = g_egl.GetCurrentDisplay();
 		saved_draw_surface = g_egl.GetCurrentSurface(EGL_DRAW_);
 		saved_read_surface = g_egl.GetCurrentSurface(EGL_READ_);
 		saved_context = g_egl.GetCurrentContext();
 		active = g_egl.MakeCurrent(display, surface, surface, context);
+		owns_switch = active;
 		if (!active)
 			fprintf(stderr, "[retro_gpu_target] scoped_context: eglMakeCurrent failed: 0x%x\n", g_egl.GetError());
 	}
 
 	~scoped_context()
 	{
-		if (active)
+		if (owns_switch)
 			g_egl.MakeCurrent(saved_display, saved_draw_surface, saved_read_surface, saved_context);
 	}
 
@@ -410,6 +421,8 @@ struct scoped_context
 
 retro_gpu_target::retro_gpu_target()
 	: m_display(nullptr), m_context(nullptr), m_surface(nullptr), m_valid(false)
+	, m_batch_active(false)
+	, m_batch_saved_display(nullptr), m_batch_saved_draw_surface(nullptr), m_batch_saved_read_surface(nullptr), m_batch_saved_context(nullptr)
 	, m_fbo(0), m_color_tex(0), m_fbo_width(0), m_fbo_height(0)
 	, m_vram_tex(0), m_vram_tex_width(0), m_vram_tex_height(0)
 	, m_program(0), m_vao(0), m_vbo(0)
@@ -627,7 +640,7 @@ void retro_gpu_target::begin_frame(int width, int height)
 	if (!m_valid)
 		return;
 
-	scoped_context ctx(m_display, m_surface, m_context);
+	scoped_context ctx(m_display, m_surface, m_context, m_batch_active);
 	if (!ctx.active)
 		return;
 
@@ -641,19 +654,26 @@ void retro_gpu_target::begin_frame(int width, int height)
 	g_gl.Disable(GL_BLEND);
 }
 
-// No-ops: with per-call scoped_context above, our context is never left
-// bound between calls, so there is nothing for these to yield/resume - see
-// the interface's default (osd::gpu_render_target::yield_context()) for
-// the general contract. Kept as explicit overrides (rather than removing
-// them and falling back to the base class) so the call sites in
-// psxgpu_device::updatevisiblearea() don't need to change if a future,
-// safe way to hold the context wider is found.
-void retro_gpu_target::yield_context()
+void retro_gpu_target::begin_batch()
 {
+	if (!m_valid || m_batch_active)
+		return;
+	m_batch_saved_display = g_egl.GetCurrentDisplay();
+	m_batch_saved_draw_surface = g_egl.GetCurrentSurface(EGL_DRAW_);
+	m_batch_saved_read_surface = g_egl.GetCurrentSurface(EGL_READ_);
+	m_batch_saved_context = g_egl.GetCurrentContext();
+	if (g_egl.MakeCurrent(m_display, m_surface, m_surface, m_context))
+		m_batch_active = true;
+	else
+		fprintf(stderr, "[retro_gpu_target] begin_batch: eglMakeCurrent failed: 0x%x\n", g_egl.GetError());
 }
 
-void retro_gpu_target::resume_context()
+void retro_gpu_target::end_batch()
 {
+	if (!m_batch_active)
+		return;
+	g_egl.MakeCurrent(m_batch_saved_display, m_batch_saved_draw_surface, m_batch_saved_read_surface, m_batch_saved_context);
+	m_batch_active = false;
 }
 
 void retro_gpu_target::set_clip_rect(int x1, int y1, int x2, int y2)
@@ -661,7 +681,7 @@ void retro_gpu_target::set_clip_rect(int x1, int y1, int x2, int y2)
 	if (!m_valid)
 		return;
 
-	scoped_context ctx(m_display, m_surface, m_context);
+	scoped_context ctx(m_display, m_surface, m_context, m_batch_active);
 	if (!ctx.active)
 		return;
 
@@ -687,7 +707,7 @@ void retro_gpu_target::upload_texture(const uint32_t *rgba_pixels, int width, in
 	if (!m_valid)
 		return;
 
-	scoped_context ctx(m_display, m_surface, m_context);
+	scoped_context ctx(m_display, m_surface, m_context, m_batch_active);
 	if (!ctx.active)
 		return;
 
@@ -740,18 +760,23 @@ void retro_gpu_target::set_blend_mode(osd::gpu_blend_mode blend)
 
 void retro_gpu_target::submit_triangle(const osd::gpu_vertex tri[3], bool textured, osd::gpu_blend_mode blend)
 {
-	if (!m_valid)
+	submit_triangles(tri, 3, textured, blend);
+}
+
+void retro_gpu_target::submit_triangles(const osd::gpu_vertex *verts, int count, bool textured, osd::gpu_blend_mode blend)
+{
+	if (!m_valid || count <= 0)
 		return;
 
-	scoped_context ctx(m_display, m_surface, m_context);
+	scoped_context ctx(m_display, m_surface, m_context, m_batch_active);
 	if (!ctx.active)
 		return;
 
 	set_blend_mode(blend);
 	g_gl.Uniform1i(m_u_textured_loc, textured ? 1 : 0);
 	g_gl.BindBuffer(GL_ARRAY_BUFFER, m_vbo);
-	g_gl.BufferData(GL_ARRAY_BUFFER, sizeof(osd::gpu_vertex) * 3, tri, GL_DYNAMIC_DRAW);
-	g_gl.DrawArrays(GL_TRIANGLES, 0, 3);
+	g_gl.BufferData(GL_ARRAY_BUFFER, sizeof(osd::gpu_vertex) * count, verts, GL_DYNAMIC_DRAW);
+	g_gl.DrawArrays(GL_TRIANGLES, 0, count);
 }
 
 void retro_gpu_target::end_frame_and_readback(uint32_t *rgba_out)
@@ -759,7 +784,7 @@ void retro_gpu_target::end_frame_and_readback(uint32_t *rgba_out)
 	if (!m_valid)
 		return;
 
-	scoped_context ctx(m_display, m_surface, m_context);
+	scoped_context ctx(m_display, m_surface, m_context, m_batch_active);
 	if (!ctx.active)
 		return;
 
