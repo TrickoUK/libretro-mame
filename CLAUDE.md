@@ -375,6 +375,34 @@ architecture.
   ROM-collection availability gap, not a code issue - revisit if a real
   dump for any `konamigv.cpp` game becomes available.
 
+### Next planned work: rendering quality (PGXP-style correction) - not started
+
+**User's intent (2026-09-16): this is the next thing to work on, in a
+future session** (explicitly not the same day Phase 3 finished). Phases
+1-3 above are done and working; this is new, not-yet-started work.
+
+Current GPU path deliberately/inherently reproduces two classic PS1
+visual characteristics: affine texture warping (the vertex shader hardcodes
+`w=1.0`, disabling perspective-correct UV interpolation - see
+`retro_gpu_target.cpp`'s `vertex_shader_src`) and geometry wobble (the
+vertices we render are the same integer-truncated screen coordinates the
+real GPU always received - the CPU-side GTE's low-precision fixed-point
+math is what causes this, and `psxgpu_device`/`psx.cpp` - everything
+touched so far - has never had access to real per-vertex depth to do
+anything about it). Fixing either one for real needs the same missing
+ingredient (real per-vertex depth), which means the same underlying
+technique - **PGXP-style GTE interception** (`src/devices/cpu/psx/gte.cpp`,
+opcodes **RTPS**/**RTPT** - completely different, untouched code from
+Phase 1-3, belonging to `psxcpu_device` not `psxgpu_device`) - would
+address both at once, not two separate projects. Full technical grounding,
+including why running Brave Blade in a console-only PS1 core (e.g. Beetle
+PSX HW) instead was considered and rejected (Brave Blade is Sony ZN-2
+**arcade** hardware, not a retail PS1 game - MAME already solved the hard
+"arcade platform compatibility" part; a console core has none of that),
+is in `/home/bazzite/.claude/plans/glowing-conjuring-raven.md`'s "Phase 4"
+section - **read that before starting**, nothing below is a
+substitute for it.
+
 ### Other candidates (not currently being worked, kept for reference)
 
 Ranked by how self-contained/impactful their software rasterizer is. Line
