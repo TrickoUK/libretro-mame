@@ -72,6 +72,7 @@ char joystick_threshold[8];
 char alternate_renderer = 0;
 bool lua_console_enable = false;
 char debug_plugin[32] = "";
+int psx_gpu_hle_scale = 0;
 
 // emu flags
 static bool arcade = false;

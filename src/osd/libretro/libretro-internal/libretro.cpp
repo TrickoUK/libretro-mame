@@ -457,6 +457,18 @@ static void check_variables(void)
       debug_plugin[sizeof(debug_plugin) - 1] = '\0';
    }
 
+   var.key   = CORE_NAME "_psx_gpu_hle";
+   var.value = NULL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "disabled"))
+         psx_gpu_hle_scale = 0;
+      if (!strcmp(var.value, "2x"))
+         psx_gpu_hle_scale = 2;
+      if (!strcmp(var.value, "4x"))
+         psx_gpu_hle_scale = 4;
+   }
+
    var.key   = CORE_NAME "_lightgun_mode";
    var.value = NULL;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)

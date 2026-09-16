@@ -318,6 +318,13 @@ void retro_osd_interface::osd_exit()
 osd::gpu_render_target *retro_osd_interface::get_gpu_render_target()
 {
 #if defined(HAVE_RETRO_GPU_TARGET)
+	// mame_psx_gpu_hle core option: user-selected "disabled" means never
+	// construct (or keep returning) a real GPU context, regardless of this
+	// being a HAVE_RETRO_GPU_TARGET build - matches gpu_render_available()
+	// (see its doc comment in osdepend.h) so a caller checking only one of
+	// the two still gets consistent behavior.
+	if (psx_gpu_hle_scale <= 0)
+		return nullptr;
 	if (!m_gpu_render_target)
 	{
 		auto target = std::make_unique<retro_gpu_target>();

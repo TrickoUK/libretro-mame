@@ -111,6 +111,12 @@ extern char joystick_threshold[8];
 extern char alternate_renderer;
 extern bool lua_console_enable;
 extern char debug_plugin[32];
+// mame_psx_gpu_hle core option: 0 = disabled (software rendering, the
+// default), else the internal resolution multiplier (2 or 4) psxgpu_device
+// should render at via the GPU render-target service - see osdretro.h's
+// gpu_render_available()/gpu_render_scale() overrides and CLAUDE.md
+// "Chosen first target" for the feature this controls.
+extern int psx_gpu_hle_scale;
 
 extern int fb_width;
 extern int fb_height;

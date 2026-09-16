@@ -112,9 +112,17 @@ public:
 	virtual bool gpu_render_available() const override
 	{
 #if defined(HAVE_RETRO_GPU_TARGET)
-		return true;
+		return psx_gpu_hle_scale > 0;
 #else
 		return false;
+#endif
+	}
+	virtual int gpu_render_scale() const override
+	{
+#if defined(HAVE_RETRO_GPU_TARGET)
+		return psx_gpu_hle_scale > 0 ? psx_gpu_hle_scale : 1;
+#else
+		return 1;
 #endif
 	}
 	virtual osd::gpu_render_target *get_gpu_render_target() override;

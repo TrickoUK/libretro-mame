@@ -510,6 +510,21 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "640x480"
    },
    {
+      CORE_NAME "_psx_gpu_hle",
+      "PS1 GPU Hardware Rendering (Experimental)",
+      NULL,
+      "Renders PS1-based drivers (Sony ZN, Konami GQ/GV/573/Twinkle, Namco System 10/11/12, Taito GNET, plain PS1) via the host GPU at an internal-resolution multiplier instead of MAME's software rasterizer. Requires restarting content to take effect. Only tested against a subset of games so far - if a game looks wrong, set this back to Disabled.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "2x",       "2x" },
+         { "4x",       "4x" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
       CORE_NAME "_cpu_overclock",
       "Main CPU Overclock %",
       NULL,

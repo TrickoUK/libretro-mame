@@ -89,6 +89,11 @@ void psxgpu_device::device_reset()
 	gpu_reset();
 }
 
+int psxgpu_device::gpu_scale() const
+{
+	return machine().osd().gpu_render_scale();
+}
+
 bool psxgpu_device::gpu_active()
 {
 	// Lazily acquired here, on first real use (a polygon submission or
@@ -526,8 +531,8 @@ void psxgpu_device::updatevisiblearea()
 		// throughout for VRAM/draw-area addressing - only the declared
 		// screen size (what MAME/the OSD report as this screen's
 		// resolution) is scaled up.
-		uint32_t scaled_width = n_screenwidth * GPU_RES_SCALE;
-		uint32_t scaled_height = n_screenheight * GPU_RES_SCALE;
+		uint32_t scaled_width = n_screenwidth * gpu_scale();
+		uint32_t scaled_height = n_screenheight * gpu_scale();
 		visarea.set(0, scaled_width - 1, 0, scaled_height - 1);
 
 		// screen.configure() can synchronously propagate to the libretro
@@ -1596,10 +1601,10 @@ void psxgpu_device::gpu_maybe_set_clip_rect()
 
 	gpu_queued_cmd cmd;
 	cmd.kind = gpu_queued_cmd::kind_t::CLIP;
-	cmd.clip_x1 = (int)n_drawarea_x1 * GPU_RES_SCALE;
-	cmd.clip_y1 = (int)n_drawarea_y1 * GPU_RES_SCALE;
-	cmd.clip_x2 = (int)( n_drawarea_x2 + 1 ) * GPU_RES_SCALE - 1;
-	cmd.clip_y2 = (int)( n_drawarea_y2 + 1 ) * GPU_RES_SCALE - 1;
+	cmd.clip_x1 = (int)n_drawarea_x1 * gpu_scale();
+	cmd.clip_y1 = (int)n_drawarea_y1 * gpu_scale();
+	cmd.clip_x2 = (int)( n_drawarea_x2 + 1 ) * gpu_scale() - 1;
+	cmd.clip_y2 = (int)( n_drawarea_y2 + 1 ) * gpu_scale() - 1;
 	m_gpu_queue.push_back( std::move( cmd ) );
 
 	m_gpu_drawarea_cached = true;
@@ -1641,8 +1646,8 @@ bool psxgpu_device::gpu_submit_flat_polygon( int n_points )
 	osd::gpu_vertex v[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
-		v[ i ].x = (float)( S11_COORD_X( m_packet.FlatPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * GPU_RES_SCALE;
-		v[ i ].y = (float)( S11_COORD_Y( m_packet.FlatPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * GPU_RES_SCALE;
+		v[ i ].x = (float)( S11_COORD_X( m_packet.FlatPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * gpu_scale();
+		v[ i ].y = (float)( S11_COORD_Y( m_packet.FlatPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * gpu_scale();
 		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
 		v[ i ].u = 0.0f; v[ i ].v = 0.0f;
 	}
@@ -1658,8 +1663,8 @@ bool psxgpu_device::gpu_submit_gouraud_polygon( int n_points )
 	osd::gpu_vertex v[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
-		v[ i ].x = (float)( S11_COORD_X( m_packet.GouraudPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * GPU_RES_SCALE;
-		v[ i ].y = (float)( S11_COORD_Y( m_packet.GouraudPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * GPU_RES_SCALE;
+		v[ i ].x = (float)( S11_COORD_X( m_packet.GouraudPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * gpu_scale();
+		v[ i ].y = (float)( S11_COORD_Y( m_packet.GouraudPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * gpu_scale();
 		v[ i ].r = BGR_R( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].g = BGR_G( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].b = BGR_B( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
@@ -1690,8 +1695,8 @@ bool psxgpu_device::gpu_submit_flat_textured_polygon( int n_points )
 	osd::gpu_vertex v[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
-		v[ i ].x = (float)( S11_COORD_X( m_packet.FlatTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * GPU_RES_SCALE;
-		v[ i ].y = (float)( S11_COORD_Y( m_packet.FlatTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * GPU_RES_SCALE;
+		v[ i ].x = (float)( S11_COORD_X( m_packet.FlatTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * gpu_scale();
+		v[ i ].y = (float)( S11_COORD_Y( m_packet.FlatTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * gpu_scale();
 		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
 		v[ i ].u = (float)TEXTURE_U( m_packet.FlatTexturedPolygon.vertex[ i ].n_texture );
 		v[ i ].v = (float)TEXTURE_V( m_packet.FlatTexturedPolygon.vertex[ i ].n_texture );
@@ -1716,8 +1721,8 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 	osd::gpu_vertex v[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
-		v[ i ].x = (float)( S11_COORD_X( m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * GPU_RES_SCALE;
-		v[ i ].y = (float)( S11_COORD_Y( m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * GPU_RES_SCALE;
+		v[ i ].x = (float)( S11_COORD_X( m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * gpu_scale();
+		v[ i ].y = (float)( S11_COORD_Y( m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * gpu_scale();
 		v[ i ].r = BGR_R( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].g = BGR_G( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].b = BGR_B( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
@@ -1772,8 +1777,8 @@ void psxgpu_device::gpu_maybe_upload_texture_page( int n_tx, int n_ty, int tp, i
 // un-resubmitted parts going black.
 uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 {
-	int w = n_screenwidth * GPU_RES_SCALE;
-	int h = n_screenheight * GPU_RES_SCALE;
+	int w = n_screenwidth * gpu_scale();
+	int h = n_screenheight * gpu_scale();
 
 	// One context acquisition for the whole burst below (begin_frame,
 	// every queued call, and the final readback) instead of one per call -

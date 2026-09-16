@@ -117,15 +117,26 @@ public:
 	virtual std::vector<osd::network_device_info> list_network_devices() = 0;
 
 	// GPU render interface - get_gpu_render_target() returns nullptr if
-	// this OSD/build doesn't support it; callers must always have a
-	// software fallback. gpu_render_available() is a cheap, compile-time-
-	// only query with no runtime context creation - safe to call early
-	// (e.g. to decide a screen's declared resolution before any actual
-	// rendering happens) without the ordering hazards that come with
-	// eagerly constructing a real GPU context too early relative to the
-	// host frontend's own graphics setup (see psxgpu_device::updatevisiblearea()).
+	// this OSD/build doesn't support it, or if it does but the user has
+	// disabled it (e.g. via a frontend core option); callers must always
+	// have a software fallback. gpu_render_available() is a cheap query -
+	// no runtime GPU context creation - safe to call early (e.g. to decide
+	// a screen's declared resolution before any actual rendering happens)
+	// without the ordering hazards that come with eagerly constructing a
+	// real GPU context too early relative to the host frontend's own
+	// graphics setup (see psxgpu_device::updatevisiblearea()). It reflects
+	// both build-time support AND the user's current on/off choice, so a
+	// caller only needs this one check.
 	virtual bool gpu_render_available() const { return false; }
 	virtual osd::gpu_render_target *get_gpu_render_target() = 0;
+
+	// The resolution multiplier a caller should scale by when
+	// gpu_render_available() is true (e.g. 2 or 4 for 2x/4x internal
+	// resolution) - user-selectable where the OSD supports it (see the
+	// retro OSD's mame_psx_gpu_hle core option). Meaningless/unspecified
+	// when gpu_render_available() is false; default of 1 here covers that
+	// case safely for any caller that queries it regardless.
+	virtual int gpu_render_scale() const { return 1; }
 
 protected:
 	virtual ~osd_interface() { }

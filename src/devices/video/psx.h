@@ -284,7 +284,17 @@ private:
 	uint32_t gpu_update_screen( bitmap_rgb32 &bitmap );
 
 	osd::gpu_render_target *m_gpu_render_target = nullptr;
-	static constexpr int GPU_RES_SCALE = 2;
+
+	// The user-selectable internal-resolution multiplier (mame_psx_gpu_hle
+	// core option on the retro OSD - "disabled"/"2x"/"4x", read once at
+	// boot; see osdepend.h's gpu_render_scale() and CLAUDE.md "Chosen first
+	// target"). A cheap query (just returns a stored int on the retro OSD,
+	// no GPU context work), safe to call anywhere gpu_render_available() is
+	// also safe to call, including before gpu_active() has ever run.
+	// Defined in psx.cpp, not inline here - osd_interface (returned by
+	// machine().osd()) is only forward-declared where psx.h gets included
+	// by other drivers, not fully defined.
+	int gpu_scale() const;
 
 	// Avoids re-decoding/re-uploading the same 256x256 texture page+CLUT to
 	// the GPU on every single textured polygon (most runs of consecutive
