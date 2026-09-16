@@ -70,6 +70,8 @@ char joystick_deadzone[8];
 char joystick_saturation[8];
 char joystick_threshold[8];
 char alternate_renderer = 0;
+bool lua_console_enable = false;
+char debug_plugin[32] = "";
 
 // emu flags
 static bool arcade = false;
@@ -524,6 +526,15 @@ static void Set_Default_Option(void)
       Add_Option("-cheat");
    else
       Add_Option("-nocheat");
+
+   if (lua_console_enable)
+      Add_Option("-console");
+
+   if (debug_plugin[0] && strcmp(debug_plugin, "none"))
+   {
+      Add_Option("-plugin");
+      Add_Option(debug_plugin);
+   }
 
    if (write_config_enable)
       Add_Option("-writeconfig");

@@ -79,6 +79,11 @@ struct retro_core_option_v2_category option_cats_us[] = {
       "Emulation Hacks",
       "Configure emulation hack options."
    },
+   {
+      "debug",
+      "Debug",
+      "Configure MAME's Lua console and debug plugins."
+   },
    { NULL, NULL, NULL },
 };
 
@@ -806,6 +811,37 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          { NULL, NULL },
       },
       "0"
+   },
+   {
+      CORE_NAME "_lua_console",
+      "Enable Lua Debug Console",
+      NULL,
+      "Starts MAME's interactive Lua console on stdin/stdout (-console). Only usable when RetroArch is launched attached to a terminal.",
+      NULL,
+      "debug",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_debug_plugin",
+      "Autostart Debug Plugin",
+      NULL,
+      "Autostarts a single MAME Lua plugin (-plugin) for runtime state inspection without needing the interactive console.",
+      NULL,
+      "debug",
+      {
+         { "none",      NULL },
+         { "gdbstub",   "gdbstub (GDB remote CPU debugging, x86 family only)" },
+         { "cheatfind", NULL },
+         { "hiscore",   NULL },
+         { "timer",     NULL },
+         { NULL, NULL },
+      },
+      "none"
    },
    { NULL, NULL, NULL, NULL, NULL, NULL, {{0}}, NULL },
 };

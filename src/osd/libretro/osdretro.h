@@ -5,6 +5,7 @@
 #include "modules/osdmodule.h"
 #include "modules/font/font_module.h"
 #include <chrono>
+#include <memory>
 
 #include "libretro-internal/libretro_shared.h"
 
@@ -108,6 +109,16 @@ public:
 
 	virtual void process_events() override {}
 
+	virtual bool gpu_render_available() const override
+	{
+#if defined(HAVE_RETRO_GPU_TARGET)
+		return true;
+#else
+		return false;
+#endif
+	}
+	virtual osd::gpu_render_target *get_gpu_render_target() override;
+
 private:
 	virtual void osd_exit() override;
 
@@ -119,6 +130,8 @@ private:
 	std::chrono::steady_clock::time_point m_last_click_time;
 	int m_last_click_x;
 	int m_last_click_y;
+
+	std::unique_ptr<osd::gpu_render_target> m_gpu_render_target;
 };
 
 //============================================================

@@ -12,7 +12,12 @@
 
 #include "cpu/psx/psx.h"
 
+#include "osdepend.h"
+#include "interface/gpurender.h"
+
 #include "screen.h"
+
+#include <algorithm>
 
 
 #define STOP_ON_ERROR ( 0 )
@@ -59,6 +64,16 @@ void psxgpu_device::device_start()
 		set_pen_color( n_colour, pal555(n_colour,0, 5, 10) );
 	}
 
+	// GPU-accelerated rendering (Phase 2, see CLAUDE.md): deliberately NOT
+	// acquired here. device_start()/device_reset() run synchronously
+	// inside retro_load_game(), before RetroArch has created its own
+	// Wayland/EGL context - creating ours this early was found to corrupt
+	// RetroArch's later context setup (EGL_BAD_CONTEXT, then a crash),
+	// regardless of EGL platform choice or careful current-context
+	// save/restore. gpu_active() acquires it lazily on first real use
+	// instead, which only happens once actual gameplay/rendering is
+	// underway (well after RetroArch's own setup completes).
+
 	if (type() == CXD8538Q)
 	{
 		psx_gpu_init( 1 );
@@ -72,6 +87,23 @@ void psxgpu_device::device_start()
 void psxgpu_device::device_reset()
 {
 	gpu_reset();
+}
+
+bool psxgpu_device::gpu_active()
+{
+	// Lazily acquired here, on first real use (a polygon submission or
+	// update_screen(), both of which only happen once actual gameplay
+	// execution is underway) rather than in device_start()/device_reset()
+	// - see the comment there for why.
+	if (!m_gpu_active_checked)
+	{
+		m_gpu_active_checked = true;
+		m_gpu_render_target = machine().osd().get_gpu_render_target();
+		// Deliberately NOT priming begin_frame() here anymore - see the
+		// m_gpu_frame_active comment in psx.h. gpu_ensure_frame_active()
+		// acquires it lazily on first actual primitive submission instead.
+	}
+	return m_gpu_render_target != nullptr;
 }
 
 cxd8514q_device::cxd8514q_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock, uint32_t vram_size, psxcpu_device *cpu)
@@ -481,8 +513,44 @@ void psxgpu_device::updatevisiblearea()
 	}
 #endif
 
-	visarea.set(0, n_screenwidth - 1, 0, n_screenheight - 1);
-	screen().configure(n_screenwidth, n_screenheight, visarea, HZ_TO_ATTOSECONDS(refresh));
+	// Cheap compile-time-only query (see osdepend.h) - deliberately NOT
+	// gpu_active(), which lazily constructs a real GPU context and must
+	// stay deferred until actual gameplay execution starts (see
+	// device_start() and gpu_active() for why). This just decides whether
+	// to declare a scaled screen size; the real context/begin_frame() get
+	// created lazily, on first actual use, in gpu_active() itself.
+	if (machine().osd().gpu_render_available())
+	{
+		// n_screenwidth/n_screenheight stay native - they're used
+		// throughout for VRAM/draw-area addressing - only the declared
+		// screen size (what MAME/the OSD report as this screen's
+		// resolution) is scaled up.
+		uint32_t scaled_width = n_screenwidth * GPU_RES_SCALE;
+		uint32_t scaled_height = n_screenheight * GPU_RES_SCALE;
+		visarea.set(0, scaled_width - 1, 0, scaled_height - 1);
+
+		// screen.configure() can synchronously propagate to the libretro
+		// OSD's RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO callback when the size
+		// actually changes, and RetroArch's frontend handles that by doing
+		// its own EGL work right there, on this same thread - if our GPU
+		// context is the one currently bound at that moment (it normally is,
+		// for the whole frame - see retro_gpu_target.h), that corrupts
+		// RetroArch's own EGL state (this was the root cause of a
+		// reproducible crash). yield/resume hand the thread back for just
+		// this one call. No-ops if the target hasn't been constructed yet
+		// (m_gpu_render_target null - e.g. this runs before any real
+		// gameplay/gpu_active() has happened).
+		if (m_gpu_render_target)
+			m_gpu_render_target->yield_context();
+		screen().configure(scaled_width, scaled_height, visarea, HZ_TO_ATTOSECONDS(refresh));
+		if (m_gpu_render_target)
+			m_gpu_render_target->resume_context();
+	}
+	else
+	{
+		visarea.set(0, n_screenwidth - 1, 0, n_screenheight - 1);
+		screen().configure(n_screenwidth, n_screenheight, visarea, HZ_TO_ATTOSECONDS(refresh));
+	}
 }
 
 void psxgpu_device::psx_gpu_init( int n_gputype )
@@ -644,6 +712,11 @@ void psxgpu_device::device_post_load()
 
 uint32_t psxgpu_device::update_screen(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
+	if (gpu_active())
+	{
+		return gpu_update_screen(bitmap);
+	}
+
 	uint32_t n_x;
 	uint32_t n_y;
 	int n_top;
@@ -1417,8 +1490,338 @@ static inline int CullVertex( int a, int b )
 	} \
 	int n_rightpoint = n_leftpoint;
 
+//**************************************************************************
+//  GPU-accelerated rendering (Phase 2)
+//
+//  Only the four polygon primitives below are routed to the GPU; lines,
+//  rectangles, sprites, dots, and framebuffer-copy commands (MoveImage,
+//  FrameBufferRectangleDraw) still use the original software VRAM path
+//  further down in this file and are NOT visible on screen when the GPU
+//  path is active, since update_screen() no longer scans VRAM for display
+//  in that case - see gpu_update_screen(). This is a deliberate, documented
+//  scope limitation for this first pass, not an oversight; see CLAUDE.md
+//  "Chosen first target" and the implementation plan for the reasoning
+//  (avoiding draw-order compositing bugs between two separate backends).
+//**************************************************************************
+
+osd::gpu_blend_mode psxgpu_device::gpu_blend_mode_for( uint8_t n_cmd ) const
+{
+	if( ( n_cmd & 0x02 ) == 0 )
+	{
+		return osd::gpu_blend_mode::NONE;
+	}
+	switch( n_abr )
+	{
+	case 0: return osd::gpu_blend_mode::HALF_ADD;
+	case 1: return osd::gpu_blend_mode::ADD;
+	case 2: return osd::gpu_blend_mode::SUBTRACT;
+	case 3: return osd::gpu_blend_mode::ADD_QUARTER;
+	default: return osd::gpu_blend_mode::NONE;
+	}
+}
+
+// Decodes a 256x256 texel region starting at VRAM word (n_tx,n_ty) into a
+// flat RGBA8 buffer, using the exact same per-texel addressing as the
+// TEXTURE4BIT/8BIT/15BIT macros above (so results match the software path
+// bit-for-bit for any UV a draw call might present) - texture window
+// masking is not applied (a documented simplification: most textures don't
+// use it). n_bgr == 0 decodes to fully transparent (alpha 0), discarded in
+// the fragment shader.
+bool psxgpu_device::gpu_decode_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty, std::vector<uint32_t> &out )
+{
+	// This decodes the *full* 0-255 x 0-255 UV space regardless of what
+	// the actual polygon needs (unlike the CPU rasterizer's TEXTURE4BIT/
+	// 8BIT/15BIT macros, which only ever evaluate addresses for UVs a real
+	// scanline interpolation produces, implicitly bounded by the polygon's
+	// own vertex data) - so n_tx/n_clutx plus a large column offset here
+	// can exceed a VRAM row's 1024-uint16_t width in a way the CPU path
+	// never hits in practice. Mask every column index (both the texel
+	// address and, separately, the CLUT lookup address) to stay in-row -
+	// p_p_vram's row pointers are always valid for all 1024 possible rows
+	// regardless of actual VRAM height (see psx_gpu_init), only the
+	// *column* needs guarding here. Takes the CLUT's row/column origin
+	// rather than a precomputed pointer specifically so this masking can
+	// be applied to it too.
+	uint16_t *p_clut_row = p_p_vram[ n_cluty & 1023 ];
+	out.resize( 256 * 256 );
+	for( int v = 0; v < 256; v++ )
+	{
+		uint16_t *p_row = p_p_vram[ ( n_ty + v ) & 1023 ];
+		for( int u = 0; u < 256; u++ )
+		{
+			uint16_t n_bgr;
+			switch( tp )
+			{
+			case 0:
+				n_bgr = p_clut_row[ ( n_clutx + ( ( *( p_row + ( ( n_tx + ( u >> 2 ) ) & 1023 ) ) >> ( ( u & 0x03 ) << 2 ) ) & 0x0f ) ) & 1023 ];
+				break;
+			case 1:
+				n_bgr = p_clut_row[ ( n_clutx + ( ( *( p_row + ( ( n_tx + ( u >> 1 ) ) & 1023 ) ) >> ( ( u & 0x01 ) << 3 ) ) & 0xff ) ) & 1023 ];
+				break;
+			default:
+				n_bgr = *( p_row + ( ( n_tx + u ) & 1023 ) );
+				break;
+			}
+
+			uint32_t rgba;
+			if( n_bgr == 0 )
+			{
+				rgba = 0;
+			}
+			else
+			{
+				uint32_t r = ( n_bgr & 0x1f ) << 3;
+				uint32_t g = ( ( n_bgr >> 5 ) & 0x1f ) << 3;
+				uint32_t b = ( ( n_bgr >> 10 ) & 0x1f ) << 3;
+				rgba = ( 255u << 24 ) | ( b << 16 ) | ( g << 8 ) | r;
+			}
+			out[ v * 256 + u ] = rgba;
+		}
+	}
+	return true;
+}
+
+// The real PS1 GPU clips all primitives to a settable draw-area rectangle
+// (n_drawarea_x1/y1/x2/y2, used extensively by the CPU scanline rasterizer's
+// clipping logic elsewhere in this file) - the GPU path ignored this
+// entirely until now, which large edge-of-screen polygons (ground/sky
+// backdrops - exactly the geometry most likely to extend beyond whatever
+// the current draw area is) are the most exposed to: as the draw area
+// changes from frame to frame, unclipped polygons bleed into/overwrite
+// regions they shouldn't, on top of the persistent framebuffer this target
+// now uses - visible as flicker. Cached the same way as the texture page
+// above, since consecutive polygons usually share one draw area.
+void psxgpu_device::gpu_maybe_set_clip_rect()
+{
+	if( m_gpu_drawarea_cached &&
+		n_drawarea_x1 == m_gpu_last_drawarea_x1 && n_drawarea_y1 == m_gpu_last_drawarea_y1 &&
+		n_drawarea_x2 == m_gpu_last_drawarea_x2 && n_drawarea_y2 == m_gpu_last_drawarea_y2 )
+	{
+		return;
+	}
+
+	m_gpu_render_target->set_clip_rect(
+		(int)n_drawarea_x1 * GPU_RES_SCALE, (int)n_drawarea_y1 * GPU_RES_SCALE,
+		(int)( n_drawarea_x2 + 1 ) * GPU_RES_SCALE - 1, (int)( n_drawarea_y2 + 1 ) * GPU_RES_SCALE - 1 );
+
+	m_gpu_drawarea_cached = true;
+	m_gpu_last_drawarea_x1 = n_drawarea_x1;
+	m_gpu_last_drawarea_y1 = n_drawarea_y1;
+	m_gpu_last_drawarea_x2 = n_drawarea_x2;
+	m_gpu_last_drawarea_y2 = n_drawarea_y2;
+}
+
+// Lazily (re)acquires the GPU target's context for this frame if it isn't
+// already bound - see the m_gpu_frame_active comment in psx.h for why this
+// replaced eagerly re-priming begin_frame() right after every readback.
+void psxgpu_device::gpu_ensure_frame_active()
+{
+	if( m_gpu_frame_active )
+		return;
+	m_gpu_frame_w = n_screenwidth * GPU_RES_SCALE;
+	m_gpu_frame_h = n_screenheight * GPU_RES_SCALE;
+	m_gpu_render_target->begin_frame( m_gpu_frame_w, m_gpu_frame_h );
+	m_gpu_frame_active = true;
+}
+
+void psxgpu_device::gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend )
+{
+	gpu_ensure_frame_active();
+	gpu_maybe_set_clip_rect();
+	osd::gpu_vertex tri[ 3 ] = { v0, v1, v2 };
+	m_gpu_render_target->submit_triangle( tri, textured, blend );
+	if( n_points == 4 )
+	{
+		osd::gpu_vertex tri2[ 3 ] = { v1, v2, v3 };
+		m_gpu_render_target->submit_triangle( tri2, textured, blend );
+	}
+}
+
+bool psxgpu_device::gpu_submit_flat_polygon( int n_points )
+{
+	uint8_t n_cmd = BGR_C( m_packet.FlatPolygon.n_bgr );
+	float r = BGR_R( m_packet.FlatPolygon.n_bgr ) / 255.0f;
+	float g = BGR_G( m_packet.FlatPolygon.n_bgr ) / 255.0f;
+	float b = BGR_B( m_packet.FlatPolygon.n_bgr ) / 255.0f;
+
+	osd::gpu_vertex v[ 4 ];
+	for( int i = 0; i < n_points; i++ )
+	{
+		v[ i ].x = (float)( S11_COORD_X( m_packet.FlatPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * GPU_RES_SCALE;
+		v[ i ].y = (float)( S11_COORD_Y( m_packet.FlatPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * GPU_RES_SCALE;
+		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
+		v[ i ].u = 0.0f; v[ i ].v = 0.0f;
+	}
+
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, false, gpu_blend_mode_for( n_cmd ) );
+	return true;
+}
+
+bool psxgpu_device::gpu_submit_gouraud_polygon( int n_points )
+{
+	uint8_t n_cmd = BGR_C( m_packet.GouraudPolygon.vertex[ 0 ].n_bgr );
+
+	osd::gpu_vertex v[ 4 ];
+	for( int i = 0; i < n_points; i++ )
+	{
+		v[ i ].x = (float)( S11_COORD_X( m_packet.GouraudPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * GPU_RES_SCALE;
+		v[ i ].y = (float)( S11_COORD_Y( m_packet.GouraudPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * GPU_RES_SCALE;
+		v[ i ].r = BGR_R( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
+		v[ i ].g = BGR_G( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
+		v[ i ].b = BGR_B( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
+		v[ i ].a = 1.0f;
+		v[ i ].u = 0.0f; v[ i ].v = 0.0f;
+	}
+
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, false, gpu_blend_mode_for( n_cmd ) );
+	return true;
+}
+
+bool psxgpu_device::gpu_submit_flat_textured_polygon( int n_points )
+{
+	uint8_t n_cmd = BGR_C( m_packet.FlatTexturedPolygon.n_bgr );
+
+	uint32_t n_clutx = ( m_packet.FlatTexturedPolygon.vertex[ 0 ].n_texture.w.h & 0x3f ) << 4;
+	uint32_t n_cluty = ( m_packet.FlatTexturedPolygon.vertex[ 0 ].n_texture.w.h >> 6 ) & 0x3ff;
+
+	decode_tpage( m_packet.FlatTexturedPolygon.vertex[ 1 ].n_texture.w.h );
+	TEXTURESETUP
+
+	gpu_maybe_upload_texture_page( n_tx, n_ty, n_tp, n_clutx, n_cluty );
+
+	float r = ( n_cmd & 0x01 ) ? ( 128.0f / 255.0f ) : ( BGR_R( m_packet.FlatTexturedPolygon.n_bgr ) / 255.0f );
+	float g = ( n_cmd & 0x01 ) ? ( 128.0f / 255.0f ) : ( BGR_G( m_packet.FlatTexturedPolygon.n_bgr ) / 255.0f );
+	float b = ( n_cmd & 0x01 ) ? ( 128.0f / 255.0f ) : ( BGR_B( m_packet.FlatTexturedPolygon.n_bgr ) / 255.0f );
+
+	osd::gpu_vertex v[ 4 ];
+	for( int i = 0; i < n_points; i++ )
+	{
+		v[ i ].x = (float)( S11_COORD_X( m_packet.FlatTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * GPU_RES_SCALE;
+		v[ i ].y = (float)( S11_COORD_Y( m_packet.FlatTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * GPU_RES_SCALE;
+		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
+		v[ i ].u = (float)TEXTURE_U( m_packet.FlatTexturedPolygon.vertex[ i ].n_texture );
+		v[ i ].v = (float)TEXTURE_V( m_packet.FlatTexturedPolygon.vertex[ i ].n_texture );
+	}
+
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, gpu_blend_mode_for( n_cmd ) );
+	return true;
+}
+
+bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
+{
+	uint8_t n_cmd = BGR_C( m_packet.GouraudTexturedPolygon.vertex[ 0 ].n_bgr );
+
+	uint32_t n_clutx = ( m_packet.GouraudTexturedPolygon.vertex[ 0 ].n_texture.w.h & 0x3f ) << 4;
+	uint32_t n_cluty = ( m_packet.GouraudTexturedPolygon.vertex[ 0 ].n_texture.w.h >> 6 ) & 0x3ff;
+
+	decode_tpage( m_packet.GouraudTexturedPolygon.vertex[ 1 ].n_texture.w.h );
+	TEXTURESETUP
+
+	gpu_maybe_upload_texture_page( n_tx, n_ty, n_tp, n_clutx, n_cluty );
+
+	osd::gpu_vertex v[ 4 ];
+	for( int i = 0; i < n_points; i++ )
+	{
+		v[ i ].x = (float)( S11_COORD_X( m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * GPU_RES_SCALE;
+		v[ i ].y = (float)( S11_COORD_Y( m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * GPU_RES_SCALE;
+		v[ i ].r = BGR_R( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
+		v[ i ].g = BGR_G( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
+		v[ i ].b = BGR_B( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
+		v[ i ].a = 1.0f;
+		v[ i ].u = (float)TEXTURE_U( m_packet.GouraudTexturedPolygon.vertex[ i ].n_texture );
+		v[ i ].v = (float)TEXTURE_V( m_packet.GouraudTexturedPolygon.vertex[ i ].n_texture );
+	}
+
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, gpu_blend_mode_for( n_cmd ) );
+	return true;
+}
+
+// Uploading a full 256x256 texture page (decode + glTexImage2D) on every
+// single textured polygon was a major performance problem in practice -
+// most runs of consecutive polygons reuse the same texture page/CLUT, so
+// skip the decode+upload entirely when nothing has changed since last time.
+void psxgpu_device::gpu_maybe_upload_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty )
+{
+	if( n_tx == m_gpu_last_tx && n_ty == m_gpu_last_ty && tp == m_gpu_last_tp &&
+		n_clutx == m_gpu_last_clutx && n_cluty == m_gpu_last_cluty )
+	{
+		return;
+	}
+
+	gpu_ensure_frame_active();
+	std::vector<uint32_t> texdata;
+	gpu_decode_texture_page( n_tx, n_ty, tp, n_clutx, n_cluty, texdata );
+	m_gpu_render_target->upload_texture( texdata.data(), 256, 256 );
+
+	m_gpu_last_tx = n_tx;
+	m_gpu_last_ty = n_ty;
+	m_gpu_last_tp = tp;
+	m_gpu_last_clutx = n_clutx;
+	m_gpu_last_cluty = n_cluty;
+}
+
+// Reads back whatever polygons have been submitted to the GPU target since
+// the last call into bitmap, then immediately re-begins the target for the
+// next frame's incoming primitives WITHOUT clearing it (see
+// retro_gpu_target::resize_target()) - the target models PS1 VRAM, which is
+// persistent across frames, matching the original VRAM-scanout path. A game
+// that doesn't fully redraw the visible area every single refresh (common -
+// most games only resubmit what changed, clearing the rest via their own
+// fill-rectangle GP0 command) still shows correctly-persisted content from
+// prior frames instead of the un-resubmitted parts going black.
+uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
+{
+	// Make sure our context is bound before touching the target, even if no
+	// primitive happened to be submitted since the last readback (a no-op
+	// if a frame is already active) - see gpu_ensure_frame_active() and the
+	// m_gpu_frame_active comment in psx.h for why this is lazy rather than
+	// eagerly re-primed at the end of the previous call.
+	gpu_ensure_frame_active();
+
+	// Use m_gpu_frame_w/h (what the active frame was actually begin_frame()'d
+	// with), NOT a fresh n_screenwidth/height recomputation - those can
+	// differ if a GP1 display-mode command ran between the primitive that
+	// lazily started this frame and this readback, and retro_gpu_target's
+	// actual FBO is still sized to the former (see the psx.h comment on
+	// m_gpu_frame_w/h - a mismatch here previously overflowed the readback
+	// buffer and crashed inside glReadPixels).
+	int w = m_gpu_frame_w;
+	int h = m_gpu_frame_h;
+
+	std::vector<uint32_t> temp( (size_t)w * h );
+	m_gpu_render_target->end_frame_and_readback( temp.data() );
+
+	// bitmap is sized to the *current* n_screenwidth/height (updatevisiblearea()
+	// already reconfigured the screen to that before this runs), which can
+	// differ from w/h (the frame's actual FBO size, possibly from before a
+	// mid-frame display-mode change) - clamp to whichever is smaller so
+	// neither the source (temp) nor destination (bitmap) is ever read/written
+	// out of bounds. A mismatch here is an edge case (display mode changing
+	// between a primitive submission and this readback), not the common
+	// path - a cropped/incomplete frame is an acceptable outcome, a crash
+	// is not.
+	int copy_w = std::min( w, (int)n_screenwidth * GPU_RES_SCALE );
+	int copy_h = std::min( h, (int)n_screenheight * GPU_RES_SCALE );
+	for( int y = 0; y < copy_h; y++ )
+	{
+		memcpy( &bitmap.pix( y, 0 ), &temp[ (size_t)y * w ], (size_t)copy_w * sizeof( uint32_t ) );
+	}
+
+	// Released now - the next frame's context is only reacquired lazily,
+	// on that frame's first actual GPU call, so our context is guaranteed
+	// NOT bound by the time control returns to RetroArch's frontend.
+	m_gpu_frame_active = false;
+	return 0;
+}
+
 void psxgpu_device::FlatPolygon( int n_points )
 {
+	if( gpu_active() )
+	{
+		gpu_submit_flat_polygon( n_points );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 1 )
 	{
@@ -1534,6 +1937,12 @@ void psxgpu_device::FlatPolygon( int n_points )
 
 void psxgpu_device::FlatTexturedPolygon( int n_points )
 {
+	if( gpu_active() )
+	{
+		gpu_submit_flat_textured_polygon( n_points );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 2 )
 	{
@@ -1689,6 +2098,12 @@ void psxgpu_device::FlatTexturedPolygon( int n_points )
 
 void psxgpu_device::GouraudPolygon( int n_points )
 {
+	if( gpu_active() )
+	{
+		gpu_submit_gouraud_polygon( n_points );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 3 )
 	{
@@ -1853,6 +2268,12 @@ void psxgpu_device::GouraudPolygon( int n_points )
 
 void psxgpu_device::GouraudTexturedPolygon( int n_points )
 {
+	if( gpu_active() )
+	{
+		gpu_submit_gouraud_textured_polygon( n_points );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 4 )
 	{

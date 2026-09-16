@@ -109,6 +109,8 @@ extern char joystick_deadzone[8];
 extern char joystick_saturation[8];
 extern char joystick_threshold[8];
 extern char alternate_renderer;
+extern bool lua_console_enable;
+extern char debug_plugin[32];
 
 extern int fb_width;
 extern int fb_height;

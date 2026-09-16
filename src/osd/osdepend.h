@@ -17,6 +17,7 @@
 
 #include "bitmap.h"
 #include "interface/audio.h"
+#include "interface/gpurender.h"
 #include "interface/midiport.h"
 #include "interface/nethandler.h"
 
@@ -114,6 +115,17 @@ public:
 	// network interface
 	virtual std::unique_ptr<osd::network_device> open_network_device(int id, osd::network_handler &handler) = 0;
 	virtual std::vector<osd::network_device_info> list_network_devices() = 0;
+
+	// GPU render interface - get_gpu_render_target() returns nullptr if
+	// this OSD/build doesn't support it; callers must always have a
+	// software fallback. gpu_render_available() is a cheap, compile-time-
+	// only query with no runtime context creation - safe to call early
+	// (e.g. to decide a screen's declared resolution before any actual
+	// rendering happens) without the ordering hazards that come with
+	// eagerly constructing a real GPU context too early relative to the
+	// host frontend's own graphics setup (see psxgpu_device::updatevisiblearea()).
+	virtual bool gpu_render_available() const { return false; }
+	virtual osd::gpu_render_target *get_gpu_render_target() = 0;
 
 protected:
 	virtual ~osd_interface() { }

@@ -12,7 +12,17 @@
 
 #pragma once
 
+#include <vector>
+
 #define PSXGPU_DEBUG_VIEWER ( 0 )
+
+// GPU-accelerated rendering (see CLAUDE.md "Chosen first target" /
+// /home/bazzite/.claude/plans/glowing-conjuring-raven.md Phase 2) - forward
+// declared here so psx.h doesn't need to pull in the full OSD interface
+// header; osd_interface::get_gpu_render_target() (declared in osdepend.h,
+// which psx.cpp includes) returns nullptr when unavailable, so this is
+// always safe to store even on OSDs/builds without the feature.
+namespace osd { class gpu_render_target; enum class gpu_blend_mode; struct gpu_vertex; }
 
 DECLARE_DEVICE_TYPE(CXD8514Q,  cxd8514q_device)
 DECLARE_DEVICE_TYPE(CXD8538Q,  cxd8538q_device)
@@ -218,6 +228,82 @@ private:
 	void gpu_reset();
 	void gpu_read( uint32_t *p_ram, int32_t n_size );
 	void gpu_write( uint32_t *p_ram, int32_t n_size );
+
+	// GPU-accelerated rendering (Phase 2): only the four polygon primitives
+	// are routed to the GPU; lines/rects/sprites/dots/framebuffer-copy
+	// commands still use the original software VRAM path (see CLAUDE.md).
+	// Lazily acquires the GPU render target on first call (see psx.cpp) -
+	// deliberately NOT done in device_start()/device_reset(), which run
+	// too early (before RetroArch sets up its own graphics context; see
+	// the comment in device_start()). Not const because of the lazy init.
+	bool gpu_active();
+	bool m_gpu_active_checked = false;
+
+	// Whether the GPU target currently has an active begin_frame() with no
+	// matching end_frame_and_readback() yet - i.e. whether our EGL context
+	// is the one bound on this thread right now. Deliberately NOT re-primed
+	// eagerly right after end_frame_and_readback() in gpu_update_screen();
+	// instead begin_frame() for the next frame is only (re)acquired lazily,
+	// right before the first primitive of that frame is actually submitted
+	// (gpu_ensure_frame_active(), called from gpu_submit_triangle_pair()).
+	// This matters because RetroArch's frontend checks/reports this screen's
+	// geometry somewhere in its own per-frame loop *outside* any MAME call
+	// this device controls (not synchronously inside screen.configure(), as
+	// first assumed - confirmed by diagnostic logging showing the resulting
+	// SET_SYSTEM_AV_INFO firing with our context still bound from an eagerly
+	// re-primed begin_frame(), well outside updatevisiblearea()). The only
+	// way to guarantee our context is never bound at that unknown point is
+	// to guarantee it's released by the time control returns to RetroArch at
+	// all - i.e. never hold it across a frame boundary we don't control.
+	bool m_gpu_frame_active = false;
+	// The target-pixel dimensions the currently-active frame was actually
+	// begin_frame()'d with. n_screenwidth/height (and hence the "current"
+	// scaled size) can change mid-frame - a GP1 display-mode command can
+	// run between an earlier primitive submission (which lazily started
+	// the frame at the size current then) and gpu_update_screen()'s
+	// readback. Recomputing w/h fresh from n_screenwidth/height at readback
+	// time instead of using these would size the CPU-side readback buffer
+	// differently than retro_gpu_target's actual FBO, which still uses
+	// whatever begin_frame() last (re)sized it to - a heap-buffer-overflow
+	// SIGSEGV inside glReadPixels, not merely a visual glitch.
+	int m_gpu_frame_w = 0;
+	int m_gpu_frame_h = 0;
+	void gpu_ensure_frame_active();
+	osd::gpu_blend_mode gpu_blend_mode_for( uint8_t n_cmd ) const;
+	bool gpu_decode_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty, std::vector<uint32_t> &out );
+	void gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend );
+	bool gpu_submit_flat_polygon( int n_points );
+	bool gpu_submit_flat_textured_polygon( int n_points );
+	bool gpu_submit_gouraud_polygon( int n_points );
+	bool gpu_submit_gouraud_textured_polygon( int n_points );
+	uint32_t gpu_update_screen( bitmap_rgb32 &bitmap );
+
+	osd::gpu_render_target *m_gpu_render_target = nullptr;
+	static constexpr int GPU_RES_SCALE = 2;
+
+	// Avoids re-decoding/re-uploading the same 256x256 texture page+CLUT to
+	// the GPU on every single textured polygon (most runs of consecutive
+	// polygons share one texture page) - see gpu_maybe_upload_texture_page()
+	// in psx.cpp. -1 means "nothing uploaded yet this session", guaranteed
+	// to mismatch any real n_tx/n_ty (always >= 0).
+	int32_t m_gpu_last_tx = -1;
+	int32_t m_gpu_last_ty = -1;
+	int32_t m_gpu_last_tp = -1;
+	int32_t m_gpu_last_clutx = -1;
+	int32_t m_gpu_last_cluty = -1;
+	void gpu_maybe_upload_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty );
+
+	// Avoids calling set_clip_rect() (a GL scissor-state change) on every
+	// polygon when consecutive polygons share the same PS1 draw area,
+	// mirroring the texture-page cache above. false until the first
+	// polygon submission each session, guaranteeing the first call always
+	// applies whatever draw area is current at that point.
+	bool m_gpu_drawarea_cached = false;
+	uint32_t m_gpu_last_drawarea_x1 = 0;
+	uint32_t m_gpu_last_drawarea_y1 = 0;
+	uint32_t m_gpu_last_drawarea_x2 = 0;
+	uint32_t m_gpu_last_drawarea_y2 = 0;
+	void gpu_maybe_set_clip_rect();
 
 	int32_t m_n_tx;
 	int32_t m_n_ty;

@@ -116,6 +116,23 @@ project ("osd_" .. _OPTIONS["osd"])
 		MAME_DIR .. "src/osd/modules/sound/retro_sound.cpp",
 	}
 
+	-- Optional GPU-accelerated render target for device code (e.g.
+	-- psxgpu_device) - a private/headless EGL context, independent of
+	-- RetroArch's own. dlopen-based at runtime, so no new build-time
+	-- header/library dependency; opt-in only, default build is unaffected.
+	-- See CLAUDE.md "Chosen first target" for why this architecture was
+	-- picked over libretro's RETRO_HW_RENDER API.
+	if _OPTIONS["HAVE_RETRO_GPU_TARGET"] then
+		defines {
+			"HAVE_RETRO_GPU_TARGET",
+		}
+		files {
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_target.cpp",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_target.h",
+			MAME_DIR .. "src/osd/interface/gpurender.h",
+		}
+	end
+
 
 project ("ocore_" .. _OPTIONS["osd"])
 	targetsubdir(_OPTIONS["target"] .."_" .. _OPTIONS["subtarget"])

@@ -415,6 +415,21 @@ end
 			MAME_DIR .. "src/osd/libretro/retromain.cpp",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/libretro.cpp",
 		}
+
+		-- retromain.cpp/libretro.cpp are compiled again here (a second,
+		-- separate copy from the one in retro.lua's osd_retro project -
+		-- this is the copy that actually ends up in the final link), so
+		-- the optional GPU render-target service needs the same
+		-- HAVE_RETRO_GPU_TARGET define/files here too. See CLAUDE.md "Chosen first
+		-- target" for the feature; retro.lua has the primary comment.
+		if _OPTIONS["HAVE_RETRO_GPU_TARGET"] then
+			defines {
+				"HAVE_RETRO_GPU_TARGET",
+			}
+			files {
+				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_target.cpp",
+			}
+		end
 	end
 -- RETRO HACK
 if (STANDALONE==true) then

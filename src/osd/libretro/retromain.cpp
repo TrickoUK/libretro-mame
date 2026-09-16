@@ -1,6 +1,7 @@
 
 // only for oslog callback
 #include <functional>
+#include <cstdio>
 
 // standard includes
 #if !defined(RETROMAME_WIN32)
@@ -30,6 +31,10 @@
 #include "modules/diagnostics/diagnostics_module.h"
 
 #include "libretro_vfs.h"
+
+#if defined(HAVE_RETRO_GPU_TARGET)
+#include "libretro-internal/retro_gpu_target.h"
+#endif
 
 bool fexists(std::string path)
 {
@@ -307,6 +312,27 @@ void retro_osd_interface::osd_exit()
 
 
 //============================================================
+//  get_gpu_render_target
+//============================================================
+
+osd::gpu_render_target *retro_osd_interface::get_gpu_render_target()
+{
+#if defined(HAVE_RETRO_GPU_TARGET)
+	if (!m_gpu_render_target)
+	{
+		auto target = std::make_unique<retro_gpu_target>();
+		if (!target->is_valid())
+			return nullptr;
+		m_gpu_render_target = std::move(target);
+	}
+	return m_gpu_render_target.get();
+#else
+	return nullptr;
+#endif
+}
+
+
+//============================================================
 //  output_oslog
 //============================================================
 
@@ -349,6 +375,20 @@ void retro_osd_interface::init(running_machine &machine)
 		using namespace std::placeholders;
 		machine.add_logerror_callback(std::bind(&retro_osd_interface::output_oslog, this, _1));
 	}
+
+	// NOTE: Phase 1's self-test used to run right here, constructing the
+	// GPU render target immediately. Removed for Phase 2: init() runs
+	// synchronously inside retro_load_game(), before RetroArch has set up
+	// its own Wayland/EGL context, and constructing our EGL context this
+	// early was found to corrupt RetroArch's later context setup
+	// (EGL_BAD_CONTEXT, then a crash) - regardless of EGL platform choice
+	// or careful current-context save/restore around our own calls. The
+	// GPU render target is now acquired lazily instead, on first real use
+	// from psxgpu_device::gpu_active() (src/devices/video/psx.cpp), which
+	// only happens once actual gameplay execution is underway (well after
+	// RetroArch's own setup completes). Phase 1's mechanism itself was
+	// already validated safe via an LD_PRELOAD-injected background-thread
+	// test against a live RetroArch session - see the implementation plan.
 }
 
 

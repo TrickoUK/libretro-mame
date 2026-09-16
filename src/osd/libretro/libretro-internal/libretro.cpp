@@ -439,6 +439,24 @@ static void check_variables(void)
          mouse_enable = true;
    }
 
+   var.key   = CORE_NAME "_lua_console";
+   var.value = NULL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "disabled"))
+         lua_console_enable = false;
+      if (!strcmp(var.value, "enabled"))
+         lua_console_enable = true;
+   }
+
+   var.key   = CORE_NAME "_debug_plugin";
+   var.value = NULL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      strncpy(debug_plugin, var.value, sizeof(debug_plugin) - 1);
+      debug_plugin[sizeof(debug_plugin) - 1] = '\0';
+   }
+
    var.key   = CORE_NAME "_lightgun_mode";
    var.value = NULL;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)

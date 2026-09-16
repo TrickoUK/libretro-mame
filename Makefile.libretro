@@ -330,6 +330,12 @@ endif
 ifneq ($(SOURCES),)
 	TARGETFLAGS += SOURCES=$(SOURCES)
 endif
+ifneq ($(SOURCEFILTER),)
+	TARGETFLAGS += SOURCEFILTER=$(SOURCEFILTER)
+endif
+ifneq ($(HAVE_RETRO_GPU_TARGET),)
+	TARGETFLAGS += HAVE_RETRO_GPU_TARGET=$(HAVE_RETRO_GPU_TARGET)
+endif
 
 ###########################################################################
 #

@@ -392,6 +392,11 @@ newoption {
 }
 
 newoption {
+	trigger = "HAVE_RETRO_GPU_TARGET",
+	description = "Enable the libretro OSD's optional GPU render-target service (dlopen-based EGL/GL, opt-in).",
+}
+
+newoption {
 	trigger = "PLATFORM",
 	description = "Target machine platform (x86,arm,...)",
 }

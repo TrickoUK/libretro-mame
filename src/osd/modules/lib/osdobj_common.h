@@ -244,6 +244,10 @@ public:
 	virtual std::unique_ptr<osd::network_device> open_network_device(int id, osd::network_handler &handler) override;
 	virtual std::vector<osd::network_device_info> list_network_devices() override;
 
+	// GPU render interface - no-op default (nullptr) shared by every OSD;
+	// only overridden where a real implementation exists (see retro OSD).
+	virtual osd::gpu_render_target *get_gpu_render_target() override { return nullptr; }
+
 	// FIXME: everything below seems to be osd specific and not part of
 	//        this INTERFACE but part of the osd IMPLEMENTATION
 
