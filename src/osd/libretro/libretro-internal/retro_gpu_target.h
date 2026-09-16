@@ -40,7 +40,8 @@ public:
 	retro_gpu_target &operator=(const retro_gpu_target &) = delete;
 
 	virtual void begin_frame(int width, int height) override;
-	virtual void upload_texture(const uint32_t *rgba_pixels, int width, int height) override;
+	virtual void upload_vram(const uint16_t *vram_words, int width, int height) override;
+	virtual void set_texture_page(int tx, int ty, int tp, int clutx, int cluty) override;
 	virtual void submit_triangle(const osd::gpu_vertex tri[3], bool textured, osd::gpu_blend_mode blend) override;
 	virtual void submit_triangles(const osd::gpu_vertex *verts, int count, bool textured, osd::gpu_blend_mode blend) override;
 	virtual void end_frame_and_readback(uint32_t *rgba_out) override;
@@ -88,7 +89,7 @@ private:
 	// helper in the .cpp) - safe on its own, but an eglMakeCurrent pair
 	// per call is too slow for a real polygon-heavy scene. begin_batch()/
 	// end_batch() add an opt-in fast path *psxgpu_device actually uses*:
-	// the caller queues a whole frame's worth of upload_texture()/
+	// the caller queues a whole frame's worth of upload_vram()/set_texture_page()/
 	// set_clip_rect()/submit_triangle() calls in host memory (no GL calls
 	// at all yet), then replays the queue in one tight, synchronous C++
 	// loop bracketed by begin_batch()/end_batch() - during which control
@@ -117,6 +118,12 @@ private:
 	uint32_t m_vbo;
 	int m_u_target_size_loc;
 	int m_u_textured_loc;
+	int m_u_tp_loc;
+	int m_u_tx_loc;
+	int m_u_ty_loc;
+	int m_u_clutx_loc;
+	int m_u_cluty_loc;
+	int m_u_vram_height_loc;
 
 	osd::gpu_blend_mode m_current_blend;
 

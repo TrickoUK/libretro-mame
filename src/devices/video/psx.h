@@ -243,13 +243,13 @@ private:
 	bool m_gpu_active_checked = false;
 
 	// Per-call EGL context acquisition (one eglMakeCurrent pair per
-	// upload_texture()/submit_triangle()/set_clip_rect() call) was too slow
+	// set_texture_page()/submit_triangle()/set_clip_rect() call) was too slow
 	// for a real polygon-heavy scene. Rather than holding the context
 	// across multiple calls to amortize that cost - which was tried and
 	// found to eventually corrupt shared driver state once control returns
 	// to MAME/RetroArch's scheduler in between (see CLAUDE.md/plan file
 	// Phase 2 status) - primitive submission is deferred: gpu_submit_
-	// triangle_pair()/gpu_maybe_upload_texture_page()/gpu_maybe_set_clip_
+	// triangle_pair()/gpu_maybe_set_texture_page()/gpu_maybe_set_clip_
 	// rect() queue commands here instead of calling m_gpu_render_target
 	// directly. gpu_update_screen() then replays the whole queue in one
 	// tight, synchronous loop bracketed by begin_batch()/end_batch() -
@@ -266,16 +266,15 @@ private:
 	// real polygon-heavy scene.
 	struct gpu_queued_cmd
 	{
-		enum class kind_t { TRIANGLE, TEXTURE, CLIP } kind;
+		enum class kind_t { TRIANGLE, TEXPARAM, CLIP } kind;
 		osd::gpu_vertex tri[3];
 		bool textured = false;
 		osd::gpu_blend_mode blend = osd::gpu_blend_mode::NONE;
-		std::vector<uint32_t> texdata;
+		int tex_tx = 0, tex_ty = 0, tex_tp = 0, tex_clutx = 0, tex_cluty = 0;
 		int clip_x1 = 0, clip_y1 = 0, clip_x2 = 0, clip_y2 = 0;
 	};
 	std::vector<gpu_queued_cmd> m_gpu_queue;
 	osd::gpu_blend_mode gpu_blend_mode_for( uint8_t n_cmd ) const;
-	bool gpu_decode_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty, std::vector<uint32_t> &out );
 	void gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend );
 	bool gpu_submit_flat_polygon( int n_points );
 	bool gpu_submit_flat_textured_polygon( int n_points );
@@ -296,17 +295,21 @@ private:
 	// by other drivers, not fully defined.
 	int gpu_scale() const;
 
-	// Avoids re-decoding/re-uploading the same 256x256 texture page+CLUT to
-	// the GPU on every single textured polygon (most runs of consecutive
-	// polygons share one texture page) - see gpu_maybe_upload_texture_page()
-	// in psx.cpp. -1 means "nothing uploaded yet this session", guaranteed
-	// to mismatch any real n_tx/n_ty (always >= 0).
+	// Avoids re-issuing a set_texture_page() GL state change on every single
+	// textured polygon when consecutive polygons share one texture page -
+	// see gpu_maybe_set_texture_page() in psx.cpp. -1 means "nothing set
+	// yet this session", guaranteed to mismatch any real n_tx/n_ty (always
+	// >= 0). Texture *data* itself is no longer decoded/cached here at all -
+	// upload_vram() in gpu_update_screen() uploads the device's whole raw
+	// VRAM once per frame and the GPU shader decodes CLUT/bpp addressing
+	// directly from it (see retro_gpu_target's fragment shader) - this
+	// cache is now purely about skipping a handful of uniform updates.
 	int32_t m_gpu_last_tx = -1;
 	int32_t m_gpu_last_ty = -1;
 	int32_t m_gpu_last_tp = -1;
 	int32_t m_gpu_last_clutx = -1;
 	int32_t m_gpu_last_cluty = -1;
-	void gpu_maybe_upload_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty );
+	void gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty );
 
 	// Avoids calling set_clip_rect() (a GL scissor-state change) on every
 	// polygon when consecutive polygons share the same PS1 draw area,
@@ -329,6 +332,12 @@ private:
 	int32_t n_ti;
 
 	std::unique_ptr<uint16_t[]> p_vram;
+	// Row count of p_vram (width is always 1024 words) - passed to
+	// osd::gpu_render_target::upload_vram() so its shader can wrap texture-
+	// page row addressing by the actual VRAM height, exactly like
+	// p_p_vram's row lookup table already does for the CPU path (see
+	// psx_gpu_init()).
+	int m_vram_height = 0;
 	uint32_t n_vramx;
 	uint32_t n_vramy;
 	uint32_t n_twy;

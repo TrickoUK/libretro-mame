@@ -571,6 +571,7 @@ void psxgpu_device::psx_gpu_init( int n_gputype )
 	b_reverseflag = 0;
 
 	p_vram = make_unique_clear<uint16_t[]>(width * height );
+	m_vram_height = height;
 
 	for( int n_line = 0; n_line < 1024; n_line++ )
 	{
@@ -1519,67 +1520,6 @@ osd::gpu_blend_mode psxgpu_device::gpu_blend_mode_for( uint8_t n_cmd ) const
 	}
 }
 
-// Decodes a 256x256 texel region starting at VRAM word (n_tx,n_ty) into a
-// flat RGBA8 buffer, using the exact same per-texel addressing as the
-// TEXTURE4BIT/8BIT/15BIT macros above (so results match the software path
-// bit-for-bit for any UV a draw call might present) - texture window
-// masking is not applied (a documented simplification: most textures don't
-// use it). n_bgr == 0 decodes to fully transparent (alpha 0), discarded in
-// the fragment shader.
-bool psxgpu_device::gpu_decode_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty, std::vector<uint32_t> &out )
-{
-	// This decodes the *full* 0-255 x 0-255 UV space regardless of what
-	// the actual polygon needs (unlike the CPU rasterizer's TEXTURE4BIT/
-	// 8BIT/15BIT macros, which only ever evaluate addresses for UVs a real
-	// scanline interpolation produces, implicitly bounded by the polygon's
-	// own vertex data) - so n_tx/n_clutx plus a large column offset here
-	// can exceed a VRAM row's 1024-uint16_t width in a way the CPU path
-	// never hits in practice. Mask every column index (both the texel
-	// address and, separately, the CLUT lookup address) to stay in-row -
-	// p_p_vram's row pointers are always valid for all 1024 possible rows
-	// regardless of actual VRAM height (see psx_gpu_init), only the
-	// *column* needs guarding here. Takes the CLUT's row/column origin
-	// rather than a precomputed pointer specifically so this masking can
-	// be applied to it too.
-	uint16_t *p_clut_row = p_p_vram[ n_cluty & 1023 ];
-	out.resize( 256 * 256 );
-	for( int v = 0; v < 256; v++ )
-	{
-		uint16_t *p_row = p_p_vram[ ( n_ty + v ) & 1023 ];
-		for( int u = 0; u < 256; u++ )
-		{
-			uint16_t n_bgr;
-			switch( tp )
-			{
-			case 0:
-				n_bgr = p_clut_row[ ( n_clutx + ( ( *( p_row + ( ( n_tx + ( u >> 2 ) ) & 1023 ) ) >> ( ( u & 0x03 ) << 2 ) ) & 0x0f ) ) & 1023 ];
-				break;
-			case 1:
-				n_bgr = p_clut_row[ ( n_clutx + ( ( *( p_row + ( ( n_tx + ( u >> 1 ) ) & 1023 ) ) >> ( ( u & 0x01 ) << 3 ) ) & 0xff ) ) & 1023 ];
-				break;
-			default:
-				n_bgr = *( p_row + ( ( n_tx + u ) & 1023 ) );
-				break;
-			}
-
-			uint32_t rgba;
-			if( n_bgr == 0 )
-			{
-				rgba = 0;
-			}
-			else
-			{
-				uint32_t r = ( n_bgr & 0x1f ) << 3;
-				uint32_t g = ( ( n_bgr >> 5 ) & 0x1f ) << 3;
-				uint32_t b = ( ( n_bgr >> 10 ) & 0x1f ) << 3;
-				rgba = ( 255u << 24 ) | ( b << 16 ) | ( g << 8 ) | r;
-			}
-			out[ v * 256 + u ] = rgba;
-		}
-	}
-	return true;
-}
-
 // The real PS1 GPU clips all primitives to a settable draw-area rectangle
 // (n_drawarea_x1/y1/x2/y2, used extensively by the CPU scanline rasterizer's
 // clipping logic elsewhere in this file) - the GPU path ignored this
@@ -1686,7 +1626,7 @@ bool psxgpu_device::gpu_submit_flat_textured_polygon( int n_points )
 	decode_tpage( m_packet.FlatTexturedPolygon.vertex[ 1 ].n_texture.w.h );
 	TEXTURESETUP
 
-	gpu_maybe_upload_texture_page( n_tx, n_ty, n_tp, n_clutx, n_cluty );
+	gpu_maybe_set_texture_page( n_tx, n_ty, n_tp, n_clutx, n_cluty );
 
 	float r = ( n_cmd & 0x01 ) ? ( 128.0f / 255.0f ) : ( BGR_R( m_packet.FlatTexturedPolygon.n_bgr ) / 255.0f );
 	float g = ( n_cmd & 0x01 ) ? ( 128.0f / 255.0f ) : ( BGR_G( m_packet.FlatTexturedPolygon.n_bgr ) / 255.0f );
@@ -1716,7 +1656,7 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 	decode_tpage( m_packet.GouraudTexturedPolygon.vertex[ 1 ].n_texture.w.h );
 	TEXTURESETUP
 
-	gpu_maybe_upload_texture_page( n_tx, n_ty, n_tp, n_clutx, n_cluty );
+	gpu_maybe_set_texture_page( n_tx, n_ty, n_tp, n_clutx, n_cluty );
 
 	osd::gpu_vertex v[ 4 ];
 	for( int i = 0; i < n_points; i++ )
@@ -1735,11 +1675,14 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 	return true;
 }
 
-// Uploading a full 256x256 texture page (decode + glTexImage2D) on every
-// single textured polygon was a major performance problem in practice -
-// most runs of consecutive polygons reuse the same texture page/CLUT, so
-// skip the decode+upload entirely when nothing has changed since last time.
-void psxgpu_device::gpu_maybe_upload_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty )
+// Re-issuing a set_texture_page() GL state change on every single textured
+// polygon was wasteful - most runs of consecutive polygons reuse the same
+// texture page/CLUT, so skip it entirely when nothing has changed since
+// last time. Unlike the old per-page decode this replaced, there is no
+// expensive CPU work being skipped here (just a handful of glUniform1i
+// calls) - this cache is now purely about avoiding a GL state churn, not
+// about avoiding a decode.
+void psxgpu_device::gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty )
 {
 	if( n_tx == m_gpu_last_tx && n_ty == m_gpu_last_ty && tp == m_gpu_last_tp &&
 		n_clutx == m_gpu_last_clutx && n_cluty == m_gpu_last_cluty )
@@ -1748,8 +1691,12 @@ void psxgpu_device::gpu_maybe_upload_texture_page( int n_tx, int n_ty, int tp, i
 	}
 
 	gpu_queued_cmd cmd;
-	cmd.kind = gpu_queued_cmd::kind_t::TEXTURE;
-	gpu_decode_texture_page( n_tx, n_ty, tp, n_clutx, n_cluty, cmd.texdata );
+	cmd.kind = gpu_queued_cmd::kind_t::TEXPARAM;
+	cmd.tex_tx = n_tx;
+	cmd.tex_ty = n_ty;
+	cmd.tex_tp = tp;
+	cmd.tex_clutx = n_clutx;
+	cmd.tex_cluty = n_cluty;
 	m_gpu_queue.push_back( std::move( cmd ) );
 
 	m_gpu_last_tx = n_tx;
@@ -1759,7 +1706,7 @@ void psxgpu_device::gpu_maybe_upload_texture_page( int n_tx, int n_ty, int tp, i
 	m_gpu_last_cluty = n_cluty;
 }
 
-// Replays this frame's queued upload_texture()/set_clip_rect()/triangle
+// Replays this frame's queued set_texture_page()/set_clip_rect()/triangle
 // commands (see the m_gpu_queue comment in psx.h), reads the result back
 // into bitmap, then clears the queue for the next frame. Consecutive
 // TRIANGLE commands sharing the same textured/blend state are merged into
@@ -1789,6 +1736,13 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 	m_gpu_render_target->begin_batch();
 	m_gpu_render_target->begin_frame( w, h );
 
+	// Whole-VRAM upload, once per frame, regardless of how many texture
+	// page/CLUT switches this frame's polygons make - see the fragment
+	// shader comment in retro_gpu_target.cpp for why this replaced a
+	// per-texture-page CPU decode (that was 43% of total CPU time in
+	// profiling, more than PS1 CPU emulation itself).
+	m_gpu_render_target->upload_vram( p_vram.get(), 1024, m_vram_height );
+
 	std::vector<osd::gpu_vertex> run;
 	bool run_textured = false;
 	osd::gpu_blend_mode run_blend = osd::gpu_blend_mode::NONE;
@@ -1814,9 +1768,9 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 			run.push_back( cmd.tri[ 1 ] );
 			run.push_back( cmd.tri[ 2 ] );
 			break;
-		case gpu_queued_cmd::kind_t::TEXTURE:
+		case gpu_queued_cmd::kind_t::TEXPARAM:
 			flush_run();
-			m_gpu_render_target->upload_texture( cmd.texdata.data(), 256, 256 );
+			m_gpu_render_target->set_texture_page( cmd.tex_tx, cmd.tex_ty, cmd.tex_tp, cmd.tex_clutx, cmd.tex_cluty );
 			break;
 		case gpu_queued_cmd::kind_t::CLIP:
 			flush_run();

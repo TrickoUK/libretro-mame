@@ -92,10 +92,13 @@ typedef unsigned int GLbitfield;
 #define GL_TRIANGLES 0x0004
 #define GL_TEXTURE_2D 0x0DE1
 #define GL_UNSIGNED_BYTE 0x1401
+#define GL_UNSIGNED_SHORT 0x1403
 #define GL_FLOAT 0x1406
 #define GL_RGBA 0x1908
 #define GL_BGRA 0x80E1
 #define GL_RGBA8 0x8058
+#define GL_RED_INTEGER 0x8D94
+#define GL_R16UI 0x8234
 #define GL_TEXTURE_MIN_FILTER 0x2801
 #define GL_TEXTURE_MAG_FILTER 0x2800
 #define GL_NEAREST 0x2600
@@ -346,21 +349,65 @@ const char *vertex_shader_src =
  * psxgpu_device::gpu_submit_flat_textured_polygon()) rather than an alpha
  * multiplier, matching the CPU rasterizer's SHADEDPIXEL/TRANSPARENTPIXEL
  * macros (psx.cpp) which multiply the texel by the vertex shade centered
- * at 0x80/128. Texels with zero alpha (n_bgr == 0 when decoded, see
- * gpu_decode_texture_page()) are the PS1 GPU's "transparent, don't draw"
- * marker and are discarded rather than blended. */
+ * at 0x80/128.
+ *
+ * Texture decode (CLUT lookup / 4bpp-8bpp-16bpp unpack) happens here, not
+ * on the CPU: u_tex holds the device's *entire* raw VRAM as undecoded
+ * 16-bit texels (see retro_gpu_target::upload_vram()), and u_tx/u_ty/
+ * u_tp/u_clutx/u_cluty (set per polygon batch by set_texture_page())
+ * select where in it to sample from - the exact same addressing as psx.cpp's
+ * TEXTURE4BIT/8BIT/15BIT macros, reproduced bit-for-bit so results match
+ * the software path. This replaced an earlier design that CPU-decoded a
+ * full 256x256 RGBA page per texture-page switch - profiling found that
+ * decode was 43% of total CPU time (dominant even over PS1 CPU emulation
+ * itself) because consecutive polygons in real content switch texture
+ * pages far more often than they reuse one, so a small last-page cache
+ * barely helped. Moving the decode into the GPU removes that cost
+ * entirely; a zero-valued texel (n_bgr == 0) is the PS1 GPU's
+ * "transparent, don't draw" marker and is discarded rather than blended,
+ * exactly as the CPU path's n_bgr == 0 check does. */
 const char *fragment_shader_src =
 	"#version 330 core\n"
 	"in vec4 v_color;\n"
 	"in vec2 v_uv;\n"
-	"uniform sampler2D u_tex;\n"
+	"uniform usampler2D u_tex;\n"
 	"uniform int u_textured;\n"
+	"uniform int u_tp;\n"
+	"uniform int u_tx;\n"
+	"uniform int u_ty;\n"
+	"uniform int u_clutx;\n"
+	"uniform int u_cluty;\n"
+	"uniform int u_vram_height;\n"
 	"out vec4 frag_color;\n"
 	"void main() {\n"
 	"    if (u_textured != 0) {\n"
-	"        vec4 texel = texelFetch(u_tex, ivec2(v_uv), 0);\n"
-	"        if (texel.a == 0.0) discard;\n"
-	"        frag_color = vec4(clamp(texel.rgb * (v_color.rgb * 2.0), 0.0, 1.0), 1.0);\n"
+	"        int u = int(v_uv.x);\n"
+	"        int v = int(v_uv.y);\n"
+	"        int row = (u_ty + v) % u_vram_height;\n"
+	"        int clutrow = u_cluty % u_vram_height;\n"
+	"        uint bgr;\n"
+	"        if (u_tp == 0) {\n"
+	"            int col = (u_tx + (u >> 2)) & 1023;\n"
+	"            uint word = texelFetch(u_tex, ivec2(col, row), 0).r;\n"
+	"            uint idx = (word >> uint((u & 3) << 2)) & 0x0Fu;\n"
+	"            int clutcol = (u_clutx + int(idx)) & 1023;\n"
+	"            bgr = texelFetch(u_tex, ivec2(clutcol, clutrow), 0).r;\n"
+	"        } else if (u_tp == 1) {\n"
+	"            int col = (u_tx + (u >> 1)) & 1023;\n"
+	"            uint word = texelFetch(u_tex, ivec2(col, row), 0).r;\n"
+	"            uint idx = (word >> uint((u & 1) << 3)) & 0xFFu;\n"
+	"            int clutcol = (u_clutx + int(idx)) & 1023;\n"
+	"            bgr = texelFetch(u_tex, ivec2(clutcol, clutrow), 0).r;\n"
+	"        } else {\n"
+	"            int col = (u_tx + u) & 1023;\n"
+	"            bgr = texelFetch(u_tex, ivec2(col, row), 0).r;\n"
+	"        }\n"
+	"        if (bgr == 0u) discard;\n"
+	"        uint r8 = (bgr & 0x1Fu) << 3;\n"
+	"        uint g8 = ((bgr >> 5) & 0x1Fu) << 3;\n"
+	"        uint b8 = ((bgr >> 10) & 0x1Fu) << 3;\n"
+	"        vec3 texel = vec3(float(r8), float(g8), float(b8)) / 255.0;\n"
+	"        frag_color = vec4(clamp(texel * (v_color.rgb * 2.0), 0.0, 1.0), 1.0);\n"
 	"    } else {\n"
 	"        frag_color = v_color;\n"
 	"    }\n"
@@ -427,6 +474,7 @@ retro_gpu_target::retro_gpu_target()
 	, m_vram_tex(0), m_vram_tex_width(0), m_vram_tex_height(0)
 	, m_program(0), m_vao(0), m_vbo(0)
 	, m_u_target_size_loc(-1), m_u_textured_loc(-1)
+	, m_u_tp_loc(-1), m_u_tx_loc(-1), m_u_ty_loc(-1), m_u_clutx_loc(-1), m_u_cluty_loc(-1), m_u_vram_height_loc(-1)
 	, m_current_blend(osd::gpu_blend_mode::NONE)
 	, m_scissor_enabled(false), m_scissor_x(0), m_scissor_y(0), m_scissor_w(0), m_scissor_h(0)
 {
@@ -529,6 +577,12 @@ bool retro_gpu_target::init_context()
 	g_gl.UseProgram(m_program);
 	m_u_target_size_loc = g_gl.GetUniformLocation(m_program, "u_target_size");
 	m_u_textured_loc = g_gl.GetUniformLocation(m_program, "u_textured");
+	m_u_tp_loc = g_gl.GetUniformLocation(m_program, "u_tp");
+	m_u_tx_loc = g_gl.GetUniformLocation(m_program, "u_tx");
+	m_u_ty_loc = g_gl.GetUniformLocation(m_program, "u_ty");
+	m_u_clutx_loc = g_gl.GetUniformLocation(m_program, "u_clutx");
+	m_u_cluty_loc = g_gl.GetUniformLocation(m_program, "u_cluty");
+	m_u_vram_height_loc = g_gl.GetUniformLocation(m_program, "u_vram_height");
 	GLint tex_loc = g_gl.GetUniformLocation(m_program, "u_tex");
 	g_gl.Uniform1i(tex_loc, 0);
 
@@ -702,7 +756,7 @@ void retro_gpu_target::set_clip_rect(int x1, int y1, int x2, int y2)
 	g_gl.Scissor(m_scissor_x, m_scissor_y, m_scissor_w, m_scissor_h);
 }
 
-void retro_gpu_target::upload_texture(const uint32_t *rgba_pixels, int width, int height)
+void retro_gpu_target::upload_vram(const uint16_t *vram_words, int width, int height)
 {
 	if (!m_valid)
 		return;
@@ -711,13 +765,39 @@ void retro_gpu_target::upload_texture(const uint32_t *rgba_pixels, int width, in
 	if (!ctx.active)
 		return;
 
+	// Raw, undecoded upload - one 16-bit texel per VRAM word, GL_R16UI so
+	// the fragment shader can texelFetch() it as an integer and do its own
+	// CLUT/bit-unpack decode (see fragment_shader_src) instead of this being
+	// pre-decoded to RGBA8 on the CPU. Called once per frame regardless of
+	// how many texture pages/CLUTs polygons in that frame actually use -
+	// see set_texture_page() for the per-polygon addressing into this.
 	g_gl.ActiveTexture(GL_TEXTURE0);
 	g_gl.BindTexture(GL_TEXTURE_2D, m_vram_tex);
-	g_gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba_pixels);
+	g_gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, width, height, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, vram_words);
 	g_gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	g_gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	m_vram_tex_width = width;
 	m_vram_tex_height = height;
+
+	g_gl.UseProgram(m_program);
+	g_gl.Uniform1i(m_u_vram_height_loc, height);
+}
+
+void retro_gpu_target::set_texture_page(int tx, int ty, int tp, int clutx, int cluty)
+{
+	if (!m_valid)
+		return;
+
+	scoped_context ctx(m_display, m_surface, m_context, m_batch_active);
+	if (!ctx.active)
+		return;
+
+	g_gl.UseProgram(m_program);
+	g_gl.Uniform1i(m_u_tp_loc, tp);
+	g_gl.Uniform1i(m_u_tx_loc, tx);
+	g_gl.Uniform1i(m_u_ty_loc, ty);
+	g_gl.Uniform1i(m_u_clutx_loc, clutx);
+	g_gl.Uniform1i(m_u_cluty_loc, cluty);
 }
 
 void retro_gpu_target::set_blend_mode(osd::gpu_blend_mode blend)

@@ -66,11 +66,21 @@ public:
 	// are in target pixels (i.e. native resolution * desired multiplier).
 	virtual void begin_frame(int width, int height) = 0;
 
-	// upload a full source texture (e.g. a device's entire VRAM) as a
-	// single 2D texture, addressed in texels by gpu_vertex::u/v. Format is
-	// always packed RGBA8 - the caller converts from whatever native pixel
-	// format it stores internally.
-	virtual void upload_texture(const uint32_t *rgba_pixels, int width, int height) = 0;
+	// upload a device's entire raw VRAM as a single integer texture (one
+	// 16-bit texel per VRAM word, unpacked/undecoded) - addressed in whole
+	// VRAM words by set_texture_page() below, not by gpu_vertex::u/v
+	// directly. Meant to be called once per frame (VRAM is uploaded
+	// wholesale, cheaply, rather than decoding/re-uploading a texture page
+	// worth of pixels every time a polygon's texture page/CLUT changes).
+	virtual void upload_vram(const uint16_t *vram_words, int width, int height) = 0;
+
+	// select which texture page/CLUT/pixel-format subsequent textured
+	// submit_triangle(s) calls should sample from within the last
+	// upload_vram()'d data, in VRAM word coordinates (matching
+	// upload_vram's addressing) - tp: 0 = 4bpp CLUT, 1 = 8bpp CLUT,
+	// 2 = 16bpp direct, mirroring the PS1 GPU's own texture-page
+	// color-mode field. gpu_vertex::u/v remain page-relative (0-255).
+	virtual void set_texture_page(int tx, int ty, int tp, int clutx, int cluty) = 0;
 
 	// submit one triangle, drawn with the given blend mode against
 	// whatever is already in the target. textured=false ignores u/v and
@@ -103,7 +113,7 @@ public:
 	// implementation/device pairing that doesn't need it.
 	virtual void set_clip_rect(int x1, int y1, int x2, int y2) {}
 
-	// Optionally batch a run of upload_texture()/set_clip_rect()/
+	// Optionally batch a run of upload_vram()/set_texture_page()/set_clip_rect()/
 	// submit_triangle() calls under a single context acquisition instead
 	// of each call acquiring its own - a significant win when many calls
 	// happen back-to-back with nothing else (e.g. no return to the host's
