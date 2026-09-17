@@ -327,7 +327,7 @@ osd::gpu_render_target *retro_osd_interface::get_gpu_render_target()
 		return nullptr;
 	if (!m_gpu_render_target)
 	{
-		auto target = std::make_unique<retro_gpu_target>();
+		auto target = std::make_unique<retro_gpu_target>(gpu_render_msaa_samples());
 		if (!target->is_valid())
 			return nullptr;
 		m_gpu_render_target = std::move(target);

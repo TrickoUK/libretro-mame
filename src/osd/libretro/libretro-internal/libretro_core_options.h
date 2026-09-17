@@ -539,6 +539,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
+      CORE_NAME "_psx_gpu_msaa",
+      "PS1 GPU 4x MSAA (Experimental)",
+      NULL,
+      "Only affects PS1 GPU Hardware Rendering above when it's also enabled. Smooths jagged polygon edges using 4x multisample anti-aliasing on the GPU render target. Disable this for a specific game if it causes visual problems. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "enabled",  "Enabled" },
+         { NULL, NULL },
+      },
+      "enabled"
+   },
+   {
       CORE_NAME "_cpu_overclock",
       "Main CPU Overclock %",
       NULL,

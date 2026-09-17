@@ -121,6 +121,12 @@ extern int psx_gpu_hle_scale;
 // GPU HLE path above (see osdretro.h's gpu_render_pgxp_enabled() and
 // CLAUDE.md Phase 4) - only meaningful when psx_gpu_hle_scale > 0.
 extern bool psx_gpu_pgxp_enable;
+// mame_psx_gpu_msaa core option: 4x MSAA on the GPU render target above
+// (see osdretro.h's gpu_render_msaa_samples()) - only meaningful when
+// psx_gpu_hle_scale > 0. A user-facing escape hatch in case a specific
+// game looks worse with it on, not expected to be needed in the common
+// case.
+extern bool psx_gpu_msaa_enable;
 
 extern int fb_width;
 extern int fb_height;

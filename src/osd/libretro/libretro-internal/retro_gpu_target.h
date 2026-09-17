@@ -32,7 +32,13 @@ typedef void *EGLSurface;
 class retro_gpu_target : public osd::gpu_render_target
 {
 public:
-	retro_gpu_target();
+	// msaa_samples: 0 disables MSAA (the FBO still goes through the
+	// resolve-blit path unconditionally for one simple code path rather
+	// than two - see resize_target()/end_frame_and_readback() - a
+	// zero-sample renderbuffer is spec-legal and behaves as a plain
+	// single-sample one, so this costs one harmless extra blit per frame
+	// when disabled, not a code fork).
+	explicit retro_gpu_target(int msaa_samples = 4);
 	virtual ~retro_gpu_target();
 
 	// non-copyable: owns GPU resources
@@ -105,7 +111,20 @@ private:
 	EGLSurface m_batch_saved_read_surface;
 	EGLContext m_batch_saved_context;
 
+	// m_fbo is the actual render target - a multisample color renderbuffer
+	// attachment (MSAA, see MSAA_SAMPLES in the .cpp), not a plain texture.
+	// glReadPixels can't read a multisample framebuffer directly, so
+	// end_frame_and_readback() resolves m_fbo into m_resolve_fbo (a
+	// same-size single-sample FBO with a plain texture attachment,
+	// m_color_tex) via glBlitFramebuffer first, then reads back from
+	// m_resolve_fbo. copy_rect() (mid-frame VRAM-to-VRAM blits) operates
+	// on m_fbo directly and stays multisampled all frame - only the very
+	// last step, right before readback, drops to single-sample.
+	int m_msaa_samples;
+
 	uint32_t m_fbo;
+	uint32_t m_color_rb_ms;
+	uint32_t m_resolve_fbo;
 	uint32_t m_color_tex;
 	int m_fbo_width;
 	int m_fbo_height;

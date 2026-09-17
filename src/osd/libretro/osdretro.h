@@ -133,6 +133,14 @@ public:
 		return false;
 #endif
 	}
+	virtual int gpu_render_msaa_samples() const override
+	{
+#if defined(HAVE_RETRO_GPU_TARGET)
+		return psx_gpu_msaa_enable ? 4 : 0;
+#else
+		return 0;
+#endif
+	}
 	virtual osd::gpu_render_target *get_gpu_render_target() override;
 
 private:

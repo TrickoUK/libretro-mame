@@ -108,6 +108,7 @@ typedef unsigned int GLbitfield;
 #define GL_DRAW_FRAMEBUFFER 0x8CA9
 #define GL_COLOR_ATTACHMENT0 0x8CE0
 #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
+#define GL_RENDERBUFFER 0x8D41
 #define GL_VERTEX_SHADER 0x8B31
 #define GL_FRAGMENT_SHADER 0x8B30
 #define GL_COMPILE_STATUS 0x8B81
@@ -167,6 +168,10 @@ typedef void (*PFNGLENABLEPROC)(GLenum);
 typedef void (*PFNGLDISABLEPROC)(GLenum);
 typedef void (*PFNGLSCISSORPROC)(GLint, GLint, GLsizei, GLsizei);
 typedef void (*PFNGLBLITFRAMEBUFFERPROC)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum);
+typedef void (*PFNGLGENRENDERBUFFERSPROC)(GLsizei, GLuint *);
+typedef void (*PFNGLBINDRENDERBUFFERPROC)(GLenum, GLuint);
+typedef void (*PFNGLRENDERBUFFERSTORAGEMULTISAMPLEPROC)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
+typedef void (*PFNGLFRAMEBUFFERRENDERBUFFERPROC)(GLenum, GLenum, GLenum, GLuint);
 typedef const GLchar *(*PFNGLGETSTRINGPROC)(GLenum);
 typedef GLenum (*PFNGLGETERRORPROC)(void);
 #define GL_VENDOR 0x1F00
@@ -221,6 +226,10 @@ struct gl_dispatch
 	PFNGLDISABLEPROC Disable = nullptr;
 	PFNGLSCISSORPROC Scissor = nullptr;
 	PFNGLBLITFRAMEBUFFERPROC BlitFramebuffer = nullptr;
+	PFNGLGENRENDERBUFFERSPROC GenRenderbuffers = nullptr;
+	PFNGLBINDRENDERBUFFERPROC BindRenderbuffer = nullptr;
+	PFNGLRENDERBUFFERSTORAGEMULTISAMPLEPROC RenderbufferStorageMultisample = nullptr;
+	PFNGLFRAMEBUFFERRENDERBUFFERPROC FramebufferRenderbuffer = nullptr;
 	PFNGLGETSTRINGPROC GetString = nullptr;
 	PFNGLGETERRORPROC GetError = nullptr;
 };
@@ -313,6 +322,8 @@ bool load_gl_dispatch()
 	LOAD_GL(Viewport); LOAD_GL(ClearColor); LOAD_GL(Clear); LOAD_GL(DrawArrays);
 	LOAD_GL(ReadPixels); LOAD_GL(Finish); LOAD_GL(Enable); LOAD_GL(Disable); LOAD_GL(Scissor);
 	LOAD_GL(BlitFramebuffer);
+	LOAD_GL(GenRenderbuffers); LOAD_GL(BindRenderbuffer);
+	LOAD_GL(RenderbufferStorageMultisample); LOAD_GL(FramebufferRenderbuffer);
 #undef LOAD_GL
 	return true;
 }
@@ -484,11 +495,12 @@ struct scoped_context
 
 } // anonymous namespace
 
-retro_gpu_target::retro_gpu_target()
+retro_gpu_target::retro_gpu_target(int msaa_samples)
 	: m_display(nullptr), m_context(nullptr), m_surface(nullptr), m_valid(false)
 	, m_batch_active(false)
 	, m_batch_saved_display(nullptr), m_batch_saved_draw_surface(nullptr), m_batch_saved_read_surface(nullptr), m_batch_saved_context(nullptr)
-	, m_fbo(0), m_color_tex(0), m_fbo_width(0), m_fbo_height(0)
+	, m_msaa_samples(msaa_samples < 0 ? 0 : msaa_samples)
+	, m_fbo(0), m_color_rb_ms(0), m_resolve_fbo(0), m_color_tex(0), m_fbo_width(0), m_fbo_height(0)
 	, m_vram_tex(0), m_vram_tex_width(0), m_vram_tex_height(0)
 	, m_program(0), m_vao(0), m_vbo(0)
 	, m_u_target_size_loc(-1), m_u_textured_loc(-1)
@@ -683,10 +695,31 @@ void retro_gpu_target::resize_target(int width, int height)
 
 	if (!m_fbo)
 		g_gl.GenFramebuffers(1, &m_fbo);
+	if (!m_color_rb_ms)
+		g_gl.GenRenderbuffers(1, &m_color_rb_ms);
+	if (!m_resolve_fbo)
+		g_gl.GenFramebuffers(1, &m_resolve_fbo);
 	if (!m_color_tex)
 		g_gl.GenTextures(1, &m_color_tex);
 
+	// The actual multisample render target - everything submit_triangle(s)/
+	// copy_rect() draws into all frame.
 	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+	g_gl.BindRenderbuffer(GL_RENDERBUFFER, m_color_rb_ms);
+	// m_msaa_samples: caller-selected (mame_psx_gpu_msaa core option, 4x
+	// when enabled), 0 disables MSAA - a 0-sample renderbuffer is
+	// spec-legal and equivalent to a plain single-sample one, well within
+	// what this host's GL 4.6 core profile supports either way - no
+	// MAX_SAMPLES capability query needed for this target.
+	g_gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, m_msaa_samples, GL_RGBA8, width, height);
+	g_gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, m_color_rb_ms);
+
+	// The single-sample resolve target - glReadPixels can't read a
+	// multisample framebuffer directly, so end_frame_and_readback() blits
+	// m_fbo into this one (resolving the samples) right before reading it
+	// back. Never drawn into directly - only ever a glBlitFramebuffer
+	// destination.
+	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_resolve_fbo);
 	g_gl.BindTexture(GL_TEXTURE_2D, m_color_tex);
 	g_gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 	g_gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -702,6 +735,7 @@ void retro_gpu_target::resize_target(int width, int height)
 	// (observed: alternating full/near-black frames on Brave Blade, since
 	// whatever it doesn't resubmit in a given frame was being wiped instead
 	// of persisting like real VRAM).
+	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
 	g_gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	g_gl.Clear(GL_COLOR_BUFFER_BIT);
 
@@ -926,12 +960,22 @@ void retro_gpu_target::end_frame_and_readback(uint32_t *rgba_out)
 
 	g_gl.Finish();
 
-	// glReadPixels is itself affected by the scissor box - disable it for
-	// the readback (we always want the whole target back) and restore
-	// afterward, since the draw area/clip rect is meant to persist across
-	// frames like real PS1 GPU state, not reset here.
+	// glReadPixels (and the resolve blit below) are affected by the
+	// scissor box - disable it for both (we always want the whole target
+	// back) and restore afterward, since the draw area/clip rect is meant
+	// to persist across frames like real PS1 GPU state, not reset here.
 	if (m_scissor_enabled)
 		g_gl.Disable(GL_SCISSOR_TEST);
+
+	// m_fbo is multisampled (see m_msaa_samples/resize_target()) - glReadPixels
+	// can't read a multisample framebuffer directly, so resolve it into the
+	// single-sample m_resolve_fbo first. This is the only place per frame
+	// the samples actually get resolved - copy_rect() mid-frame operates on
+	// m_fbo directly and stays multisampled the rest of the time.
+	g_gl.BindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
+	g_gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, m_resolve_fbo);
+	g_gl.BlitFramebuffer(0, 0, m_fbo_width, m_fbo_height, 0, 0, m_fbo_width, m_fbo_height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	g_gl.BindFramebuffer(GL_READ_FRAMEBUFFER, m_resolve_fbo);
 
 	std::vector<uint32_t> tmp(static_cast<size_t>(m_fbo_width) * m_fbo_height);
 	// GL_BGRA (not GL_RGBA): MAME's bitmap_rgb32/rgb_t stores pixels as
@@ -939,6 +983,11 @@ void retro_gpu_target::end_frame_and_readback(uint32_t *rgba_out)
 	// host - GL_BGRA's memory byte order matches that directly, avoiding a
 	// manual per-pixel channel swap on every readback.
 	g_gl.ReadPixels(0, 0, m_fbo_width, m_fbo_height, GL_BGRA, GL_UNSIGNED_BYTE, tmp.data());
+
+	// Leave GL_FRAMEBUFFER bound to m_fbo (the real render target) again,
+	// matching what every other entry point (submit_triangle(s), copy_rect(),
+	// the next begin_frame()) expects to already be bound.
+	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
 
 	if (m_scissor_enabled)
 	{

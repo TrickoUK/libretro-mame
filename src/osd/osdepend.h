@@ -145,6 +145,16 @@ public:
 	// gpu_render_scale(); default of false covers that case safely.
 	virtual bool gpu_render_pgxp_enabled() const { return false; }
 
+	// MSAA sample count the GPU render target should use (e.g. 4 for 4x
+	// MSAA, 0 to disable) - user-selectable where the OSD supports it (see
+	// the retro OSD's mame_psx_gpu_msaa core option). Read once, at
+	// get_gpu_render_target()'s first (lazy) construction of the target -
+	// changing it takes effect on the next restart, same as
+	// gpu_render_scale()/gpu_render_pgxp_enabled(). Meaningless/
+	// unspecified when gpu_render_available() is false; default of 0
+	// covers that case safely.
+	virtual int gpu_render_msaa_samples() const { return 0; }
+
 protected:
 	virtual ~osd_interface() { }
 };
