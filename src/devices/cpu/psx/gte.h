@@ -38,31 +38,37 @@ public:
 	void setcp2cr( uint32_t pc, int reg, uint32_t value );
 	int docop2( uint32_t pc, int gteop );
 
-	// PGXP-style geometry/texture correction (see CLAUDE.md Phase 4): when
+	// PGXP-style geometry/texture correction (see CLAUDE.md Phase 4c): when
 	// enabled, RTPS/RTPT additionally redo their transform+perspective-
 	// divide in double precision (skipping the fixed-point path's several
-	// intermediate saturation/truncation steps) and cache the result here
-	// - x/y for geometry correction, w (the vertex's real eye-space depth,
-	// SZ3) for perspective-correct texture/color interpolation - keyed by
-	// the exact fixed-point SXY word just written to m_cp2dr[12..14] - the
-	// same word a game copies verbatim into a later GP0 polygon command,
-	// and so the only thing available to match a later primitive's vertex
-	// back up with the higher-precision value that produced it. Purely
-	// additive: never changes any existing GTE register/FLAG/timing
-	// behavior, and costs nothing when disabled.
+	// intermediate saturation/truncation steps, and reproducing the real
+	// hardware clamps those steps have - see pgxp_write_shadow()'s
+	// definition) and mirror the result into a 3-entry shadow FIFO
+	// alongside the real SXY0/SXY1/SXY2 FIFO (m_cp2dr[12..14]) it's
+	// rotated in lockstep with. This is deliberately NOT a value-keyed
+	// cache (Phase 4b's approach, replaced here after live testing and a
+	// reference-implementation comparison - see CLAUDE.md - showed a
+	// value-keyed cache is inherently collision/staleness-prone even
+	// after several rounds of fixes): a caller reads a specific FIFO slot
+	// by GTE register number, exactly mirroring how the real SXY FIFO is
+	// read (MFC2), so there is nothing to collide or go stale within this
+	// layer. Purely additive: never changes any existing GTE register/
+	// FLAG/timing behavior, and costs nothing when disabled.
 	void set_pgxp_enabled( bool enabled ) { m_pgxp_enabled = enabled; }
-	bool pgxp_query( uint32_t sxy_word, float &x, float &y, float &w ) const;
 
-	// Discards every cached entry - called once per emulated frame (see
-	// psxgpu_device::gpu_update_screen()). Without this, an entry that
-	// survives untouched from a previous frame could coincidentally share
-	// its exact fixed-point key with an unrelated vertex in a later frame
-	// (the cache is small relative to how many distinct on-screen
-	// positions a game can produce over multiple frames) and be used as a
-	// silently wrong "hit" for that unrelated vertex - a source of
-	// intermittent, frame-to-frame flicker distinct from the intra-frame
-	// capacity/collision issue PGXP_CACHE_SIZE and pgxp_hash() address.
-	void pgxp_clear_cache();
+	struct pgxp_shadow
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+		float w = 1.0f;
+		bool valid = false;
+	};
+
+	// reg: a cp2dr register number - 12/13/14 for SXY0/SXY1/SXY2, 15 for
+	// the SXYP auto-increment alias (matches getcp2dr()'s own reg 15
+	// case, which returns SXY2's value). Any other register has no
+	// shadow, always returns an invalid entry.
+	pgxp_shadow pgxp_shadow_for_reg( int reg ) const;
 
 protected:
 	class int44
@@ -137,34 +143,25 @@ protected:
 	int64_t m_mac2;
 	int64_t m_mac3;
 
-	// float redo of RTPS/RTPT's rotation+translation+perspective-divide,
-	// using the already-computed full-precision MAC1/MAC2/MAC3 (not the
-	// saturated IR1/IR2/IR3) as input - called once per vertex, after the
-	// existing fixed-point SXY write, only when m_pgxp_enabled.
-	void pgxp_cache_vertex( uint32_t sxy_word, int64_t mac1, int64_t mac2, int32_t sz3 );
+	// Float redo of RTPS/RTPT's perspective-divide step, using the
+	// hardware-clamped IR1/IR2 (using the raw pre-clamp MAC1/MAC2 was
+	// tried first and was a real bug - for a near-degenerate vertex
+	// A1()/A2() never actually clamp their return value, only flag
+	// overflow, so MAC1/MAC2 could reach values that multiplied into a
+	// screen position literally millions of pixels off). Also reproduces
+	// two more hardware clamps this recomputation would otherwise skip:
+	// h_over_sz3 (gte_divide()+Lm_E()) is capped to 0x1ffff/65536 - not a
+	// rare case, this triggers for any vertex closer than half the "H"
+	// reference distance, i.e. ordinary foreground geometry - and the
+	// final x/y is capped to [-1024,1023] (Lm_G1/Lm_G2), hardware's own
+	// safety net for a near-zero SZ3 blowing up the divide regardless of
+	// how IR1/IR2 are bounded. Rotates the result into m_pgxp_shadow[]
+	// exactly where docop2() rotates SXY0/SXY1/SXY2 - called once per
+	// vertex, only when m_pgxp_enabled.
+	void pgxp_write_shadow( int64_t ir1, int64_t ir2, int32_t sz3 );
 
 	bool m_pgxp_enabled = false;
-
-	// Large enough to comfortably hold every vertex a busy 3D scene
-	// transforms in one frame (thousands is realistic) without evicting
-	// entries before the matching GP0 primitive consumes them - too small
-	// a cache was found to cause visible per-triangle correction dropouts
-	// (a vertex either gets its cached value or silently falls back,
-	// see gpu_resolve_polygon_pgxp()'s all-or-nothing rule) that flicker
-	// frame to frame, and cause seams where two adjacent primitives
-	// sharing a vertex land on different (corrected vs. fallback)
-	// positions for what should be the exact same point.
-	static constexpr int PGXP_CACHE_SIZE = 16384;
-	static uint32_t pgxp_hash( uint32_t key );
-	struct pgxp_entry
-	{
-		uint32_t key = 0;
-		float x = 0.0f;
-		float y = 0.0f;
-		float w = 1.0f;
-		bool valid = false;
-	};
-	pgxp_entry m_pgxp_cache[ PGXP_CACHE_SIZE ];
+	pgxp_shadow m_pgxp_shadow[ 3 ];
 };
 
 #endif // MAME_CPU_PSX_GTE_H

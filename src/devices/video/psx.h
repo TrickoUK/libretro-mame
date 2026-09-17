@@ -230,7 +230,14 @@ private:
 	void psx_gpu_init( int n_gputype );
 	void gpu_reset();
 	void gpu_read( uint32_t *p_ram, int32_t n_size );
-	void gpu_write( uint32_t *p_ram, int32_t n_size );
+	// base_address: the real RAM byte address p_ram[0] came from, or
+	// PGXP_NO_ADDRESS (the default) when there isn't one (the direct
+	// single-word GP0 port write - see write()'s case 0x00 - has no
+	// derivable RAM address; a plain CPU-port write, not the DMA path
+	// real vertex volume flows through). See CLAUDE.md Phase 4c and the
+	// m_packet_shadow comment below.
+	static constexpr uint32_t PGXP_NO_ADDRESS = 0xffffffffu;
+	void gpu_write( uint32_t *p_ram, int32_t n_size, uint32_t base_address = PGXP_NO_ADDRESS );
 
 	// GPU-accelerated rendering (Phase 2): only the four polygon primitives
 	// are routed to the GPU; lines/rects/sprites/dots/framebuffer-copy
@@ -306,36 +313,43 @@ private:
 	// by other drivers, not fully defined.
 	int gpu_scale() const;
 
-	// PGXP-style geometry correction (CLAUDE.md Phase 4): the CPU whose
-	// GTE may have a higher-precision cached position for a polygon
-	// vertex, keyed by that vertex's fixed-point SXY word - see
-	// gpu_pgxp_query() below. Stored from the psxcpu_device* every current
-	// caller already passes into the psxgpu_device constructor (previously
-	// used only to wire GPU read/write ports and DMA/IRQ, then discarded);
-	// no machine-config changes needed for any existing driver.
+	// PGXP-style geometry/texture correction (CLAUDE.md Phase 4c): the CPU
+	// whose RAM-address shadow (see psxcpu_device::pgxp_ram_shadow_query())
+	// gpu_write() consults when filling m_packet_shadow[] for a DMA'd
+	// word. Stored from the psxcpu_device* every current caller already
+	// passes into the psxgpu_device constructor (previously used only to
+	// wire GPU read/write ports and DMA/IRQ, then discarded); no
+	// machine-config changes needed for any existing driver.
 	psxcpu_device *m_cpu = nullptr;
 
-	// Looks up a higher-precision (x,y) and a real perspective depth (w)
-	// for a GTE-sourced polygon vertex, read once at device_start()/
-	// device_reset() into m_gpu_pgxp_enabled (mame_psx_gpu_pgxp core
-	// option) so the four polygon gpu_submit_* functions can skip the
-	// lookup entirely when the feature is off.
+	// Read once at device_start()/device_reset() (mame_psx_gpu_pgxp core
+	// option) so gpu_write() and the four polygon gpu_submit_* functions
+	// can skip PGXP work entirely when the feature is off.
 	bool m_gpu_pgxp_enabled = false;
-	bool gpu_pgxp_query( uint32_t sxy_word, float &x, float &y, float &w ) const;
 
 	// Shared by all four GTE-sourced polygon primitives (gpu_submit_flat_
 	// polygon/gouraud_polygon/flat_textured_polygon/gouraud_textured_
 	// polygon): resolves one vertex's target-space (x,y) and its
-	// osd::gpu_vertex::w (perspective-correct-interpolation divisor,
-	// see gpurender.h), preferring a PGXP cache hit over the plain
-	// integer-coordinate + draw-offset + scale computation (and the
-	// affine-interpolation default w=1.0) when available.
-	bool gpu_vertex_xyw( PAIR n_coord, float &out_x, float &out_y, float &out_w ) const;
+	// osd::gpu_vertex::w (perspective-correct-interpolation divisor, see
+	// gpurender.h) from m_packet_shadow[entry_index] when valid, else the
+	// plain integer-coordinate + draw-offset + scale computation (and the
+	// affine-interpolation default w=1.0).
+	bool gpu_vertex_xyw( int entry_index, PAIR n_coord, float &out_x, float &out_y, float &out_w ) const;
 
 	// All-or-nothing wrapper around gpu_vertex_xyw() for a whole polygon's
 	// n_points vertices - see its definition in psx.cpp for why partial
 	// per-vertex correction must be avoided.
-	void gpu_resolve_polygon_pgxp( const PAIR *n_coord, int n_points, osd::gpu_vertex *v ) const;
+	void gpu_resolve_polygon_pgxp( const int *entry_index, const PAIR *n_coord, int n_points, osd::gpu_vertex *v ) const;
+
+	// PACKET is a union of uint32_t n_entry[16] and the typed vertex
+	// structs (see its definition above) - this recovers which n_entry[]
+	// slot a given field (e.g. a vertex's n_coord) lives at, so
+	// m_packet_shadow[] (filled in lockstep with n_entry[] in
+	// gpu_write()) can be looked up for that exact field.
+	int gpu_entry_index( const PAIR &field ) const
+	{
+		return (int)( reinterpret_cast<const uint32_t *>( &field ) - m_packet.n_entry );
+	}
 
 	// Avoids re-issuing a set_texture_page() GL state change on every single
 	// textured polygon when consecutive polygons share one texture page -
@@ -411,6 +425,26 @@ private:
 	bool m_check_stp;
 
 	PACKET m_packet;
+
+	// PGXP (CLAUDE.md Phase 4c): one shadow slot per m_packet.n_entry[]
+	// word, filled in lockstep with it in gpu_write() - the consumption
+	// end of the GTE-write -> GPR -> RAM -> DMA-to-GPU chain
+	// psxcpu_device implements the rest of (m_pgxp_gpr/m_pgxp_ram_shadow
+	// there). A vertex's n_coord field and its shadow always share the
+	// same n_entry[] index (PACKET is a union of uint32_t n_entry[16]
+	// and the typed structs), so gpu_vertex_xyw() takes that index
+	// directly rather than re-deriving a lookup key from the vertex's
+	// value - replacing Phase 4b's value-keyed cache, which needed a
+	// fixed-point-word key because it had no way to know which specific
+	// GP0 word produced a given vertex.
+	struct pgxp_word_shadow
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+		float w = 1.0f;
+		bool valid = false;
+	};
+	pgxp_word_shadow m_packet_shadow[ 16 ];
 
 	uint16_t *p_p_vram[ 1024 ];
 

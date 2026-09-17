@@ -1473,8 +1473,10 @@ void psxcpu_device::commit_delayed_load()
 	if( m_delayr != 0 )
 	{
 		m_r[ m_delayr ] = m_delayv;
+		m_pgxp_gpr[ m_delayr ] = m_pgxp_delay_shadow;
 		m_delayr = 0;
 		m_delayv = 0;
+		m_pgxp_delay_shadow = gte::pgxp_shadow();
 	}
 }
 
@@ -1528,18 +1530,20 @@ void psxcpu_device::load( uint32_t reg, uint32_t value )
 	}
 }
 
-void psxcpu_device::delayed_load( uint32_t reg, uint32_t value )
+void psxcpu_device::delayed_load( uint32_t reg, uint32_t value, const gte::pgxp_shadow *shadow )
 {
 	if( m_delayr == reg )
 	{
 		m_delayr = 0;
 		m_delayv = 0;
+		m_pgxp_delay_shadow = gte::pgxp_shadow();
 	}
 
 	advance_pc();
 
 	m_delayr = reg;
 	m_delayv = value;
+	m_pgxp_delay_shadow = shadow != nullptr ? *shadow : gte::pgxp_shadow();
 }
 
 void psxcpu_device::branch( uint32_t address )
@@ -1986,6 +1990,14 @@ void psxcpu_device::device_start()
 	// initialize the registers once
 	std::fill(std::begin(m_r), std::end(m_r), 0);
 
+	// PGXP (CLAUDE.md Phase 4c): m_pgxp_ram_shadow is deliberately NOT
+	// sized here - m_ram->size() measured 0 at this point live (confirmed
+	// via temporary debug print), matching this project's established
+	// "OSD/RAM isn't ready yet at device_start()" hazard (see
+	// psxgpu_device's GPU-render-target lazy-acquisition comment in
+	// psx.cpp, video/, for the same class of issue). Sized lazily on
+	// first real use instead - see ensure_pgxp_ram_shadow().
+
 	// set our instruction counter
 	set_icountptr(m_icount);
 }
@@ -2241,6 +2253,23 @@ void psxcpu_device::swc( int cop, int sr_cu )
 		}
 
 		writeword( address, data );
+
+		// PGXP (CLAUDE.md Phase 4c): SWC2 stores a GTE register straight to
+		// memory in one instruction, entirely bypassing the GPR-based
+		// propagation OP_SW handles (m_r[]/m_pgxp_gpr[] are never touched
+		// here) - this is the idiomatic, more efficient way real PS1 code
+		// builds a GP0 packet from GTE output (vs. MFC2 into a register
+		// then a separate SW), and turned out to be the dominant path real
+		// games use: with only OP_SW covered, live testing measured a
+		// 100% shadow miss rate even on primitives that should have hit.
+		// Mirrors OP_SW's own invalidate-on-plain-store rule for every
+		// other coprocessor/register (cop2 registers 12-15 only).
+		ensure_pgxp_ram_shadow();
+		if( !m_pgxp_ram_shadow.empty() )
+		{
+			gte::pgxp_shadow shadow = ( cop == 2 ) ? m_gte.pgxp_shadow_for_reg( INS_RT( m_op ) ) : gte::pgxp_shadow();
+			m_pgxp_ram_shadow[ ( address / 4 ) % m_pgxp_ram_shadow.size() ] = shadow;
+		}
 
 		if( breakpoint )
 		{
@@ -2773,8 +2802,15 @@ void psxcpu_device::execute_run()
 						switch( INS_RS( m_op ) )
 						{
 						case RS_MFC:
-							delayed_load( INS_RT( m_op ), m_gte.getcp2dr( m_pc, INS_RD( m_op ) ) );
+						{
+							// PGXP (CLAUDE.md Phase 4c): MFC2 reading SXY0/1/2/SXYP
+							// (reg 12-15) is the first hop of the GTE-write -> GPR ->
+							// RAM -> DMA-to-GPU shadow chain - seed the destination
+							// GPR's shadow from the GTE's own FIFO-mirror here.
+							gte::pgxp_shadow shadow = m_gte.pgxp_shadow_for_reg( INS_RD( m_op ) );
+							delayed_load( INS_RT( m_op ), m_gte.getcp2dr( m_pc, INS_RD( m_op ) ), &shadow );
 							break;
+						}
 
 						case RS_CFC:
 							delayed_load( INS_RT( m_op ), m_gte.getcp2cr( m_pc, INS_RD( m_op ) ) );
@@ -3006,7 +3042,17 @@ void psxcpu_device::execute_run()
 							}
 							else
 							{
-								delayed_load( INS_RT( m_op ), data );
+								// PGXP (CLAUDE.md Phase 4c): the RAM-shadow hop of the
+								// GTE-write -> GPR -> RAM -> DMA-to-GPU chain - a plain
+								// LW of a word a shadowed SW previously stored picks its
+								// shadow back up here. Only OP_LW (not LH/LB/LWL/LWR) is
+								// covered - PS1 vertex data is always full-word aligned
+								// in practice; a partial-word load just never carries
+								// shadow (safe no-op fallback, not a regression).
+								gte::pgxp_shadow shadow;
+								bool has_shadow = pgxp_ram_shadow_query( address, shadow.x, shadow.y, shadow.w );
+								shadow.valid = has_shadow;
+								delayed_load( INS_RT( m_op ), data, &shadow );
 							}
 						}
 					}
@@ -3240,6 +3286,21 @@ void psxcpu_device::execute_run()
 						else
 						{
 							writeword( address, m_r[ INS_RT( m_op ) ] );
+
+							// PGXP (CLAUDE.md Phase 4c): the RAM-shadow write hop of the
+							// GTE-write -> GPR -> RAM -> DMA-to-GPU chain. A shadowed
+							// source GPR (e.g. one just loaded from SXY2 via MFC2)
+							// propagates its shadow to this address; otherwise this
+							// store must explicitly invalidate whatever shadow was
+							// there before - a stale leftover shadow surviving a real,
+							// unrelated overwrite is exactly the staleness bug that
+							// broke Phase 4b's (and beetle-psx-libretro's own
+							// discouraged fallback cache's) value-keyed approach.
+							ensure_pgxp_ram_shadow();
+							if( !m_pgxp_ram_shadow.empty() )
+							{
+								m_pgxp_ram_shadow[ ( address / 4 ) % m_pgxp_ram_shadow.size() ] = m_pgxp_gpr[ INS_RT( m_op ) ];
+							}
 
 							if( breakpoint )
 							{

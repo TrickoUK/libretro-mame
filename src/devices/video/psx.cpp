@@ -105,16 +105,6 @@ int psxgpu_device::gpu_scale() const
 	return machine().osd().gpu_render_scale();
 }
 
-bool psxgpu_device::gpu_pgxp_query( uint32_t sxy_word, float &x, float &y, float &w ) const
-{
-	if( !m_gpu_pgxp_enabled || m_cpu == nullptr )
-	{
-		return false;
-	}
-
-	return m_cpu->pgxp_query( sxy_word, x, y, w );
-}
-
 bool psxgpu_device::gpu_active()
 {
 	// Lazily acquired here, on first real use (a polygon submission or
@@ -1633,14 +1623,14 @@ void psxgpu_device::gpu_force_no_clip()
 	m_gpu_drawarea_cached = false;
 }
 
-bool psxgpu_device::gpu_vertex_xyw( PAIR n_coord, float &out_x, float &out_y, float &out_w ) const
+bool psxgpu_device::gpu_vertex_xyw( int entry_index, PAIR n_coord, float &out_x, float &out_y, float &out_w ) const
 {
-	float px, py, pw;
-	if( gpu_pgxp_query( n_coord.d, px, py, pw ) )
+	if( m_gpu_pgxp_enabled && entry_index >= 0 && entry_index < 16 && m_packet_shadow[ entry_index ].valid )
 	{
-		out_x = ( px + n_drawoffset_x ) * gpu_scale();
-		out_y = ( py + n_drawoffset_y ) * gpu_scale();
-		out_w = pw;
+		const pgxp_word_shadow &s = m_packet_shadow[ entry_index ];
+		out_x = ( s.x + n_drawoffset_x ) * gpu_scale();
+		out_y = ( s.y + n_drawoffset_y ) * gpu_scale();
+		out_w = s.w;
 		return true;
 	}
 
@@ -1650,22 +1640,23 @@ bool psxgpu_device::gpu_vertex_xyw( PAIR n_coord, float &out_x, float &out_y, fl
 	return false;
 }
 
-// A PGXP cache miss on even one vertex of a triangle (eviction, or a
-// degenerate SZ3<=0 vertex never cached in the first place) must not be
-// allowed to mix that vertex's fallback w=1.0 with real, much larger
-// cached-depth w values on the other two - the resulting huge per-vertex
-// w disparity is exactly what produces severe "warp to a focal point"
-// texture distortion (see CLAUDE.md Phase 4). So correction is
-// all-or-nothing per primitive: if any vertex misses, every vertex in
+// A PGXP miss on even one vertex of a triangle (no shadow ever reached
+// this word - e.g. the game recomputed it without going through a tracked
+// GTE->GPR->RAM round trip, or an intervening unrelated store invalidated
+// it) must not be allowed to mix that vertex's fallback w=1.0 with real,
+// much larger shadowed-depth w values on the other two - the resulting
+// huge per-vertex w disparity is exactly what produces severe "warp to a
+// focal point" texture distortion (see CLAUDE.md Phase 4). So correction
+// is all-or-nothing per primitive: if any vertex misses, every vertex in
 // that primitive reverts to the plain integer-coordinate/w=1.0 path,
 // matching pre-PGXP behavior for that primitive rather than partially
 // correcting it.
-void psxgpu_device::gpu_resolve_polygon_pgxp( const PAIR *n_coord, int n_points, osd::gpu_vertex *v ) const
+void psxgpu_device::gpu_resolve_polygon_pgxp( const int *entry_index, const PAIR *n_coord, int n_points, osd::gpu_vertex *v ) const
 {
 	bool all_hit = true;
 	for( int i = 0; i < n_points; i++ )
 	{
-		all_hit = gpu_vertex_xyw( n_coord[ i ], v[ i ].x, v[ i ].y, v[ i ].w ) && all_hit;
+		all_hit = gpu_vertex_xyw( entry_index[ i ], n_coord[ i ], v[ i ].x, v[ i ].y, v[ i ].w ) && all_hit;
 	}
 
 	if( !all_hit )
@@ -1688,13 +1679,15 @@ bool psxgpu_device::gpu_submit_flat_polygon( int n_points )
 
 	osd::gpu_vertex v[ 4 ];
 	PAIR coords[ 4 ];
+	int indices[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
 		coords[ i ] = m_packet.FlatPolygon.vertex[ i ].n_coord;
+		indices[ i ] = gpu_entry_index( m_packet.FlatPolygon.vertex[ i ].n_coord );
 		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
 		v[ i ].u = 0.0f; v[ i ].v = 0.0f;
 	}
-	gpu_resolve_polygon_pgxp( coords, n_points, v );
+	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
 
 	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, false, gpu_blend_mode_for( n_cmd ) );
 	return true;
@@ -1706,16 +1699,18 @@ bool psxgpu_device::gpu_submit_gouraud_polygon( int n_points )
 
 	osd::gpu_vertex v[ 4 ];
 	PAIR coords[ 4 ];
+	int indices[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
 		coords[ i ] = m_packet.GouraudPolygon.vertex[ i ].n_coord;
+		indices[ i ] = gpu_entry_index( m_packet.GouraudPolygon.vertex[ i ].n_coord );
 		v[ i ].r = BGR_R( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].g = BGR_G( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].b = BGR_B( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].a = 1.0f;
 		v[ i ].u = 0.0f; v[ i ].v = 0.0f;
 	}
-	gpu_resolve_polygon_pgxp( coords, n_points, v );
+	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
 
 	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, false, gpu_blend_mode_for( n_cmd ) );
 	return true;
@@ -1739,14 +1734,16 @@ bool psxgpu_device::gpu_submit_flat_textured_polygon( int n_points )
 
 	osd::gpu_vertex v[ 4 ];
 	PAIR coords[ 4 ];
+	int indices[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
 		coords[ i ] = m_packet.FlatTexturedPolygon.vertex[ i ].n_coord;
+		indices[ i ] = gpu_entry_index( m_packet.FlatTexturedPolygon.vertex[ i ].n_coord );
 		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
 		v[ i ].u = (float)TEXTURE_U( m_packet.FlatTexturedPolygon.vertex[ i ].n_texture );
 		v[ i ].v = (float)TEXTURE_V( m_packet.FlatTexturedPolygon.vertex[ i ].n_texture );
 	}
-	gpu_resolve_polygon_pgxp( coords, n_points, v );
+	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
 
 	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, gpu_blend_mode_for( n_cmd ) );
 	return true;
@@ -1766,9 +1763,11 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 
 	osd::gpu_vertex v[ 4 ];
 	PAIR coords[ 4 ];
+	int indices[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
 		coords[ i ] = m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord;
+		indices[ i ] = gpu_entry_index( m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord );
 		v[ i ].r = BGR_R( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].g = BGR_G( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].b = BGR_B( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
@@ -1776,7 +1775,7 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 		v[ i ].u = (float)TEXTURE_U( m_packet.GouraudTexturedPolygon.vertex[ i ].n_texture );
 		v[ i ].v = (float)TEXTURE_V( m_packet.GouraudTexturedPolygon.vertex[ i ].n_texture );
 	}
-	gpu_resolve_polygon_pgxp( coords, n_points, v );
+	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
 
 	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, gpu_blend_mode_for( n_cmd ) );
 	return true;
@@ -2092,19 +2091,6 @@ void psxgpu_device::gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int 
 // un-resubmitted parts going black.
 uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 {
-	// Every GTE-sourced vertex this now-finished frame will ever need has
-	// already been both cached (RTPS/RTPT, during this frame's CPU
-	// execution) and consumed (gpu_resolve_polygon_pgxp(), called inline
-	// as each GP0 polygon command was processed, also during this frame's
-	// CPU execution - well before this end-of-frame call). Clearing here,
-	// right as the next frame's CPU execution is about to resume, bounds
-	// any cache entry's lifetime to at most one frame - see
-	// gte::pgxp_clear_cache()'s comment for the staleness bug this avoids.
-	if( m_gpu_pgxp_enabled && m_cpu != nullptr )
-	{
-		m_cpu->pgxp_clear_cache();
-	}
-
 	int w = n_screenwidth * gpu_scale();
 
 	// The actual GPU target is sized to full VRAM height, not just the
@@ -3805,17 +3791,44 @@ void psxgpu_device::MoveImage()
 
 void psxgpu_device::dma_write( uint32_t *p_n_psxram, uint32_t n_address, int32_t n_size )
 {
-	gpu_write( &p_n_psxram[ n_address / 4 ], n_size );
+	gpu_write( &p_n_psxram[ n_address / 4 ], n_size, n_address );
 }
 
-void psxgpu_device::gpu_write( uint32_t *p_ram, int32_t n_size )
+void psxgpu_device::gpu_write( uint32_t *p_ram, int32_t n_size, uint32_t base_address )
 {
+	uint32_t n_word = 0;
 	while( n_size > 0 )
 	{
 		uint32_t data = *( p_ram );
 
 		LOG("PSX Packet #%u %08x\n", n_gpu_buffer_offset, data);
 		m_packet.n_entry[ n_gpu_buffer_offset ] = data;
+
+		// PGXP (CLAUDE.md Phase 4c): mirror this word's shadow into
+		// m_packet_shadow[] at the exact same index, so gpu_vertex_xyw()
+		// (called later, once this command's full packet is parsed) can
+		// look it up by the vertex field's own n_entry[] index rather
+		// than re-deriving a lookup key from the vertex's value. Only
+		// possible when this call came from dma_write() (base_address !=
+		// PGXP_NO_ADDRESS) - see gpu_write()'s declaration for why the
+		// direct single-word GP0 port write can't provide one.
+		if( m_gpu_pgxp_enabled && m_cpu != nullptr && base_address != PGXP_NO_ADDRESS )
+		{
+			float x, y, w;
+			bool valid = m_cpu->pgxp_ram_shadow_query( base_address + n_word * 4, x, y, w );
+			m_packet_shadow[ n_gpu_buffer_offset ].valid = valid;
+			if( valid )
+			{
+				m_packet_shadow[ n_gpu_buffer_offset ].x = x;
+				m_packet_shadow[ n_gpu_buffer_offset ].y = y;
+				m_packet_shadow[ n_gpu_buffer_offset ].w = w;
+			}
+		}
+		else
+		{
+			m_packet_shadow[ n_gpu_buffer_offset ].valid = false;
+		}
+
 		switch( m_packet.n_entry[ 0 ] >> 24 )
 		{
 		case 0x00:
@@ -4315,6 +4328,7 @@ void psxgpu_device::gpu_write( uint32_t *p_ram, int32_t n_size )
 		}
 		p_ram++;
 		n_size--;
+		n_word++;
 	}
 }
 

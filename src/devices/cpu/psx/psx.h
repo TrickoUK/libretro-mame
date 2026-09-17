@@ -19,6 +19,9 @@
 #include "sio.h"
 #include "psxdasm.h"
 
+#include <algorithm>
+#include <vector>
+
 //**************************************************************************
 //  CONSTANTS
 //**************************************************************************
@@ -131,14 +134,34 @@ public:
 	void berr_w(uint32_t data);
 	uint32_t berr_r();
 
-	// PGXP-style geometry correction (see CLAUDE.md Phase 4) - thin
-	// forwarders to the GTE's own cache, so psxgpu_device (which has no
-	// direct access to psxcpu_device internals otherwise) can look up a
-	// higher-precision vertex position by the same fixed-point SXY word a
-	// GP0 polygon command carries.
+	// PGXP-style geometry/texture correction (see CLAUDE.md Phase 4c).
+	// set_pgxp_enabled() forwards to the GTE (gates pgxp_write_shadow()
+	// there). pgxp_ram_shadow_query() lets psxgpu_device look up the
+	// shadow for a specific RAM word address - the end of the
+	// GTE-write -> GPR -> RAM -> DMA-to-GPU propagation chain this class
+	// implements below (see the m_pgxp_gpr/m_pgxp_ram_shadow comments).
 	void set_pgxp_enabled(bool enabled) { m_gte.set_pgxp_enabled(enabled); }
-	bool pgxp_query(uint32_t sxy_word, float &x, float &y, float &w) const { return m_gte.pgxp_query(sxy_word, x, y, w); }
-	void pgxp_clear_cache() { m_gte.pgxp_clear_cache(); }
+
+	// Lazily sizes m_pgxp_ram_shadow on first real use instead of in
+	// device_start() - m_ram->size() measured 0 there live (this
+	// project's established "RAM/OSD isn't ready yet at device_start()"
+	// hazard). Called from the OP_SW and SWC2 propagation sites before
+	// they touch m_pgxp_ram_shadow; a no-op once already sized.
+	void ensure_pgxp_ram_shadow()
+	{
+		if (m_pgxp_ram_shadow.empty() && m_ram->size() > 0)
+			m_pgxp_ram_shadow.resize(m_ram->size() / 4);
+	}
+
+	bool pgxp_ram_shadow_query(uint32_t address, float &x, float &y, float &w) const
+	{
+		size_t index = (address / 4) % std::max<size_t>(m_pgxp_ram_shadow.size(), 1);
+		if (m_pgxp_ram_shadow.empty() || !m_pgxp_ram_shadow[index].valid)
+			return false;
+		const gte::pgxp_shadow &s = m_pgxp_ram_shadow[index];
+		x = s.x; y = s.y; w = s.w;
+		return true;
+	}
 
 	uint32_t exp_base();
 
@@ -223,6 +246,28 @@ protected:
 	uint32_t m_com_delay;
 	uint32_t m_delayv;
 	uint32_t m_delayr;
+	// PGXP shadow (CLAUDE.md Phase 4c) paired with m_delayr/m_delayv -
+	// carries a load's shadow (from delayed_load()'s optional argument)
+	// across the same one-instruction MIPS load delay m_delayr/m_delayv
+	// already model, applied to m_pgxp_gpr[m_delayr] at the same point
+	// commit_delayed_load() applies m_delayv to m_r[m_delayr].
+	gte::pgxp_shadow m_pgxp_delay_shadow;
+	// One shadow slot per GPR - sourced either from the GTE's own SXY
+	// FIFO shadow (MFC2 reading SXY0/1/2/SXYP) or from m_pgxp_ram_shadow
+	// (a plain LW). Propagated into m_pgxp_ram_shadow by a plain SW using
+	// the source register's shadow here - see the OP_SW case in
+	// execute_run(). This is the GPR link of the GTE-write -> GPR -> RAM
+	// -> DMA-to-GPU chain psxgpu_device::gpu_write() consumes at the far
+	// end (see its m_packet_shadow comment).
+	gte::pgxp_shadow m_pgxp_gpr[ 32 ];
+	// One shadow slot per RAM word (index = byte address / 4, modulo the
+	// vector's size - sized to the machine's real RAM in device_start()).
+	// A plain (unshadowed) SW explicitly invalidates the slot it writes -
+	// see the OP_SW case - so a stale shadow can never survive past a
+	// real, unrelated store to that address (the exact bug that made
+	// Phase 4b's - and beetle-psx-libretro's own discouraged fallback
+	// cache's - staleness problem possible).
+	std::vector<gte::pgxp_shadow> m_pgxp_ram_shadow;
 	uint32_t m_berr;
 	uint32_t m_biu;
 	uint32_t m_icacheTag[ ICACHE_ENTRIES / 4 ];
@@ -276,7 +321,7 @@ protected:
 	void fetch_next_op();
 	void advance_pc();
 	void load( uint32_t reg, uint32_t value );
-	void delayed_load( uint32_t reg, uint32_t value );
+	void delayed_load( uint32_t reg, uint32_t value, const gte::pgxp_shadow *shadow = nullptr );
 	void branch( uint32_t address );
 	void conditional_branch( int takeBranch );
 	void unconditional_branch();
