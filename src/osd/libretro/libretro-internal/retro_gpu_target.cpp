@@ -104,6 +104,8 @@ typedef unsigned int GLbitfield;
 #define GL_NEAREST 0x2600
 #define GL_TEXTURE0 0x84C0
 #define GL_FRAMEBUFFER 0x8D40
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
 #define GL_COLOR_ATTACHMENT0 0x8CE0
 #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
 #define GL_VERTEX_SHADER 0x8B31
@@ -164,6 +166,7 @@ typedef void (*PFNGLFINISHPROC)(void);
 typedef void (*PFNGLENABLEPROC)(GLenum);
 typedef void (*PFNGLDISABLEPROC)(GLenum);
 typedef void (*PFNGLSCISSORPROC)(GLint, GLint, GLsizei, GLsizei);
+typedef void (*PFNGLBLITFRAMEBUFFERPROC)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum);
 typedef const GLchar *(*PFNGLGETSTRINGPROC)(GLenum);
 typedef GLenum (*PFNGLGETERRORPROC)(void);
 #define GL_VENDOR 0x1F00
@@ -217,6 +220,7 @@ struct gl_dispatch
 	PFNGLENABLEPROC Enable = nullptr;
 	PFNGLDISABLEPROC Disable = nullptr;
 	PFNGLSCISSORPROC Scissor = nullptr;
+	PFNGLBLITFRAMEBUFFERPROC BlitFramebuffer = nullptr;
 	PFNGLGETSTRINGPROC GetString = nullptr;
 	PFNGLGETERRORPROC GetError = nullptr;
 };
@@ -308,6 +312,7 @@ bool load_gl_dispatch()
 	LOAD_GL(GenTextures); LOAD_GL(BindTexture); LOAD_GL(TexImage2D); LOAD_GL(TexParameteri);
 	LOAD_GL(Viewport); LOAD_GL(ClearColor); LOAD_GL(Clear); LOAD_GL(DrawArrays);
 	LOAD_GL(ReadPixels); LOAD_GL(Finish); LOAD_GL(Enable); LOAD_GL(Disable); LOAD_GL(Scissor);
+	LOAD_GL(BlitFramebuffer);
 #undef LOAD_GL
 	return true;
 }
@@ -754,6 +759,42 @@ void retro_gpu_target::set_clip_rect(int x1, int y1, int x2, int y2)
 
 	g_gl.Enable(GL_SCISSOR_TEST);
 	g_gl.Scissor(m_scissor_x, m_scissor_y, m_scissor_w, m_scissor_h);
+}
+
+// PS1 GPU VRAM-to-VRAM copy commands (MoveImage) bypass the draw-area clip
+// entirely - matches set_clip_rect()'s own top-left-origin -> GL bottom-up
+// y-flip so a copy lands at the same target pixels a same-rect draw would.
+// Blitting the FBO onto itself (rather than sourcing from the raw VRAM
+// texture upload_vram() provides) is deliberate: the raw VRAM texture only
+// reflects primitives that still write to the CPU-side p_vram buffer
+// (persistent 2D image data, lines, dots), not the polygon/rectangle/sprite
+// primitives now rendered GPU-side only - this target's own color buffer is
+// the only place with correct, up-to-date pixels for those.
+void retro_gpu_target::copy_rect(int sx, int sy, int dx, int dy, int w, int h)
+{
+	if (!m_valid || w <= 0 || h <= 0)
+		return;
+
+	scoped_context ctx(m_display, m_surface, m_context, m_batch_active);
+	if (!ctx.active)
+		return;
+
+	bool scissor_was_enabled = m_scissor_enabled;
+	if (scissor_was_enabled)
+		g_gl.Disable(GL_SCISSOR_TEST);
+
+	int src_x0 = sx, src_x1 = sx + w;
+	int src_y0 = m_fbo_height - (sy + h), src_y1 = m_fbo_height - sy;
+	int dst_x0 = dx, dst_x1 = dx + w;
+	int dst_y0 = m_fbo_height - (dy + h), dst_y1 = m_fbo_height - dy;
+
+	g_gl.BindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
+	g_gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fbo);
+	g_gl.BlitFramebuffer(src_x0, src_y0, src_x1, src_y1, dst_x0, dst_y0, dst_x1, dst_y1, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+
+	if (scissor_was_enabled)
+		g_gl.Enable(GL_SCISSOR_TEST);
 }
 
 void retro_gpu_target::upload_vram(const uint16_t *vram_words, int width, int height)

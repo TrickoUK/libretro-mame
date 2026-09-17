@@ -430,6 +430,53 @@ no crash, no ghosting; `brvblade` re-verified unaffected by either fix):
    off` before `run`, then `sharedlibrary mame_libretro` after the crash to
    load symbols only for the one library actually needed, avoiding
    whatever triggers the bad type lookup in the other libraries.
+4. **Correctness, round 2** (same-shaped ghosting bug, found via `starswep`
+   regression-testing item 2 above: 2D-only attract-mode content - no 3D
+   geometry involved at all - visibly ghosted the same way, confirmed via
+   live testing to not happen with the GPU path disabled). The item-2 fix
+   only covered rectangle/sprite primitives; every *other* primitive that
+   can land on screen was still software-only: `Dot`/`TexturedDot`,
+   `MonochromeLine`/`GouraudLine`, GP0 `0x02` "Fill Rectangle in VRAM", GP0
+   `0x80` "Move Image in Frame Buffer" (VRAM-to-VRAM copy), and GP0 `0xA0`
+   "Copy Rectangle (CPU to VRAM)" - the standard way PS1 games DMA
+   pre-rendered 2D art (logos, backgrounds, UI) straight into VRAM, and the
+   dominant cause of this particular bug given the "2D-only, no 3D" shape.
+   **Fixed** by routing all of these to the GPU target too:
+   - `0x02`/`0xA0` are absolute-VRAM-address, no-draw-area-clip commands on
+     real hardware (matching their software implementations, which skip
+     both `n_drawoffset_x/y` and the `n_drawarea_*` clip check) - new
+     `gpu_force_no_clip()` pushes a full-target CLIP command and
+     invalidates the clip cache so the *next* real primitive unconditionally
+     restores the game's actual draw area afterward.
+   - `0xA0` specifically is implemented as a textured-quad "stamp" sampling
+     the whole-VRAM texture (`gpu_submit_image_stamp()`) rather than
+     re-uploading the transferred bytes as a second texture - the transfer
+     still writes `p_vram` exactly as before (now serving only as this
+     frame's `upload_vram()` source, not the visible framebuffer), and
+     since this target's local coordinate space already equals VRAM-
+     absolute address space (every offset-relative primitive ends up at
+     `coord + n_drawoffset` == the VRAM address it's specified relative
+     to), the stamp's destination and its source UV in the VRAM texture
+     are literally the same numbers.
+   - `0x80` (MoveImage) is different: its source may be GPU-rendered
+     content (a polygon/rectangle/sprite from earlier this frame or a
+     prior one) that was *never* written back to `p_vram`, so sampling the
+     VRAM texture would be wrong. Implemented as a real GPU-side
+     framebuffer-to-itself blit instead - new `osd::gpu_render_target::
+     copy_rect()` (default no-op in the interface, `retro_gpu_target`'s
+     implementation uses `glBlitFramebuffer` with the same FBO bound as
+     both read and draw, temporarily disabling the scissor test) - and a
+     new `COPY` kind in `psxgpu_device::m_gpu_queue` so it replays at the
+     correct point in the frame's command order, same as `TEXPARAM`/`CLIP`.
+   - `Dot`/`TexturedDot`/lines *do* respect draw offset and the draw-area
+     clip on real hardware (confirmed in their software implementations),
+     so these go through the normal `gpu_submit_triangle_pair()` path
+     rather than the no-clip one - a 1x1 quad for dots, a thin
+     (half-scaled-pixel-wide) quad along the segment for lines, reusing
+     the existing triangle/blend infrastructure rather than adding a new
+     `GL_LINES` draw path.
+   Verified: `starswep` attract mode no longer ghosts; `gdarius2` and
+   `brvblade` re-confirmed unaffected (both still crash-free, ghosting-free).
 
 ### Next planned work: rendering quality (PGXP-style correction) - not started
 

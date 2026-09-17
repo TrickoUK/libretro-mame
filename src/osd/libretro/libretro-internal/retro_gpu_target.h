@@ -46,6 +46,7 @@ public:
 	virtual void submit_triangles(const osd::gpu_vertex *verts, int count, bool textured, osd::gpu_blend_mode blend) override;
 	virtual void end_frame_and_readback(uint32_t *rgba_out) override;
 	virtual void set_clip_rect(int x1, int y1, int x2, int y2) override;
+	virtual void copy_rect(int sx, int sy, int dx, int dy, int w, int h) override;
 	virtual void begin_batch() override;
 	virtual void end_batch() override;
 

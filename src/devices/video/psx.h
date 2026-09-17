@@ -266,22 +266,31 @@ private:
 	// real polygon-heavy scene.
 	struct gpu_queued_cmd
 	{
-		enum class kind_t { TRIANGLE, TEXPARAM, CLIP } kind;
+		enum class kind_t { TRIANGLE, TEXPARAM, CLIP, COPY } kind;
 		osd::gpu_vertex tri[3];
 		bool textured = false;
 		osd::gpu_blend_mode blend = osd::gpu_blend_mode::NONE;
 		int tex_tx = 0, tex_ty = 0, tex_tp = 0, tex_clutx = 0, tex_cluty = 0;
 		int clip_x1 = 0, clip_y1 = 0, clip_x2 = 0, clip_y2 = 0;
+		int copy_sx = 0, copy_sy = 0, copy_dx = 0, copy_dy = 0, copy_w = 0, copy_h = 0;
 	};
 	std::vector<gpu_queued_cmd> m_gpu_queue;
 	osd::gpu_blend_mode gpu_blend_mode_for( uint8_t n_cmd ) const;
+	void gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend );
 	void gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend );
+	void gpu_force_no_clip();
 	bool gpu_submit_flat_polygon( int n_points );
 	bool gpu_submit_flat_textured_polygon( int n_points );
 	bool gpu_submit_gouraud_polygon( int n_points );
 	bool gpu_submit_gouraud_textured_polygon( int n_points );
 	bool gpu_submit_flat_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, PAIR n_bgr );
 	bool gpu_submit_textured_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, uint8_t n_u0, uint8_t n_v0, PAIR n_bgr, int32_t n_tx, int32_t n_ty, int32_t n_tp, uint32_t n_clutx, uint32_t n_cluty );
+	bool gpu_submit_vram_fill_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, PAIR n_bgr );
+	bool gpu_submit_image_stamp( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h );
+	bool gpu_submit_dot( int32_t n_x, int32_t n_y, PAIR n_bgr );
+	bool gpu_submit_textured_dot( int32_t n_x, int32_t n_y, uint8_t n_u0, uint8_t n_v0, PAIR n_bgr, int32_t n_tx, int32_t n_ty, int32_t n_tp, uint32_t n_clutx, uint32_t n_cluty );
+	bool gpu_submit_line( int32_t n_x0, int32_t n_y0, int32_t n_x1, int32_t n_y1, float r0, float g0, float b0, float r1, float g1, float b1, uint8_t n_cmd );
+	bool gpu_queue_copy_rect( int32_t n_sx, int32_t n_sy, int32_t n_dx, int32_t n_dy, int32_t n_w, int32_t n_h );
 	uint32_t gpu_update_screen( bitmap_rgb32 &bitmap );
 
 	osd::gpu_render_target *m_gpu_render_target = nullptr;

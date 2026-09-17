@@ -113,6 +113,14 @@ public:
 	// implementation/device pairing that doesn't need it.
 	virtual void set_clip_rect(int x1, int y1, int x2, int y2) {}
 
+	// copy a w x h rectangle within the target itself, from (sx,sy) to
+	// (dx,dy) - both corners in the same target-pixel space as gpu_vertex
+	// positions. Ignores the current clip rect (matching hardware VRAM-to-
+	// VRAM copy commands, which bypass the draw-area clip entirely).
+	// Default no-op for any implementation/device pairing that doesn't
+	// need it.
+	virtual void copy_rect(int sx, int sy, int dx, int dy, int w, int h) {}
+
 	// Optionally batch a run of upload_vram()/set_texture_page()/set_clip_rect()/
 	// submit_triangle() calls under a single context acquisition instead
 	// of each call acquiring its own - a significant win when many calls

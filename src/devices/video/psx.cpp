@@ -18,6 +18,7 @@
 #include "screen.h"
 
 #include <algorithm>
+#include <cmath>
 
 
 #define STOP_ON_ERROR ( 0 )
@@ -1491,17 +1492,23 @@ static inline int CullVertex( int a, int b )
 	int n_rightpoint = n_leftpoint;
 
 //**************************************************************************
-//  GPU-accelerated rendering (Phase 2)
+//  GPU-accelerated rendering (Phase 2, extended post-Phase-3 2026-09-17)
 //
-//  Only the four polygon primitives below are routed to the GPU; lines,
-//  rectangles, sprites, dots, and framebuffer-copy commands (MoveImage,
-//  FrameBufferRectangleDraw) still use the original software VRAM path
-//  further down in this file and are NOT visible on screen when the GPU
-//  path is active, since update_screen() no longer scans VRAM for display
-//  in that case - see gpu_update_screen(). This is a deliberate, documented
-//  scope limitation for this first pass, not an oversight; see CLAUDE.md
-//  "Chosen first target" and the implementation plan for the reasoning
-//  (avoiding draw-order compositing bugs between two separate backends).
+//  Every primitive that can end up visible on screen is routed to the GPU
+//  target when gpu_active(): the four polygon types, rectangles/sprites
+//  (FlatRectangle[8x8/16x16]/FlatTexturedRectangle/Sprite8x8/16x16), Dot/
+//  TexturedDot, Monochrome/GouraudLine, the VRAM-fill (0x02) and CPU-to-
+//  VRAM image transfer (0xA0) commands, and MoveImage (VRAM-to-VRAM copy,
+//  0x80). None of these write to the CPU-side p_vram buffer's *visible*
+//  effect once GPU-routed - update_screen() no longer scans VRAM for
+//  display in that case, see gpu_update_screen() - though 0xA0 still
+//  writes p_vram too, deliberately, since it doubles as this frame's
+//  upload_vram() texture source (see gpu_submit_image_stamp()'s comment).
+//  Originally only the four polygon primitives were routed here (see git
+//  history) - ghosting bugs found via gdarius2 (rectangle/sprite fill/
+//  clear) and starswep (2D-only content relying on 0xA0 image transfers)
+//  are what closed the remaining gaps; see CLAUDE.md's "Post-Phase-3
+//  fixes" note.
 //**************************************************************************
 
 osd::gpu_blend_mode psxgpu_device::gpu_blend_mode_for( uint8_t n_cmd ) const
@@ -1554,10 +1561,8 @@ void psxgpu_device::gpu_maybe_set_clip_rect()
 	m_gpu_last_drawarea_y2 = n_drawarea_y2;
 }
 
-void psxgpu_device::gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend )
+void psxgpu_device::gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend )
 {
-	gpu_maybe_set_clip_rect();
-
 	gpu_queued_cmd cmd;
 	cmd.kind = gpu_queued_cmd::kind_t::TRIANGLE;
 	cmd.tri[ 0 ] = v0; cmd.tri[ 1 ] = v1; cmd.tri[ 2 ] = v2;
@@ -1574,6 +1579,33 @@ void psxgpu_device::gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const o
 		cmd2.blend = blend;
 		m_gpu_queue.push_back( std::move( cmd2 ) );
 	}
+}
+
+void psxgpu_device::gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend )
+{
+	gpu_maybe_set_clip_rect();
+	gpu_queue_triangle_pair( v0, v1, v2, v3, n_points, textured, blend );
+}
+
+// A few PS1 GPU commands (Fill Rectangle in VRAM/0x02, CPU-to-VRAM image
+// transfer/0xA0) operate directly on VRAM and are specified to bypass the
+// draw-area clip entirely - unlike every other primitive above, which is
+// always clipped to it (see gpu_maybe_set_clip_rect()). Queues an explicit
+// full-target CLIP command so the *next* queued triangle(s) aren't clipped,
+// then invalidates the clip cache so whatever primitive runs after this one
+// unconditionally restores the game's actual draw area - gpu_maybe_set_clip_
+// rect()'s cache-hit fast path would otherwise wrongly assume the clip is
+// still what it last cached and skip re-emitting it.
+void psxgpu_device::gpu_force_no_clip()
+{
+	gpu_queued_cmd cmd;
+	cmd.kind = gpu_queued_cmd::kind_t::CLIP;
+	cmd.clip_x1 = 0;
+	cmd.clip_y1 = 0;
+	cmd.clip_x2 = (int)( n_screenwidth * gpu_scale() ) - 1;
+	cmd.clip_y2 = (int)( n_screenheight * gpu_scale() ) - 1;
+	m_gpu_queue.push_back( std::move( cmd ) );
+	m_gpu_drawarea_cached = false;
 }
 
 bool psxgpu_device::gpu_submit_flat_polygon( int n_points )
@@ -1758,6 +1790,184 @@ bool psxgpu_device::gpu_submit_textured_rectangle( int32_t n_x, int32_t n_y, int
 	return true;
 }
 
+// GP0 0x02 "Fill Rectangle in VRAM" - unlike FlatRectangle (0x60-63), this
+// command operates on absolute VRAM addresses (no draw offset) and
+// deliberately bypasses the draw-area clip on real hardware, which is why
+// it's a common choice for the double-buffer clear PS1 games do each frame -
+// matches the software path (FrameBufferRectangleDraw()) not applying
+// n_drawoffset_x/y or checking n_drawarea_x1/y1/x2/y2 either. Since this
+// target's local coordinate space already equals VRAM-absolute address
+// space (every offset-relative primitive above ends up at coord +
+// n_drawoffset == the VRAM address it's specified relative to), the
+// absolute n_x/n_y here need no translation at all.
+bool psxgpu_device::gpu_submit_vram_fill_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, PAIR n_bgr )
+{
+	float r = BGR_R( n_bgr ) / 255.0f;
+	float g = BGR_G( n_bgr ) / 255.0f;
+	float b = BGR_B( n_bgr ) / 255.0f;
+
+	float x0 = (float)n_x * gpu_scale();
+	float y0 = (float)n_y * gpu_scale();
+	float x1 = x0 + (float)n_w * gpu_scale();
+	float y1 = y0 + (float)n_h * gpu_scale();
+
+	osd::gpu_vertex v[ 4 ];
+	v[ 0 ].x = x0; v[ 0 ].y = y0;
+	v[ 1 ].x = x1; v[ 1 ].y = y0;
+	v[ 2 ].x = x0; v[ 2 ].y = y1;
+	v[ 3 ].x = x1; v[ 3 ].y = y1;
+	for( int i = 0; i < 4; i++ )
+	{
+		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
+		v[ i ].u = 0.0f; v[ i ].v = 0.0f;
+	}
+
+	gpu_force_no_clip();
+	gpu_queue_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, false, osd::gpu_blend_mode::NONE );
+	return true;
+}
+
+// GP0 0xA0 "Copy Rectangle (CPU to VRAM)" - the standard way PS1 games DMA
+// pre-rendered 2D art (logos, backgrounds, UI) straight into VRAM, entirely
+// bypassing the polygon/sprite pipeline. Like the fill above, this is an
+// absolute-VRAM-address, no-clip operation on real hardware. The pixel data
+// itself still gets written to the software p_vram buffer exactly as before
+// (see the inline 0xA0 handler in gpu_write()) - that write is what feeds
+// this frame's upload_vram() call, so by the time gpu_update_screen()
+// replays this queued command, the just-uploaded whole-VRAM texture already
+// contains this transfer's data at address (n_x,n_y). This stamps it into
+// the target by sampling that texture directly (texture page 2 = 16bpp
+// direct color, no CLUT, tx=ty=0 since VRAM texture addressing is already
+// absolute) rather than re-uploading the same bytes as a second texture.
+bool psxgpu_device::gpu_submit_image_stamp( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h )
+{
+	gpu_maybe_set_texture_page( 0, 0, 2, 0, 0 );
+
+	float x0 = (float)n_x * gpu_scale();
+	float y0 = (float)n_y * gpu_scale();
+	float x1 = x0 + (float)n_w * gpu_scale();
+	float y1 = y0 + (float)n_h * gpu_scale();
+
+	float u0 = (float)n_x;
+	float v0 = (float)n_y;
+	float u1 = (float)( n_x + n_w );
+	float v1 = (float)( n_y + n_h );
+
+	osd::gpu_vertex v[ 4 ];
+	v[ 0 ].x = x0; v[ 0 ].y = y0; v[ 0 ].u = u0; v[ 0 ].v = v0;
+	v[ 1 ].x = x1; v[ 1 ].y = y0; v[ 1 ].u = u1; v[ 1 ].v = v0;
+	v[ 2 ].x = x0; v[ 2 ].y = y1; v[ 2 ].u = u0; v[ 2 ].v = v1;
+	v[ 3 ].x = x1; v[ 3 ].y = y1; v[ 3 ].u = u1; v[ 3 ].v = v1;
+	for( int i = 0; i < 4; i++ )
+	{
+		// neutral shade (matches the "raw" 0.5*2.0 = 1.0 modulation the
+		// fragment shader expects - see its header comment).
+		v[ i ].r = 0.5f; v[ i ].g = 0.5f; v[ i ].b = 0.5f; v[ i ].a = 1.0f;
+	}
+
+	gpu_force_no_clip();
+	gpu_queue_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, true, osd::gpu_blend_mode::NONE );
+	return true;
+}
+
+// GP0 0x80 "Move Image in Frame Buffer" (VRAM-to-VRAM copy) - also an
+// absolute-VRAM-address, no-clip operation (matches MoveImage() not
+// checking n_drawarea_*/applying n_drawoffset either). Unlike the image
+// stamp above, the source data for this one may well be GPU-rendered
+// content (a polygon/rectangle/sprite drawn earlier this frame or a prior
+// one) that was never written back to the CPU-side p_vram buffer, so
+// sampling the raw VRAM texture would be wrong - queued as a real
+// GPU-side framebuffer-to-itself blit (osd::gpu_render_target::copy_rect())
+// instead, replayed at the correct point in this frame's command order.
+bool psxgpu_device::gpu_queue_copy_rect( int32_t n_sx, int32_t n_sy, int32_t n_dx, int32_t n_dy, int32_t n_w, int32_t n_h )
+{
+	gpu_queued_cmd cmd;
+	cmd.kind = gpu_queued_cmd::kind_t::COPY;
+	cmd.copy_sx = n_sx * gpu_scale();
+	cmd.copy_sy = n_sy * gpu_scale();
+	cmd.copy_dx = n_dx * gpu_scale();
+	cmd.copy_dy = n_dy * gpu_scale();
+	cmd.copy_w = n_w * gpu_scale();
+	cmd.copy_h = n_h * gpu_scale();
+	m_gpu_queue.push_back( std::move( cmd ) );
+	return true;
+}
+
+// Dot/TexturedDot and Monochrome/GouraudLine, unlike the VRAM-absolute
+// commands above, are offset-relative and draw-area-clipped exactly like
+// the polygon primitives (see Dot()'s/MonochromeLine()'s own drawarea
+// check in the software path), so these go through the normal
+// gpu_submit_triangle_pair() path rather than gpu_force_no_clip().
+bool psxgpu_device::gpu_submit_dot( int32_t n_x, int32_t n_y, PAIR n_bgr )
+{
+	float r = BGR_R( n_bgr ) / 255.0f;
+	float g = BGR_G( n_bgr ) / 255.0f;
+	float b = BGR_B( n_bgr ) / 255.0f;
+
+	float x0 = (float)( n_x + n_drawoffset_x ) * gpu_scale();
+	float y0 = (float)( n_y + n_drawoffset_y ) * gpu_scale();
+	float x1 = x0 + gpu_scale();
+	float y1 = y0 + gpu_scale();
+
+	osd::gpu_vertex v[ 4 ];
+	v[ 0 ].x = x0; v[ 0 ].y = y0;
+	v[ 1 ].x = x1; v[ 1 ].y = y0;
+	v[ 2 ].x = x0; v[ 2 ].y = y1;
+	v[ 3 ].x = x1; v[ 3 ].y = y1;
+	for( int i = 0; i < 4; i++ )
+	{
+		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
+		v[ i ].u = 0.0f; v[ i ].v = 0.0f;
+	}
+
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, false, osd::gpu_blend_mode::NONE );
+	return true;
+}
+
+bool psxgpu_device::gpu_submit_textured_dot( int32_t n_x, int32_t n_y, uint8_t n_u0, uint8_t n_v0, PAIR n_bgr, int32_t n_tx, int32_t n_ty, int32_t n_tp, uint32_t n_clutx, uint32_t n_cluty )
+{
+	return gpu_submit_textured_rectangle( n_x, n_y, 1, 1, n_u0, n_v0, n_bgr, n_tx, n_ty, n_tp, n_clutx, n_cluty );
+}
+
+bool psxgpu_device::gpu_submit_line( int32_t n_x0, int32_t n_y0, int32_t n_x1, int32_t n_y1, float r0, float g0, float b0, float r1, float g1, float b1, uint8_t n_cmd )
+{
+	float x0 = (float)( n_x0 + n_drawoffset_x ) * gpu_scale();
+	float y0 = (float)( n_y0 + n_drawoffset_y ) * gpu_scale();
+	float x1 = (float)( n_x1 + n_drawoffset_x ) * gpu_scale();
+	float y1 = (float)( n_y1 + n_drawoffset_y ) * gpu_scale();
+
+	// PS1 lines are always exactly 1 pixel wide with no anti-aliasing -
+	// reproduced as a thin quad, half a (scaled) pixel to either side of
+	// the segment, rather than adding a new GL_LINES draw path.
+	float dx = x1 - x0;
+	float dy = y1 - y0;
+	float len = sqrtf( dx * dx + dy * dy );
+	float nx, ny;
+	if( len < 0.0001f )
+	{
+		nx = 0.5f * gpu_scale();
+		ny = 0.0f;
+	}
+	else
+	{
+		nx = -dy / len * 0.5f * gpu_scale();
+		ny = dx / len * 0.5f * gpu_scale();
+	}
+
+	osd::gpu_vertex v[ 4 ];
+	v[ 0 ].x = x0 - nx; v[ 0 ].y = y0 - ny; v[ 0 ].r = r0; v[ 0 ].g = g0; v[ 0 ].b = b0;
+	v[ 1 ].x = x0 + nx; v[ 1 ].y = y0 + ny; v[ 1 ].r = r0; v[ 1 ].g = g0; v[ 1 ].b = b0;
+	v[ 2 ].x = x1 - nx; v[ 2 ].y = y1 - ny; v[ 2 ].r = r1; v[ 2 ].g = g1; v[ 2 ].b = b1;
+	v[ 3 ].x = x1 + nx; v[ 3 ].y = y1 + ny; v[ 3 ].r = r1; v[ 3 ].g = g1; v[ 3 ].b = b1;
+	for( int i = 0; i < 4; i++ )
+	{
+		v[ i ].a = 1.0f; v[ i ].u = 0.0f; v[ i ].v = 0.0f;
+	}
+
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, false, gpu_blend_mode_for( n_cmd ) );
+	return true;
+}
+
 // Re-issuing a set_texture_page() GL state change on every single textured
 // polygon was wasteful - most runs of consecutive polygons reuse the same
 // texture page/CLUT, so skip it entirely when nothing has changed since
@@ -1858,6 +2068,10 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 		case gpu_queued_cmd::kind_t::CLIP:
 			flush_run();
 			m_gpu_render_target->set_clip_rect( cmd.clip_x1, cmd.clip_y1, cmd.clip_x2, cmd.clip_y2 );
+			break;
+		case gpu_queued_cmd::kind_t::COPY:
+			flush_run();
+			m_gpu_render_target->copy_rect( cmd.copy_sx, cmd.copy_sy, cmd.copy_dx, cmd.copy_dy, cmd.copy_w, cmd.copy_h );
 			break;
 		}
 	}
@@ -2548,6 +2762,18 @@ void psxgpu_device::GouraudTexturedPolygon( int n_points )
 
 void psxgpu_device::MonochromeLine()
 {
+	if( gpu_active() )
+	{
+		uint8_t n_cmd = BGR_C( m_packet.MonochromeLine.n_bgr );
+		float r = BGR_R( m_packet.MonochromeLine.n_bgr ) / 255.0f;
+		float g = BGR_G( m_packet.MonochromeLine.n_bgr ) / 255.0f;
+		float b = BGR_B( m_packet.MonochromeLine.n_bgr ) / 255.0f;
+		gpu_submit_line( S11_COORD_X( m_packet.MonochromeLine.vertex[ 0 ].n_coord ), S11_COORD_Y( m_packet.MonochromeLine.vertex[ 0 ].n_coord ),
+			S11_COORD_X( m_packet.MonochromeLine.vertex[ 1 ].n_coord ), S11_COORD_Y( m_packet.MonochromeLine.vertex[ 1 ].n_coord ),
+			r, g, b, r, g, b, n_cmd );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 5 )
 	{
@@ -2648,6 +2874,17 @@ void psxgpu_device::MonochromeLine()
 
 void psxgpu_device::GouraudLine()
 {
+	if( gpu_active() )
+	{
+		uint8_t n_cmd = BGR_C( m_packet.GouraudLine.vertex[ 0 ].n_bgr );
+		gpu_submit_line( S11_COORD_X( m_packet.GouraudLine.vertex[ 0 ].n_coord ), S11_COORD_Y( m_packet.GouraudLine.vertex[ 0 ].n_coord ),
+			S11_COORD_X( m_packet.GouraudLine.vertex[ 1 ].n_coord ), S11_COORD_Y( m_packet.GouraudLine.vertex[ 1 ].n_coord ),
+			BGR_R( m_packet.GouraudLine.vertex[ 0 ].n_bgr ) / 255.0f, BGR_G( m_packet.GouraudLine.vertex[ 0 ].n_bgr ) / 255.0f, BGR_B( m_packet.GouraudLine.vertex[ 0 ].n_bgr ) / 255.0f,
+			BGR_R( m_packet.GouraudLine.vertex[ 1 ].n_bgr ) / 255.0f, BGR_G( m_packet.GouraudLine.vertex[ 1 ].n_bgr ) / 255.0f, BGR_B( m_packet.GouraudLine.vertex[ 1 ].n_bgr ) / 255.0f,
+			n_cmd );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 6 )
 	{
@@ -2762,6 +2999,13 @@ void psxgpu_device::GouraudLine()
 
 void psxgpu_device::FrameBufferRectangleDraw()
 {
+	if( gpu_active() )
+	{
+		gpu_submit_vram_fill_rectangle( COORD_X( m_packet.FlatRectangle.n_coord ), COORD_Y( m_packet.FlatRectangle.n_coord ),
+			SIZE_W( m_packet.FlatRectangle.n_size ), SIZE_H( m_packet.FlatRectangle.n_size ), m_packet.FlatRectangle.n_bgr );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 7 )
 	{
@@ -3199,6 +3443,12 @@ void psxgpu_device::Sprite16x16()
 
 void psxgpu_device::Dot()
 {
+	if( gpu_active() )
+	{
+		gpu_submit_dot( S11_COORD_X( m_packet.Dot.vertex.n_coord ), S11_COORD_Y( m_packet.Dot.vertex.n_coord ), m_packet.Dot.n_bgr );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 14 )
 	{
@@ -3247,6 +3497,24 @@ void psxgpu_device::Dot()
 
 void psxgpu_device::TexturedDot()
 {
+	if( gpu_active() )
+	{
+		uint32_t n_clutx = ( m_packet.TexturedDot.vertex.n_texture.w.h & 0x3f ) << 4;
+		uint32_t n_cluty = ( m_packet.TexturedDot.vertex.n_texture.w.h >> 6 ) & 0x3ff;
+		int n_tx = m_n_tx;
+		int n_ty = m_n_ty;
+		switch( n_tp )
+		{
+		case 0: n_tx += n_twx >> 2; n_ty += n_twy; break;
+		case 1: n_tx += n_twx >> 1; n_ty += n_twy; break;
+		case 2: n_tx += n_twx >> 0; n_ty += n_twy; break;
+		}
+		gpu_submit_textured_dot( S11_COORD_X( m_packet.TexturedDot.vertex.n_coord ), S11_COORD_Y( m_packet.TexturedDot.vertex.n_coord ),
+			TEXTURE_U( m_packet.TexturedDot.vertex.n_texture ), TEXTURE_V( m_packet.TexturedDot.vertex.n_texture ),
+			m_packet.TexturedDot.n_bgr, n_tx, n_ty, n_tp, n_clutx, n_cluty );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if (m_debug.n_skip == 15)
 	{
@@ -3285,6 +3553,14 @@ void psxgpu_device::TexturedDot()
 
 void psxgpu_device::MoveImage()
 {
+	if( gpu_active() )
+	{
+		gpu_queue_copy_rect( COORD_X( m_packet.MoveImage.vertex[ 0 ].n_coord ), COORD_Y( m_packet.MoveImage.vertex[ 0 ].n_coord ),
+			COORD_X( m_packet.MoveImage.vertex[ 1 ].n_coord ), COORD_Y( m_packet.MoveImage.vertex[ 1 ].n_coord ),
+			SIZE_W( m_packet.MoveImage.n_size ), SIZE_H( m_packet.MoveImage.n_size ) );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 16 )
 	{
@@ -3736,6 +4012,11 @@ void psxgpu_device::gpu_write( uint32_t *p_ram, int32_t n_size )
 							LOGMASKED(LOG_WRITE, "%s: %02x: send image to framebuffer %u,%u %u,%u\n", machine().describe_context(), m_packet.n_entry[ 0 ] >> 24,
 								m_packet.n_entry[ 1 ] & 0xffff, ( m_packet.n_entry[ 1 ] >> 16 ),
 								m_packet.n_entry[ 2 ] & 0xffff, ( m_packet.n_entry[ 2 ] >> 16 ) );
+							if( gpu_active() )
+							{
+								gpu_submit_image_stamp( m_packet.n_entry[ 1 ] & 0xffff, m_packet.n_entry[ 1 ] >> 16,
+									m_packet.n_entry[ 2 ] & 0xffff, m_packet.n_entry[ 2 ] >> 16 );
+							}
 							n_gpu_buffer_offset = 0;
 							n_vramx = 0;
 							n_vramy = 0;
