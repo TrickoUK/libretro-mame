@@ -280,6 +280,8 @@ private:
 	bool gpu_submit_flat_textured_polygon( int n_points );
 	bool gpu_submit_gouraud_polygon( int n_points );
 	bool gpu_submit_gouraud_textured_polygon( int n_points );
+	bool gpu_submit_flat_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, PAIR n_bgr );
+	bool gpu_submit_textured_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, uint8_t n_u0, uint8_t n_v0, PAIR n_bgr, int32_t n_tx, int32_t n_ty, int32_t n_tp, uint32_t n_clutx, uint32_t n_cluty );
 	uint32_t gpu_update_screen( bitmap_rgb32 &bitmap );
 
 	osd::gpu_render_target *m_gpu_render_target = nullptr;

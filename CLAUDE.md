@@ -375,6 +375,62 @@ architecture.
   ROM-collection availability gap, not a code issue - revisit if a real
   dump for any `konamigv.cpp` game becomes available.
 
+### Post-Phase-3 fixes: gdarius2 crash + ghosting (2026-09-17)
+
+Found via `gdarius2` (G-Darius Ver.2, `src/mame/sony/zn.cpp`, Sony ZN) at 2x
+GPU scale - two independent bugs, both now fixed and verified (90s soak,
+no crash, no ghosting; `brvblade` re-verified unaffected by either fix):
+
+1. **Crash**: `double free or corruption (!prev)` inside RetroArch's own
+   `video_thread_free()`/`driver_uninit()`, not this core's code (confirmed
+   via `gdb` backtrace - see "Debugging" below for the GDB workaround
+   needed to get one). Root cause: `gdarius2` writes the GP1 display-mode
+   register several times during boot; at 2x scale the resulting
+   resolution exceeded the libretro OSD's hardcoded 720x720
+   `max_width`/`max_height` (`src/osd/libretro/libretro-internal/
+   libretro.cpp`), and crossing that ceiling forces a full
+   `RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO` (`window.cpp`'s
+   `VIDEO_CHANGED_AV_INFO`) instead of the cheap `SET_GEOMETRY` - RetroArch
+   handles that by tearing down and reinitializing its whole video driver,
+   and its threaded video driver has a double-free bug when hit that way.
+   **Fixed** (not by patching RetroArch) by pre-scaling `max_width`/
+   `max_height` by the `mame_psx_gpu_hle` multiplier in `retro_load_game()`,
+   right after `check_variables()`, before the machine starts or any AV-info
+   is ever sent - scaled resolutions then never exceed the declared max, so
+   in-session mode changes stay on the cheap path and never re-trigger
+   RetroArch's fragile reinit.
+2. **Correctness** (frame ghosting: new content draws correctly each frame,
+   e.g. ships moving, but stale previous-frame pixels remain everywhere
+   nothing new was drawn, until a full screen change happens to overwrite
+   them): only the four polygon primitives (`FlatPolygon`,
+   `FlatTexturedPolygon`, `GouraudPolygon`, `GouraudTexturedPolygon`) were
+   ever routed to the GPU target - `FlatRectangle`(+`8x8`/`16x16`),
+   `FlatTexturedRectangle`, and `Sprite8x8`/`Sprite16x16` still only wrote
+   to the software `p_vram` buffer. Games that use a solid `FlatRectangle`
+   to erase/clear regions of the screen each frame (distinct from a full
+   VRAM clear - a common PS1 technique `gdarius2` apparently relies on
+   more than `brvblade` does) had that erase applied only to software VRAM,
+   never reflected in the GPU target's deliberately-persistent framebuffer
+   (see Phase 2 item 3 above), so old GPU-rendered pixels from prior frames
+   stuck around as ghosting. **Fixed** by giving all six of these
+   primitives the same GPU-submission path as the four polygon primitives
+   already had (`gpu_submit_flat_rectangle()`/`gpu_submit_textured_
+   rectangle()` in `psx.cpp`, each rectangle/sprite becoming two triangles).
+   Since `psxgpu_device` is shared across every PS1-based board (see
+   "Active target" above), this was a latent bug for any game on any of
+   those boards that leans on rectangle/sprite primitives, not just
+   `gdarius2` - worth re-testing `starswep`/other already-verified romsets
+   if picking this back up.
+3. **Debugging note**: `gdb` on this `mame-dev` Distrobox hits an internal
+   GDB bug (`ext_lang_guard: Assertion 'is_main_thread()' failed`) when it
+   tries to canonicalize a deeply-templated type name from
+   `mame_libretro.so`'s debug info (a `make_cosine_table<0,1,2,...>` audio
+   DSP table) as soon as any new thread appears - crashes GDB itself, not
+   the target. Workaround that got a real backtrace: `set auto-solib-add
+   off` before `run`, then `sharedlibrary mame_libretro` after the crash to
+   load symbols only for the one library actually needed, avoiding
+   whatever triggers the bad type lookup in the other libraries.
+
 ### Next planned work: rendering quality (PGXP-style correction) - not started
 
 **User's intent (2026-09-16): this is the next thing to work on, in a
@@ -415,10 +471,15 @@ upstream merges.
 | Sega Model 3 | `src/mame/sega/model3_v.cpp` (~2500 lines) | `daytona2` | Texture-mapped Gouraud triangles, more complex than Model 2. |
 | Namco System 22 | `src/mame/namco/namcos22_v.cpp` (~2700 lines) | `ridgerac`, `timecris`, `acedrive`, `cybrcomm` | Uses the shared legacy software polygon helper (`src/mame/ausnz/poly.h` / `src/devices/video/poly.h`). |
 | Namco System 11 (3D) | `src/mame/namco/namcos11.cpp` | `starswep` | PS1-derived 3D hardware, simpler than System 22/23. |
-| Konami GTI Club-class | `src/mame/konami/gticlub.cpp` | `gticlub`, `hangplt` | Custom 3D chip (K001005/K001006), not real Voodoo but similar pipeline shape. |
-| Konami (3D, other) | `src/mame/konami/konamigv.cpp` | `nagano98` | PS1-derived GV system. |
-| Midway Voodoo-based | `src/mame/williams/midvunit.cpp` | `crusnusa`, `crusnwld`, `offroadc` | Uses `src/devices/video/voodoo*.cpp` (real 3dfx Voodoo emulation) — a GPU path here benefits every game on this device. |
-| Midway "Seattle"/Voodoo | `src/mame/williams/seattle.cpp` | `sfrush`, `sfrushrk`, `mace` | Also Voodoo-based (`voodoo_render.cpp`, ~2900 lines total). |
+| Konami GTI Club-class | `src/mame/konami/gticlub.cpp`, `nwk-tr.cpp`, `hornet.cpp` | `gticlub`, `hangplt`, `thrilld`, `gradius4` | Custom 3D chip (K001005/K001006) does the real rasterizing. **Correction (2026-09-17)**: these files also wire a `generic_voodoo_device` into their memory map (via `konppc_device`), but it's bus/register glue only, not the renderer — confirmed no `K001005`/`K001006` config exists without it and the Voodoo device has no framebuffer/screen of its own here. Not a Voodoo rasterizer target. |
+| Konami (3D, other) | `src/mame/konami/konamigv.cpp` | `nagano98` | PS1-derived GV system (uses `psxgpu_device`, same device already GPU-accelerated for Sony ZN — see "Active target" above). `nagano98`'s romset in this collection is a stub, untestable currently. |
+| Midway "Vegas Flavor" | `src/mame/williams/midvunit.cpp` | `crusnusa`, `crusnwld`, `offroadc` | **Correction (2026-09-17)**: does **not** use `voodoo*.cpp` — has its own self-contained rasterizer, `midvunit_renderer : poly_manager<...>` in `midvunit_v.cpp`. Custom TMS34010-driven polygon rasterizer, not Voodoo-based. Kept here as a candidate in its own right, not as a Voodoo target. |
+| Midway "Seattle" (Voodoo 1) | `src/mame/williams/seattle.cpp` | `sfrush`, `sfrushrk`, `mace`, `calspeed`, `vaportrx`, `carnevil`, `hyprdriv` | True Voodoo-rasterizer target (`voodoo_render.cpp`, ~2900 lines total). Entry point: `enqueue_triangle()` in `src/devices/video/voodoo.cpp:3015`. Best-covered board in the local ROM collection. |
+| Midway "Vegas" (Voodoo 2) | `src/mame/williams/vegas.cpp` | `gauntleg`, `tenthdeg`, `gauntdl`, `warfa`, `roadburn`, `sf2049`, `cartfury` | Also a true Voodoo target, same device/entry point as Seattle above. Second-best-covered board locally. |
+| Midway "Quicksilver" (Voodoo 2, PCI) | `src/mame/williams/midqslvr.cpp` | none locally (`hydrthnd`, `offrthnd`, `arctthnd` not in collection) | True Voodoo target, PCI-attached like the PC-based systems below rather than a fixed on-board device. |
+| Konami Viper (Voodoo 3/Banshee) | `src/mame/konami/viper.cpp` | `kviper`, `code1d`, `gticlub2`, `jpark3`, `thrild2`, `wcombat`, `xtrial` | True Voodoo target (`voodoo_banshee.cpp`/`voodoo_3_device`). Note: despite the name, `gticlub2` here is unrelated to the K001005-based original `gticlub` above — Viper-era GTI Club 2 really is Voodoo-rendered. |
+| ITEagle (Voodoo 3) | `src/mame/itech/iteagle.cpp` | `iteagle`, `virtpool`, `carnking`, `bbh` | True Voodoo target. |
+| PC-based arcade systems (Voodoo as a real PCI card) | `src/mame/misc/comebaby.cpp`, `funkball.cpp`, `gammagic.cpp`, `magictg.cpp`, `savquest.cpp`, `xtom3d.cpp`, `src/mame/pc/quakeat.cpp`, `src/mame/taito/taitowlf.cpp` | `pumpitup` (+ ~18 variants, `xtom3d.cpp`) is the only one locally available | Embedded-PC arcade systems with genuine Voodoo 1/2/Banshee PCI cards; same `voodoo_render.cpp` pipeline as the dedicated boards above but reached through `voodoo_pci.cpp`. |
 | Midway Zeus | `src/mame/williams/midzeus.cpp` | `mk4`, `invasnab` | Custom "Zeus" 3D chip, not Voodoo. |
 | Nintendo 64 (RDP) / Aleck64 | `src/mame/nintendo/n64_v.h` (~4200 lines), `src/mame/nintendo/aleck64.cpp` | `aleck64` | N64's actual 3D pipeline (RDP) — most complex/most faithfully-emulated candidate, high risk/reward. |
 

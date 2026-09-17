@@ -1675,6 +1675,89 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 	return true;
 }
 
+// Rectangle/sprite primitives (FlatRectangle[8x8/16x16], FlatTexturedRectangle,
+// Sprite8x8/16x16) were routed only to the software p_vram path, never to the
+// GPU target - unlike the four polygon primitives above. Games that use a
+// solid FlatRectangle to erase/clear regions of the screen each frame (a
+// common PS1 technique, distinct from a full VRAM clear) would have that
+// erase applied to the software VRAM but never reflected in the GPU target's
+// persistent framebuffer (see the resize_target()-only-clears comment on
+// gpu_update_screen() - VRAM is deliberately persistent across frames), so
+// stale GPU-rendered pixels from prior frames stuck around as ghosting until
+// something else happened to overdraw that exact region. Confirmed via
+// gdarius2 (Sony ZN) live testing, 2026-09-17 - not visible on brvblade,
+// which apparently doesn't rely on this technique. Fixed by giving rectangle/
+// sprite primitives the same GPU path as the polygon primitives, as two
+// triangles forming the axis-aligned quad.
+bool psxgpu_device::gpu_submit_flat_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, PAIR n_bgr )
+{
+	uint8_t n_cmd = BGR_C( n_bgr );
+	float r = BGR_R( n_bgr ) / 255.0f;
+	float g = BGR_G( n_bgr ) / 255.0f;
+	float b = BGR_B( n_bgr ) / 255.0f;
+
+	float x0 = (float)( n_x + n_drawoffset_x ) * gpu_scale();
+	float y0 = (float)( n_y + n_drawoffset_y ) * gpu_scale();
+	float x1 = x0 + (float)n_w * gpu_scale();
+	float y1 = y0 + (float)n_h * gpu_scale();
+
+	osd::gpu_vertex v[ 4 ];
+	v[ 0 ].x = x0; v[ 0 ].y = y0;
+	v[ 1 ].x = x1; v[ 1 ].y = y0;
+	v[ 2 ].x = x0; v[ 2 ].y = y1;
+	v[ 3 ].x = x1; v[ 3 ].y = y1;
+	for( int i = 0; i < 4; i++ )
+	{
+		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
+		v[ i ].u = 0.0f; v[ i ].v = 0.0f;
+	}
+
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, false, gpu_blend_mode_for( n_cmd ) );
+	return true;
+}
+
+bool psxgpu_device::gpu_submit_textured_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, uint8_t n_u0, uint8_t n_v0, PAIR n_bgr, int32_t n_tx, int32_t n_ty, int32_t n_tp, uint32_t n_clutx, uint32_t n_cluty )
+{
+	uint8_t n_cmd = BGR_C( n_bgr );
+
+	gpu_maybe_set_texture_page( n_tx, n_ty, n_tp, n_clutx, n_cluty );
+
+	float r = ( n_cmd & 0x01 ) ? ( 128.0f / 255.0f ) : ( BGR_R( n_bgr ) / 255.0f );
+	float g = ( n_cmd & 0x01 ) ? ( 128.0f / 255.0f ) : ( BGR_G( n_bgr ) / 255.0f );
+	float b = ( n_cmd & 0x01 ) ? ( 128.0f / 255.0f ) : ( BGR_B( n_bgr ) / 255.0f );
+
+	// n_du/n_dv (sprite flip along x/y, from the current draw mode's texpage
+	// bits) apply identically here to how the software TEXTUREFILL loop uses
+	// them - a linear u0->u1/v0->v1 interpolation across the quad reproduces
+	// the same flip, since PS1 rectangle/sprite texturing has no perspective
+	// term to preserve either way.
+	int n_du = ( n_ix != 0 ) ? -1 : 1;
+	int n_dv = ( n_iy != 0 ) ? -1 : 1;
+
+	float x0 = (float)( n_x + n_drawoffset_x ) * gpu_scale();
+	float y0 = (float)( n_y + n_drawoffset_y ) * gpu_scale();
+	float x1 = x0 + (float)n_w * gpu_scale();
+	float y1 = y0 + (float)n_h * gpu_scale();
+
+	float u0 = (float)n_u0;
+	float v0 = (float)n_v0;
+	float u1 = u0 + (float)( n_w * n_du );
+	float v1 = v0 + (float)( n_h * n_dv );
+
+	osd::gpu_vertex v[ 4 ];
+	v[ 0 ].x = x0; v[ 0 ].y = y0; v[ 0 ].u = u0; v[ 0 ].v = v0;
+	v[ 1 ].x = x1; v[ 1 ].y = y0; v[ 1 ].u = u1; v[ 1 ].v = v0;
+	v[ 2 ].x = x0; v[ 2 ].y = y1; v[ 2 ].u = u0; v[ 2 ].v = v1;
+	v[ 3 ].x = x1; v[ 3 ].y = y1; v[ 3 ].u = u1; v[ 3 ].v = v1;
+	for( int i = 0; i < 4; i++ )
+	{
+		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
+	}
+
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, true, gpu_blend_mode_for( n_cmd ) );
+	return true;
+}
+
 // Re-issuing a set_texture_page() GL state change on every single textured
 // polygon was wasteful - most runs of consecutive polygons reuse the same
 // texture page/CLUT, so skip it entirely when nothing has changed since
@@ -2720,6 +2803,13 @@ void psxgpu_device::FrameBufferRectangleDraw()
 
 void psxgpu_device::FlatRectangle()
 {
+	if( gpu_active() )
+	{
+		gpu_submit_flat_rectangle( S11_COORD_X( m_packet.FlatRectangle.n_coord ), S11_COORD_Y( m_packet.FlatRectangle.n_coord ),
+			SIZE_W( m_packet.FlatRectangle.n_size ), SIZE_H( m_packet.FlatRectangle.n_size ), m_packet.FlatRectangle.n_bgr );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 8 )
 	{
@@ -2769,6 +2859,13 @@ void psxgpu_device::FlatRectangle()
 
 void psxgpu_device::FlatRectangle8x8()
 {
+	if( gpu_active() )
+	{
+		gpu_submit_flat_rectangle( S11_COORD_X( m_packet.FlatRectangle8x8.n_coord ), S11_COORD_Y( m_packet.FlatRectangle8x8.n_coord ),
+			8, 8, m_packet.FlatRectangle8x8.n_bgr );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 9 )
 	{
@@ -2818,6 +2915,13 @@ void psxgpu_device::FlatRectangle8x8()
 
 void psxgpu_device::FlatRectangle16x16()
 {
+	if( gpu_active() )
+	{
+		gpu_submit_flat_rectangle( S11_COORD_X( m_packet.FlatRectangle16x16.n_coord ), S11_COORD_Y( m_packet.FlatRectangle16x16.n_coord ),
+			16, 16, m_packet.FlatRectangle16x16.n_bgr );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 10 )
 	{
@@ -2867,6 +2971,25 @@ void psxgpu_device::FlatRectangle16x16()
 
 void psxgpu_device::FlatTexturedRectangle()
 {
+	if( gpu_active() )
+	{
+		uint32_t n_clutx = ( m_packet.FlatTexturedRectangle.n_texture.w.h & 0x3f ) << 4;
+		uint32_t n_cluty = ( m_packet.FlatTexturedRectangle.n_texture.w.h >> 6 ) & 0x3ff;
+		int n_tx = m_n_tx;
+		int n_ty = m_n_ty;
+		switch( n_tp )
+		{
+		case 0: n_tx += n_twx >> 2; n_ty += n_twy; break;
+		case 1: n_tx += n_twx >> 1; n_ty += n_twy; break;
+		case 2: n_tx += n_twx >> 0; n_ty += n_twy; break;
+		}
+		gpu_submit_textured_rectangle( S11_COORD_X( m_packet.FlatTexturedRectangle.n_coord ), S11_COORD_Y( m_packet.FlatTexturedRectangle.n_coord ),
+			SIZE_W( m_packet.FlatTexturedRectangle.n_size ), SIZE_H( m_packet.FlatTexturedRectangle.n_size ),
+			TEXTURE_U( m_packet.FlatTexturedRectangle.n_texture ), TEXTURE_V( m_packet.FlatTexturedRectangle.n_texture ),
+			m_packet.FlatTexturedRectangle.n_bgr, n_tx, n_ty, n_tp, n_clutx, n_cluty );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 11 )
 	{
@@ -2924,6 +3047,24 @@ void psxgpu_device::FlatTexturedRectangle()
 
 void psxgpu_device::Sprite8x8()
 {
+	if( gpu_active() )
+	{
+		uint32_t n_clutx = ( m_packet.Sprite8x8.n_texture.w.h & 0x3f ) << 4;
+		uint32_t n_cluty = ( m_packet.Sprite8x8.n_texture.w.h >> 6 ) & 0x3ff;
+		int n_tx = m_n_tx;
+		int n_ty = m_n_ty;
+		switch( n_tp )
+		{
+		case 0: n_tx += n_twx >> 2; n_ty += n_twy; break;
+		case 1: n_tx += n_twx >> 1; n_ty += n_twy; break;
+		case 2: n_tx += n_twx >> 0; n_ty += n_twy; break;
+		}
+		gpu_submit_textured_rectangle( S11_COORD_X( m_packet.Sprite8x8.n_coord ), S11_COORD_Y( m_packet.Sprite8x8.n_coord ),
+			8, 8, TEXTURE_U( m_packet.Sprite8x8.n_texture ), TEXTURE_V( m_packet.Sprite8x8.n_texture ),
+			m_packet.Sprite8x8.n_bgr, n_tx, n_ty, n_tp, n_clutx, n_cluty );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 12 )
 	{
@@ -2982,6 +3123,24 @@ void psxgpu_device::Sprite8x8()
 
 void psxgpu_device::Sprite16x16()
 {
+	if( gpu_active() )
+	{
+		uint32_t n_clutx = ( m_packet.Sprite16x16.n_texture.w.h & 0x3f ) << 4;
+		uint32_t n_cluty = ( m_packet.Sprite16x16.n_texture.w.h >> 6 ) & 0x3ff;
+		int n_tx = m_n_tx;
+		int n_ty = m_n_ty;
+		switch( n_tp )
+		{
+		case 0: n_tx += n_twx >> 2; n_ty += n_twy; break;
+		case 1: n_tx += n_twx >> 1; n_ty += n_twy; break;
+		case 2: n_tx += n_twx >> 0; n_ty += n_twy; break;
+		}
+		gpu_submit_textured_rectangle( S11_COORD_X( m_packet.Sprite16x16.n_coord ), S11_COORD_Y( m_packet.Sprite16x16.n_coord ),
+			16, 16, TEXTURE_U( m_packet.Sprite16x16.n_texture ), TEXTURE_V( m_packet.Sprite16x16.n_texture ),
+			m_packet.Sprite16x16.n_bgr, n_tx, n_ty, n_tp, n_clutx, n_cluty );
+		return;
+	}
+
 #if PSXGPU_DEBUG_VIEWER
 	if( m_debug.n_skip == 13 )
 	{
