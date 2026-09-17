@@ -1602,8 +1602,13 @@ void psxgpu_device::gpu_force_no_clip()
 	cmd.kind = gpu_queued_cmd::kind_t::CLIP;
 	cmd.clip_x1 = 0;
 	cmd.clip_y1 = 0;
+	// Full target bounds, not just the currently-declared display size -
+	// the target itself is sized to full VRAM height (see
+	// gpu_update_screen()'s comment), and an absolute-VRAM command like
+	// this one may legitimately target a currently-hidden buffer region
+	// past n_screenheight (double buffering).
 	cmd.clip_x2 = (int)( n_screenwidth * gpu_scale() ) - 1;
-	cmd.clip_y2 = (int)( n_screenheight * gpu_scale() ) - 1;
+	cmd.clip_y2 = (int)( m_vram_height * gpu_scale() ) - 1;
 	m_gpu_queue.push_back( std::move( cmd ) );
 	m_gpu_drawarea_cached = false;
 }
@@ -2018,7 +2023,20 @@ void psxgpu_device::gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int 
 uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 {
 	int w = n_screenwidth * gpu_scale();
-	int h = n_screenheight * gpu_scale();
+
+	// The actual GPU target is sized to full VRAM height, not just the
+	// currently-declared display height - draw-offset-relative geometry
+	// (polygons, rectangles, etc.) is placed at coord + n_drawoffset, which
+	// is a real VRAM address that can legitimately land well past
+	// n_screenheight (e.g. a game double-buffering across a taller region
+	// of VRAM than what's actually shown at once - draw into the hidden
+	// half, flip display_start to reveal it, repeat). Sizing the target to
+	// only n_screenheight silently clipped/discarded any draw-offset
+	// commands aimed at such a hidden buffer - found via raystorm (Taito,
+	// src/mame/sony/zn.cpp): n_screenheight=240 there, but it flips
+	// n_drawoffset_y/n_displaystarty between 0 and 240 every frame,
+	// meaning VRAM rows 0-479 are all live, not just 0-239.
+	int h = m_vram_height * gpu_scale();
 
 	// One context acquisition for the whole burst below (begin_frame,
 	// every queued call, and the final readback) instead of one per call -
@@ -2082,19 +2100,123 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 	m_gpu_render_target->end_frame_and_readback( temp.data() );
 	m_gpu_render_target->end_batch();
 
-	// bitmap is sized by whatever updatevisiblearea() last configured the
-	// screen to, which should always match w/h exactly (both derived from
-	// the same n_screenwidth/n_screenheight at essentially the same point
-	// in time) - but clamp against bitmap's own reported dimensions rather
-	// than assume, since a mismatch here previously overflowed the
-	// readback buffer and crashed inside glReadPixels (see git history);
-	// cheap insurance, and a cropped/incomplete frame is an acceptable
-	// fallback outcome where a crash is not.
-	int copy_w = std::min( w, bitmap.width() );
-	int copy_h = std::min( h, bitmap.height() );
-	for( int y = 0; y < copy_h; y++ )
+	// Mirrors update_screen()'s (the software display path, further down in
+	// this file) border/overscan cropping and display_start windowing -
+	// the GPU path previously showed the raw n_screenwidth x n_screenheight
+	// canvas verbatim, unlike the software path, which only ever shows the
+	// n_vert_disstart/n_vert_disend/n_horiz_disstart/n_horiz_disend window
+	// and paints solid black everywhere else. Real PS1 games rely on that
+	// crop: they routinely stash non-image scratch data (CLUT tables, work
+	// buffers) in the overscan border, counting on real hardware never
+	// scanning it out - found via raystorm (Taito, src/mame/sony/zn.cpp),
+	// which stores a small CLUT swatch there, visibly rendered as a stray
+	// block of colour in the corner without this crop. GP1 0x05's
+	// "display start" is applied the same way as before (see the removed
+	// version of this comment in git history for that half on its own),
+	// just folded into the same window computation - both were found and
+	// fixed together, 2026-09-17.
+	if( ( n_gpustatus & ( 1 << 0x17 ) ) != 0 )
 	{
-		memcpy( &bitmap.pix( y, 0 ), &temp[ (size_t)y * w ], (size_t)copy_w * sizeof( uint32_t ) );
+		/* display disabled */
+		bitmap.fill( 0 );
+		return 0;
+	}
+
+	int scale = gpu_scale();
+	int n_displaystartx;
+	if( b_reverseflag )
+	{
+		n_displaystartx = ( 1023 - m_n_displaystartx );
+		n_displaystartx -= ( (int32_t)n_screenwidth - 1 );
+	}
+	else
+	{
+		n_displaystartx = m_n_displaystartx;
+	}
+
+	int n_overscantop, n_overscanleft;
+	if( ( n_gpustatus & ( 1 << 0x14 ) ) != 0 )
+	{
+		/* pal */
+		n_overscantop = 0x23;
+		n_overscanleft = 0x27e;
+	}
+	else
+	{
+		/* ntsc */
+		n_overscantop = 0x10;
+		n_overscanleft = 0x260;
+	}
+
+	int n_top = (int32_t)n_vert_disstart - n_overscantop;
+	int n_lines = (int32_t)n_vert_disend - (int32_t)n_vert_disstart;
+	int n_y;
+	if( n_top < 0 )
+	{
+		n_y = -n_top;
+		n_lines += n_top;
+	}
+	else
+	{
+		n_y = 0;
+	}
+	if( ( n_gpustatus & ( 1 << 0x16 ) ) != 0 )
+	{
+		/* interlaced */
+		n_lines *= 2;
+	}
+	if( n_lines > (int32_t)n_screenheight - ( n_y + n_top ) )
+		n_lines = (int32_t)n_screenheight - ( n_y + n_top );
+
+	int n_left = ( ( (int32_t)n_horiz_disstart - n_overscanleft ) * (int32_t)n_screenwidth ) / 2560;
+	int n_columns = ( ( (int32_t)n_horiz_disend - (int32_t)n_horiz_disstart ) * (int32_t)n_screenwidth ) / 2560;
+	if( n_left > (int32_t)n_screenwidth - n_columns )
+		n_left = (int32_t)n_screenwidth - n_columns;
+	int n_x;
+	if( n_left < 0 )
+	{
+		n_x = -n_left;
+		n_columns += n_left;
+	}
+	else
+	{
+		n_x = 0;
+	}
+	if( n_columns > (int32_t)n_screenwidth - ( n_x + n_left ) )
+		n_columns = (int32_t)n_screenwidth - ( n_x + n_left );
+
+	bitmap.fill( 0 );
+
+	if( n_lines > 0 && n_columns > 0 )
+	{
+		int dst_y0 = ( n_y + n_top ) * scale;
+		int dst_x0 = ( n_x + n_left ) * scale;
+		int src_y0 = ( n_y + (int32_t)n_displaystarty ) * scale;
+		int src_x0 = ( n_x + n_displaystartx ) * scale;
+		int copy_h = std::min( n_lines * scale, bitmap.height() - dst_y0 );
+		int copy_w = std::min( n_columns * scale, bitmap.width() - dst_x0 );
+
+		if( copy_h > 0 && copy_w > 0 )
+		{
+			int sx = ( ( src_x0 % w ) + w ) % w;
+			for( int y = 0; y < copy_h; y++ )
+			{
+				int src_y = ( ( ( src_y0 + y ) % h ) + h ) % h;
+				const uint32_t *src_row = &temp[ (size_t)src_y * w ];
+				uint32_t *dst_row = &bitmap.pix( dst_y0 + y, dst_x0 );
+				if( sx == 0 )
+				{
+					memcpy( dst_row, src_row, (size_t)copy_w * sizeof( uint32_t ) );
+				}
+				else
+				{
+					int first_part = std::min( copy_w, w - sx );
+					memcpy( dst_row, src_row + sx, (size_t)first_part * sizeof( uint32_t ) );
+					if( copy_w > first_part )
+						memcpy( dst_row + first_part, src_row, (size_t)( copy_w - first_part ) * sizeof( uint32_t ) );
+				}
+			}
+		}
 	}
 
 	return 0;

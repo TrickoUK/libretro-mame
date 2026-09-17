@@ -477,6 +477,57 @@ no crash, no ghosting; `brvblade` re-verified unaffected by either fix):
      `GL_LINES` draw path.
    Verified: `starswep` attract mode no longer ghosts; `gdarius2` and
    `brvblade` re-confirmed unaffected (both still crash-free, ghosting-free).
+5. **Correctness, round 3 - display-start/double-buffering and overscan
+   border cropping** (found via `raystorm`/RayStorm, Taito, same
+   `src/mame/sony/zn.cpp` board as `gdarius2`): a duplicated strip of the
+   top of the screen reappeared near the bottom, and separately a small
+   block of what turned out to be raw CLUT (palette) data was visible in
+   a corner - neither is a primitive-routing gap like items 2/4 above;
+   both come from `gpu_update_screen()`'s final readback/compositing step
+   never having replicated two things the software display path
+   (`update_screen()`, further down in `psx.cpp`) already does correctly:
+   - **Display-start windowing**: GP1 0x05 lets a game point "display
+     start" anywhere in VRAM - `raystorm` flips `n_displaystarty` between
+     `0` and `240` every frame, real PS1 double buffering (draw into
+     whichever half isn't currently selected, then flip). The GPU path
+     always read back target-local `(0,0)`, ignoring `n_displaystarty`/
+     `m_n_displaystartx` entirely, so the *fixed* window it read from a
+     *persistent* (never-fully-cleared, see Phase 2 item 3) target could
+     miss whichever half was actually current. Also required enlarging
+     the GPU target itself from `n_screenheight` to full `m_vram_height`
+     (previously draw-offset-relative geometry aimed at the "hidden" half
+     of a double-buffered scene landed outside the target and was
+     silently discarded - `gpu_force_no_clip()`'s bounds needed the same
+     enlargement, or it would incorrectly scissor absolute-VRAM commands
+     aimed at that hidden half).
+   - **Overscan border cropping**: the software path only ever shows the
+     `n_vert_disstart`/`n_vert_disend`/`n_horiz_disstart`/`n_horiz_disend`-
+     bounded window and paints solid black everywhere else (with PAL/NTSC
+     `n_overscantop`/`n_overscanleft` constants) - real PS1 games rely on
+     that crop, routinely stashing non-image scratch data (CLUT tables,
+     work buffers) in the border, counting on real hardware never
+     scanning it out. The GPU path showed the *raw* `n_screenwidth` x
+     `n_screenheight` canvas verbatim, so `raystorm`'s CLUT swatch - safely
+     invisible on real hardware and under the software path - became a
+     visible artifact.
+   **Fixed** by porting both algorithms from `update_screen()` into
+   `gpu_update_screen()`: same PAL/NTSC/interlace/`b_reverseflag` branches,
+   same border-fill-then-windowed-copy structure, with the copy step
+   reading from `n_displaystarty`/`m_n_displaystartx` (wrapped modulo the
+   now-larger target) instead of `(0,0)`. Debugging note: got the exact
+   `n_displaystarty`/`n_drawoffset_y` values and target dimensions in play
+   via temporary `fprintf(stderr, ...)` calls at the GP1 0x05 write site
+   and the top of `gpu_update_screen()` - removed once confirmed; worth
+   the same trick again for any future "GPU path shows something
+   different from what should be visible" bug in this device, since
+   VERBOSE-gated `LOGMASKED` calls need a rebuild to toggle and are easy
+   to drown in unrelated log lines otherwise. Verified via screenshot
+   (`spectacle`, since RetroArch's window is a native Wayland client
+   invisible to X11-only capture tools like `xdotool`/`wmctrl` on this
+   KDE/Wayland desktop) across three passes - fixed the vertical jump the
+   display-start fix alone introduced, then fixed the still-remaining
+   duplicate band and CLUT swatch with the border-crop fix; `gdarius2`,
+   `starswep`, `brvblade` re-confirmed unaffected.
 
 ### Next planned work: rendering quality (PGXP-style correction) - not started
 
