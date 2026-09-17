@@ -38,6 +38,15 @@ namespace osd {
 struct gpu_vertex
 {
 	float x, y;
+	// Perspective divisor for varying (color/UV) interpolation only - the
+	// final screen position (x,y) is unaffected by this value regardless
+	// of what it's set to (see retro_gpu_target's vertex shader). 1.0
+	// (the default) means affine interpolation, matching original PS1
+	// hardware and every vertex without real PGXP-style depth data; set
+	// to a vertex's real relative depth (larger = further from the
+	// camera) to enable perspective-correct interpolation for that
+	// vertex instead.
+	float w = 1.0f;
 	float r, g, b, a;
 	float u, v;
 };

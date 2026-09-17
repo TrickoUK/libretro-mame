@@ -73,6 +73,7 @@ char alternate_renderer = 0;
 bool lua_console_enable = false;
 char debug_plugin[32] = "";
 int psx_gpu_hle_scale = 0;
+bool psx_gpu_pgxp_enable = false;
 
 // emu flags
 static bool arcade = false;

@@ -117,6 +117,10 @@ extern char debug_plugin[32];
 // gpu_render_available()/gpu_render_scale() overrides and CLAUDE.md
 // "Chosen first target" for the feature this controls.
 extern int psx_gpu_hle_scale;
+// mame_psx_gpu_pgxp core option: PGXP-style geometry correction for the PS1
+// GPU HLE path above (see osdretro.h's gpu_render_pgxp_enabled() and
+// CLAUDE.md Phase 4) - only meaningful when psx_gpu_hle_scale > 0.
+extern bool psx_gpu_pgxp_enable;
 
 extern int fb_width;
 extern int fb_height;

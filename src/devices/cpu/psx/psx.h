@@ -131,6 +131,15 @@ public:
 	void berr_w(uint32_t data);
 	uint32_t berr_r();
 
+	// PGXP-style geometry correction (see CLAUDE.md Phase 4) - thin
+	// forwarders to the GTE's own cache, so psxgpu_device (which has no
+	// direct access to psxcpu_device internals otherwise) can look up a
+	// higher-precision vertex position by the same fixed-point SXY word a
+	// GP0 polygon command carries.
+	void set_pgxp_enabled(bool enabled) { m_gte.set_pgxp_enabled(enabled); }
+	bool pgxp_query(uint32_t sxy_word, float &x, float &y, float &w) const { return m_gte.pgxp_query(sxy_word, x, y, w); }
+	void pgxp_clear_cache() { m_gte.pgxp_clear_cache(); }
+
 	uint32_t exp_base();
 
 	void exp_base_w(offs_t offset, uint32_t data, uint32_t mem_mask = ~0);

@@ -389,6 +389,78 @@ uint32_t gte::Lm_E( uint32_t result )
 	return result;
 }
 
+// PGXP-style geometry/texture correction (CLAUDE.md Phase 4). Redoes
+// RTPS/RTPT's OFX/OFY + IR1_or_2 * (H/SZ3) perspective-projection step in
+// double precision, using mac1/mac2 (the pre-Lm_B-clamp, already
+// sf-shifted eye-space X/Y that IR1/IR2 are themselves derived from - see
+// A1()/A2()) instead of the saturated IR1/IR2, and a direct division
+// instead of the hardware's limited-precision reciprocal-table
+// approximation (gte_divide()). sz3 (the vertex's raw eye-space depth) is
+// cached as-is for perspective-correct texture/color interpolation - see
+// psxgpu_device::gpu_vertex_xyw() and retro_gpu_target's vertex shader.
+// This never changes any existing register/FLAG value - it only feeds a
+// cache consulted later, read-only, by psxgpu_device.
+// sxy_word packs SX in its low 16 bits and SY in its high 16 bits (see
+// SXY0..2's #defines above). A plain "% PGXP_CACHE_SIZE" would only ever
+// look at the low bits of SX - SY would never affect the cache index at
+// all, so two vertices at very different screen heights but similar X
+// would constantly clobber each other's entries. Mix both halves in
+// before reducing (lowbias32, a well-known integer hash finalizer) so the
+// index actually depends on the whole word.
+uint32_t gte::pgxp_hash( uint32_t key )
+{
+	key ^= key >> 16;
+	key *= 0x7feb352dU;
+	key ^= key >> 15;
+	key *= 0x846ca68bU;
+	key ^= key >> 16;
+	return key;
+}
+
+void gte::pgxp_cache_vertex( uint32_t sxy_word, int64_t mac1, int64_t mac2, int32_t sz3 )
+{
+	if( sz3 <= 0 )
+	{
+		// Degenerate/behind-camera vertex - gte_divide() itself saturates
+		// to its max clamp here (see Lm_E()); no meaningful precise value
+		// to cache, leave the integer-coordinate fallback in place.
+		return;
+	}
+
+	double h_over_sz3 = (double) H / (double) sz3;
+	double x = ( (double) OFX / 65536.0 ) + ( (double) mac1 * h_over_sz3 );
+	double y = ( (double) OFY / 65536.0 ) + ( (double) mac2 * h_over_sz3 );
+
+	pgxp_entry &entry = m_pgxp_cache[ pgxp_hash( sxy_word ) % PGXP_CACHE_SIZE ];
+	entry.key = sxy_word;
+	entry.x = (float) x;
+	entry.y = (float) y;
+	entry.w = (float) sz3;
+	entry.valid = true;
+}
+
+bool gte::pgxp_query( uint32_t sxy_word, float &x, float &y, float &w ) const
+{
+	const pgxp_entry &entry = m_pgxp_cache[ pgxp_hash( sxy_word ) % PGXP_CACHE_SIZE ];
+	if( !entry.valid || entry.key != sxy_word )
+	{
+		return false;
+	}
+
+	x = entry.x;
+	y = entry.y;
+	w = entry.w;
+	return true;
+}
+
+void gte::pgxp_clear_cache()
+{
+	for( auto &entry : m_pgxp_cache )
+	{
+		entry.valid = false;
+	}
+}
+
 int64_t gte::F( int64_t a )
 {
 	m_mac0 = a;
@@ -501,6 +573,10 @@ int gte::docop2( uint32_t pc, int gteop )
 		SY2 = Lm_G2( F( (int64_t) OFY + ( (int64_t) IR2 * h_over_sz3 ) ) >> 16 );
 		MAC0 = F( (int64_t) DQB + ( (int64_t) DQA * h_over_sz3 ) );
 		IR0 = Lm_H( m_mac0, 1 );
+		if( m_pgxp_enabled )
+		{
+			pgxp_cache_vertex( (uint32_t) SXY2, MAC1, MAC2, SZ3 );
+		}
 		return 1;
 
 	case 0x06:
@@ -852,6 +928,10 @@ int gte::docop2( uint32_t pc, int gteop )
 			SXY1 = SXY2;
 			SX2 = Lm_G1( F( (int64_t) OFX + ( (int64_t) IR1 * h_over_sz3 ) ) >> 16 );
 			SY2 = Lm_G2( F( (int64_t) OFY + ( (int64_t) IR2 * h_over_sz3 ) ) >> 16 );
+			if( m_pgxp_enabled )
+			{
+				pgxp_cache_vertex( (uint32_t) SXY2, MAC1, MAC2, SZ3 );
+			}
 		}
 
 		MAC0 = F( (int64_t) DQB + ( (int64_t) DQA * h_over_sz3 ) );

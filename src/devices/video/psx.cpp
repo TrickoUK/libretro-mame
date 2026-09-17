@@ -41,6 +41,7 @@ psxgpu_device::psxgpu_device(const machine_config &mconfig, device_type type, co
 	: psxgpu_device(mconfig, type, tag, owner, clock)
 {
 	vramSize = vram_size;
+	m_cpu = cpu;
 	cpu->gpu_read().set(tag, FUNC(psxgpu_device::read));
 	cpu->gpu_write().set(tag, FUNC(psxgpu_device::write));
 	cpu->subdevice<psxdma_device>("dma")->install_read_handler(2, psxdma_device::read_delegate(&psxgpu_device::dma_read, this));
@@ -83,6 +84,15 @@ void psxgpu_device::device_start()
 	{
 		psx_gpu_init( 2 );
 	}
+
+	// mame_psx_gpu_pgxp core option (CLAUDE.md Phase 4) - read once at
+	// boot, same as gpu_scale()/mame_psx_gpu_hle. Only meaningful when the
+	// GPU HLE path itself is active; harmless (never consulted) otherwise.
+	m_gpu_pgxp_enabled = machine().osd().gpu_render_pgxp_enabled();
+	if( m_cpu != nullptr )
+	{
+		m_cpu->set_pgxp_enabled( m_gpu_pgxp_enabled );
+	}
 }
 
 void psxgpu_device::device_reset()
@@ -93,6 +103,16 @@ void psxgpu_device::device_reset()
 int psxgpu_device::gpu_scale() const
 {
 	return machine().osd().gpu_render_scale();
+}
+
+bool psxgpu_device::gpu_pgxp_query( uint32_t sxy_word, float &x, float &y, float &w ) const
+{
+	if( !m_gpu_pgxp_enabled || m_cpu == nullptr )
+	{
+		return false;
+	}
+
+	return m_cpu->pgxp_query( sxy_word, x, y, w );
 }
 
 bool psxgpu_device::gpu_active()
@@ -1613,6 +1633,52 @@ void psxgpu_device::gpu_force_no_clip()
 	m_gpu_drawarea_cached = false;
 }
 
+bool psxgpu_device::gpu_vertex_xyw( PAIR n_coord, float &out_x, float &out_y, float &out_w ) const
+{
+	float px, py, pw;
+	if( gpu_pgxp_query( n_coord.d, px, py, pw ) )
+	{
+		out_x = ( px + n_drawoffset_x ) * gpu_scale();
+		out_y = ( py + n_drawoffset_y ) * gpu_scale();
+		out_w = pw;
+		return true;
+	}
+
+	out_x = (float)( S11_COORD_X( n_coord ) + n_drawoffset_x ) * gpu_scale();
+	out_y = (float)( S11_COORD_Y( n_coord ) + n_drawoffset_y ) * gpu_scale();
+	out_w = 1.0f;
+	return false;
+}
+
+// A PGXP cache miss on even one vertex of a triangle (eviction, or a
+// degenerate SZ3<=0 vertex never cached in the first place) must not be
+// allowed to mix that vertex's fallback w=1.0 with real, much larger
+// cached-depth w values on the other two - the resulting huge per-vertex
+// w disparity is exactly what produces severe "warp to a focal point"
+// texture distortion (see CLAUDE.md Phase 4). So correction is
+// all-or-nothing per primitive: if any vertex misses, every vertex in
+// that primitive reverts to the plain integer-coordinate/w=1.0 path,
+// matching pre-PGXP behavior for that primitive rather than partially
+// correcting it.
+void psxgpu_device::gpu_resolve_polygon_pgxp( const PAIR *n_coord, int n_points, osd::gpu_vertex *v ) const
+{
+	bool all_hit = true;
+	for( int i = 0; i < n_points; i++ )
+	{
+		all_hit = gpu_vertex_xyw( n_coord[ i ], v[ i ].x, v[ i ].y, v[ i ].w ) && all_hit;
+	}
+
+	if( !all_hit )
+	{
+		for( int i = 0; i < n_points; i++ )
+		{
+			v[ i ].x = (float)( S11_COORD_X( n_coord[ i ] ) + n_drawoffset_x ) * gpu_scale();
+			v[ i ].y = (float)( S11_COORD_Y( n_coord[ i ] ) + n_drawoffset_y ) * gpu_scale();
+			v[ i ].w = 1.0f;
+		}
+	}
+}
+
 bool psxgpu_device::gpu_submit_flat_polygon( int n_points )
 {
 	uint8_t n_cmd = BGR_C( m_packet.FlatPolygon.n_bgr );
@@ -1621,13 +1687,14 @@ bool psxgpu_device::gpu_submit_flat_polygon( int n_points )
 	float b = BGR_B( m_packet.FlatPolygon.n_bgr ) / 255.0f;
 
 	osd::gpu_vertex v[ 4 ];
+	PAIR coords[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
-		v[ i ].x = (float)( S11_COORD_X( m_packet.FlatPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * gpu_scale();
-		v[ i ].y = (float)( S11_COORD_Y( m_packet.FlatPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * gpu_scale();
+		coords[ i ] = m_packet.FlatPolygon.vertex[ i ].n_coord;
 		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
 		v[ i ].u = 0.0f; v[ i ].v = 0.0f;
 	}
+	gpu_resolve_polygon_pgxp( coords, n_points, v );
 
 	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, false, gpu_blend_mode_for( n_cmd ) );
 	return true;
@@ -1638,16 +1705,17 @@ bool psxgpu_device::gpu_submit_gouraud_polygon( int n_points )
 	uint8_t n_cmd = BGR_C( m_packet.GouraudPolygon.vertex[ 0 ].n_bgr );
 
 	osd::gpu_vertex v[ 4 ];
+	PAIR coords[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
-		v[ i ].x = (float)( S11_COORD_X( m_packet.GouraudPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * gpu_scale();
-		v[ i ].y = (float)( S11_COORD_Y( m_packet.GouraudPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * gpu_scale();
+		coords[ i ] = m_packet.GouraudPolygon.vertex[ i ].n_coord;
 		v[ i ].r = BGR_R( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].g = BGR_G( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].b = BGR_B( m_packet.GouraudPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].a = 1.0f;
 		v[ i ].u = 0.0f; v[ i ].v = 0.0f;
 	}
+	gpu_resolve_polygon_pgxp( coords, n_points, v );
 
 	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, false, gpu_blend_mode_for( n_cmd ) );
 	return true;
@@ -1670,14 +1738,15 @@ bool psxgpu_device::gpu_submit_flat_textured_polygon( int n_points )
 	float b = ( n_cmd & 0x01 ) ? ( 128.0f / 255.0f ) : ( BGR_B( m_packet.FlatTexturedPolygon.n_bgr ) / 255.0f );
 
 	osd::gpu_vertex v[ 4 ];
+	PAIR coords[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
-		v[ i ].x = (float)( S11_COORD_X( m_packet.FlatTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * gpu_scale();
-		v[ i ].y = (float)( S11_COORD_Y( m_packet.FlatTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * gpu_scale();
+		coords[ i ] = m_packet.FlatTexturedPolygon.vertex[ i ].n_coord;
 		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
 		v[ i ].u = (float)TEXTURE_U( m_packet.FlatTexturedPolygon.vertex[ i ].n_texture );
 		v[ i ].v = (float)TEXTURE_V( m_packet.FlatTexturedPolygon.vertex[ i ].n_texture );
 	}
+	gpu_resolve_polygon_pgxp( coords, n_points, v );
 
 	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, gpu_blend_mode_for( n_cmd ) );
 	return true;
@@ -1696,10 +1765,10 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 	gpu_maybe_set_texture_page( n_tx, n_ty, n_tp, n_clutx, n_cluty );
 
 	osd::gpu_vertex v[ 4 ];
+	PAIR coords[ 4 ];
 	for( int i = 0; i < n_points; i++ )
 	{
-		v[ i ].x = (float)( S11_COORD_X( m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_x ) * gpu_scale();
-		v[ i ].y = (float)( S11_COORD_Y( m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord ) + n_drawoffset_y ) * gpu_scale();
+		coords[ i ] = m_packet.GouraudTexturedPolygon.vertex[ i ].n_coord;
 		v[ i ].r = BGR_R( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].g = BGR_G( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
 		v[ i ].b = BGR_B( m_packet.GouraudTexturedPolygon.vertex[ i ].n_bgr ) / 255.0f;
@@ -1707,6 +1776,7 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 		v[ i ].u = (float)TEXTURE_U( m_packet.GouraudTexturedPolygon.vertex[ i ].n_texture );
 		v[ i ].v = (float)TEXTURE_V( m_packet.GouraudTexturedPolygon.vertex[ i ].n_texture );
 	}
+	gpu_resolve_polygon_pgxp( coords, n_points, v );
 
 	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, gpu_blend_mode_for( n_cmd ) );
 	return true;
@@ -2022,6 +2092,19 @@ void psxgpu_device::gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int 
 // un-resubmitted parts going black.
 uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 {
+	// Every GTE-sourced vertex this now-finished frame will ever need has
+	// already been both cached (RTPS/RTPT, during this frame's CPU
+	// execution) and consumed (gpu_resolve_polygon_pgxp(), called inline
+	// as each GP0 polygon command was processed, also during this frame's
+	// CPU execution - well before this end-of-frame call). Clearing here,
+	// right as the next frame's CPU execution is about to resume, bounds
+	// any cache entry's lifetime to at most one frame - see
+	// gte::pgxp_clear_cache()'s comment for the staleness bug this avoids.
+	if( m_gpu_pgxp_enabled && m_cpu != nullptr )
+	{
+		m_cpu->pgxp_clear_cache();
+	}
+
 	int w = n_screenwidth * gpu_scale();
 
 	// The actual GPU target is sized to full VRAM height, not just the

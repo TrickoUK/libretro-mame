@@ -138,6 +138,13 @@ public:
 	// case safely for any caller that queries it regardless.
 	virtual int gpu_render_scale() const { return 1; }
 
+	// Whether GTE-sourced GPU polygon vertices should be corrected using
+	// PGXP-style geometry correction (see the retro OSD's
+	// mame_psx_gpu_pgxp core option and CLAUDE.md Phase 4) - meaningless/
+	// unspecified when gpu_render_available() is false, same as
+	// gpu_render_scale(); default of false covers that case safely.
+	virtual bool gpu_render_pgxp_enabled() const { return false; }
+
 protected:
 	virtual ~osd_interface() { }
 };

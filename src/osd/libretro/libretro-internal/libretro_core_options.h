@@ -525,6 +525,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
+      CORE_NAME "_psx_gpu_pgxp",
+      "PS1 GPU PGXP Geometry Correction (Experimental)",
+      NULL,
+      "Only affects GTE-sourced polygons when PS1 GPU Hardware Rendering above is also enabled. Redoes the PS1 geometry transform in floating point instead of the console's low-precision fixed-point math, reducing vertex 'wobble' on distant/small geometry. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "enabled",  "Enabled" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
       CORE_NAME "_cpu_overclock",
       "Main CPU Overclock %",
       NULL,

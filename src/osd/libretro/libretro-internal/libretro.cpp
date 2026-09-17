@@ -469,6 +469,13 @@ static void check_variables(void)
          psx_gpu_hle_scale = 4;
    }
 
+   var.key   = CORE_NAME "_psx_gpu_pgxp";
+   var.value = NULL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      psx_gpu_pgxp_enable = !strcmp(var.value, "enabled");
+   }
+
    var.key   = CORE_NAME "_lightgun_mode";
    var.value = NULL;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)

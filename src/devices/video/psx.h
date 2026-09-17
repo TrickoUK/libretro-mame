@@ -306,6 +306,37 @@ private:
 	// by other drivers, not fully defined.
 	int gpu_scale() const;
 
+	// PGXP-style geometry correction (CLAUDE.md Phase 4): the CPU whose
+	// GTE may have a higher-precision cached position for a polygon
+	// vertex, keyed by that vertex's fixed-point SXY word - see
+	// gpu_pgxp_query() below. Stored from the psxcpu_device* every current
+	// caller already passes into the psxgpu_device constructor (previously
+	// used only to wire GPU read/write ports and DMA/IRQ, then discarded);
+	// no machine-config changes needed for any existing driver.
+	psxcpu_device *m_cpu = nullptr;
+
+	// Looks up a higher-precision (x,y) and a real perspective depth (w)
+	// for a GTE-sourced polygon vertex, read once at device_start()/
+	// device_reset() into m_gpu_pgxp_enabled (mame_psx_gpu_pgxp core
+	// option) so the four polygon gpu_submit_* functions can skip the
+	// lookup entirely when the feature is off.
+	bool m_gpu_pgxp_enabled = false;
+	bool gpu_pgxp_query( uint32_t sxy_word, float &x, float &y, float &w ) const;
+
+	// Shared by all four GTE-sourced polygon primitives (gpu_submit_flat_
+	// polygon/gouraud_polygon/flat_textured_polygon/gouraud_textured_
+	// polygon): resolves one vertex's target-space (x,y) and its
+	// osd::gpu_vertex::w (perspective-correct-interpolation divisor,
+	// see gpurender.h), preferring a PGXP cache hit over the plain
+	// integer-coordinate + draw-offset + scale computation (and the
+	// affine-interpolation default w=1.0) when available.
+	bool gpu_vertex_xyw( PAIR n_coord, float &out_x, float &out_y, float &out_w ) const;
+
+	// All-or-nothing wrapper around gpu_vertex_xyw() for a whole polygon's
+	// n_points vertices - see its definition in psx.cpp for why partial
+	// per-vertex correction must be avoided.
+	void gpu_resolve_polygon_pgxp( const PAIR *n_coord, int n_points, osd::gpu_vertex *v ) const;
+
 	// Avoids re-issuing a set_texture_page() GL state change on every single
 	// textured polygon when consecutive polygons share one texture page -
 	// see gpu_maybe_set_texture_page() in psx.cpp. -1 means "nothing set

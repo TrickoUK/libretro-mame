@@ -125,6 +125,14 @@ public:
 		return 1;
 #endif
 	}
+	virtual bool gpu_render_pgxp_enabled() const override
+	{
+#if defined(HAVE_RETRO_GPU_TARGET)
+		return psx_gpu_pgxp_enable;
+#else
+		return false;
+#endif
+	}
 	virtual osd::gpu_render_target *get_gpu_render_target() override;
 
 private:

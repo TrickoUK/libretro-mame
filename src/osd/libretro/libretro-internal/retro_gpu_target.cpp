@@ -333,11 +333,24 @@ bool ensure_dispatch_loaded()
 	return true;
 }
 
+/* a_w (osd::gpu_vertex::w) is a perspective divisor for v_color/v_uv
+ * interpolation only - it never moves the final screen position. Standard
+ * "keep position, correct interpolation" trick: emitting clip.xyz =
+ * ndc*w, clip.w = w means the GPU's own perspective divide (clip.xyz /
+ * clip.w) recovers exactly ndc.xy unchanged ((ndc*w)/w == ndc), while
+ * every varying is interpolated using OpenGL's standard perspective-
+ * correct rule (weighted by 1/clip.w per vertex) instead of the flat/
+ * affine interpolation a constant w=1 produces. a_w defaults to 1.0 for
+ * every vertex without real PGXP depth data (see gpurender.h), which
+ * makes this bit-for-bit identical to the previous hardcoded-w=1.0
+ * behavior (original PS1-accurate affine warping) for anything that
+ * isn't PGXP-corrected. */
 const char *vertex_shader_src =
 	"#version 330 core\n"
 	"layout(location=0) in vec2 a_pos;\n"
 	"layout(location=1) in vec4 a_color;\n"
 	"layout(location=2) in vec2 a_uv;\n"
+	"layout(location=3) in float a_w;\n"
 	"uniform vec2 u_target_size;\n"
 	"out vec4 v_color;\n"
 	"out vec2 v_uv;\n"
@@ -346,7 +359,7 @@ const char *vertex_shader_src =
 	"    v_uv = a_uv;\n"
 	"    float ndc_x = (a_pos.x / u_target_size.x) * 2.0 - 1.0;\n"
 	"    float ndc_y = 1.0 - (a_pos.y / u_target_size.y) * 2.0;\n"
-	"    gl_Position = vec4(ndc_x, ndc_y, 0.0, 1.0);\n"
+	"    gl_Position = vec4(ndc_x * a_w, ndc_y * a_w, 0.0, a_w);\n"
 	"}\n";
 
 /* Textured mode treats v_color as a PS1-style modulation factor (0.5 = the
@@ -601,6 +614,8 @@ bool retro_gpu_target::init_context()
 	g_gl.VertexAttribPointer(1, 4, GL_FLOAT, 0, sizeof(osd::gpu_vertex), (void*)offsetof(osd::gpu_vertex, r));
 	g_gl.EnableVertexAttribArray(2);
 	g_gl.VertexAttribPointer(2, 2, GL_FLOAT, 0, sizeof(osd::gpu_vertex), (void*)offsetof(osd::gpu_vertex, u));
+	g_gl.EnableVertexAttribArray(3);
+	g_gl.VertexAttribPointer(3, 1, GL_FLOAT, 0, sizeof(osd::gpu_vertex), (void*)offsetof(osd::gpu_vertex, w));
 
 	g_gl.GenTextures(1, &m_vram_tex);
 
