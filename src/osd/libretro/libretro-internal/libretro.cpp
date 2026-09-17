@@ -969,6 +969,33 @@ bool retro_load_game(const struct retro_game_info *info)
 
    check_variables();
 
+   // The PS1 GPU HLE path (psxgpu_device, see CLAUDE.md) declares a
+   // screen resolution scaled up by psx_gpu_hle_scale (2x/4x), but
+   // max_width/max_height above default to a fixed 720x720 sized for the
+   // *unscaled* software-rendering path. A scaled resolution that exceeds
+   // that stale max forces window.cpp's compute_minimum_size() to bump
+   // max_width/max_height and set VIDEO_CHANGED_AV_INFO instead of the
+   // cheap VIDEO_CHANGED_GEOMETRY, which sends a full
+   // RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO mid-session - RetroArch handles
+   // that by tearing down and reinitializing its entire video driver
+   // (command_event_reinit() -> driver_uninit() -> video_thread_free()).
+   // Games whose GPU writes several display-mode changes during boot
+   // (e.g. gdarius2 on Sony ZN, src/mame/sony/zn.cpp) can hit that
+   // teardown/reinit path while RetroArch's threaded video driver is
+   // still mid-flight, corrupting its heap and crashing with "double
+   // free or corruption" inside video_thread_free() - confirmed via gdb
+   // backtrace (2026-09-17). Pre-scaling max_width/max_height here,
+   // before the machine starts and before the first SET_SYSTEM_AV_INFO
+   // is ever sent, means every in-session resolution change for this
+   // path stays within the declared max and only takes the cheap
+   // SET_GEOMETRY route - sidesteps the RetroArch-side bug entirely
+   // rather than trying to fix RetroArch's own reinit path.
+   if (psx_gpu_hle_scale > 0)
+   {
+      max_width  *= psx_gpu_hle_scale;
+      max_height *= psx_gpu_hle_scale;
+   }
+
 //FIXME: re-add way to handle OGL
 #if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES)
 #if defined(HAVE_OPENGLES)
