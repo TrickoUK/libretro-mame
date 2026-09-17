@@ -529,6 +529,48 @@ no crash, no ghosting; `brvblade` re-verified unaffected by either fix):
    duplicate band and CLUT swatch with the border-crop fix; `gdarius2`,
    `starswep`, `brvblade` re-confirmed unaffected.
 
+### Taito G-NET (`src/mame/sony/taitogn.cpp`) - confirmed working, no code changes needed (2026-09-17)
+
+`taitogn_state` directly inherits `zn_state` (`taitogn.cpp:347-348`) - the
+exact same base class `gdarius2`/`raystorm`/`brvblade` use - and its
+`coh3002t()` machine config calls `zn2()` (`zn.cpp:91-96`), which wires up
+the identical `psxgpu_device` (`CXD8654Q`, 2MB VRAM instead of the 1MB on
+the ZN1 boards tested above - `m_vram_height` comes out to 1024 instead of
+512, already handled dynamically, no special-casing needed). No
+`screen_update` override, no custom video file - `taitogn.cpp` has zero
+driver-specific video code. Confirmed live: booted **RayCrisis** (`raycris`)
+with `mame_psx_gpu_hle = "2x"` already set, clean boot, GPU target
+initialized, `SET_SYSTEM_AV_INFO: 512x480` (correctly 2x-scaled), no
+crashes, reached real attract-mode gameplay.
+
+**G-NET titles are CHD-based** (PC-card flash disk images), unlike the
+ZIP-only ZN1/ZN2 games tested elsewhere in this doc - `raycris`/`raycrisj`
+are the only ones with CHDs in the local collection; `chaoshea`, `shikigam`,
+`spuzbobl` etc. only have the BIOS/flash ROM zips, not their matching CHDs,
+so aren't testable here without those disk images. Loading quirk: pointing
+RetroArch at the `.chd` file directly failed (`Error: unknown option:
+raycris`, a content-parsing bug in this OSD unrelated to the PS1 GPU work) -
+pointing at the **containing directory** instead (e.g.
+`mame-roms/roms/raycris/`) works.
+
+**Long boot sequence is real hardware behavior, not fixable** - real G-NET
+boards re-flash their PC-card contents against onboard flash chips on
+every boot where the cart doesn't already match, taking "approximately 2-3
+minutes" per the driver's own source comment (`taitogn.cpp:17-22`); MAME's
+`intelfsh16_device` emulation faithfully reproduces this. It's a one-time
+cost, not a per-launch one, though: this OSD already persists flash chip
+contents via MAME's standard NVRAM mechanism (`-nvram_directory`, wired up
+in `retro_init.cpp` - confirmed real files being written to
+`<retroarch system dir>/mame/nvram/<gamename>/` on clean exit: `firm`,
+`wave0`-`wave2`, `zoomprog`, `at28c16`). Verified via timing: a clean-NVRAM
+`raycris` boot took ~4 minutes to reach attract-mode gameplay; relaunching
+immediately after (NVRAM now populated from that completed boot) reached
+the same milestone in well under 90 seconds - roughly 3x faster, matching
+what a real cabinet would do on a cart it's already flashed once. **The
+practical guidance, not a bug to chase**: let the very first boot of each
+G-NET title run to completion (don't kill it early) - every launch after
+that will be fast, same as real hardware.
+
 ### Next planned work: rendering quality (PGXP-style correction) - not started
 
 **User's intent (2026-09-16): this is the next thing to work on, in a
