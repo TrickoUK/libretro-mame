@@ -483,6 +483,18 @@ static void check_variables(void)
       psx_gpu_msaa_enable = !strcmp(var.value, "enabled");
    }
 
+   var.key   = CORE_NAME "_psx_gpu_texfilter";
+   var.value = NULL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "disabled"))
+         psx_gpu_texfilter_mode = 0;
+      if (!strcmp(var.value, "bilinear"))
+         psx_gpu_texfilter_mode = 1;
+      if (!strcmp(var.value, "trilinear"))
+         psx_gpu_texfilter_mode = 2;
+   }
+
    var.key   = CORE_NAME "_lightgun_mode";
    var.value = NULL;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)

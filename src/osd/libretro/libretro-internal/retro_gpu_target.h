@@ -38,7 +38,11 @@ public:
 	// zero-sample renderbuffer is spec-legal and behaves as a plain
 	// single-sample one, so this costs one harmless extra blit per frame
 	// when disabled, not a code fork).
-	explicit retro_gpu_target(int msaa_samples = 4);
+	// texfilter_mode: 0 = nearest (PS1-accurate, default), 1 = bilinear,
+	// 2 = trilinear (bilinear + a coarser box-filtered blend on minified
+	// polygons - see fragment_shader_src in the .cpp for why there's no
+	// real mip chain involved).
+	explicit retro_gpu_target(int msaa_samples = 4, int texfilter_mode = 0);
 	virtual ~retro_gpu_target();
 
 	// non-copyable: owns GPU resources
@@ -48,8 +52,8 @@ public:
 	virtual void begin_frame(int width, int height) override;
 	virtual void upload_vram(const uint16_t *vram_words, int width, int height) override;
 	virtual void set_texture_page(int tx, int ty, int tp, int clutx, int cluty) override;
-	virtual void submit_triangle(const osd::gpu_vertex tri[3], bool textured, osd::gpu_blend_mode blend) override;
-	virtual void submit_triangles(const osd::gpu_vertex *verts, int count, bool textured, osd::gpu_blend_mode blend) override;
+	virtual void submit_triangle(const osd::gpu_vertex tri[3], bool textured, osd::gpu_blend_mode blend, bool filterable = true) override;
+	virtual void submit_triangles(const osd::gpu_vertex *verts, int count, bool textured, osd::gpu_blend_mode blend, bool filterable = true) override;
 	virtual void end_frame_and_readback(uint32_t *rgba_out) override;
 	virtual void set_clip_rect(int x1, int y1, int x2, int y2) override;
 	virtual void copy_rect(int sx, int sy, int dx, int dy, int w, int h) override;
@@ -144,6 +148,9 @@ private:
 	int m_u_clutx_loc;
 	int m_u_cluty_loc;
 	int m_u_vram_height_loc;
+	int m_u_texfilter_loc;
+
+	int m_texfilter_mode;
 
 	osd::gpu_blend_mode m_current_blend;
 

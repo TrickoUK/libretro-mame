@@ -75,6 +75,7 @@ char debug_plugin[32] = "";
 int psx_gpu_hle_scale = 0;
 bool psx_gpu_pgxp_enable = false;
 bool psx_gpu_msaa_enable = true;
+int psx_gpu_texfilter_mode = 0;
 
 // emu flags
 static bool arcade = false;

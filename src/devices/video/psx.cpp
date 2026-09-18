@@ -1571,12 +1571,13 @@ void psxgpu_device::gpu_maybe_set_clip_rect()
 	m_gpu_last_drawarea_y2 = n_drawarea_y2;
 }
 
-void psxgpu_device::gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend )
+void psxgpu_device::gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable )
 {
 	gpu_queued_cmd cmd;
 	cmd.kind = gpu_queued_cmd::kind_t::TRIANGLE;
 	cmd.tri[ 0 ] = v0; cmd.tri[ 1 ] = v1; cmd.tri[ 2 ] = v2;
 	cmd.textured = textured;
+	cmd.filterable = filterable;
 	cmd.blend = blend;
 	m_gpu_queue.push_back( std::move( cmd ) );
 
@@ -1586,15 +1587,16 @@ void psxgpu_device::gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const os
 		cmd2.kind = gpu_queued_cmd::kind_t::TRIANGLE;
 		cmd2.tri[ 0 ] = v1; cmd2.tri[ 1 ] = v2; cmd2.tri[ 2 ] = v3;
 		cmd2.textured = textured;
+		cmd2.filterable = filterable;
 		cmd2.blend = blend;
 		m_gpu_queue.push_back( std::move( cmd2 ) );
 	}
 }
 
-void psxgpu_device::gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend )
+void psxgpu_device::gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable )
 {
 	gpu_maybe_set_clip_rect();
-	gpu_queue_triangle_pair( v0, v1, v2, v3, n_points, textured, blend );
+	gpu_queue_triangle_pair( v0, v1, v2, v3, n_points, textured, blend, filterable );
 }
 
 // A few PS1 GPU commands (Fill Rectangle in VRAM/0x02, CPU-to-VRAM image
@@ -1716,6 +1718,29 @@ bool psxgpu_device::gpu_submit_gouraud_polygon( int n_points )
 	return true;
 }
 
+// See gpu_vertex::u_min/v_min/u_max/v_max in gpurender.h - stamps this
+// primitive's own UV bounding box onto every one of its vertices, so a
+// filtered sample (see submit_triangle(s)'s filterable parameter) can't
+// bleed past this polygon's own texture footprint into whatever's packed
+// next to it in the same shared VRAM texture page.
+void psxgpu_device::gpu_set_polygon_uv_clamp( osd::gpu_vertex *v, int n_points )
+{
+	float u_min = v[ 0 ].u, u_max = v[ 0 ].u;
+	float v_min = v[ 0 ].v, v_max = v[ 0 ].v;
+	for( int i = 1; i < n_points; i++ )
+	{
+		u_min = std::min( u_min, v[ i ].u );
+		u_max = std::max( u_max, v[ i ].u );
+		v_min = std::min( v_min, v[ i ].v );
+		v_max = std::max( v_max, v[ i ].v );
+	}
+	for( int i = 0; i < n_points; i++ )
+	{
+		v[ i ].u_min = u_min; v[ i ].u_max = u_max;
+		v[ i ].v_min = v_min; v[ i ].v_max = v_max;
+	}
+}
+
 bool psxgpu_device::gpu_submit_flat_textured_polygon( int n_points )
 {
 	uint8_t n_cmd = BGR_C( m_packet.FlatTexturedPolygon.n_bgr );
@@ -1744,6 +1769,7 @@ bool psxgpu_device::gpu_submit_flat_textured_polygon( int n_points )
 		v[ i ].v = (float)TEXTURE_V( m_packet.FlatTexturedPolygon.vertex[ i ].n_texture );
 	}
 	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
+	gpu_set_polygon_uv_clamp( v, n_points );
 
 	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, gpu_blend_mode_for( n_cmd ) );
 	return true;
@@ -1776,6 +1802,7 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 		v[ i ].v = (float)TEXTURE_V( m_packet.GouraudTexturedPolygon.vertex[ i ].n_texture );
 	}
 	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
+	gpu_set_polygon_uv_clamp( v, n_points );
 
 	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, gpu_blend_mode_for( n_cmd ) );
 	return true;
@@ -1860,7 +1887,11 @@ bool psxgpu_device::gpu_submit_textured_rectangle( int32_t n_x, int32_t n_y, int
 		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
 	}
 
-	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, true, gpu_blend_mode_for( n_cmd ) );
+	// filterable=false: sprites/2D-rectangle draws (also covers dots, which
+	// delegate here as a 1x1 sprite) are pixel-art-style content - PS1
+	// games routinely use these for HUD/text/UI, which should stay crisp
+	// even with texture filtering enabled for true 3D polygon geometry.
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, true, gpu_blend_mode_for( n_cmd ), false );
 	return true;
 }
 
@@ -1940,7 +1971,11 @@ bool psxgpu_device::gpu_submit_image_stamp( int32_t n_x, int32_t n_y, int32_t n_
 	}
 
 	gpu_force_no_clip();
-	gpu_queue_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, true, osd::gpu_blend_mode::NONE );
+	// filterable=false: this is a verbatim CPU-to-VRAM pixel copy (see the
+	// comment above gpu_submit_image_stamp()), not a game asset meant to be
+	// viewed smoothed/scaled - filtering it would blur data that's often
+	// not even an image (e.g. a CLUT table stashed in VRAM).
+	gpu_queue_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, true, osd::gpu_blend_mode::NONE, false );
 	return true;
 }
 
@@ -2076,10 +2111,11 @@ void psxgpu_device::gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int 
 // Replays this frame's queued set_texture_page()/set_clip_rect()/triangle
 // commands (see the m_gpu_queue comment in psx.h), reads the result back
 // into bitmap, then clears the queue for the next frame. Consecutive
-// TRIANGLE commands sharing the same textured/blend state are merged into
-// one osd::gpu_render_target::submit_triangles() call instead of replayed
-// one triangle (one GL draw call) at a time - a run only needs to break on
-// an actual state change (different textured/blend) or an intervening
+// TRIANGLE commands sharing the same textured/blend/filterable state are
+// merged into one osd::gpu_render_target::submit_triangles() call instead
+// of replayed one triangle (one GL draw call) at a time - a run only needs
+// to break on an actual state change (different textured/blend/filterable)
+// or an intervening
 // TEXTURE/CLIP command (which changes what subsequent triangles should
 // look like, so can't be reordered past). The GPU target itself is NOT
 // cleared here (see retro_gpu_target::resize_target()) - it models PS1
@@ -2125,12 +2161,13 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 
 	std::vector<osd::gpu_vertex> run;
 	bool run_textured = false;
+	bool run_filterable = true;
 	osd::gpu_blend_mode run_blend = osd::gpu_blend_mode::NONE;
-	auto flush_run = [ this, &run, &run_textured, &run_blend ]()
+	auto flush_run = [ this, &run, &run_textured, &run_filterable, &run_blend ]()
 	{
 		if( !run.empty() )
 		{
-			m_gpu_render_target->submit_triangles( run.data(), (int)run.size(), run_textured, run_blend );
+			m_gpu_render_target->submit_triangles( run.data(), (int)run.size(), run_textured, run_blend, run_filterable );
 			run.clear();
 		}
 	};
@@ -2140,9 +2177,10 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 		switch( cmd.kind )
 		{
 		case gpu_queued_cmd::kind_t::TRIANGLE:
-			if( !run.empty() && ( cmd.textured != run_textured || cmd.blend != run_blend ) )
+			if( !run.empty() && ( cmd.textured != run_textured || cmd.blend != run_blend || cmd.filterable != run_filterable ) )
 				flush_run();
 			run_textured = cmd.textured;
+			run_filterable = cmd.filterable;
 			run_blend = cmd.blend;
 			run.push_back( cmd.tri[ 0 ] );
 			run.push_back( cmd.tri[ 1 ] );

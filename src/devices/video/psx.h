@@ -266,7 +266,7 @@ private:
 	//
 	// A structured list (not opaque closures) so gpu_update_screen() can
 	// also merge consecutive TRIANGLE commands that share the same
-	// textured/blend state into one larger osd::gpu_render_target::
+	// textured/blend/filterable state into one larger osd::gpu_render_target::
 	// submit_triangles() call instead of replaying them one triangle (one
 	// GL draw call) at a time - per-draw-call overhead, independent of the
 	// EGL context-switching problem above, is itself significant for a
@@ -276,6 +276,7 @@ private:
 		enum class kind_t { TRIANGLE, TEXPARAM, CLIP, COPY } kind;
 		osd::gpu_vertex tri[3];
 		bool textured = false;
+		bool filterable = true;
 		osd::gpu_blend_mode blend = osd::gpu_blend_mode::NONE;
 		int tex_tx = 0, tex_ty = 0, tex_tp = 0, tex_clutx = 0, tex_cluty = 0;
 		int clip_x1 = 0, clip_y1 = 0, clip_x2 = 0, clip_y2 = 0;
@@ -283,10 +284,11 @@ private:
 	};
 	std::vector<gpu_queued_cmd> m_gpu_queue;
 	osd::gpu_blend_mode gpu_blend_mode_for( uint8_t n_cmd ) const;
-	void gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend );
-	void gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend );
+	void gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable = true );
+	void gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable = true );
 	void gpu_force_no_clip();
 	bool gpu_submit_flat_polygon( int n_points );
+	static void gpu_set_polygon_uv_clamp( osd::gpu_vertex *v, int n_points );
 	bool gpu_submit_flat_textured_polygon( int n_points );
 	bool gpu_submit_gouraud_polygon( int n_points );
 	bool gpu_submit_gouraud_textured_polygon( int n_points );

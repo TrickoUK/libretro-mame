@@ -155,6 +155,15 @@ public:
 	// covers that case safely.
 	virtual int gpu_render_msaa_samples() const { return 0; }
 
+	// Texture filtering mode for the GPU render target (0 = disabled/
+	// nearest, PS1-accurate; 1 = bilinear; 2 = trilinear) - user-selectable
+	// where the OSD supports it (see the retro OSD's mame_psx_gpu_texfilter
+	// core option). Read once, at get_gpu_render_target()'s first (lazy)
+	// construction of the target, same as gpu_render_msaa_samples().
+	// Meaningless/unspecified when gpu_render_available() is false;
+	// default of 0 covers that case safely.
+	virtual int gpu_render_texfilter() const { return 0; }
+
 protected:
 	virtual ~osd_interface() { }
 };

@@ -49,6 +49,19 @@ struct gpu_vertex
 	float w = 1.0f;
 	float r, g, b, a;
 	float u, v;
+	// Texel-space rectangle (same units as u/v) that a filtered (see
+	// submit_triangle(s)'s filterable parameter) sample is allowed to pull
+	// neighbor taps from - the source primitive's own UV footprint, i.e.
+	// the min/max of u/v across all of that primitive's vertices. Bilinear/
+	// trilinear taps landing outside this rectangle are clamped back into
+	// it (clamp-to-edge) instead of reading whatever unrelated texture
+	// data happens to be packed next to it in the same shared VRAM texture
+	// page - without this, filtering a real primitive can visibly bleed in
+	// a neighboring, unrelated sprite/texture's colors at its edges.
+	// Defaults to a whole 256x256 texture page (the maximum any texture
+	// page addressing mode can reach), a safe fallback for any submitter
+	// that doesn't compute a tighter bound.
+	float u_min = 0.0f, v_min = 0.0f, u_max = 255.0f, v_max = 255.0f;
 };
 
 // PS1-style semi-transparency blend modes (also usable by other future
@@ -93,21 +106,27 @@ public:
 
 	// submit one triangle, drawn with the given blend mode against
 	// whatever is already in the target. textured=false ignores u/v and
-	// uses per-vertex color only.
-	virtual void submit_triangle(const gpu_vertex tri[3], bool textured, gpu_blend_mode blend) = 0;
+	// uses per-vertex color only. filterable (textured draws only) tells
+	// the backend whether the caller's user-selected texture-filtering
+	// option (bilinear/trilinear) should apply to this draw at all - true
+	// for real 3D-textured polygon geometry, false for pixel-art-style
+	// draws (2D sprites, UI/HUD, raw VRAM copies) where smoothing would
+	// blur content designed to be shown 1:1. Ignored when textured=false.
+	virtual void submit_triangle(const gpu_vertex tri[3], bool textured, gpu_blend_mode blend, bool filterable = true) = 0;
 
 	// submit `count` vertices (a multiple of 3, i.e. count/3 triangles) as
-	// one batch, all sharing the same textured/blend state - equivalent to
-	// calling submit_triangle() count/3 times, but as a single underlying
-	// draw call. Significantly cheaper for many triangles sharing state
-	// (the common case - see psxgpu_device::gpu_update_screen(), which
-	// groups its queued triangles into runs before calling this). Default
-	// implementation just loops submit_triangle() for callers/backends
-	// that don't need the batched path.
-	virtual void submit_triangles(const gpu_vertex *verts, int count, bool textured, gpu_blend_mode blend)
+	// one batch, all sharing the same textured/blend/filterable state -
+	// equivalent to calling submit_triangle() count/3 times, but as a
+	// single underlying draw call. Significantly cheaper for many
+	// triangles sharing state (the common case - see psxgpu_device::
+	// gpu_update_screen(), which groups its queued triangles into runs
+	// before calling this). Default implementation just loops
+	// submit_triangle() for callers/backends that don't need the batched
+	// path.
+	virtual void submit_triangles(const gpu_vertex *verts, int count, bool textured, gpu_blend_mode blend, bool filterable = true)
 	{
 		for (int i = 0; i + 3 <= count; i += 3)
-			submit_triangle(&verts[i], textured, blend);
+			submit_triangle(&verts[i], textured, blend, filterable);
 	}
 
 	// finish rendering and read the target back into a caller-owned RGBA8

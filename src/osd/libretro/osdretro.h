@@ -141,6 +141,14 @@ public:
 		return 0;
 #endif
 	}
+	virtual int gpu_render_texfilter() const override
+	{
+#if defined(HAVE_RETRO_GPU_TARGET)
+		return psx_gpu_texfilter_mode;
+#else
+		return 0;
+#endif
+	}
 	virtual osd::gpu_render_target *get_gpu_render_target() override;
 
 private:

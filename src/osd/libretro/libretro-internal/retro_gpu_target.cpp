@@ -362,12 +362,15 @@ const char *vertex_shader_src =
 	"layout(location=1) in vec4 a_color;\n"
 	"layout(location=2) in vec2 a_uv;\n"
 	"layout(location=3) in float a_w;\n"
+	"layout(location=4) in vec4 a_uv_clamp;\n"
 	"uniform vec2 u_target_size;\n"
 	"out vec4 v_color;\n"
 	"out vec2 v_uv;\n"
+	"out vec4 v_uv_clamp;\n"
 	"void main() {\n"
 	"    v_color = a_color;\n"
 	"    v_uv = a_uv;\n"
+	"    v_uv_clamp = a_uv_clamp;\n"
 	"    float ndc_x = (a_pos.x / u_target_size.x) * 2.0 - 1.0;\n"
 	"    float ndc_y = 1.0 - (a_pos.y / u_target_size.y) * 2.0;\n"
 	"    gl_Position = vec4(ndc_x * a_w, ndc_y * a_w, 0.0, a_w);\n"
@@ -395,12 +398,42 @@ const char *vertex_shader_src =
  * entirely; a zero-valued texel (n_bgr == 0) is the PS1 GPU's
  * "transparent, don't draw" marker and is discarded rather than blended,
  * exactly as the CPU path's n_bgr == 0 check does. */
+/* u_texfilter: 0 = nearest (bit-exact with the original PS1-accurate
+ * unfiltered lookup below), 1 = bilinear, 2 = trilinear.
+ *
+ * decode_texel() is the same page/CLUT addressing as before, just factored
+ * out so it can be called at multiple integer (u,v) taps for filtering.
+ * bgr == 0u ("transparent, don't draw") is carried through as alpha 0
+ * instead of an unconditional discard, so a filtered tap that lands off
+ * the edge of a sprite can be excluded from the weighted blend rather than
+ * always killing the whole fragment - each filter function renormalizes
+ * over only the taps that hit real texel data, and only discards if every
+ * tap it sampled was transparent.
+ *
+ * Neither filter mode has any per-object knowledge of a sprite/polygon's
+ * own UV rect (only raw texel addresses reach this shader), so a bilinear
+ * tap can still cross into an unrelated image packed into the same 256x256
+ * VRAM texture page - the well-known "edge bleeding" artifact shared by
+ * every other PS1 HLE renderer's texture filtering (e.g. Beetle PSX HW).
+ * Not fixed here; see CLAUDE.md if revisiting.
+ *
+ * Trilinear has no real mip chain to sample (PS1 has none, and the CLUT
+ * decode happens per-fragment from raw VRAM, not a precomputed RGBA
+ * texture that could have mipmaps generated for it). Instead it blends
+ * the normal bilinear (level 0) sample with a coarser, box-filtered
+ * sample taken on a texel grid spaced 2 apart (an approximate "level 1"),
+ * weighted by how minified the polygon is in screen space (via
+ * dFdx/dFdy(v_uv)) - this smooths shimmering on receding/distant polygons
+ * similarly to real trilinear filtering without requiring precomputed
+ * mip levels. */
 const char *fragment_shader_src =
 	"#version 330 core\n"
 	"in vec4 v_color;\n"
 	"in vec2 v_uv;\n"
+	"in vec4 v_uv_clamp;\n"
 	"uniform usampler2D u_tex;\n"
 	"uniform int u_textured;\n"
+	"uniform int u_texfilter;\n"
 	"uniform int u_tp;\n"
 	"uniform int u_tx;\n"
 	"uniform int u_ty;\n"
@@ -408,35 +441,82 @@ const char *fragment_shader_src =
 	"uniform int u_cluty;\n"
 	"uniform int u_vram_height;\n"
 	"out vec4 frag_color;\n"
+	"vec4 decode_texel(int u, int v) {\n"
+	"    int row = (u_ty + v) % u_vram_height;\n"
+	"    int clutrow = u_cluty % u_vram_height;\n"
+	"    uint bgr;\n"
+	"    if (u_tp == 0) {\n"
+	"        int col = (u_tx + (u >> 2)) & 1023;\n"
+	"        uint word = texelFetch(u_tex, ivec2(col, row), 0).r;\n"
+	"        uint idx = (word >> uint((u & 3) << 2)) & 0x0Fu;\n"
+	"        int clutcol = (u_clutx + int(idx)) & 1023;\n"
+	"        bgr = texelFetch(u_tex, ivec2(clutcol, clutrow), 0).r;\n"
+	"    } else if (u_tp == 1) {\n"
+	"        int col = (u_tx + (u >> 1)) & 1023;\n"
+	"        uint word = texelFetch(u_tex, ivec2(col, row), 0).r;\n"
+	"        uint idx = (word >> uint((u & 1) << 3)) & 0xFFu;\n"
+	"        int clutcol = (u_clutx + int(idx)) & 1023;\n"
+	"        bgr = texelFetch(u_tex, ivec2(clutcol, clutrow), 0).r;\n"
+	"    } else {\n"
+	"        int col = (u_tx + u) & 1023;\n"
+	"        bgr = texelFetch(u_tex, ivec2(col, row), 0).r;\n"
+	"    }\n"
+	"    if (bgr == 0u) return vec4(0.0);\n"
+	"    uint r8 = (bgr & 0x1Fu) << 3;\n"
+	"    uint g8 = ((bgr >> 5) & 0x1Fu) << 3;\n"
+	"    uint b8 = ((bgr >> 10) & 0x1Fu) << 3;\n"
+	"    return vec4(vec3(float(r8), float(g8), float(b8)) / 255.0, 1.0);\n"
+	"}\n"
+	// Clamping each tap's integer coordinate to the source primitive's own
+	// UV footprint (v_uv_clamp, set per-vertex from psx.cpp - see gpu_vertex
+	// in gpurender.h) before decoding it is what prevents a bilinear/
+	// trilinear sample near a texture's edge from pulling in an unrelated
+	// texture packed next to it in the same shared VRAM page - the classic
+	// PS1 HLE "texture bleeding" artifact (clamp-to-edge instead, same
+	// technique other PS1 HLE renderers with texture filtering use, e.g.
+	// Beetle PSX HW).
+	"vec4 sample_bilinear(vec2 uv, int step, ivec2 cmin, ivec2 cmax) {\n"
+	"    vec2 guv = uv / float(step) - 0.5;\n"
+	"    ivec2 base = ivec2(floor(guv)) * step;\n"
+	"    vec2 frac = fract(guv);\n"
+	"    ivec2 t00 = clamp(base, cmin, cmax);\n"
+	"    ivec2 t10 = clamp(base + ivec2(step, 0), cmin, cmax);\n"
+	"    ivec2 t01 = clamp(base + ivec2(0, step), cmin, cmax);\n"
+	"    ivec2 t11 = clamp(base + ivec2(step, step), cmin, cmax);\n"
+	"    vec4 c00 = decode_texel(t00.x, t00.y);\n"
+	"    vec4 c10 = decode_texel(t10.x, t10.y);\n"
+	"    vec4 c01 = decode_texel(t01.x, t01.y);\n"
+	"    vec4 c11 = decode_texel(t11.x, t11.y);\n"
+	"    float w00 = (1.0 - frac.x) * (1.0 - frac.y) * c00.a;\n"
+	"    float w10 = frac.x * (1.0 - frac.y) * c10.a;\n"
+	"    float w01 = (1.0 - frac.x) * frac.y * c01.a;\n"
+	"    float w11 = frac.x * frac.y * c11.a;\n"
+	"    float wsum = w00 + w10 + w01 + w11;\n"
+	"    if (wsum <= 0.0) return vec4(0.0);\n"
+	"    return vec4((c00.rgb * w00 + c10.rgb * w10 + c01.rgb * w01 + c11.rgb * w11) / wsum, 1.0);\n"
+	"}\n"
 	"void main() {\n"
 	"    if (u_textured != 0) {\n"
-	"        int u = int(v_uv.x);\n"
-	"        int v = int(v_uv.y);\n"
-	"        int row = (u_ty + v) % u_vram_height;\n"
-	"        int clutrow = u_cluty % u_vram_height;\n"
-	"        uint bgr;\n"
-	"        if (u_tp == 0) {\n"
-	"            int col = (u_tx + (u >> 2)) & 1023;\n"
-	"            uint word = texelFetch(u_tex, ivec2(col, row), 0).r;\n"
-	"            uint idx = (word >> uint((u & 3) << 2)) & 0x0Fu;\n"
-	"            int clutcol = (u_clutx + int(idx)) & 1023;\n"
-	"            bgr = texelFetch(u_tex, ivec2(clutcol, clutrow), 0).r;\n"
-	"        } else if (u_tp == 1) {\n"
-	"            int col = (u_tx + (u >> 1)) & 1023;\n"
-	"            uint word = texelFetch(u_tex, ivec2(col, row), 0).r;\n"
-	"            uint idx = (word >> uint((u & 1) << 3)) & 0xFFu;\n"
-	"            int clutcol = (u_clutx + int(idx)) & 1023;\n"
-	"            bgr = texelFetch(u_tex, ivec2(clutcol, clutrow), 0).r;\n"
+	"        vec4 texel;\n"
+	"        if (u_texfilter == 0) {\n"
+	"            texel = decode_texel(int(v_uv.x), int(v_uv.y));\n"
+	"        } else if (u_texfilter == 1) {\n"
+	"            ivec2 cmin = ivec2(floor(v_uv_clamp.xy));\n"
+	"            ivec2 cmax = ivec2(floor(v_uv_clamp.zw));\n"
+	"            texel = sample_bilinear(v_uv, 1, cmin, cmax);\n"
 	"        } else {\n"
-	"            int col = (u_tx + u) & 1023;\n"
-	"            bgr = texelFetch(u_tex, ivec2(col, row), 0).r;\n"
+	"            ivec2 cmin = ivec2(floor(v_uv_clamp.xy));\n"
+	"            ivec2 cmax = ivec2(floor(v_uv_clamp.zw));\n"
+	"            vec4 lvl0 = sample_bilinear(v_uv, 1, cmin, cmax);\n"
+	"            vec4 lvl1 = sample_bilinear(v_uv, 2, cmin, cmax);\n"
+	"            float density = max(length(dFdx(v_uv)), length(dFdy(v_uv)));\n"
+	"            float t = clamp(density - 1.0, 0.0, 1.0);\n"
+	"            if (lvl0.a <= 0.0) { texel = lvl1; }\n"
+	"            else if (lvl1.a <= 0.0) { texel = lvl0; }\n"
+	"            else { texel = vec4(mix(lvl0.rgb, lvl1.rgb, t), 1.0); }\n"
 	"        }\n"
-	"        if (bgr == 0u) discard;\n"
-	"        uint r8 = (bgr & 0x1Fu) << 3;\n"
-	"        uint g8 = ((bgr >> 5) & 0x1Fu) << 3;\n"
-	"        uint b8 = ((bgr >> 10) & 0x1Fu) << 3;\n"
-	"        vec3 texel = vec3(float(r8), float(g8), float(b8)) / 255.0;\n"
-	"        frag_color = vec4(clamp(texel * (v_color.rgb * 2.0), 0.0, 1.0), 1.0);\n"
+	"        if (texel.a <= 0.0) discard;\n"
+	"        frag_color = vec4(clamp(texel.rgb * (v_color.rgb * 2.0), 0.0, 1.0), 1.0);\n"
 	"    } else {\n"
 	"        frag_color = v_color;\n"
 	"    }\n"
@@ -495,7 +575,7 @@ struct scoped_context
 
 } // anonymous namespace
 
-retro_gpu_target::retro_gpu_target(int msaa_samples)
+retro_gpu_target::retro_gpu_target(int msaa_samples, int texfilter_mode)
 	: m_display(nullptr), m_context(nullptr), m_surface(nullptr), m_valid(false)
 	, m_batch_active(false)
 	, m_batch_saved_display(nullptr), m_batch_saved_draw_surface(nullptr), m_batch_saved_read_surface(nullptr), m_batch_saved_context(nullptr)
@@ -505,6 +585,8 @@ retro_gpu_target::retro_gpu_target(int msaa_samples)
 	, m_program(0), m_vao(0), m_vbo(0)
 	, m_u_target_size_loc(-1), m_u_textured_loc(-1)
 	, m_u_tp_loc(-1), m_u_tx_loc(-1), m_u_ty_loc(-1), m_u_clutx_loc(-1), m_u_cluty_loc(-1), m_u_vram_height_loc(-1)
+	, m_u_texfilter_loc(-1)
+	, m_texfilter_mode(texfilter_mode < 0 || texfilter_mode > 2 ? 0 : texfilter_mode)
 	, m_current_blend(osd::gpu_blend_mode::NONE)
 	, m_scissor_enabled(false), m_scissor_x(0), m_scissor_y(0), m_scissor_w(0), m_scissor_h(0)
 {
@@ -613,8 +695,13 @@ bool retro_gpu_target::init_context()
 	m_u_clutx_loc = g_gl.GetUniformLocation(m_program, "u_clutx");
 	m_u_cluty_loc = g_gl.GetUniformLocation(m_program, "u_cluty");
 	m_u_vram_height_loc = g_gl.GetUniformLocation(m_program, "u_vram_height");
+	m_u_texfilter_loc = g_gl.GetUniformLocation(m_program, "u_texfilter");
 	GLint tex_loc = g_gl.GetUniformLocation(m_program, "u_tex");
 	g_gl.Uniform1i(tex_loc, 0);
+	// Just a safe initial default - submit_triangle(s) resolves the real
+	// per-draw value (option mode, or forced nearest for non-filterable
+	// draws) every call, see there.
+	g_gl.Uniform1i(m_u_texfilter_loc, m_texfilter_mode);
 
 	g_gl.GenVertexArrays(1, &m_vao);
 	g_gl.BindVertexArray(m_vao);
@@ -628,6 +715,8 @@ bool retro_gpu_target::init_context()
 	g_gl.VertexAttribPointer(2, 2, GL_FLOAT, 0, sizeof(osd::gpu_vertex), (void*)offsetof(osd::gpu_vertex, u));
 	g_gl.EnableVertexAttribArray(3);
 	g_gl.VertexAttribPointer(3, 1, GL_FLOAT, 0, sizeof(osd::gpu_vertex), (void*)offsetof(osd::gpu_vertex, w));
+	g_gl.EnableVertexAttribArray(4);
+	g_gl.VertexAttribPointer(4, 4, GL_FLOAT, 0, sizeof(osd::gpu_vertex), (void*)offsetof(osd::gpu_vertex, u_min));
 
 	g_gl.GenTextures(1, &m_vram_tex);
 
@@ -928,12 +1017,12 @@ void retro_gpu_target::set_blend_mode(osd::gpu_blend_mode blend)
 	}
 }
 
-void retro_gpu_target::submit_triangle(const osd::gpu_vertex tri[3], bool textured, osd::gpu_blend_mode blend)
+void retro_gpu_target::submit_triangle(const osd::gpu_vertex tri[3], bool textured, osd::gpu_blend_mode blend, bool filterable)
 {
-	submit_triangles(tri, 3, textured, blend);
+	submit_triangles(tri, 3, textured, blend, filterable);
 }
 
-void retro_gpu_target::submit_triangles(const osd::gpu_vertex *verts, int count, bool textured, osd::gpu_blend_mode blend)
+void retro_gpu_target::submit_triangles(const osd::gpu_vertex *verts, int count, bool textured, osd::gpu_blend_mode blend, bool filterable)
 {
 	if (!m_valid || count <= 0)
 		return;
@@ -944,6 +1033,12 @@ void retro_gpu_target::submit_triangles(const osd::gpu_vertex *verts, int count,
 
 	set_blend_mode(blend);
 	g_gl.Uniform1i(m_u_textured_loc, textured ? 1 : 0);
+	// Resolve the user's texfilter option against this draw's eligibility
+	// (see gpurender.h's filterable doc comment) - falls back to nearest
+	// (0) for draws the caller marked as not filterable, regardless of the
+	// option, so 2D/pixel-art content stays crisp even with bilinear or
+	// trilinear filtering turned on for 3D geometry.
+	g_gl.Uniform1i(m_u_texfilter_loc, filterable ? m_texfilter_mode : 0);
 	g_gl.BindBuffer(GL_ARRAY_BUFFER, m_vbo);
 	g_gl.BufferData(GL_ARRAY_BUFFER, sizeof(osd::gpu_vertex) * count, verts, GL_DYNAMIC_DRAW);
 	g_gl.DrawArrays(GL_TRIANGLES, 0, count);

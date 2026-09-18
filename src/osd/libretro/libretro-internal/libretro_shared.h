@@ -127,6 +127,11 @@ extern bool psx_gpu_pgxp_enable;
 // game looks worse with it on, not expected to be needed in the common
 // case.
 extern bool psx_gpu_msaa_enable;
+// mame_psx_gpu_texfilter core option: texture filtering mode for the GPU
+// render target above (see osdretro.h's gpu_render_texfilter()) - only
+// meaningful when psx_gpu_hle_scale > 0. 0 = disabled/nearest (PS1-accurate,
+// the default), 1 = bilinear, 2 = trilinear.
+extern int psx_gpu_texfilter_mode;
 
 extern int fb_width;
 extern int fb_height;
