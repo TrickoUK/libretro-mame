@@ -41,7 +41,8 @@ public:
 	// texfilter_mode: 0 = nearest (PS1-accurate, default), 1 = bilinear,
 	// 2 = trilinear (bilinear + a coarser box-filtered blend on minified
 	// polygons - see fragment_shader_src in the .cpp for why there's no
-	// real mip chain involved).
+	// real mip chain involved), 3 = 3-point/N64-style (barycentric blend
+	// of 3 of the 4 texels instead of bilinear's blend of all 4).
 	explicit retro_gpu_target(int msaa_samples = 4, int texfilter_mode = 0);
 	virtual ~retro_gpu_target();
 

@@ -556,13 +556,14 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_psx_gpu_texfilter",
       "PS1 GPU Texture Filtering (Experimental)",
       NULL,
-      "Only affects PS1 GPU Hardware Rendering above when it's also enabled. Smooths true 3D polygon textures only - 2D sprites/rectangles (HUD, text, UI, backgrounds) are always drawn unfiltered/pixel-sharp regardless of this setting. Bilinear samples the four nearest texels; Trilinear additionally blends in a coarser sample on distant/minified polygons to reduce shimmering. Since PS1 games pack multiple unrelated textures edge-to-edge within a shared texture page, either mode can bleed a texture's edge into whatever is packed next to it in VRAM - try Disabled for a specific game if you see color smearing at texture edges. Requires restarting content to take effect.",
+      "Only affects PS1 GPU Hardware Rendering above when it's also enabled. Smooths true 3D polygon textures only - 2D sprites/rectangles (HUD, text, UI, backgrounds) are always drawn unfiltered/pixel-sharp regardless of this setting. Bilinear samples the four nearest texels; Trilinear additionally blends in a coarser sample on distant/minified polygons to reduce shimmering; 3-Point (as seen on Beetle PSX HW) is an N64-style alternative to Bilinear that blends only 3 of the 4 nearest texels, giving a slightly different, more angular look. Texture-edge bleeding into whatever's packed next to a texture in VRAM is guarded against for all three, but if you still see color smearing at texture edges on a specific game, try Disabled. Requires restarting content to take effect.",
       NULL,
       "video",
       {
          { "disabled",  "Disabled" },
          { "bilinear",  "Bilinear" },
          { "trilinear", "Trilinear" },
+         { "3point",    "3-Point" },
          { NULL, NULL },
       },
       "disabled"

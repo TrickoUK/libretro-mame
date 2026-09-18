@@ -130,7 +130,7 @@ extern bool psx_gpu_msaa_enable;
 // mame_psx_gpu_texfilter core option: texture filtering mode for the GPU
 // render target above (see osdretro.h's gpu_render_texfilter()) - only
 // meaningful when psx_gpu_hle_scale > 0. 0 = disabled/nearest (PS1-accurate,
-// the default), 1 = bilinear, 2 = trilinear.
+// the default), 1 = bilinear, 2 = trilinear, 3 = 3-point/N64-style.
 extern int psx_gpu_texfilter_mode;
 
 extern int fb_width;

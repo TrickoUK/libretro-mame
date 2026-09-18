@@ -495,6 +495,38 @@ const char *fragment_shader_src =
 	"    if (wsum <= 0.0) return vec4(0.0);\n"
 	"    return vec4((c00.rgb * w00 + c10.rgb * w10 + c01.rgb * w01 + c11.rgb * w11) / wsum, 1.0);\n"
 	"}\n"
+	// N64-style "3-point" filtering (as offered by e.g. Beetle PSX HW's
+	// texture filtering option): instead of bilinear's blend across all 4
+	// texels in the cell, split the cell along its diagonal into two
+	// triangles by which side frac.x+frac.y falls on, and barycentric-blend
+	// only the 3 texels of *that* triangle. Same edge-clamp/transparency-
+	// renormalize handling as sample_bilinear(), just a different weighting
+	// scheme - this is a style choice (matches real low-precision hardware
+	// like the N64's own filtering more closely than true bilinear), not a
+	// fix for anything bilinear/trilinear get wrong.
+	"vec4 sample_3point(vec2 uv, ivec2 cmin, ivec2 cmax) {\n"
+	"    vec2 guv = uv - 0.5;\n"
+	"    ivec2 base = ivec2(floor(guv));\n"
+	"    vec2 frac = fract(guv);\n"
+	"    ivec2 t00 = clamp(base, cmin, cmax);\n"
+	"    ivec2 t10 = clamp(base + ivec2(1, 0), cmin, cmax);\n"
+	"    ivec2 t01 = clamp(base + ivec2(0, 1), cmin, cmax);\n"
+	"    ivec2 t11 = clamp(base + ivec2(1, 1), cmin, cmax);\n"
+	"    vec4 c00 = decode_texel(t00.x, t00.y);\n"
+	"    vec4 c10 = decode_texel(t10.x, t10.y);\n"
+	"    vec4 c01 = decode_texel(t01.x, t01.y);\n"
+	"    vec4 c11 = decode_texel(t11.x, t11.y);\n"
+	"    float w00, w10, w01, w11;\n"
+	"    if (frac.x + frac.y <= 1.0) {\n"
+	"        w00 = 1.0 - frac.x - frac.y; w10 = frac.x; w01 = frac.y; w11 = 0.0;\n"
+	"    } else {\n"
+	"        w11 = frac.x + frac.y - 1.0; w10 = 1.0 - frac.y; w01 = 1.0 - frac.x; w00 = 0.0;\n"
+	"    }\n"
+	"    w00 *= c00.a; w10 *= c10.a; w01 *= c01.a; w11 *= c11.a;\n"
+	"    float wsum = w00 + w10 + w01 + w11;\n"
+	"    if (wsum <= 0.0) return vec4(0.0);\n"
+	"    return vec4((c00.rgb * w00 + c10.rgb * w10 + c01.rgb * w01 + c11.rgb * w11) / wsum, 1.0);\n"
+	"}\n"
 	"void main() {\n"
 	"    if (u_textured != 0) {\n"
 	"        vec4 texel;\n"
@@ -504,7 +536,7 @@ const char *fragment_shader_src =
 	"            ivec2 cmin = ivec2(floor(v_uv_clamp.xy));\n"
 	"            ivec2 cmax = ivec2(floor(v_uv_clamp.zw));\n"
 	"            texel = sample_bilinear(v_uv, 1, cmin, cmax);\n"
-	"        } else {\n"
+	"        } else if (u_texfilter == 2) {\n"
 	"            ivec2 cmin = ivec2(floor(v_uv_clamp.xy));\n"
 	"            ivec2 cmax = ivec2(floor(v_uv_clamp.zw));\n"
 	"            vec4 lvl0 = sample_bilinear(v_uv, 1, cmin, cmax);\n"
@@ -514,6 +546,10 @@ const char *fragment_shader_src =
 	"            if (lvl0.a <= 0.0) { texel = lvl1; }\n"
 	"            else if (lvl1.a <= 0.0) { texel = lvl0; }\n"
 	"            else { texel = vec4(mix(lvl0.rgb, lvl1.rgb, t), 1.0); }\n"
+	"        } else {\n"
+	"            ivec2 cmin = ivec2(floor(v_uv_clamp.xy));\n"
+	"            ivec2 cmax = ivec2(floor(v_uv_clamp.zw));\n"
+	"            texel = sample_3point(v_uv, cmin, cmax);\n"
 	"        }\n"
 	"        if (texel.a <= 0.0) discard;\n"
 	"        frag_color = vec4(clamp(texel.rgb * (v_color.rgb * 2.0), 0.0, 1.0), 1.0);\n"
@@ -586,7 +622,7 @@ retro_gpu_target::retro_gpu_target(int msaa_samples, int texfilter_mode)
 	, m_u_target_size_loc(-1), m_u_textured_loc(-1)
 	, m_u_tp_loc(-1), m_u_tx_loc(-1), m_u_ty_loc(-1), m_u_clutx_loc(-1), m_u_cluty_loc(-1), m_u_vram_height_loc(-1)
 	, m_u_texfilter_loc(-1)
-	, m_texfilter_mode(texfilter_mode < 0 || texfilter_mode > 2 ? 0 : texfilter_mode)
+	, m_texfilter_mode(texfilter_mode < 0 || texfilter_mode > 3 ? 0 : texfilter_mode)
 	, m_current_blend(osd::gpu_blend_mode::NONE)
 	, m_scissor_enabled(false), m_scissor_x(0), m_scissor_y(0), m_scissor_w(0), m_scissor_h(0)
 {

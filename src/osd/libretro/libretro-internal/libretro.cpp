@@ -493,6 +493,8 @@ static void check_variables(void)
          psx_gpu_texfilter_mode = 1;
       if (!strcmp(var.value, "trilinear"))
          psx_gpu_texfilter_mode = 2;
+      if (!strcmp(var.value, "3point"))
+         psx_gpu_texfilter_mode = 3;
    }
 
    var.key   = CORE_NAME "_lightgun_mode";
