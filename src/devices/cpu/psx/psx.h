@@ -153,14 +153,45 @@ public:
 			m_pgxp_ram_shadow.resize(m_ram->size() / 4);
 	}
 
-	bool pgxp_ram_shadow_query(uint32_t address, float &x, float &y, float &w) const
+	// PGXP (CLAUDE.md Phase 4c investigation): expected_value is the
+	// word gpu_write() just read from this exact RAM address (a plain
+	// 32-bit load, same as reading it any other way) - the shadow is
+	// only trusted if it matches gte::pgxp_shadow::tag_value, the word
+	// that was actually being stored the moment this shadow was
+	// attached. See tag_value's comment in gte.h for why this replaced
+	// three earlier timing-based designs: it's not an elapsed-time or
+	// frame-count check at all, so it can't have a game-dependent sweet
+	// spot the way those did - either the address's content genuinely
+	// hasn't changed since the shadow was written, or it has and the
+	// comparison fails, unconditionally correct either way.
+	bool pgxp_ram_shadow_query(uint32_t address, uint32_t expected_value, float &x, float &y, float &w) const
 	{
 		size_t index = (address / 4) % std::max<size_t>(m_pgxp_ram_shadow.size(), 1);
 		if (m_pgxp_ram_shadow.empty() || !m_pgxp_ram_shadow[index].valid)
 			return false;
 		const gte::pgxp_shadow &s = m_pgxp_ram_shadow[index];
+		if (s.tag_value != expected_value)
+			return false;
 		x = s.x; y = s.y; w = s.w;
 		return true;
+	}
+
+	// Bound to psxdma_device::set_ram_write_callback() in device_reset()
+	// (see dma.h's invalidate_delegate comment) - any DMA transfer that
+	// writes device data straight into RAM never executes OP_SW/SWC2, so
+	// without this the shadow at that address would keep reporting
+	// whatever stale vertex data used to live there as valid even after
+	// the DMA overwrote it with unrelated bytes. address is a byte offset
+	// into RAM, n_words the transfer length in 32-bit words (matching
+	// psxdma_device's own address/size units for a "read block").
+	void pgxp_invalidate_ram_range(uint32_t address, uint32_t n_words)
+	{
+		ensure_pgxp_ram_shadow();
+		if (m_pgxp_ram_shadow.empty())
+			return;
+		size_t base = (address / 4) % m_pgxp_ram_shadow.size();
+		for (uint32_t i = 0; i < n_words; i++)
+			m_pgxp_ram_shadow[ (base + i) % m_pgxp_ram_shadow.size() ] = gte::pgxp_shadow();
 	}
 
 	uint32_t exp_base();

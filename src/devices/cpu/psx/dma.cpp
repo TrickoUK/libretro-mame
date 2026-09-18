@@ -260,6 +260,8 @@ void psxdma_device::write(offs_t offset, uint32_t data, uint32_t mem_mask)
 				{
 					LOGDMA("%s dma %d read block %08x %08x\n", machine().describe_context(), index, n_address, n_size);
 					dma->fn_read(m_ram, n_address, n_size);
+					if (!m_ram_write_cb.isnull())
+						m_ram_write_cb(n_address, n_size);
 					dma_finished(index);
 				}
 				else if ((dma->n_channelcontrol & 0xffbffeff) == 0x11000000 && // CD DMA
@@ -273,6 +275,8 @@ void psxdma_device::write(offs_t offset, uint32_t data, uint32_t mem_mask)
 					oursize *= (dma->n_blockcontrol & 0xffff);
 
 					dma->fn_read(m_ram, n_address, oursize);
+					if (!m_ram_write_cb.isnull())
+						m_ram_write_cb(n_address, oursize);
 					dma_finished(index);
 				}
 				else if (dma->n_channelcontrol == 0x01000200 &&
@@ -280,6 +284,8 @@ void psxdma_device::write(offs_t offset, uint32_t data, uint32_t mem_mask)
 				{
 					LOGDMA("%s dma %d read block %08x %08x\n", machine().describe_context(), index, n_address, n_size);
 					dma->fn_read(m_ram, n_address, n_size);
+					if (!m_ram_write_cb.isnull())
+						m_ram_write_cb(n_address, n_size);
 					if (index == 1)
 						dma_start_timer(index, 26000);
 					else
@@ -323,6 +329,8 @@ void psxdma_device::write(offs_t offset, uint32_t data, uint32_t mem_mask)
 					LOGDMA("%s dma 6 reverse clear %08x %08x\n", machine().describe_context(), dma->n_base, dma->n_blockcontrol);
 					if (n_size > 0)
 					{
+						if (!m_ram_write_cb.isnull())
+							m_ram_write_cb((n_address - 4 * (n_size - 1)) & 0xffffff, n_size);
 						n_size--;
 						while (n_size > 0)
 						{

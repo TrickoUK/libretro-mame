@@ -62,6 +62,37 @@ public:
 		float y = 0.0f;
 		float w = 1.0f;
 		bool valid = false;
+		// PGXP (CLAUDE.md Phase 4c investigation, replacing three
+		// earlier timing-based attempts - a per-frame/VBLANK generation
+		// counter, then a CPU-cycle-age window, then an interlace-aware
+		// generation counter - all abandoned after live testing showed
+		// no timing boundary could separate one title's legitimate
+		// same-frame shadow reuse from another's genuinely-stale one;
+		// their real needs are set by unrelated per-game properties that
+		// don't share a threshold). tag_value is the raw 32-bit word (or
+		// register content) this shadow was computed for - the same
+		// technique libretro/beetle-psx-libretro's real PGXP
+		// implementation uses (per user request, confirmed by inspecting
+		// its source, e.g. pgxp_value.h's Validate()): every hop of the
+		// GTE-FIFO -> GPR -> RAM chain both stamps a tag_value where a
+		// shadow is written (gte::pgxp_write_shadow(),
+		// commit_delayed_load(), the OP_SW/SWC2 RAM-shadow writes - see
+		// psx.h/psx.cpp) and validates it against the real current
+		// value *before* trusting the shadow at the next hop (the MFC2
+		// and OP_SW/SWC2 sites in psx.cpp) - no elapsed time or frame
+		// count involved anywhere. Validating at every hop, not just the
+		// final RAM address, mattered in practice: an earlier version
+		// only checked RAM-shadow tags and still failed live testing,
+		// because SWC2 (confirmed to be the dominant packet-building
+		// path real games use) was re-tagging whatever shadow the GTE
+		// FIFO had with the value being stored *without first checking
+		// it belonged to that value* - a check that re-derives its own
+		// pass condition can never fail. This is a different, narrower
+		// concern than the (still-needed, kept) register-reuse fix in
+		// psxcpu_device::load(): load() proactively clears a register's
+		// shadow on every non-load write (ALU results, immediates, ...),
+		// which tag_value validation alone doesn't replace.
+		uint32_t tag_value = 0;
 	};
 
 	// reg: a cp2dr register number - 12/13/14 for SXY0/SXY1/SXY2, 15 for

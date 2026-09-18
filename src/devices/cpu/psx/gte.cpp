@@ -207,10 +207,46 @@ void gte::setcp2dr( uint32_t pc, int reg, uint32_t value )
 	switch( reg )
 	{
 	case 15:
-		SXY0 = SXY1;
-		SXY1 = SXY2;
+	{
+		// PGXP (CLAUDE.md Phase 4c/investigation): MTC2/CTC2 writing SXYP
+		// pushes a value into the FIFO without going through RTPS/RTPT's
+		// own shadow write - but the overwhelmingly common real use of
+		// this isn't an arbitrary unrelated coordinate, it's PS1 code
+		// re-sharing an already-computed vertex across a triangle
+		// fan/strip: read one of SXY0/SXY1/SXY2 back via MFC2, then push
+		// that *same* value into SXYP to advance the FIFO without
+		// recomputing it (found live: this is the dominant pattern on
+		// subdivided ground/floor geometry, which leans on fan/strip
+		// vertex sharing far more than character models do - blanket
+		// invalidation here was killing the shadow for nearly every
+		// ground-plane vertex, even though nothing about the underlying
+		// float position was actually unknown). So: only invalidate when
+		// `value` doesn't match any of the three real SXY registers as
+		// they stood *before* this shift - a genuine match reuses that
+		// slot's already-computed shadow instead of losing it.
+		uint32_t old_sxy0 = SXY0;
+		uint32_t old_sxy1 = SXY1;
+		uint32_t old_sxy2 = SXY2;
+		pgxp_shadow old_shadow0 = m_pgxp_shadow[ 0 ];
+		pgxp_shadow old_shadow1 = m_pgxp_shadow[ 1 ];
+		pgxp_shadow old_shadow2 = m_pgxp_shadow[ 2 ];
+
+		SXY0 = old_sxy1;
+		SXY1 = old_sxy2;
 		SXY2 = value;
+
+		m_pgxp_shadow[ 0 ] = old_shadow1;
+		m_pgxp_shadow[ 1 ] = old_shadow2;
+		if( value == old_sxy2 )
+			m_pgxp_shadow[ 2 ] = old_shadow2;
+		else if( value == old_sxy1 )
+			m_pgxp_shadow[ 2 ] = old_shadow1;
+		else if( value == old_sxy0 )
+			m_pgxp_shadow[ 2 ] = old_shadow0;
+		else
+			m_pgxp_shadow[ 2 ] = pgxp_shadow();
 		break;
+	}
 
 	case 28:
 		IR1 = ( value & 0x1f ) << 7;
@@ -464,6 +500,16 @@ void gte::pgxp_write_shadow( int64_t ir1, int64_t ir2, int32_t sz3 )
 	m_pgxp_shadow[ 2 ].y = (float) y;
 	m_pgxp_shadow[ 2 ].w = (float) sz3;
 	m_pgxp_shadow[ 2 ].valid = true;
+	// PGXP (CLAUDE.md Phase 4c investigation): tag with SXY2's own real
+	// value - SX2/SY2 are already written by the caller above this call
+	// (RTPS/RTPT set them immediately before calling pgxp_write_shadow())
+	// - so this is the real hardware register content, not a
+	// recomputation. Lets a later MFC2 validate this shadow against
+	// whatever SXY2 actually holds *at that read*, rather than trusting
+	// it purely because the FIFO rotation is expected to stay in sync;
+	// see the MFC2 site's comment in psx.cpp for why that expectation
+	// alone wasn't a safe enough guarantee in practice.
+	m_pgxp_shadow[ 2 ].tag_value = SXY2;
 }
 
 gte::pgxp_shadow gte::pgxp_shadow_for_reg( int reg ) const

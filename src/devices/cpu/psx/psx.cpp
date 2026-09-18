@@ -1474,6 +1474,12 @@ void psxcpu_device::commit_delayed_load()
 	{
 		m_r[ m_delayr ] = m_delayv;
 		m_pgxp_gpr[ m_delayr ] = m_pgxp_delay_shadow;
+		// PGXP (CLAUDE.md Phase 4c investigation): tag with the value
+		// actually being committed to this register right now - see
+		// the value-validation-at-use comment on the OP_SW site below
+		// for why this is checked again there, not just trusted because
+		// .valid is set here.
+		m_pgxp_gpr[ m_delayr ].tag_value = m_delayv;
 		m_delayr = 0;
 		m_delayv = 0;
 		m_pgxp_delay_shadow = gte::pgxp_shadow();
@@ -1527,6 +1533,23 @@ void psxcpu_device::load( uint32_t reg, uint32_t value )
 	if( reg != 0 )
 	{
 		m_r[ reg ] = value;
+
+		// PGXP (CLAUDE.md Phase 4c): load() is the generic synchronous
+		// register-write path every ALU/immediate instruction uses (26
+		// call sites - ADD/ADDU/ADDI/ORI/LUI/SLL/etc, none of which carry
+		// any vertex meaning). m_pgxp_gpr[reg] was previously only ever
+		// written by delayed_load()/commit_delayed_load() (MFC2 and a
+		// shadowed LW) and never cleared here, so a register that once
+		// held a valid vertex shadow kept reporting it as valid even
+		// after being overwritten by unrelated ALU results (a loop
+		// counter, pointer arithmetic, ...) - if that register was then
+		// stored to RAM right before the GPU parsed that address as a
+		// vertex word, the vertex got tagged with a real but wildly
+		// wrong shadow position. This is a different hazard from OP_SW's
+		// own stale-RAM-shadow problem (see its comment) - that one is
+		// about the destination address, this one is about the *source
+		// register* silently outliving the value that earned its shadow.
+		m_pgxp_gpr[ reg ] = gte::pgxp_shadow();
 	}
 }
 
@@ -2019,6 +2042,7 @@ void psxcpu_device::device_reset()
 	psxdma_device *psxdma = subdevice<psxdma_device>( "dma" );
 	psxdma->m_ram = (uint32_t *)m_ram->pointer();
 	psxdma->m_ramsize = m_ram->size();
+	psxdma->set_ram_write_callback( psxdma_device::invalidate_delegate( &psxcpu_device::pgxp_invalidate_ram_range, this ) );
 
 	m_delayr = 0;
 	m_delayv = 0;
@@ -2268,6 +2292,23 @@ void psxcpu_device::swc( int cop, int sr_cu )
 		if( !m_pgxp_ram_shadow.empty() )
 		{
 			gte::pgxp_shadow shadow = ( cop == 2 ) ? m_gte.pgxp_shadow_for_reg( INS_RT( m_op ) ) : gte::pgxp_shadow();
+			// PGXP (CLAUDE.md Phase 4c investigation): validate the FIFO
+			// shadow against the register's own real current value
+			// (already in `data` above) *before* re-tagging it - the
+			// same defense-in-depth as the MFC2 site's identical check
+			// (see its comment in the RS_MFC case above). Tagging with
+			// `data` unconditionally, without this check first, would
+			// launder a wrong-for-this-value shadow into looking valid
+			// again by construction - exactly the flaw that made this
+			// project's very first value-tagging attempt unable to
+			// reject anything at all (SWC2 is "the dominant path real
+			// games use" per the comment above, so a gap here alone was
+			// enough to make the whole mechanism a no-op for a
+			// SWC2-heavy title even with every other hop correctly
+			// tagged and validated).
+			if( shadow.tag_value != data )
+				shadow.valid = false;
+			shadow.tag_value = data;
 			m_pgxp_ram_shadow[ ( address / 4 ) % m_pgxp_ram_shadow.size() ] = shadow;
 		}
 
@@ -2419,6 +2460,9 @@ void psxcpu_device::execute_run()
 						if( INS_RD( m_op ) != 0 )
 						{
 							m_r[ INS_RD( m_op ) ] = m_pc + 4;
+							// PGXP (CLAUDE.md Phase 4c): see load()'s comment - a
+							// link register is never vertex data.
+							m_pgxp_gpr[ INS_RD( m_op ) ] = gte::pgxp_shadow();
 						}
 						break;
 
@@ -2544,6 +2588,8 @@ void psxcpu_device::execute_run()
 						if( INS_RT( m_op ) == RT_BLTZAL )
 						{
 							m_r[ 31 ] = m_pc + 4;
+							// PGXP (CLAUDE.md Phase 4c): see load()'s comment.
+							m_pgxp_gpr[ 31 ] = gte::pgxp_shadow();
 						}
 						break;
 
@@ -2553,6 +2599,8 @@ void psxcpu_device::execute_run()
 						if( INS_RT( m_op ) == RT_BGEZAL )
 						{
 							m_r[ 31 ] = m_pc + 4;
+							// PGXP (CLAUDE.md Phase 4c): see load()'s comment.
+							m_pgxp_gpr[ 31 ] = gte::pgxp_shadow();
 						}
 						break;
 					}
@@ -2565,6 +2613,8 @@ void psxcpu_device::execute_run()
 				case OP_JAL:
 					unconditional_branch();
 					m_r[ 31 ] = m_pc + 4;
+					// PGXP (CLAUDE.md Phase 4c): see load()'s comment.
+					m_pgxp_gpr[ 31 ] = gte::pgxp_shadow();
 					break;
 
 				case OP_BEQ:
@@ -2807,8 +2857,29 @@ void psxcpu_device::execute_run()
 							// (reg 12-15) is the first hop of the GTE-write -> GPR ->
 							// RAM -> DMA-to-GPU shadow chain - seed the destination
 							// GPR's shadow from the GTE's own FIFO-mirror here.
+							//
+							// PGXP (CLAUDE.md Phase 4c investigation): validate the
+							// FIFO shadow against the register's own real current
+							// value first - the same defense-in-depth as the OP_SW
+							// site's identical check (see its comment), applied one
+							// hop earlier. This was the actual missing piece a
+							// comparison against beetle-psx-libretro's real PGXP
+							// found: every one of its GTE_data_reg entries carries
+							// its own value tag (SXY2.value, stamped in its PGXP_PUSH
+							// - see gte::pgxp_write_shadow()'s matching stamp below)
+							// and PGXP_GTE_MFC2 validates it before use; our FIFO
+							// shadow had no tag at all until now, so a stale-but-
+							// valid-flagged FIFO entry could never be caught here,
+							// only after it had already propagated further down the
+							// chain where the *value* being compared was always the
+							// register's own just-read content by construction (so
+							// it could never mismatch) - a check that can never fail
+							// isn't a check.
 							gte::pgxp_shadow shadow = m_gte.pgxp_shadow_for_reg( INS_RD( m_op ) );
-							delayed_load( INS_RT( m_op ), m_gte.getcp2dr( m_pc, INS_RD( m_op ) ), &shadow );
+							uint32_t reg_value = m_gte.getcp2dr( m_pc, INS_RD( m_op ) );
+							if( shadow.tag_value != reg_value )
+								shadow.valid = false;
+							delayed_load( INS_RT( m_op ), reg_value, &shadow );
 							break;
 						}
 
@@ -3050,7 +3121,7 @@ void psxcpu_device::execute_run()
 								// in practice; a partial-word load just never carries
 								// shadow (safe no-op fallback, not a regression).
 								gte::pgxp_shadow shadow;
-								bool has_shadow = pgxp_ram_shadow_query( address, shadow.x, shadow.y, shadow.w );
+								bool has_shadow = pgxp_ram_shadow_query( address, data, shadow.x, shadow.y, shadow.w );
 								shadow.valid = has_shadow;
 								delayed_load( INS_RT( m_op ), data, &shadow );
 							}
@@ -3178,6 +3249,15 @@ void psxcpu_device::execute_run()
 							int shift = 8 * ( address & 3 );
 							writeword_masked( address, m_r[ INS_RT( m_op ) ] << shift, 0xff << shift );
 
+							// PGXP (CLAUDE.md Phase 4c): a partial-word store still
+							// changes the underlying RAM word, but there is no
+							// meaningful per-byte shadow to carry forward - must
+							// invalidate rather than leave OP_SW's last full-word
+							// shadow attached to now-stale bytes (see OP_SW's own
+							// comment for why a surviving stale shadow is the bug
+							// class this whole mechanism exists to avoid).
+							pgxp_invalidate_ram_range( address, 1 );
+
 							if( breakpoint )
 							{
 								breakpoint_exception();
@@ -3207,6 +3287,9 @@ void psxcpu_device::execute_run()
 						{
 							int shift = 8 * ( address & 2 );
 							writeword_masked( address, m_r[ INS_RT( m_op ) ] << shift, 0xffff << shift );
+
+							// PGXP (CLAUDE.md Phase 4c): see OP_SB's identical comment.
+							pgxp_invalidate_ram_range( address, 1 );
 
 							if( breakpoint )
 							{
@@ -3258,6 +3341,10 @@ void psxcpu_device::execute_run()
 								break;
 							}
 
+							// PGXP (CLAUDE.md Phase 4c): see OP_SB's identical comment -
+							// address is already word-aligned above (address &= ~3).
+							pgxp_invalidate_ram_range( address, 1 );
+
 							if( breakpoint )
 							{
 								breakpoint_exception();
@@ -3290,16 +3377,36 @@ void psxcpu_device::execute_run()
 							// PGXP (CLAUDE.md Phase 4c): the RAM-shadow write hop of the
 							// GTE-write -> GPR -> RAM -> DMA-to-GPU chain. A shadowed
 							// source GPR (e.g. one just loaded from SXY2 via MFC2)
-							// propagates its shadow to this address; otherwise this
-							// store must explicitly invalidate whatever shadow was
-							// there before - a stale leftover shadow surviving a real,
-							// unrelated overwrite is exactly the staleness bug that
-							// broke Phase 4b's (and beetle-psx-libretro's own
-							// discouraged fallback cache's) value-keyed approach.
+							// propagates its shadow to this address, tagged with the
+							// value actually stored (see tag_value's comment in
+							// gte.h for why a per-address value check, not a
+							// per-frame/cycle timer, is what makes this safe against
+							// a later unrelated overwrite of this same address).
 							ensure_pgxp_ram_shadow();
 							if( !m_pgxp_ram_shadow.empty() )
 							{
-								m_pgxp_ram_shadow[ ( address / 4 ) % m_pgxp_ram_shadow.size() ] = m_pgxp_gpr[ INS_RT( m_op ) ];
+								gte::pgxp_shadow shadow = m_pgxp_gpr[ INS_RT( m_op ) ];
+								// PGXP (CLAUDE.md Phase 4c investigation): validate
+								// the *source register's* shadow against its own
+								// actual current content before trusting it, the
+								// same defense-in-depth beetle-psx-libretro's real
+								// PGXP does at every register use (its Validate()
+								// calls on rs/rt in every instrumented ALU op, and
+								// again in PGXP_CPU_SW itself) - not relying purely
+								// on every register-clobbering instruction having
+								// been individually found and made to clear the
+								// shadow. If m_r[reg] no longer matches the value
+								// this shadow was tagged for when committed (see
+								// commit_delayed_load()), something changed the
+								// register through a path this project's enumeration
+								// missed, and the shadow must not be trusted
+								// regardless of its own valid flag.
+								if( shadow.tag_value != m_r[ INS_RT( m_op ) ] )
+									shadow.valid = false;
+								// Tag with the exact value being stored - see
+								// tag_value's comment in gte.h.
+								shadow.tag_value = m_r[ INS_RT( m_op ) ];
+								m_pgxp_ram_shadow[ ( address / 4 ) % m_pgxp_ram_shadow.size() ] = shadow;
 							}
 
 							if( breakpoint )
@@ -3347,6 +3454,12 @@ void psxcpu_device::execute_run()
 								writeword_masked( address, m_r[ INS_RT( m_op ) ] << 24, 0xff000000 );
 								break;
 							}
+
+							// PGXP (CLAUDE.md Phase 4c): see OP_SB's identical comment -
+							// address isn't pre-masked here like OP_SWL, but
+							// pgxp_invalidate_ram_range() indexes by address/4 so the
+							// low 2 bits don't matter.
+							pgxp_invalidate_ram_range( address, 1 );
 
 							if( breakpoint )
 							{

@@ -2192,6 +2192,7 @@ void psxgpu_device::gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int 
 // un-resubmitted parts going black.
 uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 {
+
 	int w = n_screenwidth * gpu_scale();
 
 	// The actual GPU target is sized to full VRAM height, not just the
@@ -3918,7 +3919,8 @@ void psxgpu_device::gpu_write( uint32_t *p_ram, int32_t n_size, uint32_t base_ad
 		if( m_gpu_pgxp_enabled && m_cpu != nullptr && base_address != PGXP_NO_ADDRESS )
 		{
 			float x, y, w;
-			bool valid = m_cpu->pgxp_ram_shadow_query( base_address + n_word * 4, x, y, w );
+			uint32_t word_address = base_address + n_word * 4;
+			bool valid = m_cpu->pgxp_ram_shadow_query( word_address, data, x, y, w );
 			m_packet_shadow[ n_gpu_buffer_offset ].valid = valid;
 			if( valid )
 			{
