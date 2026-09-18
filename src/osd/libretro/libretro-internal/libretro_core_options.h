@@ -518,6 +518,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "video",
       {
          { "disabled", "Disabled" },
+         { "1x",       "1x" },
          { "2x",       "2x" },
          { "4x",       "4x" },
          { NULL, NULL },

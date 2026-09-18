@@ -463,6 +463,8 @@ static void check_variables(void)
    {
       if (!strcmp(var.value, "disabled"))
          psx_gpu_hle_scale = 0;
+      if (!strcmp(var.value, "1x"))
+         psx_gpu_hle_scale = 1;
       if (!strcmp(var.value, "2x"))
          psx_gpu_hle_scale = 2;
       if (!strcmp(var.value, "4x"))
