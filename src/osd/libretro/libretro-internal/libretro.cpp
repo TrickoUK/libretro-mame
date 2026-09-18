@@ -497,6 +497,30 @@ static void check_variables(void)
          psx_gpu_texfilter_mode = 3;
    }
 
+   var.key   = CORE_NAME "_psx_gpu_filter_exclude_sprite";
+   var.value = NULL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "disabled"))
+         psx_gpu_filter_exclude_sprite_mode = 0;
+      if (!strcmp(var.value, "opaque"))
+         psx_gpu_filter_exclude_sprite_mode = 1;
+      if (!strcmp(var.value, "all"))
+         psx_gpu_filter_exclude_sprite_mode = 2;
+   }
+
+   var.key   = CORE_NAME "_psx_gpu_filter_exclude_2d_polygon";
+   var.value = NULL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "disabled"))
+         psx_gpu_filter_exclude_2d_polygon_mode = 0;
+      if (!strcmp(var.value, "opaque"))
+         psx_gpu_filter_exclude_2d_polygon_mode = 1;
+      if (!strcmp(var.value, "all"))
+         psx_gpu_filter_exclude_2d_polygon_mode = 2;
+   }
+
    var.key   = CORE_NAME "_lightgun_mode";
    var.value = NULL;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)

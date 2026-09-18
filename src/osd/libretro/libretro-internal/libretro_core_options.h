@@ -556,7 +556,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_psx_gpu_texfilter",
       "PS1 GPU Texture Filtering (Experimental)",
       NULL,
-      "Only affects PS1 GPU Hardware Rendering above when it's also enabled. Smooths true 3D polygon textures only - 2D sprites/rectangles (HUD, text, UI, backgrounds) are always drawn unfiltered/pixel-sharp regardless of this setting. Bilinear samples the four nearest texels; Trilinear additionally blends in a coarser sample on distant/minified polygons to reduce shimmering; 3-Point (as seen on Beetle PSX HW) is an N64-style alternative to Bilinear that blends only 3 of the 4 nearest texels, giving a slightly different, more angular look. Texture-edge bleeding into whatever's packed next to a texture in VRAM is guarded against for all three, but if you still see color smearing at texture edges on a specific game, try Disabled. Requires restarting content to take effect.",
+      "Only affects PS1 GPU Hardware Rendering above when it's also enabled. Smooths 3D polygon and sprite textures. By default 2D content (sprites, and polygons detected as 2D - HUD, text, UI, backgrounds) is excluded and stays pixel-sharp - see the two Exclude options below to change that. Bilinear samples the four nearest texels; Trilinear additionally blends in a coarser sample on distant/minified polygons to reduce shimmering; 3-Point (as seen on Beetle PSX HW) is an N64-style alternative to Bilinear that blends only 3 of the 4 nearest texels, giving a slightly different, more angular look. Texture-edge bleeding into whatever's packed next to a texture in VRAM is guarded against for all three, but if you still see color smearing at texture edges on a specific game, try Disabled. Requires restarting content to take effect.",
       NULL,
       "video",
       {
@@ -567,6 +567,36 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          { NULL, NULL },
       },
       "disabled"
+   },
+   {
+      CORE_NAME "_psx_gpu_filter_exclude_sprite",
+      "PS1 GPU Exclude Sprites from Filtering (Experimental)",
+      NULL,
+      "Only affects PS1 GPU Hardware Rendering above when PS1 GPU Texture Filtering is also enabled. Sprites (used heavily for HUD/text/UI, but also in-game 2D art in some games) are already excluded from filtering by default so they stay pixel-sharp - this only needs changing if a specific game wants its sprites smoothed too. 'Opaque Only' filters this game's semi-transparent sprites (glow/particle effects etc.) while keeping opaque ones sharp; 'Opaque and Semi-Transparent' excludes both (the default); 'Disabled' filters sprites the same as everything else. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "opaque",   "Opaque Only" },
+         { "all",      "Opaque and Semi-Transparent" },
+         { NULL, NULL },
+      },
+      "all"
+   },
+   {
+      CORE_NAME "_psx_gpu_filter_exclude_2d_polygon",
+      "PS1 GPU Exclude 2D Polygons from Filtering (Experimental)",
+      NULL,
+      "Only affects PS1 GPU Hardware Rendering above when PS1 GPU Texture Filtering is also enabled. Many PS1 games draw 2D content (HUD/text/UI) using the same general polygon commands as real 3D geometry instead of a dedicated sprite command, which the Exclude Sprites option above can't catch - this detects those with a heuristic (an unrotated, screen-aligned quad with an exact 1:1 texel-to-pixel mapping) and excludes them the same way. The heuristic can occasionally misclassify real 3D geometry (an unrotated, unscaled wall or floor tile, for example) - try Disabled for a specific game if 3D surfaces look unexpectedly unfiltered. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "opaque",   "Opaque Only" },
+         { "all",      "Opaque and Semi-Transparent" },
+         { NULL, NULL },
+      },
+      "all"
    },
    {
       CORE_NAME "_cpu_overclock",

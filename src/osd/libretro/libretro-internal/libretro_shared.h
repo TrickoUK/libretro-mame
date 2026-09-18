@@ -132,6 +132,14 @@ extern bool psx_gpu_msaa_enable;
 // meaningful when psx_gpu_hle_scale > 0. 0 = disabled/nearest (PS1-accurate,
 // the default), 1 = bilinear, 2 = trilinear, 3 = 3-point/N64-style.
 extern int psx_gpu_texfilter_mode;
+// mame_psx_gpu_filter_exclude_sprite/_2d_polygon core options: mirror
+// Beetle PSX HW's options of the same name/shape - exclude sprite/
+// rectangle primitives, or polygon primitives heuristically detected as
+// 2D content, from the texture filtering mode above. 0 = disabled (no
+// exclusion), 1 = exclude opaque draws only, 2 = exclude opaque and
+// semi-transparent draws. Only meaningful when psx_gpu_texfilter_mode > 0.
+extern int psx_gpu_filter_exclude_sprite_mode;
+extern int psx_gpu_filter_exclude_2d_polygon_mode;
 
 extern int fb_width;
 extern int fb_height;

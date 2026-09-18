@@ -76,6 +76,12 @@ int psx_gpu_hle_scale = 0;
 bool psx_gpu_pgxp_enable = false;
 bool psx_gpu_msaa_enable = true;
 int psx_gpu_texfilter_mode = 0;
+// Default "all" (not Beetle PSX HW's "disabled" default) to preserve this
+// fork's prior always-excluded behavior for sprites/2D content out of the
+// box - see the mame_psx_gpu_filter_exclude_sprite/_2d_polygon core option
+// comments in libretro_core_options.h.
+int psx_gpu_filter_exclude_sprite_mode = 2;
+int psx_gpu_filter_exclude_2d_polygon_mode = 2;
 
 // emu flags
 static bool arcade = false;

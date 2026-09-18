@@ -289,6 +289,8 @@ private:
 	void gpu_force_no_clip();
 	bool gpu_submit_flat_polygon( int n_points );
 	static void gpu_set_polygon_uv_clamp( osd::gpu_vertex *v, int n_points );
+	static bool gpu_detect_2d_polygon( const PAIR *n_coord, const osd::gpu_vertex *v, int n_points );
+	bool gpu_filter_eligible( int exclude_mode, osd::gpu_blend_mode blend ) const;
 	bool gpu_submit_flat_textured_polygon( int n_points );
 	bool gpu_submit_gouraud_polygon( int n_points );
 	bool gpu_submit_gouraud_textured_polygon( int n_points );

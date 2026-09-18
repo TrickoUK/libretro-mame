@@ -1718,6 +1718,61 @@ bool psxgpu_device::gpu_submit_gouraud_polygon( int n_points )
 	return true;
 }
 
+// Mirrors Beetle PSX HW's filter_exclude_sprite/filter_exclude_2d_polygon
+// options: exclude_mode is 0 = disabled (no exclusion), 1 = exclude only
+// opaque draws, 2 = exclude both opaque and semi-transparent draws (see
+// osdepend.h's gpu_render_filter_exclude_sprite()/_2d_polygon()). Returns
+// whether this draw should still be eligible for the user's texture
+// filtering mode after applying that exclusion.
+bool psxgpu_device::gpu_filter_eligible( int exclude_mode, osd::gpu_blend_mode blend ) const
+{
+	if( exclude_mode == 2 )
+		return false;
+	if( exclude_mode == 1 && blend == osd::gpu_blend_mode::NONE )
+		return false;
+	return true;
+}
+
+// Heuristic used by the "Exclude 2D Polygons from Filtering" option (see
+// gpu_filter_eligible()) to catch 2D content (HUD/text/UI) that a game
+// draws via the general polygon commands instead of the dedicated sprite/
+// rectangle ones - which the sprite-exclusion option above can't see at
+// all. Two conditions, both checked against the *raw*, pre-drawoffset/
+// pre-PGXP/pre-scale packet data (not the resolved gpu_vertex x/y, which
+// PGXP may have nudged into not-quite-axis-aligned floats even for a
+// visually flat 2D element):
+//   - the quad is an unrotated, screen-axis-aligned rectangle (matches the
+//     v0/v1 one edge, v2/v3 opposite edge winding gpu_queue_triangle_pair()
+//     expects for a 4-point primitive)
+//   - its screen-space size exactly matches its source texture rectangle's
+//     size in texels (a 1:1, unscaled blit) - real 3D geometry essentially
+//     never lands on an exact integer match here, while a 2D element
+//     blitted flat onto the screen reliably does
+// Like Beetle's own version of this heuristic, it's approximate - an
+// unrotated, unscaled 3D surface (e.g. a flat wall tile viewed dead-on)
+// can false-positive as "2D". Only ever called for n_points == 4; a
+// triangle can't be a rectangle, so those are never considered 2D.
+bool psxgpu_device::gpu_detect_2d_polygon( const PAIR *n_coord, const osd::gpu_vertex *v, int n_points )
+{
+	if( n_points != 4 )
+		return false;
+
+	int x0 = S11_COORD_X( n_coord[ 0 ] ), y0 = S11_COORD_Y( n_coord[ 0 ] );
+	int x1 = S11_COORD_X( n_coord[ 1 ] ), y1 = S11_COORD_Y( n_coord[ 1 ] );
+	int x2 = S11_COORD_X( n_coord[ 2 ] ), y2 = S11_COORD_Y( n_coord[ 2 ] );
+	int x3 = S11_COORD_X( n_coord[ 3 ] ), y3 = S11_COORD_Y( n_coord[ 3 ] );
+
+	if( y0 != y1 || y2 != y3 || x0 != x2 || x1 != x3 )
+		return false;
+
+	int screen_w = std::abs( x1 - x0 );
+	int screen_h = std::abs( y2 - y0 );
+	int uv_w = (int)std::lround( std::fabs( v[ 1 ].u - v[ 0 ].u ) );
+	int uv_h = (int)std::lround( std::fabs( v[ 2 ].v - v[ 0 ].v ) );
+
+	return screen_w == uv_w && screen_h == uv_h;
+}
+
 // See gpu_vertex::u_min/v_min/u_max/v_max in gpurender.h - stamps this
 // primitive's own UV bounding box onto every one of its vertices, so a
 // filtered sample (see submit_triangle(s)'s filterable parameter) can't
@@ -1771,7 +1826,10 @@ bool psxgpu_device::gpu_submit_flat_textured_polygon( int n_points )
 	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
 	gpu_set_polygon_uv_clamp( v, n_points );
 
-	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, gpu_blend_mode_for( n_cmd ) );
+	osd::gpu_blend_mode blend = gpu_blend_mode_for( n_cmd );
+	bool filterable = !gpu_detect_2d_polygon( coords, v, n_points )
+		|| gpu_filter_eligible( machine().osd().gpu_render_filter_exclude_2d_polygon(), blend );
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, blend, filterable );
 	return true;
 }
 
@@ -1804,7 +1862,10 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
 	gpu_set_polygon_uv_clamp( v, n_points );
 
-	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, gpu_blend_mode_for( n_cmd ) );
+	osd::gpu_blend_mode blend = gpu_blend_mode_for( n_cmd );
+	bool filterable = !gpu_detect_2d_polygon( coords, v, n_points )
+		|| gpu_filter_eligible( machine().osd().gpu_render_filter_exclude_2d_polygon(), blend );
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, blend, filterable );
 	return true;
 }
 
@@ -1887,11 +1948,15 @@ bool psxgpu_device::gpu_submit_textured_rectangle( int32_t n_x, int32_t n_y, int
 		v[ i ].r = r; v[ i ].g = g; v[ i ].b = b; v[ i ].a = 1.0f;
 	}
 
-	// filterable=false: sprites/2D-rectangle draws (also covers dots, which
-	// delegate here as a 1x1 sprite) are pixel-art-style content - PS1
-	// games routinely use these for HUD/text/UI, which should stay crisp
-	// even with texture filtering enabled for true 3D polygon geometry.
-	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, true, gpu_blend_mode_for( n_cmd ), false );
+	// Sprites/2D-rectangle draws (also covers dots, which delegate here as
+	// a 1x1 sprite) are pixel-art-style content - PS1 games routinely use
+	// these for HUD/text/UI - so filtering is excluded here by default
+	// (mame_psx_gpu_filter_exclude_sprite core option, see
+	// gpu_filter_eligible()'s doc comment); user-configurable per-game in
+	// case a specific game wants its sprites smoothed too.
+	osd::gpu_blend_mode blend = gpu_blend_mode_for( n_cmd );
+	bool filterable = gpu_filter_eligible( machine().osd().gpu_render_filter_exclude_sprite(), blend );
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], v[ 3 ], 4, true, blend, filterable );
 	return true;
 }
 

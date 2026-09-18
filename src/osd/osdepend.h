@@ -164,6 +164,23 @@ public:
 	// default of 0 covers that case safely.
 	virtual int gpu_render_texfilter() const { return 0; }
 
+	// Filtering-exclusion mode for sprite/rectangle primitives and for
+	// polygon primitives heuristically detected as 2D content (see
+	// psxgpu_device::gpu_detect_2d_polygon()) - 0 = disabled (no
+	// exclusion, filtered the same as everything else), 1 = exclude only
+	// opaque draws, 2 = exclude both opaque and semi-transparent draws.
+	// User-selectable where the OSD supports it (see the retro OSD's
+	// mame_psx_gpu_filter_exclude_sprite/_2d_polygon core options) -
+	// mirrors Beetle PSX HW's filter_exclude_sprite/filter_exclude_2d_polygon
+	// options of the same name/shape. Unlike gpu_render_texfilter() (baked
+	// into the GPU target's shader at construction), these are cheap,
+	// per-primitive queries safe to call every frame, same as
+	// gpu_render_scale() - not read once at construction. Meaningless/
+	// unspecified when gpu_render_available() is false; default of 0
+	// (no exclusion) covers that case safely.
+	virtual int gpu_render_filter_exclude_sprite() const { return 0; }
+	virtual int gpu_render_filter_exclude_2d_polygon() const { return 0; }
+
 protected:
 	virtual ~osd_interface() { }
 };
