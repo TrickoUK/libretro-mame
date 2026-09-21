@@ -510,6 +510,58 @@ void gte::pgxp_write_shadow( int64_t ir1, int64_t ir2, int32_t sz3 )
 	// see the MFC2 site's comment in psx.cpp for why that expectation
 	// alone wasn't a safe enough guarantee in practice.
 	m_pgxp_shadow[ 2 ].tag_value = SXY2;
+
+	if( m_pgxp_vcache_enabled )
+	{
+		pgxp_vcache_write( (int16_t)( SXY2 & 0xffff ), (int16_t)( SXY2 >> 16 ), m_pgxp_shadow[ 2 ].x, m_pgxp_shadow[ 2 ].y, m_pgxp_shadow[ 2 ].w );
+	}
+}
+
+// Port of Beetle's PGXP_CacheVertex(): the first write after a read opens a
+// new session (clearing the previous one - equivalent to Beetle's generation
+// counter retiring old entries); a second, different vertex claiming the same
+// integer position within a session marks it ambiguous.
+void gte::pgxp_vcache_write( int sx, int sy, float x, float y, float w )
+{
+	if( sx < -2048 || sx > 2047 || sy < -2048 || sy > 2047 )
+		return;
+
+	if( !m_pgxp_vcache_writing )
+	{
+		m_pgxp_vcache.clear();
+		m_pgxp_vcache_writing = true;
+	}
+
+	auto it = m_pgxp_vcache.find( pgxp_vcache_key( sx, sy ) );
+	if( it == m_pgxp_vcache.end() )
+	{
+		m_pgxp_vcache[ pgxp_vcache_key( sx, sy ) ] = { x, y, w, false };
+	}
+	else if( it->second.x != x || it->second.y != y || it->second.w != w )
+	{
+		it->second.ambiguous = true;
+	}
+}
+
+// Port of Beetle's PGXP_GetCachedVertex(): declines (false) for a position
+// never written this session or claimed twice; the caller then falls back to
+// the plain native coordinate.
+bool gte::pgxp_vertex_cache_query( int sx, int sy, float &x, float &y, float &w )
+{
+	if( !m_pgxp_vcache_enabled )
+		return false;
+
+	m_pgxp_vcache_writing = false;
+
+	if( sx < -2048 || sx > 2047 || sy < -2048 || sy > 2047 )
+		return false;
+
+	auto it = m_pgxp_vcache.find( pgxp_vcache_key( sx, sy ) );
+	if( it == m_pgxp_vcache.end() || it->second.ambiguous )
+		return false;
+
+	x = it->second.x; y = it->second.y; w = it->second.w;
+	return true;
 }
 
 gte::pgxp_shadow gte::pgxp_shadow_for_reg( int reg ) const

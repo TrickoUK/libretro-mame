@@ -90,6 +90,11 @@ void psxgpu_device::device_start()
 	// GPU HLE path itself is active; harmless (never consulted) otherwise.
 	m_gpu_pgxp_enabled = machine().osd().gpu_render_pgxp_enabled();
 	m_gpu_pgxp_tolerance = machine().osd().gpu_render_pgxp_tolerance();
+	m_gpu_pgxp_vcache = m_gpu_pgxp_enabled && machine().osd().gpu_render_pgxp_vertex_cache();
+	if( m_cpu != nullptr )
+	{
+		m_cpu->set_pgxp_vertex_cache_enabled( m_gpu_pgxp_vcache );
+	}
 	if( m_cpu != nullptr )
 	{
 		m_cpu->set_pgxp_enabled( m_gpu_pgxp_enabled );
@@ -1674,6 +1679,25 @@ bool psxgpu_device::gpu_vertex_xyw( int entry_index, PAIR n_coord, float &out_x,
 		out_y = ( s.y + n_drawoffset_y ) * gpu_scale();
 		out_w = s.w;
 		return true;
+	}
+
+	// No direct shadow. With the vertex cache on, try to recover a precise
+	// x/y from any other GTE-transformed vertex that landed on this same
+	// integer pixel (Beetle's PGXP_GetVertex() fallback). The w it carries
+	// is deliberately not used (Beetle sets valid_w = 0 here): returning
+	// false makes the whole primitive drop to w = 1 while keeping this
+	// precise x/y, subject to the 2D tolerance - see
+	// gpu_resolve_polygon_pgxp().
+	if( m_gpu_pgxp_vcache && m_cpu != nullptr )
+	{
+		float cx, cy, cw;
+		if( m_cpu->pgxp_vertex_cache_query( S11_COORD_X( n_coord ), S11_COORD_Y( n_coord ), cx, cy, cw ) )
+		{
+			out_x = ( cx + n_drawoffset_x ) * gpu_scale();
+			out_y = ( cy + n_drawoffset_y ) * gpu_scale();
+			out_w = 1.0f;
+			return false;
+		}
 	}
 
 	out_x = (float)( S11_COORD_X( n_coord ) + n_drawoffset_x ) * gpu_scale();

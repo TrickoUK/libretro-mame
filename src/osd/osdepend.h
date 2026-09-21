@@ -155,6 +155,13 @@ public:
 	// Meaningless when gpu_render_pgxp_enabled() is false.
 	virtual int gpu_render_pgxp_tolerance() const { return -2; }
 
+	// PGXP vertex cache (see gte::set_pgxp_vertex_cache_enabled() and the
+	// retro OSD's mame_psx_gpu_pgxp_vcache core option, mirroring Beetle
+	// PSX HW's pgxp_vertex): lets a polygon vertex with no direct PGXP
+	// shadow recover a precise position from another GTE-transformed
+	// vertex that landed on the same integer pixel. Off by default.
+	virtual bool gpu_render_pgxp_vertex_cache() const { return false; }
+
 	// MSAA sample count the GPU render target should use (e.g. 4 for 4x
 	// MSAA, 0 to disable) - user-selectable where the OSD supports it (see
 	// the retro OSD's mame_psx_gpu_msaa core option). Read once, at

@@ -125,6 +125,8 @@ extern bool psx_gpu_pgxp_enable;
 // PGXP positions), 0..8 = tolerance in native pixels - see osdepend.h's
 // gpu_render_pgxp_tolerance().
 extern int psx_gpu_pgxp_tolerance;
+// mame_psx_gpu_pgxp_vcache core option: PGXP vertex cache (see osdepend.h).
+extern bool psx_gpu_pgxp_vcache;
 // mame_psx_gpu_msaa core option: 4x MSAA on the GPU render target above
 // (see osdretro.h's gpu_render_msaa_samples()) - only meaningful when
 // psx_gpu_hle_scale > 0. A user-facing escape hatch in case a specific

@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstdint>
+#include <unordered_map>
 
 
 #define GTE_SF( op ) ( ( op >> 19 ) & 1 )
@@ -55,6 +56,20 @@ public:
 	// layer. Purely additive: never changes any existing GTE register/
 	// FLAG/timing behavior, and costs nothing when disabled.
 	void set_pgxp_enabled( bool enabled ) { m_pgxp_enabled = enabled; }
+
+	// PGXP vertex cache (Beetle PSX HW's pgxp_vertex option, see
+	// pgxp/pgxp_gpu.c PGXP_CacheVertex()/PGXP_GetCachedVertex()): remembers,
+	// per integer screen position, the precise position of every vertex the
+	// GTE transformed in the current "write session", so a polygon vertex
+	// whose own RAM-address shadow was lost can still recover a precise
+	// position from any other vertex that landed on the same pixel. A write
+	// session opens on the first write after a read (i.e. the next batch of
+	// GTE transforms after the GPU consumed the last one), which retires
+	// everything from the previous session; a position claimed by two
+	// different vertices in one session is ambiguous and refuses to answer.
+	// Costs nothing unless enabled.
+	void set_pgxp_vertex_cache_enabled( bool enabled ) { m_pgxp_vcache_enabled = enabled; m_pgxp_vcache.clear(); m_pgxp_vcache_writing = true; }
+	bool pgxp_vertex_cache_query( int sx, int sy, float &x, float &y, float &w );
 
 	struct pgxp_shadow
 	{
@@ -193,6 +208,17 @@ protected:
 
 	bool m_pgxp_enabled = false;
 	pgxp_shadow m_pgxp_shadow[ 3 ];
+
+	struct pgxp_vcache_entry
+	{
+		float x, y, w;
+		bool ambiguous;
+	};
+	static uint32_t pgxp_vcache_key( int sx, int sy ) { return ( (uint32_t)( sy + 2048 ) << 12 ) | (uint32_t)( sx + 2048 ); }
+	void pgxp_vcache_write( int sx, int sy, float x, float y, float w );
+	bool m_pgxp_vcache_enabled = false;
+	bool m_pgxp_vcache_writing = true;
+	std::unordered_map<uint32_t, pgxp_vcache_entry> m_pgxp_vcache;
 };
 
 #endif // MAME_CPU_PSX_GTE_H

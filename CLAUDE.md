@@ -665,13 +665,29 @@ Reviewed its hardware renderer (`rhi/shaders_gl/command_fragment.glsl.h`,
   primitives. Polygons only (Beetle doesn't touch rectangles; the Wild Arms 2
   special case isn't ported). Triggers on ~2.7% of textured polys in the
   `brvbladej` level-2 scene; no arcade title with a known visible fix found.
+- **24-bit display mode** (MDEC movies): `gpu_update_screen()` decodes packed
+  24-bit VRAM from `p_p_vram` exactly like the software `update_screen()`
+  branch, replicated by render scale. Found via `tektagt` (Tekken Tag intro
+  FMV rendered as rainbow noise). Fixed.
+- **PGXP vertex cache** (`mame_psx_gpu_pgxp_vcache`, default off like Beetle's
+  `pgxp_vertex`): `gte::pgxp_vcache_write()`/`pgxp_vertex_cache_query()`, a
+  port of `PGXP_CacheVertex`/`PGXP_GetCachedVertex` - per-integer-pixel table of
+  GTE-transformed vertices, session opens on first write after a read,
+  ambiguous cells refuse. Used only when a vertex has no direct RAM-address
+  shadow; returns precise x/y but drops w (Beetle's `valid_w = 0`), so it
+  pairs with the tolerance option (not `legacy`). Measured on `tektagt`:
+  only ~28% of polygon vertices had a direct shadow (412k direct vs 1.05M
+  miss in 55s); the cache recovered ~787k of the misses (~75%), leaving ~317k.
+  Live result: character-limb seams went from obvious to barely noticeable.
+  Only verified on tektagt so far - check other boards before defaulting it on.
 - **Oversized-triangle cull** uses Beetle/hardware limits (>=1024 in x, >=512
   in y), not MAME software's 1023-both-axes.
-Known remaining gaps vs Beetle (not done): mask bits (GP0 E6 set/check - needs
+Known remaining gaps vs Beetle (not done; a mask-bit usage survey across the
+collection was started but paused - only `ts2` (1.68M tris, no flags) and
+`tektagt` (90k tris, no flags) measured): mask bits (GP0 E6 set/check - needs
 framebuffer feedback), dithering (GP0 E1 bit 9; MAME's own software path has
 none either), `line_render` hack (degenerate textured triangles as lines),
-PGXP nclip / vertex cache / widescreen hack, 24-bit display mode (MDEC
-video), extra filters (JINC2/SABR/xBR), SSAA/adaptive smoothing.
+PGXP nclip / widescreen hack, extra filters (JINC2/SABR/xBR), SSAA/adaptive smoothing.
 
 ### Other candidates (not currently being worked, kept for reference)
 

@@ -133,6 +133,14 @@ public:
 		return false;
 #endif
 	}
+	virtual bool gpu_render_pgxp_vertex_cache() const override
+	{
+#if defined(HAVE_RETRO_GPU_TARGET)
+		return psx_gpu_pgxp_vcache;
+#else
+		return false;
+#endif
+	}
 	virtual int gpu_render_pgxp_tolerance() const override
 	{
 #if defined(HAVE_RETRO_GPU_TARGET)

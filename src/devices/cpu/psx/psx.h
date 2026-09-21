@@ -141,6 +141,8 @@ public:
 	// GTE-write -> GPR -> RAM -> DMA-to-GPU propagation chain this class
 	// implements below (see the m_pgxp_gpr/m_pgxp_ram_shadow comments).
 	void set_pgxp_enabled(bool enabled) { m_gte.set_pgxp_enabled(enabled); }
+	void set_pgxp_vertex_cache_enabled(bool enabled) { m_gte.set_pgxp_vertex_cache_enabled(enabled); }
+	bool pgxp_vertex_cache_query(int sx, int sy, float &x, float &y, float &w) { return m_gte.pgxp_vertex_cache_query(sx, sy, x, y, w); }
 
 	// Lazily sizes m_pgxp_ram_shadow on first real use instead of in
 	// device_start() - m_ram->size() measured 0 there live (this

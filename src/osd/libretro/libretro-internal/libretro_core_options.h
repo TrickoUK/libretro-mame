@@ -563,6 +563,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "1px"
    },
    {
+      CORE_NAME "_psx_gpu_pgxp_vcache",
+      "PS1 GPU PGXP Vertex Cache (Experimental)",
+      NULL,
+      "Only affects PS1 GPU PGXP Geometry Correction above. When a polygon vertex has no PGXP data of its own, look for another vertex the console's geometry unit transformed this frame that landed on the same screen pixel and reuse its precise position (Beetle PSX HW's 'PGXP Vertex Cache'). Can reduce visible seams between separate meshes, such as fighting-game character limbs; a wrong match can also cause small glitches, which is why it defaults to Disabled. Works together with the PGXP 2D Geometry Tolerance above (not with Legacy). Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "enabled",  "Enabled" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
       CORE_NAME "_psx_gpu_msaa",
       "PS1 GPU 4x MSAA (Experimental)",
       NULL,
