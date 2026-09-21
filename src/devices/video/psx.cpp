@@ -2545,6 +2545,57 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 
 	bitmap.fill( 0 );
 
+	// 24-bit display mode (GP1 08h bit 4 - what MDEC-decoded movies use):
+	// VRAM holds packed 24-bit RGB, three 16-bit words per two pixels, so
+	// the GPU render target's 15-bit colour is meaningless for that region
+	// and showing it read as noise (Tekken Tag Tournament's intro movie).
+	// p_p_vram is still the authoritative copy of anything written by the
+	// CPU/DMA/MDEC (image transfers write it even in GPU mode - see
+	// gpu_submit_image_stamp()), so decode straight from it exactly like
+	// update_screen()'s 24-bit branch, then replicate each native pixel
+	// scale x scale to fill the scaled bitmap.
+	if( ( n_gpustatus & ( 1 << 0x15 ) ) != 0 )
+	{
+		if( n_lines > 0 && n_columns > 0 )
+		{
+			int dst_y0 = ( n_y + n_top ) * scale;
+			int dst_x0 = ( n_x + n_left ) * scale;
+			std::vector<uint32_t> native_row( (size_t)n_columns );
+			for( int line = 0; line < n_lines; line++ )
+			{
+				const uint16_t *p_src = p_p_vram[ ( n_y + (int32_t)n_displaystarty + line ) & 1023 ];
+				int word = 3 * n_x + n_displaystartx;
+				int col = 0;
+				while( col < n_columns )
+				{
+					uint32_t n_g0r0 = p_src[ ( word++ ) & 1023 ];
+					uint32_t n_r1b0 = p_src[ ( word++ ) & 1023 ];
+					uint32_t n_b1g1 = p_src[ ( word++ ) & 1023 ];
+					native_row[ col++ ] = p_n_g0r0[ n_g0r0 ] | p_n_b0[ n_r1b0 ];
+					if( col < n_columns )
+						native_row[ col++ ] = p_n_r1[ n_r1b0 ] | p_n_b1g1[ n_b1g1 ];
+				}
+				for( int ry = 0; ry < scale; ry++ )
+				{
+					int dy = dst_y0 + line * scale + ry;
+					if( dy < 0 || dy >= bitmap.height() )
+						continue;
+					uint32_t *dst_row = &bitmap.pix( dy );
+					for( int c = 0; c < n_columns; c++ )
+					{
+						for( int rx = 0; rx < scale; rx++ )
+						{
+							int dx = dst_x0 + c * scale + rx;
+							if( dx >= 0 && dx < bitmap.width() )
+								dst_row[ dx ] = native_row[ c ];
+						}
+					}
+				}
+			}
+		}
+		return 0;
+	}
+
 	if( n_lines > 0 && n_columns > 0 )
 	{
 		int dst_y0 = ( n_y + n_top ) * scale;
