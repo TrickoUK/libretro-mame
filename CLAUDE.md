@@ -682,6 +682,14 @@ Reviewed its hardware renderer (`rhi/shaders_gl/command_fragment.glsl.h`,
   Live result: character-limb seams went from obvious to barely noticeable.
   Checked with it on: tektagt, raystorm, brvblade. Not yet: starswep,
   gdarius2, raycris, cbaj, Namco/Konami boards.
+- **Interleaved texture pages (type-1 GPU, tpage bit 13 / `n_ti`)**: Konami GQ
+  (`cryptklr`) stores 4bpp/8bpp textures interleaved; `fetch_bgr()` now applies
+  the software `TEXTUREINTERLEAVED4BIT/8BIT` addressing
+  (`set_texture_interleave()`, carried with the texture-window state). Without
+  it every such texture was scrambled into row stripes. The VRAM image stamp
+  is now forced to the identity window / non-interleaved (it samples absolute
+  VRAM, not a real texture). Verified on `cryptklr` (intro cinematic +
+  attract gameplay clean, vertex cache on).
 - **Oversized-triangle cull** uses Beetle/hardware limits (>=1024 in x, >=512
   in y), not MAME software's 1023-both-axes.
 Known remaining gaps vs Beetle (not done; a mask-bit usage survey across the

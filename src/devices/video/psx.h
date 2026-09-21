@@ -280,6 +280,7 @@ private:
 		osd::gpu_blend_mode blend = osd::gpu_blend_mode::NONE;
 		int tex_tx = 0, tex_ty = 0, tex_tp = 0, tex_clutx = 0, tex_cluty = 0;
 		int tw_and_u = 255, tw_and_v = 255, tw_off_u = 0, tw_off_v = 0;
+		int tw_interleave = 0;
 		int clip_x1 = 0, clip_y1 = 0, clip_x2 = 0, clip_y2 = 0;
 		int copy_sx = 0, copy_sy = 0, copy_dx = 0, copy_dy = 0, copy_w = 0, copy_h = 0;
 	};
@@ -377,7 +378,8 @@ private:
 	int32_t m_gpu_last_clutx = -1;
 	int32_t m_gpu_last_cluty = -1;
 	int32_t m_gpu_last_tw_and_u = -1, m_gpu_last_tw_and_v = -1, m_gpu_last_tw_off_u = -1, m_gpu_last_tw_off_v = -1;
-	void gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty );
+	int32_t m_gpu_last_interleave = -1;
+	void gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty, bool use_window = true );
 
 	// Avoids calling set_clip_rect() (a GL scissor-state change) on every
 	// polygon when consecutive polygons share the same PS1 draw area,

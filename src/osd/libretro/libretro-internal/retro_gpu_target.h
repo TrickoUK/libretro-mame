@@ -54,6 +54,7 @@ public:
 	virtual void upload_vram(const uint16_t *vram_words, int width, int height) override;
 	virtual void set_texture_page(int tx, int ty, int tp, int clutx, int cluty) override;
 	virtual void set_texture_window(int and_u, int and_v, int off_u, int off_v) override;
+	virtual void set_texture_interleave(bool interleaved) override;
 	virtual void submit_triangle(const osd::gpu_vertex tri[3], bool textured, osd::gpu_blend_mode blend, bool filterable = true) override;
 	virtual void submit_triangles(const osd::gpu_vertex *verts, int count, bool textured, osd::gpu_blend_mode blend, bool filterable = true) override;
 	virtual void end_frame_and_readback(uint32_t *rgba_out) override;
@@ -153,6 +154,7 @@ private:
 	int m_u_texfilter_loc;
 	int m_u_stp_mode_loc;
 	int m_u_tw_active_loc;
+	int m_u_interleave_loc;
 	int m_u_tw_andu_loc;
 	int m_u_tw_andv_loc;
 	int m_u_tw_offu_loc;

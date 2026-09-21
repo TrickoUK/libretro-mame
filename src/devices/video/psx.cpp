@@ -2196,7 +2196,7 @@ bool psxgpu_device::gpu_submit_vram_fill_rectangle( int32_t n_x, int32_t n_y, in
 // absolute) rather than re-uploading the same bytes as a second texture.
 bool psxgpu_device::gpu_submit_image_stamp( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h )
 {
-	gpu_maybe_set_texture_page( 0, 0, 2, 0, 0 );
+	gpu_maybe_set_texture_page( 0, 0, 2, 0, 0, false );
 
 	float x0 = (float)n_x * gpu_scale();
 	float y0 = (float)n_y * gpu_scale();
@@ -2334,26 +2334,45 @@ bool psxgpu_device::gpu_submit_line( int32_t n_x0, int32_t n_y0, int32_t n_x1, i
 // expensive CPU work being skipped here (just a handful of glUniform1i
 // calls) - this cache is now purely about avoiding a GL state churn, not
 // about avoiding a decode.
-void psxgpu_device::gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty )
+void psxgpu_device::gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty, bool use_window )
 {
 	// Texture window (GP0 E2) rides along with every textured draw's
 	// texture-page setup, cached the same way. The software path's
 	// TEXTURESETUP/TEXTUREWINDOW* macros apply (u & n_tww) + n_twx and
 	// (v & n_twh) + n_twy - see gpurender.h's set_texture_window().
-	if( (int32_t)n_tww != m_gpu_last_tw_and_u || (int32_t)n_twh != m_gpu_last_tw_and_v ||
-		(int32_t)n_twx != m_gpu_last_tw_off_u || (int32_t)n_twy != m_gpu_last_tw_off_v )
+	//
+	// use_window = false forces the identity window: the VRAM image stamp
+	// (gpu_submit_image_stamp()) isn't a real texture draw - it samples
+	// absolute VRAM coordinates (up to 1023/511) - so the game's own
+	// texture window must not remap them. Found via cryptklr (Konami GQ),
+	// whose story-screen image uploads were shredded into stripes by an
+	// active window; the next real textured draw re-emits the game's window
+	// because the cache compares against what was actually last sent.
+	int32_t w_and_u = use_window ? (int32_t)n_tww : 255;
+	int32_t w_and_v = use_window ? (int32_t)n_twh : 255;
+	int32_t w_off_u = use_window ? (int32_t)n_twx : 0;
+	int32_t w_off_v = use_window ? (int32_t)n_twy : 0;
+	// Interleaved texture pages (type-1 GPU tpage bit 13, n_ti) - see
+	// gpurender.h's set_texture_interleave(). Only meaningful for real
+	// texture draws; the image stamp always samples plain VRAM.
+	int32_t w_ti = ( use_window && n_ti != 0 ) ? 1 : 0;
+	if( w_and_u != m_gpu_last_tw_and_u || w_and_v != m_gpu_last_tw_and_v ||
+		w_off_u != m_gpu_last_tw_off_u || w_off_v != m_gpu_last_tw_off_v ||
+		w_ti != m_gpu_last_interleave )
 	{
 		gpu_queued_cmd wcmd;
 		wcmd.kind = gpu_queued_cmd::kind_t::TEXWIN;
-		wcmd.tw_and_u = (int)n_tww;
-		wcmd.tw_and_v = (int)n_twh;
-		wcmd.tw_off_u = (int)n_twx;
-		wcmd.tw_off_v = (int)n_twy;
+		wcmd.tw_and_u = w_and_u;
+		wcmd.tw_and_v = w_and_v;
+		wcmd.tw_off_u = w_off_u;
+		wcmd.tw_off_v = w_off_v;
+		wcmd.tw_interleave = w_ti;
 		m_gpu_queue.push_back( std::move( wcmd ) );
-		m_gpu_last_tw_and_u = (int32_t)n_tww;
-		m_gpu_last_tw_and_v = (int32_t)n_twh;
-		m_gpu_last_tw_off_u = (int32_t)n_twx;
-		m_gpu_last_tw_off_v = (int32_t)n_twy;
+		m_gpu_last_tw_and_u = w_and_u;
+		m_gpu_last_tw_and_v = w_and_v;
+		m_gpu_last_tw_off_u = w_off_u;
+		m_gpu_last_tw_off_v = w_off_v;
+		m_gpu_last_interleave = w_ti;
 	}
 
 	if( n_tx == m_gpu_last_tx && n_ty == m_gpu_last_ty && tp == m_gpu_last_tp &&
@@ -2464,6 +2483,7 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 		case gpu_queued_cmd::kind_t::TEXWIN:
 			flush_run();
 			m_gpu_render_target->set_texture_window( cmd.tw_and_u, cmd.tw_and_v, cmd.tw_off_u, cmd.tw_off_v );
+			m_gpu_render_target->set_texture_interleave( cmd.tw_interleave != 0 );
 			break;
 		case gpu_queued_cmd::kind_t::CLIP:
 			flush_run();

@@ -436,6 +436,7 @@ const char *fragment_shader_src =
 	"uniform int u_texfilter;\n"
 	"uniform int u_stp_mode;\n"
 	"uniform int u_tw_active;\n"
+	"uniform int u_interleave;\n"
 	"uniform int u_tw_andu;\n"
 	"uniform int u_tw_andv;\n"
 	"uniform int u_tw_offu;\n"
@@ -448,12 +449,39 @@ const char *fragment_shader_src =
 	"uniform int u_vram_height;\n"
 	"out vec4 frag_color;\n"
 	"uint fetch_bgr(int u, int v) {\n"
+	"    int offu = 0;\n"
+	"    int offv = 0;\n"
 	"    if (u_tw_active != 0) {\n"
-	"        u = (u & u_tw_andu) + u_tw_offu;\n"
-	"        v = (v & u_tw_andv) + u_tw_offv;\n"
+	"        u = u & u_tw_andu;\n"
+	"        v = v & u_tw_andv;\n"
+	"        offu = u_tw_offu;\n"
+	"        offv = u_tw_offv;\n"
 	"    }\n"
-	"    int row = (u_ty + v) % u_vram_height;\n"
 	"    int clutrow = u_cluty % u_vram_height;\n"
+	"    if (u_interleave != 0 && u_tp != 2) {\n"
+	"        int xi;\n"
+	"        int yi;\n"
+	"        uint idx;\n"
+	"        if (u_tp == 0) {\n"
+	"            xi = ((u >> 2) & ~0x3c) + ((v << 2) & 0x3c);\n"
+	"            yi = (v & ~0xf) + ((u >> 4) & 0xf);\n"
+	"        } else {\n"
+	"            xi = ((u >> 1) & ~0x78) + ((u << 2) & 0x40) + ((v << 3) & 0x38);\n"
+	"            yi = (v & ~0x7) + ((u >> 5) & 0x7);\n"
+	"        }\n"
+	"        int irow = (u_ty + offv + yi) % u_vram_height;\n"
+	"        int icol = (u_tx + ((u_tp == 0) ? (offu >> 2) : (offu >> 1)) + xi) & 1023;\n"
+	"        uint iword = texelFetch(u_tex, ivec2(icol, irow), 0).r;\n"
+	"        if (u_tp == 0)\n"
+	"            idx = (iword >> uint((u & 3) << 2)) & 0x0Fu;\n"
+	"        else\n"
+	"            idx = (iword >> uint((u & 1) << 3)) & 0xFFu;\n"
+	"        int iclutcol = (u_clutx + int(idx)) & 1023;\n"
+	"        return texelFetch(u_tex, ivec2(iclutcol, clutrow), 0).r;\n"
+	"    }\n"
+	"    u += offu;\n"
+	"    v += offv;\n"
+	"    int row = (u_ty + v) % u_vram_height;\n"
 	"    uint bgr;\n"
 	"    if (u_tp == 0) {\n"
 	"        int col = (u_tx + (u >> 2)) & 1023;\n"
@@ -691,7 +719,7 @@ retro_gpu_target::retro_gpu_target(int msaa_samples, int texfilter_mode)
 	, m_u_target_size_loc(-1), m_u_textured_loc(-1)
 	, m_u_tp_loc(-1), m_u_tx_loc(-1), m_u_ty_loc(-1), m_u_clutx_loc(-1), m_u_cluty_loc(-1), m_u_vram_height_loc(-1)
 	, m_u_texfilter_loc(-1), m_u_stp_mode_loc(-1)
-	, m_u_tw_active_loc(-1), m_u_tw_andu_loc(-1), m_u_tw_andv_loc(-1), m_u_tw_offu_loc(-1), m_u_tw_offv_loc(-1)
+	, m_u_tw_active_loc(-1), m_u_interleave_loc(-1), m_u_tw_andu_loc(-1), m_u_tw_andv_loc(-1), m_u_tw_offu_loc(-1), m_u_tw_offv_loc(-1)
 	, m_texfilter_mode(texfilter_mode < 0 || texfilter_mode > 3 ? 0 : texfilter_mode)
 	, m_current_blend(osd::gpu_blend_mode::NONE)
 	, m_scissor_enabled(false), m_scissor_x(0), m_scissor_y(0), m_scissor_w(0), m_scissor_h(0)
@@ -804,6 +832,7 @@ bool retro_gpu_target::init_context()
 	m_u_texfilter_loc = g_gl.GetUniformLocation(m_program, "u_texfilter");
 	m_u_stp_mode_loc = g_gl.GetUniformLocation(m_program, "u_stp_mode");
 	m_u_tw_active_loc = g_gl.GetUniformLocation(m_program, "u_tw_active");
+	m_u_interleave_loc = g_gl.GetUniformLocation(m_program, "u_interleave");
 	m_u_tw_andu_loc = g_gl.GetUniformLocation(m_program, "u_tw_andu");
 	m_u_tw_andv_loc = g_gl.GetUniformLocation(m_program, "u_tw_andv");
 	m_u_tw_offu_loc = g_gl.GetUniformLocation(m_program, "u_tw_offu");
@@ -1110,6 +1139,19 @@ void retro_gpu_target::set_texture_window(int and_u, int and_v, int off_u, int o
 	g_gl.Uniform1i(m_u_tw_andv_loc, and_v);
 	g_gl.Uniform1i(m_u_tw_offu_loc, off_u);
 	g_gl.Uniform1i(m_u_tw_offv_loc, off_v);
+}
+
+void retro_gpu_target::set_texture_interleave(bool interleaved)
+{
+	if (!m_valid)
+		return;
+
+	scoped_context ctx(m_display, m_surface, m_context, m_batch_active);
+	if (!ctx.active)
+		return;
+
+	g_gl.UseProgram(m_program);
+	g_gl.Uniform1i(m_u_interleave_loc, interleaved ? 1 : 0);
 }
 
 void retro_gpu_target::set_blend_mode(osd::gpu_blend_mode blend)

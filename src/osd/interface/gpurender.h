@@ -112,6 +112,12 @@ public:
 	// backends that don't support it.
 	virtual void set_texture_window(int and_u, int and_v, int off_u, int off_v) { }
 
+	// Interleaved texture pages (tpage bit 13 on Konami GQ's older "type 1"
+	// PS1 GPU - MAME's TEXTUREINTERLEAVED4BIT/8BIT macros): 4bpp/8bpp texel
+	// coordinates are scrambled across the page before addressing. 15bpp
+	// pages are unaffected. Default no-op for backends without support.
+	virtual void set_texture_interleave(bool interleaved) { }
+
 	// submit one triangle, drawn with the given blend mode against
 	// whatever is already in the target. textured=false ignores u/v and
 	// uses per-vertex color only. filterable (textured draws only) tells
