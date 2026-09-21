@@ -619,6 +619,34 @@ comparing on `cbaj`: 1px looked best (better than `disabled` and 4px);
 `brvblade` and `raystorm` re-verified with no regressions. Not yet
 re-tested: `gdarius2`, `starswep`, `raycris`.
 
+### GPU path skipped the PS1 oversized-triangle cull - brvbladej blue screen (2026-09-21)
+
+Found via a `brvbladej` save state (level 2, just before player death): the
+whole play area was covered in flat teal with only "INSERT COIN/S" visible.
+**Not PGXP-related** - reproduced identically with `mame_psx_gpu_pgxp =
+disabled`; software rendering (`mame_psx_gpu_hle = disabled`) was correct.
+A temporary per-frame trace (`fprintf` in `gpu_queue_triangle_pair`, since
+removed) showed 10-14 opaque textured quads per frame with vertices ~+-1000
+native px off-screen. The real GPU (and MAME's software path, `CullVertex`/
+`CULLTRIANGLE`/`FINDTOPLEFT` in `psx.cpp`) silently discards any triangle with
+two vertices >1023 apart in x or y; the four polygon `gpu_submit_*` functions
+returned to the GPU path *before* that cull ran, so those quads got drawn at
+full size. **Fixed** via `psxgpu_device::gpu_polygon_cull_mask()`, passed as
+`cull_mask` through `gpu_submit_triangle_pair()`/`gpu_queue_triangle_pair()`
+(quad = triangles (0,1,2)/(1,2,3), culled independently, on raw S11 native
+coordinates - not PGXP ones). Verified against the same paused state: now
+matches the software frame exactly. Hypotheses ruled out on the way: GP0 E6
+mask bits (never set on any triangle across 760 frames of trace), blend modes
+(all opaque).
+
+**Debug technique worth reusing**: to screenshot a specific game state
+deterministically, copy the `.state` to `~/.config/retroarch/states/MAME/
+<romname>.state`, launch with `-e 0 --appendconfig <file containing
+network_cmd_enable = "true">`, wait for the GPU-target-initialized log line,
+send `PAUSE_TOGGLE` via UDP to 127.0.0.1:55355 (python3 socket - no `nc`
+here), then `spectacle -a -b -n -o out.png`. A save state restores software
+VRAM only, not the GPU target's persistent framebuffer.
+
 ### Other candidates (not currently being worked, kept for reference)
 
 Ranked by how self-contained/impactful their software rasterizer is. Line

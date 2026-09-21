@@ -284,8 +284,9 @@ private:
 	};
 	std::vector<gpu_queued_cmd> m_gpu_queue;
 	osd::gpu_blend_mode gpu_blend_mode_for( uint8_t n_cmd ) const;
-	void gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable = true );
-	void gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable = true );
+	void gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable = true, int cull_mask = 0 );
+	void gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable = true, int cull_mask = 0 );
+	static int gpu_polygon_cull_mask( const PAIR *n_coord, int n_points );
 	void gpu_force_no_clip();
 	bool gpu_submit_flat_polygon( int n_points );
 	static void gpu_set_polygon_uv_clamp( osd::gpu_vertex *v, int n_points );

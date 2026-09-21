@@ -1572,17 +1572,51 @@ void psxgpu_device::gpu_maybe_set_clip_rect()
 	m_gpu_last_drawarea_y2 = n_drawarea_y2;
 }
 
-void psxgpu_device::gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable )
+// The real PS1 GPU silently discards any triangle with two vertices more
+// than a fixed distance apart (MAME's software path: CULLTRIANGLE/CullVertex
+// above, > 1023 in either axis on the raw native, pre-PGXP, pre-draw-offset
+// coordinates). Games rely on this: a perspective-projected polygon that
+// swings far past the camera plane simply vanishes instead of smearing
+// across the screen. The GPU path used to skip the check entirely (it
+// returned before the software cull ran) and drew those polygons at their
+// full oversized extent - brvbladej covered its whole screen in a stretched
+// texture that way. A quad is two triangles, (0,1,2) and (1,2,3), culled
+// independently: bit 0 of the result = first triangle culled, bit 1 = second.
+int psxgpu_device::gpu_polygon_cull_mask( const PAIR *n_coord, int n_points )
 {
-	gpu_queued_cmd cmd;
-	cmd.kind = gpu_queued_cmd::kind_t::TRIANGLE;
-	cmd.tri[ 0 ] = v0; cmd.tri[ 1 ] = v1; cmd.tri[ 2 ] = v2;
-	cmd.textured = textured;
-	cmd.filterable = filterable;
-	cmd.blend = blend;
-	m_gpu_queue.push_back( std::move( cmd ) );
+	auto tri_culled = [ n_coord ]( int a, int b, int c )
+	{
+		const int idx[ 3 ][ 2 ] = { { a, b }, { b, c }, { c, a } };
+		for( auto &e : idx )
+		{
+			if( CullVertex( S11_COORD_X( n_coord[ e[ 0 ] ] ), S11_COORD_X( n_coord[ e[ 1 ] ] ) ) ||
+				CullVertex( S11_COORD_Y( n_coord[ e[ 0 ] ] ), S11_COORD_Y( n_coord[ e[ 1 ] ] ) ) )
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	int mask = tri_culled( 0, 1, 2 ) ? 1 : 0;
+	if( n_points == 4 && tri_culled( 1, 2, 3 ) )
+		mask |= 2;
+	return mask;
+}
 
-	if( n_points == 4 )
+void psxgpu_device::gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable, int cull_mask )
+{
+	if( !( cull_mask & 1 ) )
+	{
+		gpu_queued_cmd cmd;
+		cmd.kind = gpu_queued_cmd::kind_t::TRIANGLE;
+		cmd.tri[ 0 ] = v0; cmd.tri[ 1 ] = v1; cmd.tri[ 2 ] = v2;
+		cmd.textured = textured;
+		cmd.filterable = filterable;
+		cmd.blend = blend;
+		m_gpu_queue.push_back( std::move( cmd ) );
+	}
+
+	if( n_points == 4 && !( cull_mask & 2 ) )
 	{
 		gpu_queued_cmd cmd2;
 		cmd2.kind = gpu_queued_cmd::kind_t::TRIANGLE;
@@ -1594,10 +1628,10 @@ void psxgpu_device::gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const os
 	}
 }
 
-void psxgpu_device::gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable )
+void psxgpu_device::gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable, int cull_mask )
 {
 	gpu_maybe_set_clip_rect();
-	gpu_queue_triangle_pair( v0, v1, v2, v3, n_points, textured, blend, filterable );
+	gpu_queue_triangle_pair( v0, v1, v2, v3, n_points, textured, blend, filterable, cull_mask );
 }
 
 // A few PS1 GPU commands (Fill Rectangle in VRAM/0x02, CPU-to-VRAM image
@@ -1720,7 +1754,7 @@ bool psxgpu_device::gpu_submit_flat_polygon( int n_points )
 	}
 	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
 
-	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, false, gpu_blend_mode_for( n_cmd ) );
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, false, gpu_blend_mode_for( n_cmd ), true, gpu_polygon_cull_mask( coords, n_points ) );
 	return true;
 }
 
@@ -1743,7 +1777,7 @@ bool psxgpu_device::gpu_submit_gouraud_polygon( int n_points )
 	}
 	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
 
-	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, false, gpu_blend_mode_for( n_cmd ) );
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, false, gpu_blend_mode_for( n_cmd ), true, gpu_polygon_cull_mask( coords, n_points ) );
 	return true;
 }
 
@@ -1858,7 +1892,7 @@ bool psxgpu_device::gpu_submit_flat_textured_polygon( int n_points )
 	osd::gpu_blend_mode blend = gpu_blend_mode_for( n_cmd );
 	bool filterable = !gpu_detect_2d_polygon( coords, v, n_points )
 		|| gpu_filter_eligible( machine().osd().gpu_render_filter_exclude_2d_polygon(), blend );
-	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, blend, filterable );
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, blend, filterable, gpu_polygon_cull_mask( coords, n_points ) );
 	return true;
 }
 
@@ -1894,7 +1928,7 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 	osd::gpu_blend_mode blend = gpu_blend_mode_for( n_cmd );
 	bool filterable = !gpu_detect_2d_polygon( coords, v, n_points )
 		|| gpu_filter_eligible( machine().osd().gpu_render_filter_exclude_2d_polygon(), blend );
-	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, blend, filterable );
+	gpu_submit_triangle_pair( v[ 0 ], v[ 1 ], v[ 2 ], n_points == 4 ? v[ 3 ] : v[ 2 ], n_points, true, blend, filterable, gpu_polygon_cull_mask( coords, n_points ) );
 	return true;
 }
 
