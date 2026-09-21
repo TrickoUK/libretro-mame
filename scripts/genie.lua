@@ -1005,7 +1005,11 @@ if _OPTIONS["MAP"] then
 end
 
 -- On Linux targets link libgcc and libstdc++ statically.  See #137
-if _OPTIONS["targetos"]=="linux" then
+-- Opt out with MAME_DYNAMIC_LIBSTDCXX=1 for local dev builds on a host that
+-- lacks a 64-bit static libstdc++.a (e.g. only the 32-bit multilib one is
+-- installed) - fine when building and running on the same machine, since
+-- there's no cross-distro libstdc++ ABI mismatch to guard against.
+if _OPTIONS["targetos"]=="linux" and os.getenv("MAME_DYNAMIC_LIBSTDCXX") == nil then
 		linkoptions {
 			"-static-libgcc -static-libstdc++"
 		}

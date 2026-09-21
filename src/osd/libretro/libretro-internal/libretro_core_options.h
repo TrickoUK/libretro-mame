@@ -540,6 +540,29 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
+      CORE_NAME "_psx_gpu_pgxp_tol",
+      "PS1 GPU PGXP 2D Geometry Tolerance (Experimental)",
+      NULL,
+      "Only affects PS1 GPU PGXP Geometry Correction above. Governs polygons where some vertices have no PGXP depth information (typically 2D-ish or CPU-transformed geometry such as backgrounds/scenery). Legacy: the whole polygon reverts to the console's native integer coordinates, which can leave visible seams against neighbouring polygons that stayed corrected. Disabled: keep every corrected vertex position (matches Beetle PSX HW's default). 0px-8px: keep a corrected position only if it lies within that many native pixels of the native one, otherwise revert that vertex (Beetle PSX HW's 'PGXP 2D Geometry Tolerance'). 1px is the default - it removed visible seams between background polygons while showing no regressions. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "legacy",   "Legacy" },
+         { "disabled", "Disabled" },
+         { "0px", NULL },
+         { "1px", NULL },
+         { "2px", NULL },
+         { "3px", NULL },
+         { "4px", NULL },
+         { "5px", NULL },
+         { "6px", NULL },
+         { "7px", NULL },
+         { "8px", NULL },
+         { NULL, NULL },
+      },
+      "1px"
+   },
+   {
       CORE_NAME "_psx_gpu_msaa",
       "PS1 GPU 4x MSAA (Experimental)",
       NULL,

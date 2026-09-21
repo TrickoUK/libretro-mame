@@ -599,6 +599,26 @@ is in `/home/bazzite/.claude/plans/glowing-conjuring-raven.md`'s "Phase 4"
 section - **read that before starting**, nothing below is a
 substitute for it.
 
+### PGXP 2D geometry tolerance - seams between background polygons (2026-09-21)
+
+Found via `cbaj` (Cool Boarders Arcade Jam, `zn.cpp`): visible seams between
+background scenery polygons with PGXP on. Cause: `gpu_resolve_polygon_pgxp()`
+reverted a *whole* polygon to native integer x/y if any one vertex had no
+PGXP shadow, so it sat on integer coordinates while its neighbour (sharing
+that edge) stayed on sub-pixel PGXP coordinates. Fixed by porting Beetle PSX
+HW's `pgxp_2d_tol` behaviour (`mednafen/psx/gpu_polygon.c`, the `invalidW`
+branch): on a partial miss keep each vertex's PGXP x/y, force w=1 on the whole
+primitive (that alone prevents the mixed-depth texture "warp"), and revert a
+vertex to native only if it moved more than N native pixels.
+New core option **`mame_psx_gpu_pgxp_tol`** (`legacy`/`disabled`/`0px`-`8px`,
+default **`1px`**; `legacy` = the old all-or-nothing behaviour, `disabled` =
+Beetle's default of never reverting), plumbed through
+`osd_interface::gpu_render_pgxp_tolerance()` into `psxgpu_device::
+m_gpu_pgxp_tolerance` (-2 legacy, -1 disabled, >=0 px). Live-tested by
+comparing on `cbaj`: 1px looked best (better than `disabled` and 4px);
+`brvblade` and `raystorm` re-verified with no regressions. Not yet
+re-tested: `gdarius2`, `starswep`, `raycris`.
+
 ### Other candidates (not currently being worked, kept for reference)
 
 Ranked by how self-contained/impactful their software rasterizer is. Line

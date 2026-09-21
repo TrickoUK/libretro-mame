@@ -145,6 +145,16 @@ public:
 	// gpu_render_scale(); default of false covers that case safely.
 	virtual bool gpu_render_pgxp_enabled() const { return false; }
 
+	// PGXP 2D geometry tolerance (see the retro OSD's mame_psx_gpu_pgxp_tol
+	// core option, mirroring Beetle PSX HW's pgxp_2d_tol): governs
+	// polygons where at least one vertex has no PGXP depth information.
+	// -2 = legacy (whole polygon reverts to native integer coordinates),
+	// -1 = keep every PGXP-corrected vertex position as-is (Beetle's
+	// "disabled"), N >= 0 = keep a PGXP position only if it lies within
+	// N native pixels of the native coordinate, else revert that vertex.
+	// Meaningless when gpu_render_pgxp_enabled() is false.
+	virtual int gpu_render_pgxp_tolerance() const { return -2; }
+
 	// MSAA sample count the GPU render target should use (e.g. 4 for 4x
 	// MSAA, 0 to disable) - user-selectable where the OSD supports it (see
 	// the retro OSD's mame_psx_gpu_msaa core option). Read once, at

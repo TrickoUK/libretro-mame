@@ -478,6 +478,19 @@ static void check_variables(void)
       psx_gpu_pgxp_enable = !strcmp(var.value, "enabled");
    }
 
+   var.key   = CORE_NAME "_psx_gpu_pgxp_tol";
+   var.value = NULL;
+   psx_gpu_pgxp_tolerance = 1;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "disabled"))
+         psx_gpu_pgxp_tolerance = -1;
+      else if (!strcmp(var.value, "legacy"))
+         psx_gpu_pgxp_tolerance = -2;
+      else
+         psx_gpu_pgxp_tolerance = atoi(var.value);
+   }
+
    var.key   = CORE_NAME "_psx_gpu_msaa";
    var.value = NULL;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)

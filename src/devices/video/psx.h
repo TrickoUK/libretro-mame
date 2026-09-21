@@ -330,6 +330,8 @@ private:
 	// option) so gpu_write() and the four polygon gpu_submit_* functions
 	// can skip PGXP work entirely when the feature is off.
 	bool m_gpu_pgxp_enabled = false;
+	// mame_psx_gpu_pgxp_tol: see osd_interface::gpu_render_pgxp_tolerance().
+	int m_gpu_pgxp_tolerance = -2;
 
 	// Shared by all four GTE-sourced polygon primitives (gpu_submit_flat_
 	// polygon/gouraud_polygon/flat_textured_polygon/gouraud_textured_

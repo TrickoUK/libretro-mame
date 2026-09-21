@@ -89,6 +89,7 @@ void psxgpu_device::device_start()
 	// boot, same as gpu_scale()/mame_psx_gpu_hle. Only meaningful when the
 	// GPU HLE path itself is active; harmless (never consulted) otherwise.
 	m_gpu_pgxp_enabled = machine().osd().gpu_render_pgxp_enabled();
+	m_gpu_pgxp_tolerance = machine().osd().gpu_render_pgxp_tolerance();
 	if( m_cpu != nullptr )
 	{
 		m_cpu->set_pgxp_enabled( m_gpu_pgxp_enabled );
@@ -1661,7 +1662,35 @@ void psxgpu_device::gpu_resolve_polygon_pgxp( const int *entry_index, const PAIR
 		all_hit = gpu_vertex_xyw( entry_index[ i ], n_coord[ i ], v[ i ].x, v[ i ].y, v[ i ].w ) && all_hit;
 	}
 
-	if( !all_hit )
+	if( !all_hit && m_gpu_pgxp_tolerance > -2 )
+	{
+		// Beetle PSX HW-style handling (its pgxp_2d_tol option): keep each
+		// corrected vertex's sub-pixel x/y - so shared edges with
+		// neighbouring, fully-corrected polygons stay welded instead of
+		// snapping to integers and opening a seam - but force w=1 on the
+		// whole primitive to avoid the mixed-depth "warp to a focal
+		// point" problem described above. gpu_vertex_xyw() already left
+		// missed vertices at their native coordinates. With a tolerance
+		// set (>= 0), a corrected position that strayed further than that
+		// many native pixels from the native one is treated as an
+		// outlier and reverted.
+		const float tol = m_gpu_pgxp_tolerance >= 0 ? (float)m_gpu_pgxp_tolerance * gpu_scale() : -1.0f;
+		for( int i = 0; i < n_points; i++ )
+		{
+			if( tol >= 0.0f )
+			{
+				float nx = (float)( S11_COORD_X( n_coord[ i ] ) + n_drawoffset_x ) * gpu_scale();
+				float ny = (float)( S11_COORD_Y( n_coord[ i ] ) + n_drawoffset_y ) * gpu_scale();
+				if( fabsf( v[ i ].x - nx ) > tol || fabsf( v[ i ].y - ny ) > tol )
+				{
+					v[ i ].x = nx;
+					v[ i ].y = ny;
+				}
+			}
+			v[ i ].w = 1.0f;
+		}
+	}
+	else if( !all_hit )
 	{
 		for( int i = 0; i < n_points; i++ )
 		{

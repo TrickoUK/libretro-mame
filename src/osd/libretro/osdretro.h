@@ -133,6 +133,14 @@ public:
 		return false;
 #endif
 	}
+	virtual int gpu_render_pgxp_tolerance() const override
+	{
+#if defined(HAVE_RETRO_GPU_TARGET)
+		return psx_gpu_pgxp_tolerance;
+#else
+		return -2;
+#endif
+	}
 	virtual int gpu_render_msaa_samples() const override
 	{
 #if defined(HAVE_RETRO_GPU_TARGET)

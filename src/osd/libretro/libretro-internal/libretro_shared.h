@@ -121,6 +121,10 @@ extern int psx_gpu_hle_scale;
 // GPU HLE path above (see osdretro.h's gpu_render_pgxp_enabled() and
 // CLAUDE.md Phase 4) - only meaningful when psx_gpu_hle_scale > 0.
 extern bool psx_gpu_pgxp_enable;
+// mame_psx_gpu_pgxp_tol core option: -2 = legacy, -1 = disabled (keep all
+// PGXP positions), 0..8 = tolerance in native pixels - see osdepend.h's
+// gpu_render_pgxp_tolerance().
+extern int psx_gpu_pgxp_tolerance;
 // mame_psx_gpu_msaa core option: 4x MSAA on the GPU render target above
 // (see osdretro.h's gpu_render_msaa_samples()) - only meaningful when
 // psx_gpu_hle_scale > 0. A user-facing escape hatch in case a specific
