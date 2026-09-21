@@ -669,8 +669,9 @@ Reviewed its hardware renderer (`rhi/shaders_gl/command_fragment.glsl.h`,
   24-bit VRAM from `p_p_vram` exactly like the software `update_screen()`
   branch, replicated by render scale. Found via `tektagt` (Tekken Tag intro
   FMV rendered as rainbow noise). Fixed.
-- **PGXP vertex cache** (`mame_psx_gpu_pgxp_vcache`, default off like Beetle's
-  `pgxp_vertex`): `gte::pgxp_vcache_write()`/`pgxp_vertex_cache_query()`, a
+- **PGXP vertex cache** (`mame_psx_gpu_pgxp_vcache`, **default on** since
+  2026-09-21 - Beetle's `pgxp_vertex` defaults off, ours was verified on tektagt,
+  raystorm and brvblade first): `gte::pgxp_vcache_write()`/`pgxp_vertex_cache_query()`, a
   port of `PGXP_CacheVertex`/`PGXP_GetCachedVertex` - per-integer-pixel table of
   GTE-transformed vertices, session opens on first write after a read,
   ambiguous cells refuse. Used only when a vertex has no direct RAM-address
@@ -679,7 +680,8 @@ Reviewed its hardware renderer (`rhi/shaders_gl/command_fragment.glsl.h`,
   only ~28% of polygon vertices had a direct shadow (412k direct vs 1.05M
   miss in 55s); the cache recovered ~787k of the misses (~75%), leaving ~317k.
   Live result: character-limb seams went from obvious to barely noticeable.
-  Only verified on tektagt so far - check other boards before defaulting it on.
+  Checked with it on: tektagt, raystorm, brvblade. Not yet: starswep,
+  gdarius2, raycris, cbaj, Namco/Konami boards.
 - **Oversized-triangle cull** uses Beetle/hardware limits (>=1024 in x, >=512
   in y), not MAME software's 1023-both-axes.
 Known remaining gaps vs Beetle (not done; a mask-bit usage survey across the

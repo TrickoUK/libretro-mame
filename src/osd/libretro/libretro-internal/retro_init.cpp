@@ -75,7 +75,7 @@ char debug_plugin[32] = "";
 int psx_gpu_hle_scale = 0;
 bool psx_gpu_pgxp_enable = false;
 int psx_gpu_pgxp_tolerance = 1;
-bool psx_gpu_pgxp_vcache = false;
+bool psx_gpu_pgxp_vcache = true;
 bool psx_gpu_msaa_enable = true;
 int psx_gpu_texfilter_mode = 0;
 // Default "all" (not Beetle PSX HW's "disabled" default) to preserve this

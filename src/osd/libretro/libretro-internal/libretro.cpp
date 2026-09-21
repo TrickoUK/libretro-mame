@@ -493,7 +493,7 @@ static void check_variables(void)
 
    var.key   = CORE_NAME "_psx_gpu_pgxp_vcache";
    var.value = NULL;
-   psx_gpu_pgxp_vcache = false;
+   psx_gpu_pgxp_vcache = true;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
       psx_gpu_pgxp_vcache = !strcmp(var.value, "enabled");
 
