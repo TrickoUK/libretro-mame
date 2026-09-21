@@ -434,6 +434,7 @@ const char *fragment_shader_src =
 	"uniform usampler2D u_tex;\n"
 	"uniform int u_textured;\n"
 	"uniform int u_texfilter;\n"
+	"uniform int u_stp_mode;\n"
 	"uniform int u_tp;\n"
 	"uniform int u_tx;\n"
 	"uniform int u_ty;\n"
@@ -441,7 +442,7 @@ const char *fragment_shader_src =
 	"uniform int u_cluty;\n"
 	"uniform int u_vram_height;\n"
 	"out vec4 frag_color;\n"
-	"vec4 decode_texel(int u, int v) {\n"
+	"uint fetch_bgr(int u, int v) {\n"
 	"    int row = (u_ty + v) % u_vram_height;\n"
 	"    int clutrow = u_cluty % u_vram_height;\n"
 	"    uint bgr;\n"
@@ -461,6 +462,10 @@ const char *fragment_shader_src =
 	"        int col = (u_tx + u) & 1023;\n"
 	"        bgr = texelFetch(u_tex, ivec2(col, row), 0).r;\n"
 	"    }\n"
+	"    return bgr;\n"
+	"}\n"
+	"vec4 decode_texel(int u, int v) {\n"
+	"    uint bgr = fetch_bgr(u, v);\n"
 	"    if (bgr == 0u) return vec4(0.0);\n"
 	"    uint r8 = (bgr & 0x1Fu) << 3;\n"
 	"    uint g8 = ((bgr >> 5) & 0x1Fu) << 3;\n"
@@ -552,6 +557,11 @@ const char *fragment_shader_src =
 	"            texel = sample_3point(v_uv, cmin, cmax);\n"
 	"        }\n"
 	"        if (texel.a <= 0.0) discard;\n"
+	"        if (u_stp_mode != 0) {\n"
+	"            bool stp = (fetch_bgr(int(v_uv.x), int(v_uv.y)) & 0x8000u) != 0u;\n"
+	"            if (u_stp_mode == 1 && !stp) discard;\n"
+	"            if (u_stp_mode == 2 && stp) discard;\n"
+	"        }\n"
 	"        frag_color = vec4(clamp(texel.rgb * (v_color.rgb * 2.0), 0.0, 1.0), 1.0);\n"
 	"    } else {\n"
 	"        frag_color = v_color;\n"
@@ -621,7 +631,7 @@ retro_gpu_target::retro_gpu_target(int msaa_samples, int texfilter_mode)
 	, m_program(0), m_vao(0), m_vbo(0)
 	, m_u_target_size_loc(-1), m_u_textured_loc(-1)
 	, m_u_tp_loc(-1), m_u_tx_loc(-1), m_u_ty_loc(-1), m_u_clutx_loc(-1), m_u_cluty_loc(-1), m_u_vram_height_loc(-1)
-	, m_u_texfilter_loc(-1)
+	, m_u_texfilter_loc(-1), m_u_stp_mode_loc(-1)
 	, m_texfilter_mode(texfilter_mode < 0 || texfilter_mode > 3 ? 0 : texfilter_mode)
 	, m_current_blend(osd::gpu_blend_mode::NONE)
 	, m_scissor_enabled(false), m_scissor_x(0), m_scissor_y(0), m_scissor_w(0), m_scissor_h(0)
@@ -732,6 +742,7 @@ bool retro_gpu_target::init_context()
 	m_u_cluty_loc = g_gl.GetUniformLocation(m_program, "u_cluty");
 	m_u_vram_height_loc = g_gl.GetUniformLocation(m_program, "u_vram_height");
 	m_u_texfilter_loc = g_gl.GetUniformLocation(m_program, "u_texfilter");
+	m_u_stp_mode_loc = g_gl.GetUniformLocation(m_program, "u_stp_mode");
 	GLint tex_loc = g_gl.GetUniformLocation(m_program, "u_tex");
 	g_gl.Uniform1i(tex_loc, 0);
 	// Just a safe initial default - submit_triangle(s) resolves the real
@@ -1067,7 +1078,6 @@ void retro_gpu_target::submit_triangles(const osd::gpu_vertex *verts, int count,
 	if (!ctx.active)
 		return;
 
-	set_blend_mode(blend);
 	g_gl.Uniform1i(m_u_textured_loc, textured ? 1 : 0);
 	// Resolve the user's texfilter option against this draw's eligibility
 	// (see gpurender.h's filterable doc comment) - falls back to nearest
@@ -1077,6 +1087,32 @@ void retro_gpu_target::submit_triangles(const osd::gpu_vertex *verts, int count,
 	g_gl.Uniform1i(m_u_texfilter_loc, filterable ? m_texfilter_mode : 0);
 	g_gl.BindBuffer(GL_ARRAY_BUFFER, m_vbo);
 	g_gl.BufferData(GL_ARRAY_BUFFER, sizeof(osd::gpu_vertex) * count, verts, GL_DYNAMIC_DRAW);
+
+	if (textured && blend != osd::gpu_blend_mode::NONE)
+	{
+		// Per-texel semi-transparency: on the PS1, a semi-transparent
+		// *textured* primitive only blends texels whose own bit 15 (the
+		// "STP" bit) is set - texels with it clear are drawn fully opaque
+		// (psx.cpp's TRANSPARENTPIXEL macro). One fixed-function blend
+		// mode per draw call can't express that split (and reverse-
+		// subtract can't express "opaque" at all), so draw the batch
+		// twice: pass 1 = only STP-set texels, with the requested blend;
+		// pass 2 = only STP-clear texels, blending off. Overlapping
+		// primitives inside one batch are consequently reordered
+		// blended-first, opaque-second - only visible where semi-
+		// transparent polygons overlap each other within a single
+		// same-state run, which is rare.
+		set_blend_mode(blend);
+		g_gl.Uniform1i(m_u_stp_mode_loc, 1);
+		g_gl.DrawArrays(GL_TRIANGLES, 0, count);
+		set_blend_mode(osd::gpu_blend_mode::NONE);
+		g_gl.Uniform1i(m_u_stp_mode_loc, 2);
+		g_gl.DrawArrays(GL_TRIANGLES, 0, count);
+		g_gl.Uniform1i(m_u_stp_mode_loc, 0);
+		return;
+	}
+
+	set_blend_mode(blend);
 	g_gl.DrawArrays(GL_TRIANGLES, 0, count);
 }
 

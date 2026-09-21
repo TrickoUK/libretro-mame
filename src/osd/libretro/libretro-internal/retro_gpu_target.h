@@ -150,6 +150,7 @@ private:
 	int m_u_cluty_loc;
 	int m_u_vram_height_loc;
 	int m_u_texfilter_loc;
+	int m_u_stp_mode_loc;
 
 	int m_texfilter_mode;
 
