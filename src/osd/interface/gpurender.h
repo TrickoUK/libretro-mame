@@ -104,6 +104,14 @@ public:
 	// color-mode field. gpu_vertex::u/v remain page-relative (0-255).
 	virtual void set_texture_page(int tx, int ty, int tp, int clutx, int cluty) = 0;
 
+	// PS1 texture window (GP0 E2): subsequent textured draws remap each
+	// texel coordinate as u' = (u & and_u) + off_u, v' = (v & and_v) +
+	// off_v (page-relative texels) before addressing the texture page -
+	// lets a game repeat/wrap a small texture region. The identity window
+	// is and_u = and_v = 255, off_u = off_v = 0. Default no-op for
+	// backends that don't support it.
+	virtual void set_texture_window(int and_u, int and_v, int off_u, int off_v) { }
+
 	// submit one triangle, drawn with the given blend mode against
 	// whatever is already in the target. textured=false ignores u/v and
 	// uses per-vertex color only. filterable (textured draws only) tells

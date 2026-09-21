@@ -647,6 +647,28 @@ send `PAUSE_TOGGLE` via UDP to 127.0.0.1:55355 (python3 socket - no `nc`
 here), then `spectacle -a -b -n -o out.png`. A save state restores software
 VRAM only, not the GPU target's persistent framebuffer.
 
+### Beetle PSX HW parity review (2026-09-21)
+
+Rule of thumb from the user: **Beetle PSX HW (`libretro/beetle-psx-libretro`)
+is the gold standard - port its behaviour rather than inventing our own.**
+Reviewed its hardware renderer (`rhi/shaders_gl/command_fragment.glsl.h`,
+`mednafen/psx/gpu*.c`) against the GPU path. Done so far:
+- **Per-texel STP (bit 15) semi-transparency**: two-pass draw (`u_stp_mode`),
+  filtered STP interpolated with the filter weights, opacity < 0.5 dropped,
+  exactly as Beetle's `draw_semi_transparent` split.
+- **Texture window (GP0 E2)**: `set_texture_window()` -> `u_tw_*` uniforms,
+  `(u & and) + off` applied in `fetch_bgr()`. **Not yet observed in any game**
+  (brvblade/raystorm/cbaj/starswep/gdarius2 never write a non-identity window
+  in attract mode) - regression-checked only.
+- **Oversized-triangle cull** uses Beetle/hardware limits (>=1024 in x, >=512
+  in y), not MAME software's 1023-both-axes.
+Known remaining gaps vs Beetle (not done): mask bits (GP0 E6 set/check - needs
+framebuffer feedback), dithering (GP0 E1 bit 9; MAME's own software path has
+none either), `Calc_UVOffsets_Adjust_Verts` (UV nudge for flipped 2D sprites at
+upscaled res), `line_render` hack (degenerate textured triangles as lines),
+PGXP nclip / vertex cache / widescreen hack, 24-bit display mode (MDEC
+video), extra filters (JINC2/SABR/xBR), SSAA/adaptive smoothing.
+
 ### Other candidates (not currently being worked, kept for reference)
 
 Ranked by how self-contained/impactful their software rasterizer is. Line

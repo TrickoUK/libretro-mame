@@ -435,6 +435,11 @@ const char *fragment_shader_src =
 	"uniform int u_textured;\n"
 	"uniform int u_texfilter;\n"
 	"uniform int u_stp_mode;\n"
+	"uniform int u_tw_active;\n"
+	"uniform int u_tw_andu;\n"
+	"uniform int u_tw_andv;\n"
+	"uniform int u_tw_offu;\n"
+	"uniform int u_tw_offv;\n"
 	"uniform int u_tp;\n"
 	"uniform int u_tx;\n"
 	"uniform int u_ty;\n"
@@ -443,6 +448,10 @@ const char *fragment_shader_src =
 	"uniform int u_vram_height;\n"
 	"out vec4 frag_color;\n"
 	"uint fetch_bgr(int u, int v) {\n"
+	"    if (u_tw_active != 0) {\n"
+	"        u = (u & u_tw_andu) + u_tw_offu;\n"
+	"        v = (v & u_tw_andv) + u_tw_offv;\n"
+	"    }\n"
 	"    int row = (u_ty + v) % u_vram_height;\n"
 	"    int clutrow = u_cluty % u_vram_height;\n"
 	"    uint bgr;\n"
@@ -682,6 +691,7 @@ retro_gpu_target::retro_gpu_target(int msaa_samples, int texfilter_mode)
 	, m_u_target_size_loc(-1), m_u_textured_loc(-1)
 	, m_u_tp_loc(-1), m_u_tx_loc(-1), m_u_ty_loc(-1), m_u_clutx_loc(-1), m_u_cluty_loc(-1), m_u_vram_height_loc(-1)
 	, m_u_texfilter_loc(-1), m_u_stp_mode_loc(-1)
+	, m_u_tw_active_loc(-1), m_u_tw_andu_loc(-1), m_u_tw_andv_loc(-1), m_u_tw_offu_loc(-1), m_u_tw_offv_loc(-1)
 	, m_texfilter_mode(texfilter_mode < 0 || texfilter_mode > 3 ? 0 : texfilter_mode)
 	, m_current_blend(osd::gpu_blend_mode::NONE)
 	, m_scissor_enabled(false), m_scissor_x(0), m_scissor_y(0), m_scissor_w(0), m_scissor_h(0)
@@ -793,6 +803,11 @@ bool retro_gpu_target::init_context()
 	m_u_vram_height_loc = g_gl.GetUniformLocation(m_program, "u_vram_height");
 	m_u_texfilter_loc = g_gl.GetUniformLocation(m_program, "u_texfilter");
 	m_u_stp_mode_loc = g_gl.GetUniformLocation(m_program, "u_stp_mode");
+	m_u_tw_active_loc = g_gl.GetUniformLocation(m_program, "u_tw_active");
+	m_u_tw_andu_loc = g_gl.GetUniformLocation(m_program, "u_tw_andu");
+	m_u_tw_andv_loc = g_gl.GetUniformLocation(m_program, "u_tw_andv");
+	m_u_tw_offu_loc = g_gl.GetUniformLocation(m_program, "u_tw_offu");
+	m_u_tw_offv_loc = g_gl.GetUniformLocation(m_program, "u_tw_offv");
 	GLint tex_loc = g_gl.GetUniformLocation(m_program, "u_tex");
 	g_gl.Uniform1i(tex_loc, 0);
 	// Just a safe initial default - submit_triangle(s) resolves the real
@@ -1074,6 +1089,27 @@ void retro_gpu_target::set_texture_page(int tx, int ty, int tp, int clutx, int c
 	g_gl.Uniform1i(m_u_ty_loc, ty);
 	g_gl.Uniform1i(m_u_clutx_loc, clutx);
 	g_gl.Uniform1i(m_u_cluty_loc, cluty);
+}
+
+void retro_gpu_target::set_texture_window(int and_u, int and_v, int off_u, int off_v)
+{
+	if (!m_valid)
+		return;
+
+	scoped_context ctx(m_display, m_surface, m_context, m_batch_active);
+	if (!ctx.active)
+		return;
+
+	g_gl.UseProgram(m_program);
+	// Identity window (the PS1 reset state) skips the remap entirely so
+	// filtered taps that step one texel past 255 aren't wrapped for
+	// content that never set a window.
+	bool active = !(and_u == 255 && and_v == 255 && off_u == 0 && off_v == 0);
+	g_gl.Uniform1i(m_u_tw_active_loc, active ? 1 : 0);
+	g_gl.Uniform1i(m_u_tw_andu_loc, and_u);
+	g_gl.Uniform1i(m_u_tw_andv_loc, and_v);
+	g_gl.Uniform1i(m_u_tw_offu_loc, off_u);
+	g_gl.Uniform1i(m_u_tw_offv_loc, off_v);
 }
 
 void retro_gpu_target::set_blend_mode(osd::gpu_blend_mode blend)

@@ -1589,8 +1589,13 @@ int psxgpu_device::gpu_polygon_cull_mask( const PAIR *n_coord, int n_points )
 		const int idx[ 3 ][ 2 ] = { { a, b }, { b, c }, { c, a } };
 		for( auto &e : idx )
 		{
-			if( CullVertex( S11_COORD_X( n_coord[ e[ 0 ] ] ), S11_COORD_X( n_coord[ e[ 1 ] ] ) ) ||
-				CullVertex( S11_COORD_Y( n_coord[ e[ 0 ] ] ), S11_COORD_Y( n_coord[ e[ 1 ] ] ) ) )
+			// Real hardware limits (and Beetle PSX HW's): >= 1024 apart in x,
+			// >= 512 apart in y. MAME's own software path (CullVertex) uses
+			// 1023 for both axes, which lets through vertically-oversized
+			// triangles the hardware drops.
+			int dx = S11_COORD_X( n_coord[ e[ 0 ] ] ) - S11_COORD_X( n_coord[ e[ 1 ] ] );
+			int dy = S11_COORD_Y( n_coord[ e[ 0 ] ] ) - S11_COORD_Y( n_coord[ e[ 1 ] ] );
+			if( dx >= 1024 || dx <= -1024 || dy >= 512 || dy <= -512 )
 			{
 				return true;
 			}
@@ -2214,6 +2219,26 @@ bool psxgpu_device::gpu_submit_line( int32_t n_x0, int32_t n_y0, int32_t n_x1, i
 // about avoiding a decode.
 void psxgpu_device::gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty )
 {
+	// Texture window (GP0 E2) rides along with every textured draw's
+	// texture-page setup, cached the same way. The software path's
+	// TEXTURESETUP/TEXTUREWINDOW* macros apply (u & n_tww) + n_twx and
+	// (v & n_twh) + n_twy - see gpurender.h's set_texture_window().
+	if( (int32_t)n_tww != m_gpu_last_tw_and_u || (int32_t)n_twh != m_gpu_last_tw_and_v ||
+		(int32_t)n_twx != m_gpu_last_tw_off_u || (int32_t)n_twy != m_gpu_last_tw_off_v )
+	{
+		gpu_queued_cmd wcmd;
+		wcmd.kind = gpu_queued_cmd::kind_t::TEXWIN;
+		wcmd.tw_and_u = (int)n_tww;
+		wcmd.tw_and_v = (int)n_twh;
+		wcmd.tw_off_u = (int)n_twx;
+		wcmd.tw_off_v = (int)n_twy;
+		m_gpu_queue.push_back( std::move( wcmd ) );
+		m_gpu_last_tw_and_u = (int32_t)n_tww;
+		m_gpu_last_tw_and_v = (int32_t)n_twh;
+		m_gpu_last_tw_off_u = (int32_t)n_twx;
+		m_gpu_last_tw_off_v = (int32_t)n_twy;
+	}
+
 	if( n_tx == m_gpu_last_tx && n_ty == m_gpu_last_ty && tp == m_gpu_last_tp &&
 		n_clutx == m_gpu_last_clutx && n_cluty == m_gpu_last_cluty )
 	{
@@ -2318,6 +2343,10 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 		case gpu_queued_cmd::kind_t::TEXPARAM:
 			flush_run();
 			m_gpu_render_target->set_texture_page( cmd.tex_tx, cmd.tex_ty, cmd.tex_tp, cmd.tex_clutx, cmd.tex_cluty );
+			break;
+		case gpu_queued_cmd::kind_t::TEXWIN:
+			flush_run();
+			m_gpu_render_target->set_texture_window( cmd.tw_and_u, cmd.tw_and_v, cmd.tw_off_u, cmd.tw_off_v );
 			break;
 		case gpu_queued_cmd::kind_t::CLIP:
 			flush_run();
