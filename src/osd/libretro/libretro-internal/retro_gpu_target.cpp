@@ -532,6 +532,54 @@ const char *fragment_shader_src =
 	"    if (wsum <= 0.0) return vec4(0.0);\n"
 	"    return vec4((c00.rgb * w00 + c10.rgb * w10 + c01.rgb * w01 + c11.rgb * w11) / wsum, 1.0);\n"
 	"}\n"
+	// Per-texel semi-transparency (STP, texel bit 15) decision for the
+	// fragment, ported from Beetle PSX HW's command_fragment.glsl.h (its
+	// get_texel_bilinear()/get_texel_3point() plus the
+	// `is_texel_semi_transparent != draw_semi_transparent` test in main()).
+	// Unfiltered: the nearest texel's own bit. Filtered: the colour is a
+	// blend of a small tap footprint, so - exactly like Beetle - the STP
+	// bit is interpolated with the *same weights* as the colour (a
+	// transparent tap, bgr == 0, contributes STP 0 and opacity 0 at full
+	// weight, no renormalisation) and rounded at 0.5, and a fragment whose
+	// interpolated opacity is below 0.5 is dropped. Deciding from the
+	// single nearest texel instead misclassified edge fragments and drew a
+	// hard opaque outline around translucent sprites.
+	"void texel_stp(out bool stp, out float opacity) {\n"
+	"    if (u_texfilter == 0) {\n"
+	"        stp = (fetch_bgr(int(v_uv.x), int(v_uv.y)) & 0x8000u) != 0u;\n"
+	"        opacity = 1.0;\n"
+	"        return;\n"
+	"    }\n"
+	"    ivec2 cmin = ivec2(floor(v_uv_clamp.xy));\n"
+	"    ivec2 cmax = ivec2(floor(v_uv_clamp.zw));\n"
+	"    vec2 guv = v_uv - 0.5;\n"
+	"    ivec2 base = ivec2(floor(guv));\n"
+	"    vec2 fr = fract(guv);\n"
+	"    ivec2 t00 = clamp(base, cmin, cmax);\n"
+	"    ivec2 t10 = clamp(base + ivec2(1, 0), cmin, cmax);\n"
+	"    ivec2 t01 = clamp(base + ivec2(0, 1), cmin, cmax);\n"
+	"    ivec2 t11 = clamp(base + ivec2(1, 1), cmin, cmax);\n"
+	"    uint b00 = fetch_bgr(t00.x, t00.y);\n"
+	"    uint b10 = fetch_bgr(t10.x, t10.y);\n"
+	"    uint b01 = fetch_bgr(t01.x, t01.y);\n"
+	"    uint b11 = fetch_bgr(t11.x, t11.y);\n"
+	"    float w00, w10, w01, w11;\n"
+	"    if (u_texfilter == 3) {\n"
+	"        if (fr.x + fr.y <= 1.0) {\n"
+	"            w00 = 1.0 - fr.x - fr.y; w10 = fr.x; w01 = fr.y; w11 = 0.0;\n"
+	"        } else {\n"
+	"            w11 = fr.x + fr.y - 1.0; w10 = 1.0 - fr.y; w01 = 1.0 - fr.x; w00 = 0.0;\n"
+	"        }\n"
+	"    } else {\n"
+	"        w00 = (1.0 - fr.x) * (1.0 - fr.y); w10 = fr.x * (1.0 - fr.y);\n"
+	"        w01 = (1.0 - fr.x) * fr.y; w11 = fr.x * fr.y;\n"
+	"    }\n"
+	"    opacity = w00 * (b00 != 0u ? 1.0 : 0.0) + w10 * (b10 != 0u ? 1.0 : 0.0)\n"
+	"            + w01 * (b01 != 0u ? 1.0 : 0.0) + w11 * (b11 != 0u ? 1.0 : 0.0);\n"
+	"    float sv = w00 * float((b00 >> 15) & 1u) + w10 * float((b10 >> 15) & 1u)\n"
+	"             + w01 * float((b01 >> 15) & 1u) + w11 * float((b11 >> 15) & 1u);\n"
+	"    stp = floor(sv + 0.5) >= 1.0;\n"
+	"}\n"
 	"void main() {\n"
 	"    if (u_textured != 0) {\n"
 	"        vec4 texel;\n"
@@ -558,7 +606,9 @@ const char *fragment_shader_src =
 	"        }\n"
 	"        if (texel.a <= 0.0) discard;\n"
 	"        if (u_stp_mode != 0) {\n"
-	"            bool stp = (fetch_bgr(int(v_uv.x), int(v_uv.y)) & 0x8000u) != 0u;\n"
+	"            bool stp; float stp_opacity;\n"
+	"            texel_stp(stp, stp_opacity);\n"
+	"            if (stp_opacity < 0.5) discard;\n"
 	"            if (u_stp_mode == 1 && !stp) discard;\n"
 	"            if (u_stp_mode == 2 && stp) discard;\n"
 	"        }\n"
