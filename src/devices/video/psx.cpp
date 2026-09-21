@@ -1846,7 +1846,87 @@ bool psxgpu_device::gpu_detect_2d_polygon( const PAIR *n_coord, const osd::gpu_v
 // filtered sample (see submit_triangle(s)'s filterable parameter) can't
 // bleed past this polygon's own texture footprint into whatever's packed
 // next to it in the same shared VRAM texture page.
-void psxgpu_device::gpu_set_polygon_uv_clamp( osd::gpu_vertex *v, int n_points )
+// PS1 samples a primitive's interpolated U/V at the *top-left corner* of each
+// pixel; a modern GPU (and this target, at any scale) samples at the fragment
+// centre. For an unflipped sprite that difference stays inside one texel, but
+// wherever U or V *decreases* across the primitive (a flipped 2D sprite drawn
+// as a polygon) nearest sampling lands one texel early and can pull in a
+// neighbouring image. Ported from Beetle PSX HW's
+// Calc_UVOffsets_Adjust_Verts() (mednafen/psx/gpu_polygon_sub.c, itself from
+// parallel-psx): if U (or V) is decreasing along one screen axis and constant
+// along the other, add 1 to that coordinate for the whole primitive. The
+// Wild Arms 2 forest-sprite special case in the original is game-specific
+// and not ported. Also reports whether the primitive "may be 2D" (some UV
+// derivative is exactly zero), which gpu_set_polygon_uv_clamp() uses to trim
+// the filter clamp by one texel. A quad is two triangles, (0,1,2) and
+// (1,2,3), whose results accumulate into one shared offset.
+void psxgpu_device::gpu_apply_uv_offsets( const PAIR *n_coord, osd::gpu_vertex *v, int n_points, bool &may_be_2d )
+{
+	int off_u = 0, off_v = 0;
+	may_be_2d = false;
+
+	auto tri = [ & ]( int a, int b, int c )
+	{
+		int64_t x[ 3 ] = { S11_COORD_X( n_coord[ a ] ), S11_COORD_X( n_coord[ b ] ), S11_COORD_X( n_coord[ c ] ) };
+		int64_t y[ 3 ] = { S11_COORD_Y( n_coord[ a ] ), S11_COORD_Y( n_coord[ b ] ), S11_COORD_Y( n_coord[ c ] ) };
+		int64_t u[ 3 ] = { (int64_t)v[ a ].u, (int64_t)v[ b ].u, (int64_t)v[ c ].u };
+		int64_t w[ 3 ] = { (int64_t)v[ a ].v, (int64_t)v[ b ].v, (int64_t)v[ c ].v };
+
+		int64_t abx = x[ 1 ] - x[ 0 ], aby = y[ 1 ] - y[ 0 ];
+		int64_t bcx = x[ 2 ] - x[ 1 ], bcy = y[ 2 ] - y[ 1 ];
+		int64_t cax = x[ 0 ] - x[ 2 ], cay = y[ 0 ] - y[ 2 ];
+
+		int64_t dudx = -aby * u[ 2 ] - bcy * u[ 0 ] - cay * u[ 1 ];
+		int64_t dvdx = -aby * w[ 2 ] - bcy * w[ 0 ] - cay * w[ 1 ];
+		int64_t dudy = +abx * u[ 2 ] + bcx * u[ 0 ] + cax * u[ 1 ];
+		int64_t dvdy = +abx * w[ 2 ] + bcx * w[ 0 ] + cax * w[ 1 ];
+		int64_t area = bcx * cay - bcy * cax;
+		int64_t tex_area = ( u[ 1 ] - u[ 0 ] ) * ( w[ 2 ] - w[ 0 ] ) - ( u[ 2 ] - u[ 0 ] ) * ( w[ 1 ] - w[ 0 ] );
+
+		// PGXP depth differing across the vertices means real 3D geometry
+		// that merely projected into this shape - leave it alone.
+		bool is_3d = ( v[ a ].w != v[ b ].w ) || ( v[ b ].w != v[ c ].w );
+
+		if( area == 0 || tex_area == 0 || is_3d )
+			return;
+
+		bool neg_area = area < 0;
+		bool neg_dudx = ( dudx < 0 ) != neg_area;
+		bool neg_dudy = ( dudy < 0 ) != neg_area;
+		bool neg_dvdx = ( dvdx < 0 ) != neg_area;
+		bool neg_dvdy = ( dvdy < 0 ) != neg_area;
+		bool zero_dudx = dudx == 0, zero_dudy = dudy == 0;
+		bool zero_dvdx = dvdx == 0, zero_dvdy = dvdy == 0;
+
+		may_be_2d = may_be_2d || zero_dudy || zero_dudx || zero_dvdy || zero_dvdx;
+
+		if( ( neg_dudx && zero_dudy ) || ( neg_dudy && zero_dudx ) )
+			off_u = 1;
+		if( ( neg_dvdx && zero_dvdy ) || ( neg_dvdy && zero_dvdx ) )
+			off_v = 1;
+	};
+
+	tri( 0, 1, 2 );
+	if( n_points == 4 )
+		tri( 1, 2, 3 );
+
+	if( off_u || off_v )
+	{
+		for( int i = 0; i < n_points; i++ )
+		{
+			v[ i ].u += (float)off_u;
+			v[ i ].v += (float)off_v;
+		}
+	}
+}
+
+// Beetle's Extend_/Finalise_UVLimits(): the primitive's UV footprint (already
+// including the offset above). A likely-2D primitive's max is trimmed by one
+// (when it has any extent) - "in nearest neighbour we'll get very close to
+// this UV but not close enough to actually sample it" - so a filter tap never
+// reaches the texel just past the sprite's far edge. With a texture window
+// active the footprint is meaningless (coordinates wrap), so don't clamp.
+void psxgpu_device::gpu_set_polygon_uv_clamp( osd::gpu_vertex *v, int n_points, bool may_be_2d, bool window_active )
 {
 	float u_min = v[ 0 ].u, u_max = v[ 0 ].u;
 	float v_min = v[ 0 ].v, v_max = v[ 0 ].v;
@@ -1856,6 +1936,15 @@ void psxgpu_device::gpu_set_polygon_uv_clamp( osd::gpu_vertex *v, int n_points )
 		u_max = std::max( u_max, v[ i ].u );
 		v_min = std::min( v_min, v[ i ].v );
 		v_max = std::max( v_max, v[ i ].v );
+	}
+	if( window_active )
+	{
+		u_min = 0.0f; v_min = 0.0f; u_max = 255.0f; v_max = 255.0f;
+	}
+	else if( may_be_2d )
+	{
+		if( u_max > u_min ) u_max -= 1.0f;
+		if( v_max > v_min ) v_max -= 1.0f;
 	}
 	for( int i = 0; i < n_points; i++ )
 	{
@@ -1892,7 +1981,9 @@ bool psxgpu_device::gpu_submit_flat_textured_polygon( int n_points )
 		v[ i ].v = (float)TEXTURE_V( m_packet.FlatTexturedPolygon.vertex[ i ].n_texture );
 	}
 	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
-	gpu_set_polygon_uv_clamp( v, n_points );
+	bool may_be_2d;
+	gpu_apply_uv_offsets( coords, v, n_points, may_be_2d );
+	gpu_set_polygon_uv_clamp( v, n_points, may_be_2d, n_tww != 255 || n_twh != 255 );
 
 	osd::gpu_blend_mode blend = gpu_blend_mode_for( n_cmd );
 	bool filterable = !gpu_detect_2d_polygon( coords, v, n_points )
@@ -1928,7 +2019,9 @@ bool psxgpu_device::gpu_submit_gouraud_textured_polygon( int n_points )
 		v[ i ].v = (float)TEXTURE_V( m_packet.GouraudTexturedPolygon.vertex[ i ].n_texture );
 	}
 	gpu_resolve_polygon_pgxp( indices, coords, n_points, v );
-	gpu_set_polygon_uv_clamp( v, n_points );
+	bool may_be_2d;
+	gpu_apply_uv_offsets( coords, v, n_points, may_be_2d );
+	gpu_set_polygon_uv_clamp( v, n_points, may_be_2d, n_tww != 255 || n_twh != 255 );
 
 	osd::gpu_blend_mode blend = gpu_blend_mode_for( n_cmd );
 	bool filterable = !gpu_detect_2d_polygon( coords, v, n_points )

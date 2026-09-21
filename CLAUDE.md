@@ -660,12 +660,16 @@ Reviewed its hardware renderer (`rhi/shaders_gl/command_fragment.glsl.h`,
   `(u & and) + off` applied in `fetch_bgr()`. **Not yet observed in any game**
   (brvblade/raystorm/cbaj/starswep/gdarius2 never write a non-identity window
   in attract mode) - regression-checked only.
+- **UV nudge for flipped 2D sprites** (`gpu_apply_uv_offsets()`, port of
+  `Calc_UVOffsets_Adjust_Verts`) plus the max-1 UV-clamp trim for likely-2D
+  primitives. Polygons only (Beetle doesn't touch rectangles; the Wild Arms 2
+  special case isn't ported). Triggers on ~2.7% of textured polys in the
+  `brvbladej` level-2 scene; no arcade title with a known visible fix found.
 - **Oversized-triangle cull** uses Beetle/hardware limits (>=1024 in x, >=512
   in y), not MAME software's 1023-both-axes.
 Known remaining gaps vs Beetle (not done): mask bits (GP0 E6 set/check - needs
 framebuffer feedback), dithering (GP0 E1 bit 9; MAME's own software path has
-none either), `Calc_UVOffsets_Adjust_Verts` (UV nudge for flipped 2D sprites at
-upscaled res), `line_render` hack (degenerate textured triangles as lines),
+none either), `line_render` hack (degenerate textured triangles as lines),
 PGXP nclip / vertex cache / widescreen hack, 24-bit display mode (MDEC
 video), extra filters (JINC2/SABR/xBR), SSAA/adaptive smoothing.
 
