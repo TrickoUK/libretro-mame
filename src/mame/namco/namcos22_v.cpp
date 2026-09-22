@@ -29,8 +29,8 @@ void namcos22_renderer::init()
 // poly scanline callbacks
 
 // differences between super and non-super
-// normal: per-poly fog, shading after fog, global fader (handled elsewhere), no alpha
-// super:  shading before fog, per-z fog, 2 faders, alpha, sprites in a separate callback
+// normal: shading after fog, global fader (handled elsewhere), no alpha
+// super:  shading before fog, 2 faders, alpha, sprites in a separate callback
 
 void namcos22_renderer::renderscanline_poly(int32_t scanline, const extent_t &extent, const namcos22_object_data &extra, int threadid)
 {
@@ -124,7 +124,7 @@ void namcos22_renderer::renderscanline_poly_ss22(int32_t scanline, const extent_
 	double di = extent.param[3].dpdx;
 	const int bn = extra.bn * 0x1000;
 	const pen_t *pens = extra.pens;
-	int fogfactor = 0xff - extra.fogfactor;
+	const int fogfactor = 0xff - extra.fogfactor;
 	const bool shade_enabled = extra.shade_enabled;
 	const bool texture_enabled = extra.texture_enabled;
 	rgbaint_t fogcolor = extra.fogcolor;
@@ -134,9 +134,6 @@ void namcos22_renderer::renderscanline_poly_ss22(int32_t scanline, const extent_
 	int pen = 0;
 	rgbaint_t rgb;
 
-	const u8 *czram = extra.czram;
-	const int cz_sdelta = extra.cz_sdelta;
-	const bool zfog_enabled = extra.zfog_enabled;
 	const int fadefactor = 0xff - extra.fadefactor;
 	const int alphafactor = 0xff - extra.alpha;
 	const bool alpha_enabled = extra.alpha_enabled;
@@ -186,20 +183,8 @@ void namcos22_renderer::renderscanline_poly_ss22(int32_t scanline, const extent_
 			rgb.scale_imm_and_clamp(shade << 2);
 		}
 
-		// per-z fog
-		if (zfog_enabled)
-		{
-			// discard low byte and clamp to 0-1fff
-			int cz = int(ooz) >> 8;
-			if (cz > 0x1fff) cz = 0x1fff;
-			fogfactor = czram[cz] + cz_sdelta;
-			if (fogfactor > 0)
-			{
-				if (fogfactor > 0xff) fogfactor = 0xff;
-				rgb.blend(fogcolor, 0xff - fogfactor);
-			}
-		}
-		else if (fogfactor != 0xff) // direct
+		// poly fog
+		if (fogfactor != 0xff)
 		{
 			rgb.blend(fogcolor, fogfactor);
 		}
@@ -372,7 +357,6 @@ void namcos22_renderer::poly3d_drawquad(screen_device &screen, bitmap_rgb32 &bit
 
 	extra.destbase = &bitmap;
 	extra.pfade_enabled = false;
-	extra.zfog_enabled = false;
 	extra.alpha_enabled = false;
 	extra.shade_enabled = true;
 	extra.texture_enabled = true;
@@ -419,17 +403,8 @@ void namcos22_renderer::poly3d_drawquad(screen_device &screen, bitmap_rgb32 &bit
 
 				extra.fogcolor.set(0, m_state.m_fog_r, m_state.m_fog_g, m_state.m_fog_b);
 
-				if (direct)
-				{
-					const int fogfactor = m_state.m_recalc_czram[bank][cz_value] + delta;
-					extra.fogfactor = std::clamp(fogfactor, 0, 0xff);
-				}
-				else
-				{
-					extra.zfog_enabled = true;
-					extra.cz_sdelta = delta;
-					extra.czram = m_state.m_recalc_czram[bank].get();
-				}
+				const int fogfactor = m_state.m_recalc_czram[bank][cz_value] + delta;
+				extra.fogfactor = std::clamp(fogfactor, 0, 0xff);
 			}
 		}
 	}
@@ -466,7 +441,6 @@ void namcos22_renderer::poly3d_drawquad(screen_device &screen, bitmap_rgb32 &bit
 	// disable poly fog
 	if (BIT(cz_adjust, 23))
 	{
-		extra.zfog_enabled = false;
 		extra.fogfactor = 0;
 	}
 
