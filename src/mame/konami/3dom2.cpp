@@ -250,7 +250,7 @@ void m2_bda_device::device_start()
 
 	// Set a timer to pull data from the DSPP FIFO into the DACs
 	m_dac_timer = timer_alloc(FUNC(m2_bda_device::dac_update), this);
-	m_dac_timer->adjust(attotime::from_hz(16.9345));
+	m_dac_timer->adjust(attotime::from_hz(44100));
 }
 
 
@@ -293,7 +293,17 @@ void m2_bda_device::device_add_mconfig(machine_config &config)
 	M2_MPEG(config, m_mpeg, DERIVED_CLOCK(1, 1));
 //  m_mpeg->int_handler().set(m_powerbus, FUNC(m2_powerbus_device::int_line<BDAINT_MPEG_LINE>));
 
-	DSPP_BULLDOG(config, m_dspp, DERIVED_CLOCK(1, 1));
+	// PCB oscillator notes (see konamim2.cpp) list CLKC = 16.9345MHz as the
+	// DSPP's own clock generator output, distinct from CPUCLK 25.2MHz used to
+	// derive M2_CLOCK. Previously incorrectly derived from the full M2_CLOCK
+	// (66.6667MHz, ~4x too fast), which mattered a lot since the DSPP core has
+	// no DRC and runs as a pure interpreter. 16.9344MHz is the closest known
+	// crystal value to the documented figure (a common baud-rate/audio xtal).
+	// NOTE (2026-09-22): measured via a clean A/B test with matched wall-clock
+	// timestamps - this fix does NOT move the needle on Polystars' overall
+	// speed (see m2-fix-investigation.md). Kept anyway: it is still a genuine
+	// hardware-accuracy correction against the driver's own PCB documentation.
+	DSPP_BULLDOG(config, m_dspp, XTAL(16'934'400));
 	m_dspp->int_handler().set(m_powerbus, FUNC(m2_powerbus_device::int_line<BDAINT_DSP_LINE>));
 	m_dspp->dma_read_handler().set(FUNC(m2_bda_device::read_bus8));
 	m_dspp->dma_write_handler().set(FUNC(m2_bda_device::write_bus8));
