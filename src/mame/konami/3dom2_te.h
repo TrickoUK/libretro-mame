@@ -109,6 +109,37 @@ private:
 
 	struct rgba { uint8_t r, g, b, a; };
 
+	// Per-render-job scratch: destination-blender working state (previously
+	// the member field m_dbstate) plus locally-accumulated status/statistics
+	// bits. One instance is owned per render job (currently: one per call
+	// into the walk_span()/destination_blend() chain for a scanline) rather
+	// than being a shared device member, so this chain is safe to eventually
+	// run from multiple worker threads at once - each job's pixel_scratch is
+	// private to that job. status_bits/stats are OR'd/added into the real
+	// m_db.status/g_statistics only after all in-flight jobs for a render
+	// batch have finished (single-threaded merge), never touched directly
+	// from more than one job's context at a time.
+	struct pixel_scratch
+	{
+		uint32_t    x;
+		uint32_t    y;
+		uint32_t    w;
+
+		rgba    ti;
+		uint8_t ssb;
+
+		rgba    src;
+		uint8_t dsb;
+
+		rgba    srcpath;
+		rgba    texpath;
+		rgba    blend;
+		rgba    dst;
+
+		uint32_t status_bits = 0;
+		uint32_t stats[16] = {};
+	};
+
 	void set_interrupt(uint32_t mask);
 	void update_interrupts();
 
@@ -138,10 +169,10 @@ private:
 	void addr_calc(uint32_t u, uint32_t v, uint32_t lod,
 					uint32_t & texaddr, uint32_t & texbit, uint32_t & tdepth);
 
-	void get_texture_color(uint32_t u, uint32_t v, uint32_t lod,
+	void get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
 							uint32_t & r, uint32_t & g, uint32_t & b, uint32_t & a, uint32_t & s);
 
-	void get_texel(uint32_t u, uint32_t v, uint32_t lod,
+	void get_texel(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
 		uint32_t &r_ti, uint32_t &g_ti, uint32_t &b_ti, uint32_t &a_ti, uint32_t &ssb_ti);
 
 	void texture_fetch(uint32_t texaddr, uint32_t texbit, uint32_t tdepth,
@@ -159,20 +190,20 @@ private:
 						uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 						uint32_t &ro, uint32_t &go, uint32_t &bo, uint32_t &ao, uint32_t &ssbo);
 
-	void destination_blend(uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb);
+	void destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb);
 
-	uint8_t color_blend(uint8_t ct, uint8_t cti, uint8_t cs, uint8_t csrc,
+	uint8_t color_blend(pixel_scratch &ps, uint8_t ct, uint8_t cti, uint8_t cs, uint8_t csrc,
 						uint8_t dm10, uint8_t dm11,
 						uint8_t dm20, uint8_t dm21);
 
-	void select_alpha_dsb();
-	uint8_t get_tex_coef(uint8_t cs, uint8_t dm1const0, uint8_t dm1const1);
-	uint8_t get_src_coef(uint8_t cti, uint8_t dm2const0, uint8_t dm2const1);
+	void select_alpha_dsb(pixel_scratch &ps);
+	uint8_t get_tex_coef(pixel_scratch &ps, uint8_t cs, uint8_t dm1const0, uint8_t dm1const1);
+	uint8_t get_src_coef(pixel_scratch &ps, uint8_t cti, uint8_t dm2const0, uint8_t dm2const1);
 	uint8_t dither(uint8_t in, uint8_t dithval);
 	uint8_t alu_calc(uint16_t a, uint16_t b);
-	void select_src_pixel();
-	void select_tex_pixel();
-	void write_dst_pixel();
+	void select_src_pixel(pixel_scratch &ps);
+	void select_tex_pixel(pixel_scratch &ps);
+	void write_dst_pixel(pixel_scratch &ps);
 
 	uint8_t read_tram8(offs_t address) const;
 	uint16_t read_tram16(offs_t address) const;
@@ -387,25 +418,6 @@ private:
 		};
 		uint32_t m_regs[34];
 	} m_db;
-
-	// Destination blender state
-	struct
-	{
-		uint32_t    x;
-		uint32_t    y;
-		uint32_t    w;
-
-		rgba    ti;
-		uint8_t ssb;
-
-		rgba    src;
-		uint8_t dsb;
-
-		rgba    srcpath;
-		rgba    texpath;
-		rgba    blend;
-		rgba    dst;
-	} m_dbstate;
 
 	te_state    m_state;
 

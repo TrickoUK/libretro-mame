@@ -1799,7 +1799,7 @@ uint32_t m2_te_device::get_tram_bitdepth()
 //-------------------------------------------------
 //  get_texture_color -
 //-------------------------------------------------
-void m2_te_device::get_texture_color(uint32_t u, uint32_t v, uint32_t lod,
+void m2_te_device::get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
 									uint32_t & r, uint32_t & g, uint32_t & b, uint32_t & a, uint32_t & s)
 {
 	uint32_t texaddr;
@@ -1815,7 +1815,7 @@ void m2_te_device::get_texture_color(uint32_t u, uint32_t v, uint32_t lod,
 		case TXTADDRCNTL_FILTERSEL_LINEAR: // TODO
 		{
 			addr_calc(u, v, lod, texaddr, texbit, texdepth);
-			get_texel(texaddr, texbit, texdepth, r, g, b, a, s);
+			get_texel(ps, texaddr, texbit, texdepth, r, g, b, a, s);
 			break;
 		}
 
@@ -1829,13 +1829,13 @@ void m2_te_device::get_texture_color(uint32_t u, uint32_t v, uint32_t lod,
 			uint32_t r3, g3, b3, a3, s3;
 
 			addr_calc(u, v, lod, texaddr, texbit, texdepth);
-			get_texel(texaddr, texbit, texdepth, r0, g0, b0, a0, s0);
+			get_texel(ps, texaddr, texbit, texdepth, r0, g0, b0, a0, s0);
 			addr_calc(u + 0x10, v, lod, texaddr, texbit, texdepth);
-			get_texel(texaddr, texbit, texdepth, r1, g1, b1, a1, s1);
+			get_texel(ps, texaddr, texbit, texdepth, r1, g1, b1, a1, s1);
 			addr_calc(u, v + 0x10, lod, texaddr, texbit, texdepth);
-			get_texel(texaddr, texbit, texdepth, r2, g2, b2, a2, s2);
+			get_texel(ps, texaddr, texbit, texdepth, r2, g2, b2, a2, s2);
 			addr_calc(u + 0x10, v + 0x10, lod, texaddr, texbit, texdepth);
-			get_texel(texaddr, texbit, texdepth, r3, g3, b3, a3, s3);
+			get_texel(ps, texaddr, texbit, texdepth, r3, g3, b3, a3, s3);
 
 			// LERP
 			uint32_t ufrac = u & 0xf;
@@ -1926,7 +1926,7 @@ void m2_te_device::addr_calc(uint32_t u, uint32_t v, uint32_t lod,
 }
 
 
-void m2_te_device::get_texel(uint32_t tex_addr, uint32_t tex_bit, uint32_t tdepth,
+void m2_te_device::get_texel(pixel_scratch &ps, uint32_t tex_addr, uint32_t tex_bit, uint32_t tdepth,
 							uint32_t & r, uint32_t & g, uint32_t & b, uint32_t & a, uint32_t & ssb)
 {
 	const uint32_t tex_type = m_tm.tex_exptype;
@@ -1943,7 +1943,7 @@ void m2_te_device::get_texel(uint32_t tex_addr, uint32_t tex_bit, uint32_t tdept
 	uint32_t tram_data = m_tram[tex_addr];
 
 #if TEST_TIMING
-	g_statistics[STAT_TEXEL_READS]++;
+	ps.stats[STAT_TEXEL_READS]++;
 #endif
 
 
@@ -2361,13 +2361,13 @@ void m2_te_device::select_mul(uint32_t sel, uint32_t ai, uint32_t at, uint32_t s
 //  write_dst_pixel - Write pixel to framebuffer
 //-------------------------------------------------
 
-void m2_te_device::write_dst_pixel()
+void m2_te_device::write_dst_pixel(pixel_scratch &ps)
 {
 	uint32_t mask = m_db.usergen_ctrl & DBUSERGENCTL_DESTOUT_MASK;
 
 	if (m_db.dst_ctrl & DBDESTCNTL_32BPP)
 	{
-		uint32_t dstaddr = m_db.dst_baseaddr + (m_dbstate.y * m_db.dst_xstride + m_dbstate.x) * sizeof(uint32_t);
+		uint32_t dstaddr = m_db.dst_baseaddr + (ps.y * m_db.dst_xstride + ps.x) * sizeof(uint32_t);
 
 		uint32_t old = m_bda->read_bus32(dstaddr);
 		uint32_t out = 0;
@@ -2377,16 +2377,16 @@ void m2_te_device::write_dst_pixel()
 		uint8_t sg = (old >> 8) & 0xff;
 		uint8_t sb = old & 0xff;
 
-		out |= (mask & 8 ? (m_dbstate.dsb << 7) | (m_dbstate.dst.a >> 1) : sdsb_a) << 24;
-		out |= (mask & 4 ? m_dbstate.dst.r : sr) << 16;
-		out |= (mask & 2 ? m_dbstate.dst.g : sg) << 8;
-		out |= mask & 1 ? m_dbstate.dst.b : sb;
+		out |= (mask & 8 ? (ps.dsb << 7) | (ps.dst.a >> 1) : sdsb_a) << 24;
+		out |= (mask & 4 ? ps.dst.r : sr) << 16;
+		out |= (mask & 2 ? ps.dst.g : sg) << 8;
+		out |= mask & 1 ? ps.dst.b : sb;
 
 		m_bda->write_bus32(dstaddr, out);
 	}
 	else
 	{
-		uint32_t dstaddr = m_db.dst_baseaddr + (m_dbstate.y * m_db.dst_xstride + m_dbstate.x) * sizeof(uint16_t);
+		uint32_t dstaddr = m_db.dst_baseaddr + (ps.y * m_db.dst_xstride + ps.x) * sizeof(uint16_t);
 
 		uint16_t old = m_bda->read_bus16(dstaddr);
 		uint16_t out = 0;
@@ -2396,16 +2396,16 @@ void m2_te_device::write_dst_pixel()
 		uint8_t sg = (old >> 5) & 0x1f;
 		uint8_t sb = old & 0x1f;
 
-		out |= (mask & 8 ? m_dbstate.dsb : sdsb_a) << 15;
-		out |= (mask & 4 ? m_dbstate.dst.r >> 3 : sr) << 10;
-		out |= (mask & 2 ? m_dbstate.dst.g >> 3 : sg) << 5;
-		out |= mask & 1 ? m_dbstate.dst.b >> 3 : sb;
+		out |= (mask & 8 ? ps.dsb : sdsb_a) << 15;
+		out |= (mask & 4 ? ps.dst.r >> 3 : sr) << 10;
+		out |= (mask & 2 ? ps.dst.g >> 3 : sg) << 5;
+		out |= mask & 1 ? ps.dst.b >> 3 : sb;
 
 		m_bda->write_bus16(dstaddr, out);
 	}
 
 #if TEST_TIMING
-	g_statistics[STAT_PIXEL_STORES]++;
+	ps.stats[STAT_PIXEL_STORES]++;
 #endif
 }
 
@@ -2414,13 +2414,13 @@ void m2_te_device::write_dst_pixel()
 //  destination_blend -
 //-------------------------------------------------
 
-void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb)
+void m2_te_device::destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb)
 {
-	m_dbstate.x = x;
-	m_dbstate.y = y;
-	m_dbstate.w = w;
-	m_dbstate.ti = ti_color;
-	m_dbstate.ssb = ssb;
+	ps.x = x;
+	ps.y = y;
+	ps.w = w;
+	ps.ti = ti_color;
+	ps.ssb = ssb;
 
 	bool dis = false;
 	bool zpixout = true;
@@ -2443,7 +2443,7 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 		fbclipdis = (x >= xclip) || (y >= yclip);
 
 		if (fbclipdis)
-			m_db.status |= DBSTATUS_FBCLIP;
+			ps.status_bits |= DBSTATUS_FBCLIP;
 	}
 
 	// WINCLIP
@@ -2459,14 +2459,14 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 					((m_db.usergen_ctrl & DBUSERGENCTL_WCLIPOUTEN) && !inside);
 
 		if (winclipdis)
-			m_db.status |= DBSTATUS_WINCLIP;
+			ps.status_bits |= DBSTATUS_WINCLIP;
 	}
 
-	select_src_pixel();
+	select_src_pixel(ps);
 
-	select_tex_pixel();
+	select_tex_pixel(ps);
 
-	select_alpha_dsb();
+	select_alpha_dsb(ps);
 
 
 	{
@@ -2483,7 +2483,7 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 			dm11 = txtcnst1 & 0xff; txtcnst1 >>= 8;
 			dm20 = srccnst0 & 0xff; srccnst0 >>= 8;
 			dm21 = srccnst1 & 0xff; srccnst1 >>= 8;
-			m_dbstate.blend.b = color_blend(m_dbstate.texpath.b, m_dbstate.ti.b, m_dbstate.srcpath.b, m_dbstate.src.b, dm10, dm11, dm20, dm21);
+			ps.blend.b = color_blend(ps, ps.texpath.b, ps.ti.b, ps.srcpath.b, ps.src.b, dm10, dm11, dm20, dm21);
 
 			// TODO: ALURGEL for each
 
@@ -2492,20 +2492,20 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 			dm11 = txtcnst1 & 0xff; txtcnst1 >>= 8;
 			dm20 = srccnst0 & 0xff; srccnst0 >>= 8;
 			dm21 = srccnst1 & 0xff; srccnst1 >>= 8;
-			m_dbstate.blend.g = color_blend(m_dbstate.texpath.g, m_dbstate.ti.g, m_dbstate.srcpath.g, m_dbstate.src.g, dm10, dm11, dm20, dm21);
+			ps.blend.g = color_blend(ps, ps.texpath.g, ps.ti.g, ps.srcpath.g, ps.src.g, dm10, dm11, dm20, dm21);
 
 			// Red
 			dm10 = txtcnst0 & 0xff;
 			dm11 = txtcnst1 & 0xff;
 			dm20 = srccnst0 & 0xff;
 			dm21 = srccnst1 & 0xff;
-			m_dbstate.blend.r = color_blend(m_dbstate.texpath.r, m_dbstate.ti.r, m_dbstate.srcpath.r, m_dbstate.src.r, dm10, dm11, dm20, dm21);
+			ps.blend.r = color_blend(ps, ps.texpath.r, ps.ti.r, ps.srcpath.r, ps.src.r, dm10, dm11, dm20, dm21);
 		}
 		else
 		{
-			m_dbstate.blend.r = m_dbstate.ti.r;
-			m_dbstate.blend.g = m_dbstate.ti.g;
-			m_dbstate.blend.b = m_dbstate.ti.b;
+			ps.blend.r = ps.ti.r;
+			ps.blend.g = ps.ti.g;
+			ps.blend.b = ps.ti.b;
 		}
 
 		// Dithering
@@ -2518,15 +2518,15 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 			uint32_t idx = 7 ^ (((dith_y & 1) << 2) | dith_x);
 			uint8_t val = (dith_mtx >> (idx * 4)) & 0xf;
 
-			m_dbstate.dst.r = dither(m_dbstate.blend.r, val);
-			m_dbstate.dst.g = dither(m_dbstate.blend.g, val);
-			m_dbstate.dst.b = dither(m_dbstate.blend.b, val);
+			ps.dst.r = dither(ps.blend.r, val);
+			ps.dst.g = dither(ps.blend.g, val);
+			ps.dst.b = dither(ps.blend.b, val);
 		}
 		else
 		{
-			m_dbstate.dst.r = m_dbstate.blend.r;
-			m_dbstate.dst.g = m_dbstate.blend.g;
-			m_dbstate.dst.b = m_dbstate.blend.b;
+			ps.dst.r = ps.blend.r;
+			ps.dst.g = ps.blend.g;
+			ps.dst.b = ps.blend.b;
 		}
 	}
 
@@ -2537,8 +2537,8 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 		int32_t x_offs = util::sext((m_db.z_offset & DBZOFFS_XOFFS_MASK) >> DBZOFFS_XOFFS_SHIFT, 12);
 		int32_t y_offs = util::sext((m_db.z_offset & DBZOFFS_YOFFS_MASK) >> DBZOFFS_YOFFS_SHIFT, 12);
 
-		x_offs += m_dbstate.x;
-		y_offs += m_dbstate.y;
+		x_offs += ps.x;
+		y_offs += ps.y;
 
 		uint32_t x_clip = (m_db.z_clip & DBZCLIP_XCLIP_MASK) >> DBZCLIP_XCLIP_SHIFT;
 		uint32_t y_clip = (m_db.z_clip & DBZCLIP_YCLIP_MASK) >> DBZCLIP_YCLIP_SHIFT;
@@ -2556,7 +2556,7 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 	zclipdis = zclip && (m_db.discard_ctrl & DBDISCARDCTL_ZCLIPDISEN);
 
 	if (zclipdis)
-		m_db.status |= DBSTATUS_ZCLIP;
+		ps.status_bits |= DBSTATUS_ZCLIP;
 
 	// Z-path
 	if (!(m_gc.te_master_mode & TEMASTER_MODE_DZBUF) &&
@@ -2564,7 +2564,7 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 		!zclip)
 	{
 #if TEST_TIMING
-		g_statistics[STAT_ZBUFFER_LOADS]++;
+		ps.stats[STAT_ZBUFFER_LOADS]++;
 #endif
 
 #if 1 // TODO: Why are we using this?
@@ -2591,21 +2591,21 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 			zpixout = m_db.z_ctrl & 1;//DBZCNTL_ZPIXOUT_GT;
 			zbufout = m_db.z_ctrl & 2;//DBZCNTL_ZBUFOUT_GT;
 			zgel |= 4;
-			m_db.status |= DBSTATUS_ZFUNC_GT;
+			ps.status_bits |= DBSTATUS_ZFUNC_GT;
 		}
 		else if (zdiff == 0)
 		{
 			zpixout = m_db.z_ctrl & DBZCNTL_ZPIXOUT_EQ;
 			zbufout = m_db.z_ctrl & DBZCNTL_ZBUFOUT_EQ;
 			zgel |= 2;
-			m_db.status |= DBSTATUS_ZFUNC_EQ;
+			ps.status_bits |= DBSTATUS_ZFUNC_EQ;
 		}
 		else
 		{
 			zpixout = m_db.z_ctrl & 0x10;//DBZCNTL_ZPIXOUT_LT;
 			zbufout = m_db.z_ctrl & 0x20;//DBZCNTL_ZBUFOUT_LT;
 			zgel |= 1;
-			m_db.status |= DBSTATUS_ZFUNC_LT;
+			ps.status_bits |= DBSTATUS_ZFUNC_LT;
 		}
 	}
 	else
@@ -2616,12 +2616,12 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 
 	// Discard logic
 	{
-		bool ssbdis = (m_db.discard_ctrl & DBDISCARDCTL_SSBDISEN) && (m_dbstate.ssb == 0);
+		bool ssbdis = (m_db.discard_ctrl & DBDISCARDCTL_SSBDISEN) && (ps.ssb == 0);
 
-		bool adis = (m_db.discard_ctrl & DBDISCARDCTL_ADISEN) && (m_dbstate.dst.a == 0);
+		bool adis = (m_db.discard_ctrl & DBDISCARDCTL_ADISEN) && (ps.dst.a == 0);
 
 		bool rgbdis = (m_db.discard_ctrl & DBDISCARDCTL_RGBDISEN) &&
-					(m_dbstate.dst.r == 0) && (m_dbstate.dst.g == 0) && (m_dbstate.dst.b == 0);
+					(ps.dst.r == 0) && (ps.dst.g == 0) && (ps.dst.b == 0);
 
 		dis = fbclipdis || winclipdis || zclipdis || ssbdis || adis || rgbdis;
 	}
@@ -2633,7 +2633,7 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 		if (zbufout && (m_db.usergen_ctrl & DBUSERGENCTL_ZOUTEN))
 		{
 #if TEST_TIMING
-			g_statistics[STAT_ZBUFFER_STORES]++;
+			ps.stats[STAT_ZBUFFER_STORES]++;
 #endif
 			m_bda->write_bus16(zaddr, w & 0xffff);
 		}
@@ -2641,7 +2641,7 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 		// Color
 		if (zpixout && (m_db.supergen_ctrl & DBSUPERGENCTL_DESTOUTEN))
 		{
-			write_dst_pixel();
+			write_dst_pixel(ps);
 		}
 	}
 
@@ -2662,67 +2662,67 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 }
 
 // Select between texture unit and source pixel
-void m2_te_device::select_tex_pixel()
+void m2_te_device::select_tex_pixel(pixel_scratch &ps)
 {
 	uint32_t cntl;
 
 	// TODO: REGBITS
-	if (m_dbstate.ti.a == 0)
+	if (ps.ti.a == 0)
 		cntl = (m_db.src_alpha_ctrl >> 4) & 3;
-	else if (m_dbstate.ti.a == 255)
+	else if (ps.ti.a == 255)
 		cntl = m_db.src_alpha_ctrl & 3;
 	else
 		cntl = (m_db.src_alpha_ctrl >> 2) & 3;
 
 	switch (cntl)
 	{
-		case 0: m_dbstate.texpath.a = m_dbstate.ti.a;   break;
-		case 1: m_dbstate.texpath.a = 255;              break;
-		case 2: m_dbstate.texpath.a = 0;                break;
+		case 0: ps.texpath.a = ps.ti.a;   break;
+		case 1: ps.texpath.a = 255;              break;
+		case 2: ps.texpath.a = 0;                break;
 	}
 
 	switch ((m_db.txt_mult_cntl & DBTXTMULTCNTL_INSEL_MASK) >> DBTXTMULTCNTL_INSEL_SHIFT)
 	{
 		case DBTXTMULTCNTL_INSEL_CTI:
 		{
-			m_dbstate.texpath.r = m_dbstate.ti.r;
-			m_dbstate.texpath.g = m_dbstate.ti.g;
-			m_dbstate.texpath.b = m_dbstate.ti.b;
+			ps.texpath.r = ps.ti.r;
+			ps.texpath.g = ps.ti.g;
+			ps.texpath.b = ps.ti.b;
 			break;
 		}
 		case DBTXTMULTCNTL_INSEL_CONSTANT:
 		{
 			uint32_t cnst = m_db.const_in;
-			m_dbstate.texpath.r = (cnst >> 16) & 0xff;
-			m_dbstate.texpath.g = (cnst >> 8) & 0xff;
-			m_dbstate.texpath.b = cnst & 0xff;
+			ps.texpath.r = (cnst >> 16) & 0xff;
+			ps.texpath.g = (cnst >> 8) & 0xff;
+			ps.texpath.b = cnst & 0xff;
 			break;
 		}
 		case DBTXTMULTCNTL_INSEL_COMPSRC:
 		{
-			m_dbstate.texpath.r = ~m_dbstate.src.r;
-			m_dbstate.texpath.g = ~m_dbstate.src.g;
-			m_dbstate.texpath.b = ~m_dbstate.src.b;
+			ps.texpath.r = ~ps.src.r;
+			ps.texpath.g = ~ps.src.g;
+			ps.texpath.b = ~ps.src.b;
 			break;
 		}
 		case DBTXTMULTCNTL_INSEL_ATI:
 		{
-			m_dbstate.texpath.r = m_dbstate.ti.a;
-			m_dbstate.texpath.g = m_dbstate.ti.a;
-			m_dbstate.texpath.b = m_dbstate.ti.a;
+			ps.texpath.r = ps.ti.a;
+			ps.texpath.g = ps.ti.a;
+			ps.texpath.b = ps.ti.a;
 			break;
 		}
 	}
 
 	if (m_db.txt_mult_cntl & DBTXTMULTCNTL_TXTRJUST)
 	{
-		m_dbstate.texpath.r >>= 3;
-		m_dbstate.texpath.g >>= 3;
-		m_dbstate.texpath.b >>= 3;
+		ps.texpath.r >>= 3;
+		ps.texpath.g >>= 3;
+		ps.texpath.b >>= 3;
 	}
 }
 
-void m2_te_device::select_src_pixel()
+void m2_te_device::select_src_pixel(pixel_scratch &ps)
 {
 	if ((m_db.usergen_ctrl & DBUSERGENCTL_SRCINEN)
 		&& (m_db.usergen_ctrl & DBUSERGENCTL_BLENDEN)
@@ -2731,8 +2731,8 @@ void m2_te_device::select_src_pixel()
 		int32_t x_offs = util::sext((m_db.src_offset & DBSRCOFFS_XOFFS_MASK) >> DBSRCOFFS_XOFFS_SHIFT, 12);
 		int32_t y_offs = util::sext((m_db.src_offset & DBSRCOFFS_YOFFS_MASK) >> DBSRCOFFS_YOFFS_SHIFT, 12);
 
-		x_offs += m_dbstate.x;
-		y_offs += m_dbstate.y;
+		x_offs += ps.x;
+		y_offs += ps.y;
 
 		uint32_t addr = y_offs * m_db.src_xstride + x_offs;
 
@@ -2741,50 +2741,50 @@ void m2_te_device::select_src_pixel()
 			uint32_t srcaddr = m_db.src_baseaddr + addr * sizeof(uint32_t);
 			uint32_t srcval = m_bda->read_bus32(srcaddr);
 
-			m_dbstate.src.a = ((srcval >> 24) & 0x7f) << 1;
-			m_dbstate.src.r = (srcval >> 16) & 0xff;
-			m_dbstate.src.g = (srcval >>  8) & 0xff;
-			m_dbstate.src.b = (srcval >>  0) & 0xff;
+			ps.src.a = ((srcval >> 24) & 0x7f) << 1;
+			ps.src.r = (srcval >> 16) & 0xff;
+			ps.src.g = (srcval >>  8) & 0xff;
+			ps.src.b = (srcval >>  0) & 0xff;
 
 			if (m_db.src_ctrl & DBSRCCNTL_MSBREP)
-				m_dbstate.src.a |= (m_dbstate.src.a >> 6) & 1;
+				ps.src.a |= (ps.src.a >> 6) & 1;
 
-			m_dbstate.dsb = (srcval >> 31) & 1;
+			ps.dsb = (srcval >> 31) & 1;
 		}
 		else
 		{
 			uint32_t srcaddr = m_db.src_baseaddr + addr * sizeof(uint16_t);
 			uint32_t srcval = m_bda->read_bus16(srcaddr);
 
-			m_dbstate.src.r = (srcval >> 10) & 0x1f;
-			m_dbstate.src.g = (srcval >> 5) & 0x1f;
-			m_dbstate.src.b = srcval & 0x1f;
-			m_dbstate.src.a = 0;
+			ps.src.r = (srcval >> 10) & 0x1f;
+			ps.src.g = (srcval >> 5) & 0x1f;
+			ps.src.b = srcval & 0x1f;
+			ps.src.a = 0;
 
-			m_dbstate.dsb = srcval & 0x8000;
-			m_dbstate.src.r <<= 3;
-			m_dbstate.src.g <<= 3;
-			m_dbstate.src.b <<= 3;
+			ps.dsb = srcval & 0x8000;
+			ps.src.r <<= 3;
+			ps.src.g <<= 3;
+			ps.src.b <<= 3;
 
 			if (m_db.src_ctrl & DBSRCCNTL_MSBREP)
 			{
-				m_dbstate.src.r |= (m_dbstate.src.r >> 5);
-				m_dbstate.src.g |= (m_dbstate.src.g >> 5);
-				m_dbstate.src.b |= (m_dbstate.src.b >> 5);
+				ps.src.r |= (ps.src.r >> 5);
+				ps.src.g |= (ps.src.g >> 5);
+				ps.src.b |= (ps.src.b >> 5);
 			}
 		}
 #if TEST_TIMING
-		g_statistics[STAT_PIXEL_LOADS]++;
+		ps.stats[STAT_PIXEL_LOADS]++;
 #endif
 	}
 	else
 	{
 		// Source input disabled
-		m_dbstate.dsb = 0;
-		m_dbstate.src.r = 0;
-		m_dbstate.src.g = 0;
-		m_dbstate.src.b = 0;
-		m_dbstate.src.a = 0;
+		ps.dsb = 0;
+		ps.src.r = 0;
+		ps.src.g = 0;
+		ps.src.b = 0;
+		ps.src.a = 0;
 	}
 
 	// Now
@@ -2792,43 +2792,43 @@ void m2_te_device::select_src_pixel()
 	{
 		case DBSRCMULTCNTL_INSEL_SRC:
 		{
-			m_dbstate.srcpath.r = m_dbstate.src.r;
-			m_dbstate.srcpath.g = m_dbstate.src.g;
-			m_dbstate.srcpath.b = m_dbstate.src.b;
+			ps.srcpath.r = ps.src.r;
+			ps.srcpath.g = ps.src.g;
+			ps.srcpath.b = ps.src.b;
 			break;
 		}
 		case DBSRCMULTCNTL_INSEL_CONSTANT:
 		{
 			uint32_t cnst = m_db.const_in;
-			m_dbstate.srcpath.r = (cnst >> 16) & 0xff;
-			m_dbstate.srcpath.g = (cnst >> 8) & 0xff;
-			m_dbstate.srcpath.b = (cnst >> 0) & 0xff;
+			ps.srcpath.r = (cnst >> 16) & 0xff;
+			ps.srcpath.g = (cnst >> 8) & 0xff;
+			ps.srcpath.b = (cnst >> 0) & 0xff;
 			break;
 		}
 		case DBSRCMULTCNTL_INSEL_COMPCTI:
 		{
-			m_dbstate.srcpath.r = ~m_dbstate.ti.r;
-			m_dbstate.srcpath.g = ~m_dbstate.ti.g;
-			m_dbstate.srcpath.b = ~m_dbstate.ti.b;
+			ps.srcpath.r = ~ps.ti.r;
+			ps.srcpath.g = ~ps.ti.g;
+			ps.srcpath.b = ~ps.ti.b;
 			break;
 		}
 		case DBSRCMULTCNTL_INSEL_TEXALPHA:
 		{
-			m_dbstate.srcpath.r = m_dbstate.src.a;
-			m_dbstate.srcpath.g = m_dbstate.src.a;
-			m_dbstate.srcpath.b = m_dbstate.src.a;
+			ps.srcpath.r = ps.src.a;
+			ps.srcpath.g = ps.src.a;
+			ps.srcpath.b = ps.src.a;
 			break;
 		}
 	}
 
 	if (m_db.src_mult_cntl & DBSRCMULTCNTL_SRCRJUST)
 	{
-		m_dbstate.srcpath.r >>= 3;
-		m_dbstate.srcpath.g >>= 3;
-		m_dbstate.srcpath.b >>= 3;
+		ps.srcpath.r >>= 3;
+		ps.srcpath.g >>= 3;
+		ps.srcpath.b >>= 3;
 	}
 
-	m_dbstate.srcpath.a = m_dbstate.src.a;
+	ps.srcpath.a = ps.src.a;
 }
 
 uint8_t m2_te_device::dither(uint8_t in, uint8_t dithval)
@@ -2851,23 +2851,23 @@ uint8_t m2_te_device::dither(uint8_t in, uint8_t dithval)
 	return (uint8_t)res;
 }
 
-uint8_t m2_te_device::get_src_coef(uint8_t cti, uint8_t dm2const0, uint8_t dm2const1)
+uint8_t m2_te_device::get_src_coef(pixel_scratch &ps, uint8_t cti, uint8_t dm2const0, uint8_t dm2const1)
 {
 	uint32_t sel=0;
 	uint8_t cnst, coef=0;
 
 	switch ((m_db.src_mult_cntl & DBSRCMULTCNTL_SRCCONSTCNTL_MASK) >> DBSRCMULTCNTL_SRCCONSTCNTL_SHIFT)
 	{
-		case DBSRCMULTCNTL_SRCCONSTCNTL_TEXSSB: sel = m_dbstate.ssb;    break;
-		case DBSRCMULTCNTL_SRCCONSTCNTL_SRCDSB: sel = m_dbstate.dsb;    break;
+		case DBSRCMULTCNTL_SRCCONSTCNTL_TEXSSB: sel = ps.ssb;    break;
+		case DBSRCMULTCNTL_SRCCONSTCNTL_SRCDSB: sel = ps.dsb;    break;
 	}
 
 	cnst = sel ? dm2const1 : dm2const0;
 
 	switch ((m_db.src_mult_cntl & DBSRCMULTCNTL_COEFSEL_MASK) >> DBSRCMULTCNTL_COEFSEL_SHIFT)
 	{
-		case DBSRCMULTCNTL_COEFSEL_ATI:         coef = m_dbstate.texpath.a;     break;
-		case DBSRCMULTCNTL_COEFSEL_ASRC:        coef = m_dbstate.srcpath.a;     break;
+		case DBSRCMULTCNTL_COEFSEL_ATI:         coef = ps.texpath.a;     break;
+		case DBSRCMULTCNTL_COEFSEL_ASRC:        coef = ps.srcpath.a;     break;
 		case DBSRCMULTCNTL_COEFSEL_CONSTANT:    coef = cnst;                    break;
 		case DBSRCMULTCNTL_COEFSEL_CTI:         coef = cti;                     break;
 	}
@@ -2878,7 +2878,7 @@ uint8_t m2_te_device::get_src_coef(uint8_t cti, uint8_t dm2const0, uint8_t dm2co
 		return coef;
 }
 
-uint8_t m2_te_device::get_tex_coef(uint8_t cs, uint8_t dm1const0, uint8_t dm1const1)
+uint8_t m2_te_device::get_tex_coef(pixel_scratch &ps, uint8_t cs, uint8_t dm1const0, uint8_t dm1const1)
 {
 	uint32_t sel=0;
 	uint8_t cnst, coef=0;
@@ -2887,16 +2887,16 @@ uint8_t m2_te_device::get_tex_coef(uint8_t cs, uint8_t dm1const0, uint8_t dm1con
 	uint32_t cntl = ((m_db.txt_mult_cntl & DBTXTMULTCNTL_TXTCONSTCNTL_MASK) >> DBTXTMULTCNTL_TXTCONSTCNTL_SHIFT);
 
 	if (cntl == DBTXTMULTCNTL_TXTCONSTCNTL_TEXSSB)
-		sel = m_dbstate.ssb;
+		sel = ps.ssb;
 	else if (cntl == DBTXTMULTCNTL_TXTCONSTCNTL_SRCDSB)
-		sel = m_dbstate.dsb;
+		sel = ps.dsb;
 
 	cnst = sel ? dm1const1 : dm1const0;
 
 	switch ((m_db.txt_mult_cntl & DBTXTMULTCNTL_COEFSEL_MASK) >> DBTXTMULTCNTL_COEFSEL_SHIFT)
 	{
-		case DBTXTMULTCNTL_COEFSEL_ATI:         coef = m_dbstate.texpath.a;     break;
-		case DBTXTMULTCNTL_COEFSEL_ASRC:        coef = m_dbstate.srcpath.a;     break;
+		case DBTXTMULTCNTL_COEFSEL_ATI:         coef = ps.texpath.a;     break;
+		case DBTXTMULTCNTL_COEFSEL_ASRC:        coef = ps.srcpath.a;     break;
 		case DBTXTMULTCNTL_COEFSEL_CONSTANT:    coef = cnst;                    break;
 		case DBTXTMULTCNTL_COEFSEL_CSRC:        coef = cs;                      break;
 	}
@@ -2907,7 +2907,7 @@ uint8_t m2_te_device::get_tex_coef(uint8_t cs, uint8_t dm1const0, uint8_t dm1con
 		return coef;
 }
 
-void m2_te_device::select_alpha_dsb()
+void m2_te_device::select_alpha_dsb(pixel_scratch &ps)
 {
 	if ((m_db.usergen_ctrl & DBUSERGENCTL_BLENDEN) && !(m_gc.te_master_mode & TEMASTER_MODE_DBLEND))
 	{
@@ -2916,8 +2916,8 @@ void m2_te_device::select_alpha_dsb()
 
 		switch ((m_db.dst_alpha_ctrl & DBDSTACNTL_ADESTCONSTCNTL_MASK) >> DBDSTACNTL_ADESTCONSTCNTL_SHIFT)
 		{
-			case 0: sel = m_dbstate.ssb;    break;
-			case 1: sel = m_dbstate.dsb;    break;
+			case 0: sel = ps.ssb;    break;
+			case 1: sel = ps.dsb;    break;
 		}
 
 		if (sel)
@@ -2927,36 +2927,36 @@ void m2_te_device::select_alpha_dsb()
 
 		switch ((m_db.dst_alpha_ctrl & DBDSTACNTL_ADESTSEL_MASK) >> DBDSTACNTL_ADESTSEL_SHIFT)
 		{
-			case 0: m_dbstate.dst.a = m_dbstate.texpath.a;  break;
-			case 1: m_dbstate.dst.a = aconst;               break;
-			case 2: m_dbstate.dst.a = m_dbstate.srcpath.a;  break;
-			case 3: m_dbstate.dst.a = m_dbstate.blend.r;    break;
+			case 0: ps.dst.a = ps.texpath.a;  break;
+			case 1: ps.dst.a = aconst;               break;
+			case 2: ps.dst.a = ps.srcpath.a;  break;
+			case 3: ps.dst.a = ps.blend.r;    break;
 		}
 
 		switch ((m_db.ssbdsb_ctrl & DBSSBDSBCNTL_DSBSEL_MASK) >> DBSSBDSBCNTL_DSBSEL_SHIFT)
 		{
-			case 0: m_dbstate.dsb = m_dbstate.ssb;      break;
-			case 1: m_dbstate.dsb = (m_db.ssbdsb_ctrl & DBSSBDSBCNTL_DSBCONST_MASK) >> DBSSBDSBCNTL_DSBCONST_SHIFT; break;
-			case 2: m_dbstate.dsb = m_dbstate.dsb;      break;
+			case 0: ps.dsb = ps.ssb;      break;
+			case 1: ps.dsb = (m_db.ssbdsb_ctrl & DBSSBDSBCNTL_DSBCONST_MASK) >> DBSSBDSBCNTL_DSBCONST_SHIFT; break;
+			case 2: ps.dsb = ps.dsb;      break;
 		}
 	}
 	else
 	{
-		m_dbstate.dst.a = m_dbstate.texpath.a;
-		m_dbstate.dsb = m_dbstate.ssb;
+		ps.dst.a = ps.texpath.a;
+		ps.dsb = ps.ssb;
 	}
 }
 
 
-uint8_t m2_te_device::color_blend(uint8_t ct, uint8_t cti, uint8_t cs, uint8_t csrc,
+uint8_t m2_te_device::color_blend(pixel_scratch &ps, uint8_t ct, uint8_t cti, uint8_t cs, uint8_t csrc,
 								uint8_t dm10, uint8_t dm11,
 								uint8_t dm20, uint8_t dm21)
 {
 	uint8_t tcoef, scoef;
 	uint16_t tm, sm;
 
-	tcoef = get_tex_coef(csrc, dm10, dm11);
-	scoef = get_src_coef(cti, dm20, dm21);
+	tcoef = get_tex_coef(ps, csrc, dm10, dm11);
+	scoef = get_src_coef(ps, cti, dm20, dm21);
 
 	tm = (tcoef == 255) ? ct : ((ct == 255) ? tcoef : ((tcoef * ct) >> 8));
 	sm = (scoef == 255) ? cs : ((cs == 255) ? scoef : ((scoef * cs) >> 8));
@@ -3123,6 +3123,12 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		g_debug = true;
 	}
 
+	// Reused across every pixel in this scanline: destination_blend() (and
+	// the functions it calls) fully overwrite the relevant fields at the
+	// top of every call, so one instance per walk_span() call is safe and
+	// avoids reconstructing it per pixel.
+	pixel_scratch ps{};
+
 	while (xs != xe)
 	{
 		uint32_t sx = xs;
@@ -3157,7 +3163,7 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 			// TODO: FIXME
 			uint32_t lod = lod_calc(u, v, u, v);
 
-			get_texture_color(u, v, lod, rt, gt, bt, at, ssbt);
+			get_texture_color(ps, u, v, lod, rt, gt, bt, at, ssbt);
 		}
 		else
 		{
@@ -3204,7 +3210,7 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		texout.b = bo;
 		texout.a = ao;
 
-		destination_blend(sx, sy, w16, texout, ssbo);
+		destination_blend(ps, sx, sy, w16, texout, ssbo);
 
 		// Update interpolated paramters
 		if (scan_lr)
@@ -3244,9 +3250,18 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		w = std::clamp<int32_t>(w, 0, 0x007fffff);
 
 #if TEST_TIMING
-		g_statistics[STAT_PIXELS_PROCESSED]++;
+		ps.stats[STAT_PIXELS_PROCESSED]++;
 #endif
 	}
+
+	// Merge this scanline's locally-accumulated status/statistics into the
+	// real device state. Single-threaded for now (Phase 1: no job queue
+	// yet, walk_span() is still called synchronously) - this merge point is
+	// exactly where a future per-band merge after a worker-thread dispatch
+	// would happen instead.
+	m_db.status |= ps.status_bits;
+	for (int i = 0; i < 16; i++)
+		g_statistics[i] += ps.stats[i];
 }
 
 
