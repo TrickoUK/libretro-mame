@@ -583,6 +583,131 @@ right fix? Two found, pulling in different directions:
    rasterizer rewrites — this is exactly the kind of change that rule
    exists for.
 
+## Session 3 (2026-09-22, later same day): real multi-threaded rasterization shipped
+
+Implemented option 4 above — converted `m2_te_device` to farm rasterization
+out to real worker threads via `osd_work_queue` (the low-level primitive
+`poly_manager` itself is built on; `src/mame/sega/coolridr.cpp` was the
+reference precedent for correct API usage). Full design plan (written before
+implementation) is preserved at `/home/bazzite/.claude/plans/
+proud-snuggling-thunder.md` if more detail than this summary is needed.
+
+### Design actually shipped
+
+- **`m2_te_device::walk_edges()`'s per-scanline calls no longer render
+  inline.** Each scanline's `walk_span()` arguments are captured into a
+  `span_job` and queued into one of `NUM_RENDER_BANDS` (4) buckets, keyed by
+  `y % NUM_RENDER_BANDS` — every row is always processed by the same band,
+  so within a band, jobs always execute in original submission order
+  (byte-identical to the old single-threaded result for anything that only
+  touches its own pixel, which is true of every M2 TE primitive), and
+  different bands never write the same framebuffer row, so no locking is
+  needed between them.
+- **`flush_span_jobs()`** dispatches each non-empty band's job list to a
+  worker thread (`osd_work_item_queue`/`render_band` callback) and calls
+  `osd_work_queue_wait()` before returning. Called from **two** places, not
+  just once at list-end: immediately before every `INST_WRITE_REG`
+  instruction (config/texture-mutating CPU register writes), and once more
+  at actual list completion (right before `set_interrupt(INTSTAT_LIST_END)`
+  and again as a safety net at the very end of `execute()`). This matters
+  because a single TE display list can freely interleave config changes
+  with triangle draws — deferring *all* rendering to list-end would let
+  later-queued triangles silently render against whatever texture/blend
+  state happened to be active by the time a worker thread got around to
+  them, not what was active when they were actually issued.
+- Kept from the prerequisite refactor (previous commit): `pixel_scratch`
+  already made the whole per-pixel call chain safe to call from multiple
+  threads at once (no shared mutable device state touched per-pixel).
+
+### Two real bugs found and fixed before this was correct (both by testing, not by reasoning alone)
+
+1. **Stale per-triangle edge state** (found via a hung/solid-color frame on
+   first boot, ~376% CPU, no crash — a livelock, not a crash). `m_es.r2l`
+   and `m_es.ddx_r/g/b/a/uw/vw/w` are recomputed **per triangle** by
+   `setup_triangle()` (called synchronously on the main thread, *not* via an
+   explicit `INST_WRITE_REG` the barrier above would catch), not just by
+   CPU register writes. Since jobs from multiple triangles can sit queued
+   at once between flush points, `walk_span()` reading these fields *live*
+   from `m_es` at (now deferred) render time meant a worker thread could
+   render an early triangle's job using a *later* triangle's edge deltas —
+   wrong/inconsistent enough to make the `while (xs != xe)` scanline loop
+   fail to terminate. Fixed by capturing all 8 fields into `span_job` at
+   queue time (`queue_span_job()`, while `m_es` still correctly reflects
+   the triangle being queued) and threading them through as explicit
+   `walk_span()` parameters instead of reading `m_es` live.
+   **Lesson for next time**: the config-mutation-barrier audit needs to
+   cover *every* write site for state the render path reads, not just
+   sites reachable through the generic `INST_WRITE_REG`/`write()` register
+   dispatch — `setup_triangle()` mutates `m_es` directly as part of normal
+   per-triangle processing, completely outside that path.
+2. **Wrong `osd_work_queue_alloc()` flags** (found via `osd_work_queue_wait()`
+   returning `false` on the first two flushes of a run, then `true`
+   afterward, with a full 100-second timeout given — i.e. it wasn't
+   actually waiting the full duration, it was returning almost immediately
+   with work still in flight, racing the very next dispatch). Used
+   `WORK_QUEUE_FLAG_MULTI` alone; `osd_work_queue_wait()`'s implementation
+   (`src/osd/osdsync.cpp`) only reliably spin-waits until the queue is
+   truly empty when `WORK_QUEUE_FLAG_HIGH_FREQ` is also set — without it,
+   the fallback path (reset a "done" event, wait on it) has a real missed-
+   wakeup window for a queue that's flushed as frequently as this one
+   (once per `INST_WRITE_REG`, i.e. many times per display list). Fixed by
+   allocating with `WORK_QUEUE_FLAG_MULTI | WORK_QUEUE_FLAG_HIGH_FREQ`,
+   matching `coolridr.cpp`'s exact flag choice (which this session
+   initially copied the call *pattern* from but not the flags — worth
+   copying precedent code exactly, not just its shape, next time). Kept a
+   permanent safety net for this in `flush_span_jobs()`: if
+   `osd_work_queue_wait()` ever does return `false` (timeout), the current
+   batch's results are discarded (not merged, not trusted) and logged via
+   `logerror()` rather than risking a read of a still-being-written
+   `pixel_scratch`.
+
+### Verification
+
+- Debugged the first bug via a live GDB session against the Distrobox
+  RetroArch (recipe: `set auto-solib-add off` before `run`, `sharedlibrary
+  mame_libretro` after the crash — see Session 2's "Correctness, round 3"
+  entry in this doc's history for why; the crash itself surfaced as a
+  SIGSEGV in `ppc_device::frontend::describe()`, i.e. the PowerPC DRC
+  choking on decoding memory that a wild/wrong TE pixel-address write had
+  corrupted — several frames deep from the actual bug, not a direct crash
+  in TE code, which is why static reasoning alone didn't find it as fast as
+  a live repro did).
+- Diagnosed the second bug with temporary `fprintf(stderr, ...)` tracing in
+  `flush_span_jobs()` printing `active`/`osd_work_queue_wait()`'s return
+  value — removed after the fix was confirmed (`wait_ok=1` on 100% of
+  ~500,000+ flushes across multiple soak runs afterward, zero timeouts).
+- **Soak-tested all four titles after the fix**: `polystar` (~60s, 467,351
+  flushes, 0 timeouts), `evilngt` (~35s, 6,522 flushes), `totlvice` (~35s,
+  38,369 flushes) — all clean, no errors, no crashes.
+- **Visual correctness**: screenshot-compared `polystar` against the known-
+  good pre-threading baseline at multiple points (attract-mode city scene
+  with the blend/translucency-heavy bee enemy) — pixel-identical in
+  composition, blend effects intact.
+- **Performance**: `btltryst` (the worst-case title from Session 2, ~29% of
+  wall-clock time in `TE::execute()` pre-threading) now shows a **solid
+  60.0-60.3 FPS** (`fps_show` overlay) through the portion of boot that was
+  previously part of the slow measurement window — a dramatic improvement
+  over the ~17-18 FPS (29% of 60) baseline. Did not get a screenshot of
+  `btltryst` reaching actual post-boot gameplay content in this session
+  (its boot sequence takes 75+ real seconds per Session 2's notes) - worth
+  a longer soak with real gameplay content as a follow-up, but the
+  measured wall-clock win through boot alone is already a qualitative step
+  change, not an incremental one.
+
+### What's left
+
+- Confirm the win holds during real `btltryst` gameplay (not just boot),
+  and on `evilngt`/`totlvice` too - this session only got a solid FPS
+  reading on `btltryst`'s boot sequence specifically.
+- `NUM_RENDER_BANDS = 4` was picked as a reasonable starting constant, not
+  tuned - worth experimenting with higher/lower band counts now that the
+  design is proven correct, to see if there's more throughput on the table
+  (this host has far more than 4 cores).
+- The per-pixel-path micro-optimization audit (item 3 in the old
+  "Recommended next step" list above) is still valid future work, now
+  layered on top of a genuinely parallel rasterizer instead of instead of
+  it.
+
 ## Notes on provenance / how this document was produced
 
 This was reconstructed by static analysis of the current mamedev/mame source

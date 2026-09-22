@@ -736,6 +736,9 @@ void m2_te_device::device_start()
 
 	// Allocate timers
 	m_done_timer = timer_alloc(FUNC(m2_te_device::command_done), this);
+
+	// Multi-threaded rasterization work queue - see flush_span_jobs().
+	m_render_queue = osd_work_queue_alloc(WORK_QUEUE_FLAG_MULTI | WORK_QUEUE_FLAG_HIGH_FREQ);
 }
 
 
@@ -1570,8 +1573,9 @@ void m2_te_device::walk_edges(uint32_t wrange)
 
 	do
 	{
-		// Render the pixels from this span
-		walk_span(wrange, omit_right, y, xs, xe, r, g, b, a, uw, vw, w);
+		// Queue the pixels from this span for (possibly deferred,
+		// multi-threaded) rendering - see queue_span_job().
+		queue_span_job(wrange, omit_right, y, xs, xe, r, g, b, a, uw, vw, w);
 
 		// Now update the values
 		omit_right = false;
@@ -3069,13 +3073,16 @@ uint8_t m2_te_device::alu_calc(uint16_t a, uint16_t b)
 //  walk_span -
 //-------------------------------------------------
 
-void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
+void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right,
 							 uint32_t y, uint32_t xs, uint32_t xe,
 							 int32_t r, int32_t g, int32_t b, int32_t a,
 							 uint32_t uw, uint32_t vw,
-							 uint32_t w)
+							 uint32_t w,
+							 uint32_t es_r2l,
+							 uint32_t es_ddx_r, uint32_t es_ddx_g, uint32_t es_ddx_b, uint32_t es_ddx_a,
+							 uint32_t es_ddx_uw, uint32_t es_ddx_vw, uint32_t es_ddx_w)
 {
-	bool scan_lr = !m_es.r2l;
+	bool scan_lr = !es_r2l;
 
 	// TODO: Is this correct?
 	xe = scan_lr ? xe + 1 : xe - 1;
@@ -3108,13 +3115,13 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		else
 		{
 			xs -= 1;
-			r -= m_es.ddx_r;
-			g -= m_es.ddx_g;
-			b -= m_es.ddx_b;
-			a -= m_es.ddx_a;
-			uw -= m_es.ddx_uw;
-			vw -= m_es.ddx_vw;
-			w -= m_es.ddx_w;
+			r -= es_ddx_r;
+			g -= es_ddx_g;
+			b -= es_ddx_b;
+			a -= es_ddx_a;
+			uw -= es_ddx_uw;
+			vw -= es_ddx_vw;
+			w -= es_ddx_w;
 		}
 	}
 
@@ -3123,12 +3130,13 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		g_debug = true;
 	}
 
-	// Reused across every pixel in this scanline: destination_blend() (and
-	// the functions it calls) fully overwrite the relevant fields at the
-	// top of every call, so one instance per walk_span() call is safe and
-	// avoids reconstructing it per pixel.
-	pixel_scratch ps{};
-
+	// ps is owned by the caller (one instance per render job batch, e.g.
+	// per band when running on a worker thread) and accumulates
+	// status_bits/stats across every pixel this call and any other queued
+	// jobs in the same batch touch - destination_blend() (and the
+	// functions it calls) fully overwrite the per-pixel fields (x, y, w,
+	// ti, ssb, ...) at the top of every call, so reusing one instance
+	// across many pixels/jobs is safe.
 	while (xs != xe)
 	{
 		uint32_t sx = xs;
@@ -3216,24 +3224,24 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		if (scan_lr)
 		{
 			xs += 1;
-			r += m_es.ddx_r;
-			g += m_es.ddx_g;
-			b += m_es.ddx_b;
-			a += m_es.ddx_a;
-			uw += m_es.ddx_uw;
-			vw += m_es.ddx_vw;
-			w += m_es.ddx_w;
+			r += es_ddx_r;
+			g += es_ddx_g;
+			b += es_ddx_b;
+			a += es_ddx_a;
+			uw += es_ddx_uw;
+			vw += es_ddx_vw;
+			w += es_ddx_w;
 		}
 		else
 		{
 			xs -= 1;
-			r -= m_es.ddx_r;
-			g -= m_es.ddx_g;
-			b -= m_es.ddx_b;
-			a -= m_es.ddx_a;
-			uw -= m_es.ddx_uw;
-			vw -= m_es.ddx_vw;
-			w -= m_es.ddx_w;
+			r -= es_ddx_r;
+			g -= es_ddx_g;
+			b -= es_ddx_b;
+			a -= es_ddx_a;
+			uw -= es_ddx_uw;
+			vw -= es_ddx_vw;
+			w -= es_ddx_w;
 		}
 
 		// Clamp to 11.8
@@ -3253,15 +3261,132 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		ps.stats[STAT_PIXELS_PROCESSED]++;
 #endif
 	}
+}
 
-	// Merge this scanline's locally-accumulated status/statistics into the
-	// real device state. Single-threaded for now (Phase 1: no job queue
-	// yet, walk_span() is still called synchronously) - this merge point is
-	// exactly where a future per-band merge after a worker-thread dispatch
-	// would happen instead.
-	m_db.status |= ps.status_bits;
-	for (int i = 0; i < 16; i++)
-		g_statistics[i] += ps.stats[i];
+
+//-------------------------------------------------
+//  queue_span_job - capture one scanline's worth of
+//  walk_span() arguments instead of rendering it
+//  immediately, so it can be rendered on a worker
+//  thread later. Bucketed by row so every row is
+//  always handled by the same band (see span_job).
+//-------------------------------------------------
+
+void m2_te_device::queue_span_job(uint32_t wrange, bool omit_right, uint32_t y, uint32_t xs, uint32_t xe, int32_t r, int32_t g, int32_t b, int32_t a, uint32_t uw, uint32_t vw, uint32_t w)
+{
+	span_job job;
+	job.wrange = wrange;
+	job.omit_right = omit_right;
+	job.y = y;
+	job.xs = xs;
+	job.xe = xe;
+	job.r = r;
+	job.g = g;
+	job.b = b;
+	job.a = a;
+	job.uw = uw;
+	job.vw = vw;
+	job.w = w;
+
+	// Capture this triangle's edge-state deltas now, not at render time -
+	// see span_job's comment for why.
+	job.r2l = m_es.r2l;
+	job.ddx_r = m_es.ddx_r;
+	job.ddx_g = m_es.ddx_g;
+	job.ddx_b = m_es.ddx_b;
+	job.ddx_a = m_es.ddx_a;
+	job.ddx_uw = m_es.ddx_uw;
+	job.ddx_vw = m_es.ddx_vw;
+	job.ddx_w = m_es.ddx_w;
+
+	m_span_jobs[y % NUM_RENDER_BANDS].push_back(job);
+}
+
+
+//-------------------------------------------------
+//  render_band - osd_work_item callback: render
+//  every job queued for one band, on whichever
+//  worker thread this item is scheduled on. Jobs
+//  within a band always run in their original
+//  submission order (plain sequential loop), and
+//  different bands never touch the same framebuffer
+//  row, so this needs no locking against other
+//  concurrently-running bands.
+//-------------------------------------------------
+
+void *m2_te_device::render_band(void *param, int threadid)
+{
+	band_render_ctx &ctx = *static_cast<band_render_ctx *>(param);
+
+	for (const span_job &job : ctx.dev->m_span_jobs[ctx.band])
+	{
+		ctx.dev->walk_span(ctx.ps, job.wrange, job.omit_right, job.y, job.xs, job.xe,
+			job.r, job.g, job.b, job.a, job.uw, job.vw, job.w,
+			job.r2l, job.ddx_r, job.ddx_g, job.ddx_b, job.ddx_a, job.ddx_uw, job.ddx_vw, job.ddx_w);
+	}
+
+	return nullptr;
+}
+
+
+//-------------------------------------------------
+//  flush_span_jobs - dispatch every band's queued
+//  jobs to worker threads, wait for them all to
+//  finish, merge their locally-accumulated status/
+//  statistics into the real device state, then clear
+//  the queues. Must be called before anything that
+//  mutates state a queued-but-not-yet-rendered job
+//  depends on (texture/config writes - see the
+//  INST_WRITE_REG case in execute()), and again at
+//  the end of execute() before the CPU is told
+//  rendering is complete.
+//-------------------------------------------------
+
+void m2_te_device::flush_span_jobs()
+{
+	band_render_ctx ctx[NUM_RENDER_BANDS];
+	int active = 0;
+
+	for (int band = 0; band < NUM_RENDER_BANDS; band++)
+	{
+		if (m_span_jobs[band].empty())
+			continue;
+
+		ctx[active].dev = this;
+		ctx[active].band = band;
+		ctx[active].ps = pixel_scratch{};
+		osd_work_item_queue(m_render_queue, render_band, &ctx[active], WORK_ITEM_FLAG_AUTO_RELEASE);
+		active++;
+	}
+
+	if (active == 0)
+		return;
+
+	if (!osd_work_queue_wait(m_render_queue, osd_ticks_per_second() * 100))
+	{
+		// Real timeout (100s) - a worker thread may still be writing its
+		// band's pixel_scratch/framebuffer rows. Don't touch ctx[]/m_ram
+		// any further this call; better to drop a batch of rendering than
+		// race on it. Should never happen in practice - WORK_QUEUE_FLAG_
+		// HIGH_FREQ makes osd_work_queue_wait() spin-wait for real
+		// completion instead of relying on an event that can be missed for
+		// a queue flushed this frequently (small batches, once per
+		// INST_WRITE_REG) - see git history for the bug this caught.
+		logerror("m2_te_device: render queue wait timed out, dropping this batch\n");
+		for (auto &jobs : m_span_jobs)
+			jobs.clear();
+		return;
+	}
+
+	for (int i = 0; i < active; i++)
+	{
+		m_db.status |= ctx[i].ps.status_bits;
+		for (int s = 0; s < 16; s++)
+			g_statistics[s] += ctx[i].ps.stats[s];
+	}
+
+	for (auto &jobs : m_span_jobs)
+		jobs.clear();
 }
 
 
@@ -3325,6 +3450,13 @@ void m2_te_device::execute()
 		{
 			case INST_WRITE_REG:
 			{
+				// WRITE_REG can mutate texture/blend/destination config
+				// (including reloading texture RAM via load_texture()) that
+				// any span job still sitting in the queue was rendered
+				// against - flush and wait before applying the change so a
+				// job never sees state from after it was originally issued.
+				flush_span_jobs();
+
 				uint32_t offs = inst & 0xffff;
 				int32_t cnt = (inst >> 16) & 0xff;
 
@@ -3423,6 +3555,11 @@ void m2_te_device::execute()
 		if (m_gc.irp == m_gc.iwp)
 		{
 			m_state = m_gc.te_master_mode & TEICNTL_STPL ? TE_STOPPED : TE_PAUSED;
+
+			// The CPU may react to this interrupt by immediately reading
+			// the framebuffer (or chaining straight into the next list) -
+			// make sure every queued job has actually been rendered first.
+			flush_span_jobs();
 			set_interrupt(INTSTAT_LIST_END);
 		}
 		else if (m_gc.te_master_mode & (TEICNTL_STPI | TEICNTL_STEP))
@@ -3430,6 +3567,12 @@ void m2_te_device::execute()
 			m_state = TE_STOPPED;
 		}
 	};
+
+	// Safety net for any loop-exit path that didn't already flush above
+	// (e.g. TEICNTL_STPI/STEP) - execute() must never return with jobs
+	// still queued, and g_statistics below must reflect every job this
+	// call issued.
+	flush_span_jobs();
 
 #if TEST_TIMING
 /*

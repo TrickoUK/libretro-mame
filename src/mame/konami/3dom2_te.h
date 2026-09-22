@@ -109,16 +109,16 @@ private:
 
 	struct rgba { uint8_t r, g, b, a; };
 
-	// Per-render-job scratch: destination-blender working state (previously
+	// Per-render-batch scratch: destination-blender working state (previously
 	// the member field m_dbstate) plus locally-accumulated status/statistics
-	// bits. One instance is owned per render job (currently: one per call
-	// into the walk_span()/destination_blend() chain for a scanline) rather
-	// than being a shared device member, so this chain is safe to eventually
-	// run from multiple worker threads at once - each job's pixel_scratch is
-	// private to that job. status_bits/stats are OR'd/added into the real
-	// m_db.status/g_statistics only after all in-flight jobs for a render
-	// batch have finished (single-threaded merge), never touched directly
-	// from more than one job's context at a time.
+	// bits. One instance is owned per render batch (currently: one per
+	// worker-thread band, reused across every queued span_job that band
+	// processes) rather than being a shared device member, so this chain is
+	// safe to run from multiple worker threads at once - each band's
+	// pixel_scratch is private to that band's thread. status_bits/stats are
+	// OR'd/added into the real m_db.status/g_statistics only after every
+	// band has finished (osd_work_queue_wait() returned, single-threaded
+	// merge), never touched directly from more than one thread at a time.
 	struct pixel_scratch
 	{
 		uint32_t    x;
@@ -140,6 +140,49 @@ private:
 		uint32_t stats[16] = {};
 	};
 
+	// One rasterized scanline's worth of walk_span() arguments, captured so
+	// it can be handed to a worker thread instead of being rendered
+	// synchronously inline. Bucketed by row (y % NUM_RENDER_BANDS) into
+	// m_span_jobs - every row is always processed by the same band, so a
+	// band's jobs always execute in original submission order and different
+	// bands never write the same framebuffer row, making this safe to farm
+	// out to real worker threads with no locking needed on the framebuffer
+	// itself (see queue_span_job()/flush_span_jobs()).
+	struct span_job
+	{
+		uint32_t wrange;
+		bool omit_right;
+		uint32_t y, xs, xe;
+		int32_t r, g, b, a;
+		uint32_t uw, vw, w;
+
+		// m_es.r2l/ddx_* are recomputed per-triangle by setup_triangle(),
+		// not just by explicit CPU register writes - since jobs from
+		// multiple triangles can sit queued at once (only flushed at
+		// INST_WRITE_REG/list-end boundaries, not between triangles), these
+		// must be captured here at queue time rather than read live from
+		// m_es when the job actually renders, or a later triangle's setup
+		// would silently corrupt an earlier triangle's still-queued jobs.
+		uint32_t r2l;
+		uint32_t ddx_r, ddx_g, ddx_b, ddx_a;
+		uint32_t ddx_uw, ddx_vw, ddx_w;
+	};
+
+	static constexpr int NUM_RENDER_BANDS = 4;
+
+	// osd_work_item param for render_band(): which band to render and the
+	// pixel_scratch that band's whole run of jobs accumulates into.
+	struct band_render_ctx
+	{
+		m2_te_device *dev;
+		int band;
+		pixel_scratch ps;
+	};
+
+	void queue_span_job(uint32_t wrange, bool omit_right, uint32_t y, uint32_t xs, uint32_t xe, int32_t r, int32_t g, int32_t b, int32_t a, uint32_t uw, uint32_t vw, uint32_t w);
+	void flush_span_jobs();
+	static void *render_band(void *param, int threadid);
+
 	void set_interrupt(uint32_t mask);
 	void update_interrupts();
 
@@ -157,7 +200,8 @@ private:
 	void setup_triangle(uint32_t flags);
 	void calculate_slope(const slope_params &sp, float q1, float q2, float q3, float &slope_out, float &ddx_out);
 	void walk_edges(uint32_t wrange);
-	void walk_span(uint32_t wrange, bool omit_right, uint32_t y, uint32_t xs, uint32_t xe, int32_t r, int32_t g, int32_t b, int32_t a, uint32_t uw, uint32_t vw, uint32_t w);
+	void walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right, uint32_t y, uint32_t xs, uint32_t xe, int32_t r, int32_t g, int32_t b, int32_t a, uint32_t uw, uint32_t vw, uint32_t w,
+					uint32_t es_r2l, uint32_t es_ddx_r, uint32_t es_ddx_g, uint32_t es_ddx_b, uint32_t es_ddx_a, uint32_t es_ddx_uw, uint32_t es_ddx_vw, uint32_t es_ddx_w);
 
 	void texcoord_gen(uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
 						uint32_t & uo, uint32_t & vo, uint32_t & wo);
@@ -423,6 +467,16 @@ private:
 
 	std::unique_ptr<uint32_t[]> m_pipram;
 	std::unique_ptr<uint32_t[]> m_tram;
+
+	// Multi-threaded rasterization: queued-but-not-yet-rendered scanlines,
+	// bucketed by band (see span_job above), and the OSD work queue used to
+	// render each band's jobs on a worker thread. Allocated once in
+	// device_start(); flush_span_jobs() is called both mid-list (before any
+	// instruction that mutates state the queued jobs depend on) and at the
+	// end of execute(), never leaving jobs queued across a config change or
+	// past the point the CPU expects rendering to be complete.
+	std::vector<span_job> m_span_jobs[NUM_RENDER_BANDS];
+	osd_work_queue *m_render_queue = nullptr;
 };
 
 DECLARE_DEVICE_TYPE(M2_TE, m2_te_device)
