@@ -2143,6 +2143,17 @@ void m2_te_device::texture_blend(
 {
 	uint32_t rbl = 0, gbl = 0, bbl = 0, abl = 0;
 
+	// rbl/gbl/bbl/abl (computed below) are only ever read by the two output
+	// switches' *_SEL_BLEND cases further down - skip the three select_lerp()
+	// calls (and the lerp/multiply/select_mul() calls they feed) entirely
+	// when neither output selector actually needs a blended result. This is
+	// the common case for flat/untextured or simple-textured draws and was
+	// previously computed unconditionally on every pixel regardless of
+	// whether the result was ever used.
+	const bool need_blend = (((m_tm.tex_tab_cntl & TXTTABCNTL_C_OSEL_MASK) >> TXTTABCNTL_C_OSEL_SHIFT) == TXTTABCNTL_CO_SEL_BLEND)
+		|| (((m_tm.tex_tab_cntl & TXTTABCNTL_A_OSEL_MASK) >> TXTTABCNTL_A_OSEL_SHIFT) == TXTTABCNTL_AO_SEL_BLEND);
+
+	if (need_blend)
 	{
 		uint32_t ar, ab, ag, aa;
 		uint32_t br, bb, bg, ba;
