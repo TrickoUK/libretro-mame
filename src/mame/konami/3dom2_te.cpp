@@ -816,6 +816,14 @@ uint32_t m2_te_device::read(offs_t offset)
 
 void m2_te_device::write(offs_t offset, uint32_t data)
 {
+	// Any register write may touch state the render path reads live
+	// (m_gc/m_es/m_tm/m_db, or m_pipram directly below) - mark the current
+	// snapshot stale so the next queue_span_job() takes a fresh one instead
+	// of reusing one that no longer reflects this write. Unconditional and
+	// cheap (just a bool) regardless of which register this actually is -
+	// see render_snapshot/m_snapshot_dirty.
+	m_snapshot_dirty = true;
+
 	uint32_t unit = (offset >> 11) & 7;
 	uint32_t reg = offset & 0x1ff;
 	te_reg_wmode wmode = static_cast<te_reg_wmode>((offset >> 9) & 3);
@@ -1701,9 +1709,10 @@ void m2_te_device::walk_edges(uint32_t wrange)
 //  texcoord_gen -
 //-------------------------------------------------
 
-void m2_te_device::texcoord_gen(uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
+void m2_te_device::texcoord_gen(pixel_scratch &ps, uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
 								uint32_t & uo, uint32_t & vo, uint32_t & wo)
 {
+	const auto &m_es = ps.cfg->es;
 
 	// Perspective correction
 	if (!(m_es.es_cntl & ESCNTL_PERSPECTIVEOFF))
@@ -1782,8 +1791,10 @@ uint32_t m2_te_device::lod_calc(uint32_t u0, uint32_t v0, uint32_t u1, uint32_t 
 //  get_tram_bitdepth
 //-------------------------------------------------
 
-uint32_t m2_te_device::get_tram_bitdepth()
+uint32_t m2_te_device::get_tram_bitdepth(pixel_scratch &ps)
 {
+	const auto &m_tm = ps.cfg->tm;
+
 	// TODO: Could cache this
 	const uint32_t tex_type = m_tm.tex_exptype;
 
@@ -1806,9 +1817,11 @@ uint32_t m2_te_device::get_tram_bitdepth()
 void m2_te_device::get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
 									uint32_t & r, uint32_t & g, uint32_t & b, uint32_t & a, uint32_t & s)
 {
+	const auto &m_tm = ps.cfg->tm;
+
 	uint32_t texaddr;
 	uint32_t texbit;
-	uint32_t texdepth = get_tram_bitdepth();
+	uint32_t texdepth = get_tram_bitdepth(ps);
 
 	// TODO: Multiple LODs
 	uint32_t filter = (m_tm.tex_addr_cntl >> TXTADDRCNTL_R12FILTERSEL_SHIFT) & TXTADDRCNTL_FILTERSEL_MASK;
@@ -1818,7 +1831,7 @@ void m2_te_device::get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, 
 		case TXTADDRCNTL_FILTERSEL_POINT:
 		case TXTADDRCNTL_FILTERSEL_LINEAR: // TODO
 		{
-			addr_calc(u, v, lod, texaddr, texbit, texdepth);
+			addr_calc(ps, u, v, lod, texaddr, texbit, texdepth);
 			get_texel(ps, texaddr, texbit, texdepth, r, g, b, a, s);
 			break;
 		}
@@ -1832,13 +1845,13 @@ void m2_te_device::get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, 
 			uint32_t r2, g2, b2, a2, s2;
 			uint32_t r3, g3, b3, a3, s3;
 
-			addr_calc(u, v, lod, texaddr, texbit, texdepth);
+			addr_calc(ps, u, v, lod, texaddr, texbit, texdepth);
 			get_texel(ps, texaddr, texbit, texdepth, r0, g0, b0, a0, s0);
-			addr_calc(u + 0x10, v, lod, texaddr, texbit, texdepth);
+			addr_calc(ps, u + 0x10, v, lod, texaddr, texbit, texdepth);
 			get_texel(ps, texaddr, texbit, texdepth, r1, g1, b1, a1, s1);
-			addr_calc(u, v + 0x10, lod, texaddr, texbit, texdepth);
+			addr_calc(ps, u, v + 0x10, lod, texaddr, texbit, texdepth);
 			get_texel(ps, texaddr, texbit, texdepth, r2, g2, b2, a2, s2);
-			addr_calc(u + 0x10, v + 0x10, lod, texaddr, texbit, texdepth);
+			addr_calc(ps, u + 0x10, v + 0x10, lod, texaddr, texbit, texdepth);
 			get_texel(ps, texaddr, texbit, texdepth, r3, g3, b3, a3, s3);
 
 			// LERP
@@ -1882,9 +1895,11 @@ void m2_te_device::get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, 
 //-------------------------------------------------
 //  addr_calc -
 //-------------------------------------------------
-void m2_te_device::addr_calc(uint32_t u, uint32_t v, uint32_t lod,
+void m2_te_device::addr_calc(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
 							uint32_t & texaddr, uint32_t & texbit, uint32_t & tdepth)
 {
+	const auto &m_tm = ps.cfg->tm;
+
 	uint32_t u_mask = (m_tm.uv_mask & TXTUVMASK_UMASK_MASK) >> TXTUVMASK_UMASK_SHIFT;
 	uint32_t v_mask = (m_tm.uv_mask & TXTUVMASK_VMASK_MASK) >> TXTUVMASK_VMASK_SHIFT;
 	uint32_t u_max = (m_tm.uv_max & TXTUVMAX_UMAX_MASK) >> TXTUVMAX_UMAX_SHIFT;
@@ -1933,6 +1948,10 @@ void m2_te_device::addr_calc(uint32_t u, uint32_t v, uint32_t lod,
 void m2_te_device::get_texel(pixel_scratch &ps, uint32_t tex_addr, uint32_t tex_bit, uint32_t tdepth,
 							uint32_t & r, uint32_t & g, uint32_t & b, uint32_t & a, uint32_t & ssb)
 {
+	const auto &m_tm = ps.cfg->tm;
+	const uint32_t *m_tram = ps.cfg->tram.data();
+	const uint32_t *m_pipram = ps.cfg->pipram.data();
+
 	const uint32_t tex_type = m_tm.tex_exptype;
 
 	uint8_t rtex, gtex, btex, atex;
@@ -2140,11 +2159,13 @@ static inline uint8_t multiply(uint8_t a, uint8_t b)
 //  texture_blend -
 //-------------------------------------------------
 
-void m2_te_device::texture_blend(
+void m2_te_device::texture_blend(pixel_scratch &ps,
 	uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
 	uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 	uint32_t &ro, uint32_t &go, uint32_t &bo, uint32_t &ao, uint32_t &ssbo)
 {
+	const auto &m_tm = ps.cfg->tm;
+
 	uint32_t rbl = 0, gbl = 0, bbl = 0, abl = 0;
 
 	// rbl/gbl/bbl/abl (computed below) are only ever read by the two output
@@ -2163,17 +2184,17 @@ void m2_te_device::texture_blend(
 		uint32_t br, bb, bg, ba;
 		uint32_t tr, tb, tg;
 
-		select_lerp( (m_tm.tex_tab_cntl & TXTTABCNTL_C_ASEL_MASK) >> TXTTABCNTL_C_ASEL_SHIFT,
+		select_lerp( ps, (m_tm.tex_tab_cntl & TXTTABCNTL_C_ASEL_MASK) >> TXTTABCNTL_C_ASEL_SHIFT,
 					ri, gi, bi, ai,
 					rt, gt, bt, at, ssbt,
 					ar, ag, ab );
 
-		select_lerp( (m_tm.tex_tab_cntl & TXTTABCNTL_C_BSEL_MASK) >> TXTTABCNTL_C_BSEL_SHIFT,
+		select_lerp( ps, (m_tm.tex_tab_cntl & TXTTABCNTL_C_BSEL_MASK) >> TXTTABCNTL_C_BSEL_SHIFT,
 					ri, gi, bi, ai,
 					rt, gt, bt, at, ssbt,
 					br, bg, bb );
 
-		select_lerp( (m_tm.tex_tab_cntl & TXTTABCNTL_C_TSEL_MASK) >> TXTTABCNTL_C_TSEL_SHIFT,
+		select_lerp( ps, (m_tm.tex_tab_cntl & TXTTABCNTL_C_TSEL_MASK) >> TXTTABCNTL_C_TSEL_SHIFT,
 					ri, gi, bi, ai,
 					rt, gt, bt, at, ssbt,
 					tr, tg, tb );
@@ -2188,11 +2209,11 @@ void m2_te_device::texture_blend(
 		{
 			// TODO: CHECK ME
 			// Alpha is multiply only
-			select_mul( (m_tm.tex_tab_cntl & TXTTABCNTL_A_ASEL_MASK) >> TXTTABCNTL_A_ASEL_SHIFT,
+			select_mul( ps, (m_tm.tex_tab_cntl & TXTTABCNTL_A_ASEL_MASK) >> TXTTABCNTL_A_ASEL_SHIFT,
 						ai, at, ssbt,
 						aa);
 
-			select_mul( (m_tm.tex_tab_cntl & TXTTABCNTL_A_BSEL_MASK) >> TXTTABCNTL_A_BSEL_SHIFT,
+			select_mul( ps, (m_tm.tex_tab_cntl & TXTTABCNTL_A_BSEL_MASK) >> TXTTABCNTL_A_BSEL_SHIFT,
 						ai, at, ssbt,
 						ba);
 
@@ -2260,11 +2281,13 @@ void m2_te_device::texture_blend(
 	}
 }
 
-void m2_te_device::select_lerp( uint32_t sel,
+void m2_te_device::select_lerp( pixel_scratch &ps, uint32_t sel,
 								uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
 								uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 								uint32_t & ar, uint32_t & ag, uint32_t & ab )
 {
+	const auto &m_tm = ps.cfg->tm;
+
 	switch (sel)
 	{
 		case TXTTABCNTL_C_ABTSEL_AITER:
@@ -2328,9 +2351,11 @@ void m2_te_device::select_lerp( uint32_t sel,
 }
 
 
-void m2_te_device::select_mul(uint32_t sel, uint32_t ai, uint32_t at, uint32_t ssbt,
+void m2_te_device::select_mul(pixel_scratch &ps, uint32_t sel, uint32_t ai, uint32_t at, uint32_t ssbt,
 							   uint32_t & a )
 {
+	const auto &m_tm = ps.cfg->tm;
+
 	switch (sel)
 	{
 		case TXTTABCNTL_A_ABSEL_AITER:
@@ -2367,6 +2392,8 @@ void m2_te_device::select_mul(uint32_t sel, uint32_t ai, uint32_t at, uint32_t s
 
 void m2_te_device::write_dst_pixel(pixel_scratch &ps)
 {
+	const auto &m_db = ps.cfg->db;
+
 	uint32_t mask = m_db.usergen_ctrl & DBUSERGENCTL_DESTOUT_MASK;
 
 	if (m_db.dst_ctrl & DBDESTCNTL_32BPP)
@@ -2420,6 +2447,9 @@ void m2_te_device::write_dst_pixel(pixel_scratch &ps)
 
 void m2_te_device::destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb)
 {
+	const auto &m_gc = ps.cfg->gc;
+	const auto &m_db = ps.cfg->db;
+
 	ps.x = x;
 	ps.y = y;
 	ps.w = w;
@@ -2668,6 +2698,8 @@ void m2_te_device::destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, 
 // Select between texture unit and source pixel
 void m2_te_device::select_tex_pixel(pixel_scratch &ps)
 {
+	const auto &m_db = ps.cfg->db;
+
 	uint32_t cntl;
 
 	// TODO: REGBITS
@@ -2728,6 +2760,9 @@ void m2_te_device::select_tex_pixel(pixel_scratch &ps)
 
 void m2_te_device::select_src_pixel(pixel_scratch &ps)
 {
+	const auto &m_gc = ps.cfg->gc;
+	const auto &m_db = ps.cfg->db;
+
 	if ((m_db.usergen_ctrl & DBUSERGENCTL_SRCINEN)
 		&& (m_db.usergen_ctrl & DBUSERGENCTL_BLENDEN)
 		&& !(m_gc.te_master_mode & TEMASTER_MODE_DBLEND))
@@ -2857,6 +2892,8 @@ uint8_t m2_te_device::dither(uint8_t in, uint8_t dithval)
 
 uint8_t m2_te_device::get_src_coef(pixel_scratch &ps, uint8_t cti, uint8_t dm2const0, uint8_t dm2const1)
 {
+	const auto &m_db = ps.cfg->db;
+
 	uint32_t sel=0;
 	uint8_t cnst, coef=0;
 
@@ -2884,6 +2921,8 @@ uint8_t m2_te_device::get_src_coef(pixel_scratch &ps, uint8_t cti, uint8_t dm2co
 
 uint8_t m2_te_device::get_tex_coef(pixel_scratch &ps, uint8_t cs, uint8_t dm1const0, uint8_t dm1const1)
 {
+	const auto &m_db = ps.cfg->db;
+
 	uint32_t sel=0;
 	uint8_t cnst, coef=0;
 
@@ -2913,6 +2952,9 @@ uint8_t m2_te_device::get_tex_coef(pixel_scratch &ps, uint8_t cs, uint8_t dm1con
 
 void m2_te_device::select_alpha_dsb(pixel_scratch &ps)
 {
+	const auto &m_gc = ps.cfg->gc;
+	const auto &m_db = ps.cfg->db;
+
 	if ((m_db.usergen_ctrl & DBUSERGENCTL_BLENDEN) && !(m_gc.te_master_mode & TEMASTER_MODE_DBLEND))
 	{
 		uint32_t sel = 0;
@@ -2965,13 +3007,15 @@ uint8_t m2_te_device::color_blend(pixel_scratch &ps, uint8_t ct, uint8_t cti, ui
 	tm = (tcoef == 255) ? ct : ((ct == 255) ? tcoef : ((tcoef * ct) >> 8));
 	sm = (scoef == 255) ? cs : ((cs == 255) ? scoef : ((scoef * cs) >> 8));
 
-	return alu_calc(tm, sm);
+	return alu_calc(ps, tm, sm);
 }
 
 #if 1
 
-uint8_t m2_te_device::alu_calc(uint16_t a, uint16_t b)
+uint8_t m2_te_device::alu_calc(pixel_scratch &ps, uint16_t a, uint16_t b)
 {
+	const auto &m_db = ps.cfg->db;
+
 	int32_t result = 0;
 	uint32_t blendout;
 	uint32_t carry = 0;
@@ -3082,6 +3126,9 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 							 uint32_t es_ddx_r, uint32_t es_ddx_g, uint32_t es_ddx_b, uint32_t es_ddx_a,
 							 uint32_t es_ddx_uw, uint32_t es_ddx_vw, uint32_t es_ddx_w)
 {
+	const auto &m_gc = ps.cfg->gc;
+	const auto &m_tm = ps.cfg->tm;
+
 	bool scan_lr = !es_r2l;
 
 	// TODO: Is this correct?
@@ -3166,7 +3213,7 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 			uint32_t u, v;
 
 			// UV and W
-			texcoord_gen(wrange, uw, vw, w, u, v, w16);
+			texcoord_gen(ps, wrange, uw, vw, w, u, v, w16);
 
 			// TODO: FIXME
 			uint32_t lod = lod_calc(u, v, u, v);
@@ -3202,7 +3249,7 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 		uint32_t ssbo = ssbt;
 
 		// Blend iterated RGB with texel
-		texture_blend(ri, gi, bi, ai,
+		texture_blend(ps, ri, gi, bi, ai,
 					  rt, gt, bt, at, ssbt,
 					  ro, go, bo, ao, ssbo);
 
@@ -3299,7 +3346,26 @@ void m2_te_device::queue_span_job(uint32_t wrange, bool omit_right, uint32_t y, 
 	job.ddx_vw = m_es.ddx_vw;
 	job.ddx_w = m_es.ddx_w;
 
-	m_span_jobs[y % NUM_RENDER_BANDS].push_back(job);
+	// Lazily (re)snapshot the render-relevant config the first time it's
+	// needed after a register write - see render_snapshot/m_snapshot_dirty.
+	// Reused for every subsequent job until the next write() sets the dirty
+	// flag again, so this is a cheap ~17KB copy per config change, not per
+	// job/scanline.
+	if (m_snapshot_dirty)
+	{
+		auto snap = std::make_shared<render_snapshot>();
+		snap->gc = m_gc;
+		snap->es = m_es;
+		snap->tm = m_tm;
+		snap->db = m_db;
+		memcpy(snap->pipram.data(), m_pipram.get(), PIP_RAM_WORDS * sizeof(uint32_t));
+		memcpy(snap->tram.data(), m_tram.get(), TEXTURE_RAM_WORDS * sizeof(uint32_t));
+		m_cur_snapshot = std::move(snap);
+		m_snapshot_dirty = false;
+	}
+	job.snapshot = m_cur_snapshot;
+
+	m_span_jobs[y % NUM_RENDER_BANDS].push_back(std::move(job));
 }
 
 
@@ -3320,6 +3386,13 @@ void *m2_te_device::render_band(void *param, int threadid)
 
 	for (const span_job &job : ctx.dev->m_span_jobs[ctx.band])
 	{
+		// Jobs in this list may have been queued under different config
+		// generations (INST_WRITE_REG no longer flushes before applying a
+		// register write - see execute()) - each job renders against the
+		// snapshot that was current when it was queued, not whatever the
+		// live device members hold now.
+		ctx.ps.cfg = job.snapshot.get();
+
 		ctx.dev->walk_span(ctx.ps, job.wrange, job.omit_right, job.y, job.xs, job.xe,
 			job.r, job.g, job.b, job.a, job.uw, job.vw, job.w,
 			job.r2l, job.ddx_r, job.ddx_g, job.ddx_b, job.ddx_a, job.ddx_uw, job.ddx_vw, job.ddx_w);
@@ -3334,12 +3407,14 @@ void *m2_te_device::render_band(void *param, int threadid)
 //  jobs to worker threads, wait for them all to
 //  finish, merge their locally-accumulated status/
 //  statistics into the real device state, then clear
-//  the queues. Must be called before anything that
-//  mutates state a queued-but-not-yet-rendered job
-//  depends on (texture/config writes - see the
-//  INST_WRITE_REG case in execute()), and again at
-//  the end of execute() before the CPU is told
-//  rendering is complete.
+//  the queues. Register writes no longer need this
+//  mid-list (each queued job carries its own config
+//  snapshot - see render_snapshot/queue_span_job()),
+//  so this is now only called at genuine
+//  synchronization points: list end and the safety
+//  net at the end of execute(), where the CPU
+//  actually needs rendering to be complete (e.g. it
+//  may read the framebuffer right after).
 //-------------------------------------------------
 
 void m2_te_device::flush_span_jobs()
@@ -3452,10 +3527,17 @@ void m2_te_device::execute()
 			{
 				// WRITE_REG can mutate texture/blend/destination config
 				// (including reloading texture RAM via load_texture()) that
-				// any span job still sitting in the queue was rendered
-				// against - flush and wait before applying the change so a
-				// job never sees state from after it was originally issued.
-				flush_span_jobs();
+				// span jobs still sitting in the queue were rendered
+				// against - but write() now marks the current snapshot
+				// stale instead of requiring a synchronous flush+wait here,
+				// and every queued job carries a shared_ptr to whichever
+				// snapshot was current when it was queued (see
+				// render_snapshot/queue_span_job()/render_band()), so it's
+				// safe to apply the write immediately without blocking on
+				// in-flight worker-thread rendering. Jobs now accumulate
+				// across possibly many register writes and are only
+				// actually dispatched+waited-for at the real synchronization
+				// points below (list end / safety net at execute()'s end).
 
 				uint32_t offs = inst & 0xffff;
 				int32_t cnt = (inst >> 16) & 0xff;

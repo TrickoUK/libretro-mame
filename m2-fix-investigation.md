@@ -708,6 +708,200 @@ proud-snuggling-thunder.md` if more detail than this summary is needed.
   layered on top of a genuinely parallel rasterizer instead of instead of
   it.
 
+## Session 4 (2026-09-22, later same day): diagnosed the post-threading audio-slowdown symptom
+
+Following Session 3's worker-thread TE, the user reported a split symptom:
+`polystar` still shows one CPU core pegged and real slowdown (expected,
+matches Session 3's understood limits); but `evilngt`/`totlvice` *feel* full
+speed, with no CPU core pegged, yet digitized speech sounds clearly slowed
+down/pitch-shifted. Target machine is a fast 16-core host with low aggregate
+CPU usage throughout, ruling out simple thread contention/starvation as the
+cause.
+
+### Step 1: confirmed MAME's own clock is not running slow
+
+Using the same live-Lua-console technique documented above (`mame_lua_console`
+core option; no `-debug` patch needed just to read state, only for
+breakpoints), polled `manager.machine.video.speed_percent` throughout an
+`evilngt` boot/attract run. **Result: steady ~98-103%** the whole time — MAME
+genuinely believes it's running at full speed. This rules out "the DSPP/audio
+CPU is starved of scheduler time" as the explanation.
+
+### Step 2: instrumented both ends of the audio pipeline
+
+Added temporary `std::chrono`+`std::atomic` profiling (same disposable
+pattern as Sessions 2/3 - reverted after measuring, not shipped) in two
+places simultaneously:
+- `m2_te_device::flush_span_jobs()` (`3dom2_te.cpp`) - real wall-clock
+  microseconds spent blocked in `osd_work_queue_wait()`, summed/maxed per
+  real second.
+- `upload_output_audio_buffer()` (`src/osd/libretro/libretro-internal/
+  libretro.cpp`) - real wall-clock gap between successive calls, samples
+  delivered, and whether the silence-fallback path fired, all per real
+  second.
+
+Ran `evilngt` for 60s under the same pty-driven RetroArch recipe documented
+above and correlated the two logs by second.
+
+### Finding: total audio throughput is correct, but delivery is bursty
+
+- **Samples/sec stayed correct** throughout (~48500, matching the declared
+  48000Hz `AVInfo` rate) and the silence-fallback path essentially never
+  fired (`silence=0` in nearly every reported second). So MAME really is
+  producing the right *total* amount of audio - consistent with
+  `speed_percent`, and ruling out a straightforward sample-count deficit.
+- **But delivery cadence is bursty, and it tracks TE stall load exactly.**
+  Baseline: audio_batch_cb calls land roughly every 7-17ms (matching ~60fps).
+  During seconds where `flush_span_jobs()`'s summed blocked time spiked -
+  observed up to **~270ms of a single real second** spent blocked inside
+  `osd_work_queue_wait()` (over a quarter of that second) - the gap between
+  successive `retro_run()`/`audio_batch_cb` calls grew to **25-110ms**, roughly
+  double-to-many-times the steady baseline, in lockstep with the stall spike.
+
+### Conclusion
+
+The Session 3 worker-thread TE rasterizer is real parallelism for the
+per-pixel *rendering* work, but it's still **architecturally synchronous
+from the main emulation thread's point of view** - every `INST_WRITE_REG`
+blocks on `osd_work_queue_wait()` until that band's workers finish. Total
+throughput survives this (smooth-feeling video, `speed_percent` ~100%), but
+it means the main thread's real-world progress through a `retro_run()` call
+is not evenly paced - it stalls in bursts. Audio delivery to RetroArch rides
+on that same thread's cadence (`upload_output_audio_buffer()` is called once
+per `retro_run()`), so those stalls turn into bursty, irregular
+`audio_batch_cb` delivery even though the *total* sample count comes out
+right. RetroArch's dynamic audio rate control reacts to that irregularity by
+nudging playback rate down to avoid buffer underruns - inaudible on most
+content, but very noticeable on sustained tones like speech. This explains
+the split symptom: `polystar`'s TE load is heavy enough to peg a core solid
+(Session 3's already-understood, more severe case); `evilngt`/`totlvice`'s
+lighter-but-still-frequent stalls aren't heavy enough to peg a core, but are
+still enough to disrupt audio pacing.
+
+### Not yet done: an actual fix
+
+Candidates for a follow-up session, roughly in order of how surgical they
+are:
+1. **Stop blocking the emulation thread on every `INST_WRITE_REG`.** The
+   barrier exists to protect queued-but-unrendered jobs from a config/texture
+   write that's about to mutate state they depend on (see Session 3's bug #1
+   above) - but it currently blocks unconditionally, even when the incoming
+   write wouldn't actually race anything still queued. Double-buffering the
+   mutated state (so a new write starts a fresh "generation" instead of
+   overwriting what in-flight jobs captured) could let `INST_WRITE_REG` return
+   immediately in the common case.
+2. **Decouple audio delivery from `retro_run()`'s per-frame cadence.**
+   Buffering audio a little further ahead (independent of exactly when a given
+   `retro_run()` call happens to return) would let `upload_output_audio_buffer()`
+   smooth over an occasional slow frame instead of passing the jitter straight
+   through to RetroArch.
+3. **Reduce flush frequency.** If display list content tolerates it, batching
+   multiple register writes before syncing (rather than syncing on every
+   single one) would directly cut the number of stall points per frame.
+
+All temporary profiling code from this session was reverted (`git checkout`)
+before finishing - not shipped in the tree. The `std::chrono`/`std::atomic`
+per-second-summary pattern used here (see Sessions 2/3's own instrumentation
+above for the general shape) is trivial to reconstruct if resuming this.
+
+## Session 5 (2026-09-22, later same day): shipped fix approach 1 - config snapshotting removes the per-INST_WRITE_REG block
+
+Followed up on Session 4's candidate (a): stop blocking the emulation thread
+on every `INST_WRITE_REG`. Landed as a real fix, not just a candidate.
+
+### Design shipped
+
+The reason `flush_span_jobs()` had to block before every `INST_WRITE_REG`
+was that queued-but-not-yet-rendered scanline jobs read the TE's config
+(`m_gc`/`m_es`/`m_tm`/`m_db`/`m_pipram`/`m_tram`) **live** at render time -
+a register write mutating that state while a worker thread was still
+rendering an older job would silently corrupt it. Audited every read site
+in the render path (`walk_span()` and everything it transitively calls) and
+found the live-state surface was small and enumerable despite touching 17
+functions/107 call sites: `m_gc.te_master_mode`, `m_es.es_cntl`, all of
+`m_tm`/`m_db` (21 + 34 words), plus `m_pipram`/`m_tram` contents (1KB +
+16KB) - about 17.4KB total, cheap to copy.
+
+Added `render_snapshot` (`3dom2_te.h`) - an immutable copy of all of the
+above - taken lazily by `queue_span_job()` the first time it's called after
+`write()` sets a new `m_snapshot_dirty` flag (set unconditionally at the top
+of `write()`, regardless of which register - simpler and safer than trying
+to classify which specific registers actually matter, and the cost is only
+paid if a triangle is actually queued afterward). Each `span_job` now holds
+a `shared_ptr<const render_snapshot>` captured at queue time;
+`render_band()` sets `pixel_scratch::cfg` from the job's snapshot before
+calling `walk_span()` for it. Every render-path function that used to read
+`m_tm`/`m_db`/etc. directly now shadows those member names with a local
+`const auto &m_tm = ps.cfg->tm;`-style reference at the top of the function
+body, so the 107 individual read expressions didn't need touching
+individually - only ~17 function signatures (adding `pixel_scratch &ps`
+where missing) plus one shadow declaration each.
+
+With jobs now immune to a register write mutating the live state after
+they're queued, **`execute()`'s `INST_WRITE_REG` case no longer calls
+`flush_span_jobs()` at all** - it applies the register write immediately.
+Jobs simply accumulate (each internally tagged with whichever config
+generation was active when it was queued) across however many register
+writes happen before the next real synchronization point - list end, or
+the safety net at the end of `execute()` - which are unchanged (still
+dispatch+wait+merge status/stats, since those genuinely need the CPU to see
+completed rendering, e.g. before reading the framebuffer back). Traced
+through: mid-list, the CPU can't observe *any* intermediate state anyway
+(the PPC store instruction that starts a display list runs `execute()`
+synchronously to completion or pause/stop, with no way to interleave real
+CPU instructions mid-list in this emulation model) - so the only place a
+flush was ever really required for CPU-visible correctness was the exit
+paths, which were already there.
+
+**Known limitation, not fixed and not new**: `3dom2.cpp` installs the TE's
+texture RAM directly into the PowerPC address space via `install_ram()`
+(`space.install_ram(TE_TRAM_BASE, ..., m_te->tram_ptr())`), so the CPU can
+write texture data straight into `m_tram` via plain memory stores,
+completely bypassing `m2_te_device::write()` - these writes never set
+`m_snapshot_dirty`. This is not a regression: `install_ram()` writes never
+went through `flush_span_jobs()` in the *old* synchronous design either
+(nothing about a raw RAM write triggers a flush), so this race predates
+this session's change and is orthogonal to it. Worth fixing later (switch
+to `install_write_handler()`) but out of scope here.
+
+### Verification this session
+
+- Clean rebuild (`HAVE_RETRO_GPU_TARGET=1 SOURCEFILTER=arcade.flt`), no
+  warnings from the changed files.
+- Sequential (not parallel - overlapping runs would corrupt timing/CPU
+  measurements) 45s soak tests via a pty-driven RetroArch launch, one title
+  fully killed and confirmed gone before the next started: `polystar`,
+  `evilngt`, `totlvice` all booted clean (`Geometry: 640x240, ... Sample
+  rate: 48000.00 Hz`), no fatal/segv/abort/assert/timeout/corruption in any
+  log.
+- **User visually watched all three during the soak tests and confirmed
+  they looked correct** - this stood in for a more rigorous screenshot A/B
+  diff, which was started (paused-frame `spectacle` capture of `polystar`
+  attract mode) but called off as unnecessary once the user had already
+  eyeballed live gameplay across all three titles.
+- **Not yet done**: re-measuring the `[TEPROF]`/`[AUDPROF]` instrumentation
+  from Session 4 to get a quantified "how much did this actually reduce
+  blocking/audio jitter by" number - the fix landed on reasoning + live
+  visual/stability verification, not a fresh profiling pass. Worth doing
+  before considering this fully closed, especially re-checking whether
+  Evil Night/Total Vice's audio pitch issue is actually gone (not just
+  "looks fine visually") and whether Polystars' pegged core moved at all.
+- Also not yet re-tested: `btltryst`, `starswep`, `nagano98` (per this
+  driver's shared-device blast-radius note elsewhere in this doc).
+
+### Why this should help Polystars too, not just Evil Night/Total Vice
+
+Even though the *total* per-pixel computation cost is unchanged (same
+amount of rendering work either way), consolidating from "many small
+dispatch+wait cycles per list (once per register write)" to "one
+dispatch+wait per list" cuts the number of `osd_work_queue_wait()`
+synchronization points substantially, removing repeated spin-wait/condvar
+overhead that was paid many times per list. Total blocking time should be
+similar-or-lower, not higher - the main open question (not yet measured)
+is how much of Polystars' pegged-core symptom was pure computation
+(unaffected by this change) versus synchronization overhead (which this
+directly reduces).
+
 ## Notes on provenance / how this document was produced
 
 This was reconstructed by static analysis of the current mamedev/mame source

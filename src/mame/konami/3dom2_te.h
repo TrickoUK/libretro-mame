@@ -10,6 +10,9 @@
 
 #pragma once
 
+#include <array>
+#include <memory>
+
 /***************************************************************************
     FORWARD DECLARATIONS
 ***************************************************************************/
@@ -109,6 +112,10 @@ private:
 
 	struct rgba { uint8_t r, g, b, a; };
 
+	// Defined below (after m_gc/m_es/m_tm/m_db, whose types it captures via
+	// decltype) - see the definition for what this is and why it exists.
+	struct render_snapshot;
+
 	// Per-render-batch scratch: destination-blender working state (previously
 	// the member field m_dbstate) plus locally-accumulated status/statistics
 	// bits. One instance is owned per render batch (currently: one per
@@ -138,6 +145,11 @@ private:
 
 		uint32_t status_bits = 0;
 		uint32_t stats[16] = {};
+
+		// Which config generation this job's render calls should read from -
+		// set once per job by render_band() from span_job::snapshot before
+		// walk_span() is called, not owned/kept alive by pixel_scratch itself.
+		const render_snapshot *cfg = nullptr;
 	};
 
 	// One rasterized scanline's worth of walk_span() arguments, captured so
@@ -166,6 +178,13 @@ private:
 		uint32_t r2l;
 		uint32_t ddx_r, ddx_g, ddx_b, ddx_a;
 		uint32_t ddx_uw, ddx_vw, ddx_w;
+
+		// Config generation active when this job was queued (see
+		// render_snapshot) - lets jobs queued under different register-write
+		// generations sit in the same m_span_jobs list and still each render
+		// against the correct config, so INST_WRITE_REG no longer has to
+		// flush+wait before applying a register write (see execute()).
+		std::shared_ptr<const render_snapshot> snapshot;
 	};
 
 	static constexpr int NUM_RENDER_BANDS = 4;
@@ -203,14 +222,14 @@ private:
 	void walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right, uint32_t y, uint32_t xs, uint32_t xe, int32_t r, int32_t g, int32_t b, int32_t a, uint32_t uw, uint32_t vw, uint32_t w,
 					uint32_t es_r2l, uint32_t es_ddx_r, uint32_t es_ddx_g, uint32_t es_ddx_b, uint32_t es_ddx_a, uint32_t es_ddx_uw, uint32_t es_ddx_vw, uint32_t es_ddx_w);
 
-	void texcoord_gen(uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
+	void texcoord_gen(pixel_scratch &ps, uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
 						uint32_t & uo, uint32_t & vo, uint32_t & wo);
 
 	uint32_t lod_calc(uint32_t u0, uint32_t v0, uint32_t u1, uint32_t v1);
 
-	uint32_t get_tram_bitdepth();
+	uint32_t get_tram_bitdepth(pixel_scratch &ps);
 
-	void addr_calc(uint32_t u, uint32_t v, uint32_t lod,
+	void addr_calc(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
 					uint32_t & texaddr, uint32_t & texbit, uint32_t & tdepth);
 
 	void get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
@@ -222,15 +241,15 @@ private:
 	void texture_fetch(uint32_t texaddr, uint32_t texbit, uint32_t tdepth,
 		uint32_t &r_ti, uint32_t &g_ti, uint32_t &b_ti, uint32_t &a_ti, uint32_t &ssb_ti);
 
-	void select_lerp(uint32_t sel,
+	void select_lerp(pixel_scratch &ps, uint32_t sel,
 					uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
 					uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 					uint32_t & ar, uint32_t & ag, uint32_t & ab );
 
-	void select_mul(uint32_t sel, uint32_t ai, uint32_t at, uint32_t ssbt,
+	void select_mul(pixel_scratch &ps, uint32_t sel, uint32_t ai, uint32_t at, uint32_t ssbt,
 					uint32_t & a );
 
-	void texture_blend(uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
+	void texture_blend(pixel_scratch &ps, uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
 						uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 						uint32_t &ro, uint32_t &go, uint32_t &bo, uint32_t &ao, uint32_t &ssbo);
 
@@ -244,7 +263,7 @@ private:
 	uint8_t get_tex_coef(pixel_scratch &ps, uint8_t cs, uint8_t dm1const0, uint8_t dm1const1);
 	uint8_t get_src_coef(pixel_scratch &ps, uint8_t cti, uint8_t dm2const0, uint8_t dm2const1);
 	uint8_t dither(uint8_t in, uint8_t dithval);
-	uint8_t alu_calc(uint16_t a, uint16_t b);
+	uint8_t alu_calc(pixel_scratch &ps, uint16_t a, uint16_t b);
 	void select_src_pixel(pixel_scratch &ps);
 	void select_tex_pixel(pixel_scratch &ps);
 	void write_dst_pixel(pixel_scratch &ps);
@@ -468,13 +487,39 @@ private:
 	std::unique_ptr<uint32_t[]> m_pipram;
 	std::unique_ptr<uint32_t[]> m_tram;
 
+	// Definition of the forward-declared render_snapshot (see its forward
+	// declaration above, near pixel_scratch, for what it's for). Defined
+	// here since it captures m_gc/m_es/m_tm/m_db's types via decltype.
+	struct render_snapshot
+	{
+		decltype(m_gc) gc;
+		decltype(m_es) es;
+		decltype(m_tm) tm;
+		decltype(m_db) db;
+		std::array<uint32_t, PIP_RAM_WORDS> pipram;
+		std::array<uint32_t, TEXTURE_RAM_WORDS> tram;
+	};
+
+	// Most-recently-taken snapshot and whether a register write has touched
+	// any of render_snapshot's fields since it was taken. queue_span_job()
+	// takes a fresh snapshot (copying the current live m_gc/m_es/m_tm/m_db/
+	// m_pipram/m_tram) the first time it's called after the dirty flag is
+	// set, and reuses it for every subsequent job until the next write().
+	// This is what lets write() mutate the live members immediately, without
+	// waiting for already-queued jobs to finish rendering first - they hold
+	// their own shared_ptr to the snapshot that was current when they were
+	// queued, so they're immune to the live members changing under them.
+	std::shared_ptr<const render_snapshot> m_cur_snapshot;
+	bool m_snapshot_dirty = true;
+
 	// Multi-threaded rasterization: queued-but-not-yet-rendered scanlines,
 	// bucketed by band (see span_job above), and the OSD work queue used to
 	// render each band's jobs on a worker thread. Allocated once in
-	// device_start(); flush_span_jobs() is called both mid-list (before any
-	// instruction that mutates state the queued jobs depend on) and at the
-	// end of execute(), never leaving jobs queued across a config change or
-	// past the point the CPU expects rendering to be complete.
+	// device_start(). Jobs may now span multiple register-write generations
+	// (each tagged with its own render_snapshot - see above), so unlike
+	// before, flush_span_jobs() is only called at genuine synchronization
+	// points (list end and the safety net at the end of execute()), not
+	// before every INST_WRITE_REG - see execute().
 	std::vector<span_job> m_span_jobs[NUM_RENDER_BANDS];
 	osd_work_queue *m_render_queue = nullptr;
 };
