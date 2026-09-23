@@ -187,7 +187,7 @@ private:
 		std::shared_ptr<const render_snapshot> snapshot;
 	};
 
-	static constexpr int NUM_RENDER_BANDS = 4;
+	static constexpr int NUM_RENDER_BANDS = 16;
 
 	// osd_work_item param for render_band(): which band to render and the
 	// pixel_scratch that band's whole run of jobs accumulates into.
@@ -521,7 +521,13 @@ private:
 	// points (list end and the safety net at the end of execute()), not
 	// before every INST_WRITE_REG - see execute().
 	std::vector<span_job> m_span_jobs[NUM_RENDER_BANDS];
-	osd_work_queue *m_render_queue = nullptr;
+
+	// Several queues rather than one: the OSD caps a WORK_QUEUE_FLAG_HIGH_FREQ
+	// queue at min(cores, 4) - 1 = 3 worker threads, so a single queue left
+	// most of the host's cores idle while the main thread waited. Bands are
+	// spread round-robin across the queues (see flush_span_jobs()).
+	static constexpr int NUM_RENDER_QUEUES = 4;
+	osd_work_queue *m_render_queue[NUM_RENDER_QUEUES] = { };
 };
 
 DECLARE_DEVICE_TYPE(M2_TE, m2_te_device)

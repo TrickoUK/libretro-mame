@@ -737,8 +737,9 @@ void m2_te_device::device_start()
 	// Allocate timers
 	m_done_timer = timer_alloc(FUNC(m2_te_device::command_done), this);
 
-	// Multi-threaded rasterization work queue - see flush_span_jobs().
-	m_render_queue = osd_work_queue_alloc(WORK_QUEUE_FLAG_MULTI | WORK_QUEUE_FLAG_HIGH_FREQ);
+	// Multi-threaded rasterization work queues - see flush_span_jobs().
+	for (auto &queue : m_render_queue)
+		queue = osd_work_queue_alloc(WORK_QUEUE_FLAG_MULTI | WORK_QUEUE_FLAG_HIGH_FREQ);
 }
 
 
@@ -3430,14 +3431,17 @@ void m2_te_device::flush_span_jobs()
 		ctx[active].dev = this;
 		ctx[active].band = band;
 		ctx[active].ps = pixel_scratch{};
-		osd_work_item_queue(m_render_queue, render_band, &ctx[active], WORK_ITEM_FLAG_AUTO_RELEASE);
+		osd_work_item_queue(m_render_queue[active % NUM_RENDER_QUEUES], render_band, &ctx[active], WORK_ITEM_FLAG_AUTO_RELEASE);
 		active++;
 	}
 
 	if (active == 0)
 		return;
 
-	if (!osd_work_queue_wait(m_render_queue, osd_ticks_per_second() * 100))
+	bool done = true;
+	for (auto *queue : m_render_queue)
+		done = osd_work_queue_wait(queue, osd_ticks_per_second() * 100) && done;
+	if (!done)
 	{
 		// Real timeout (100s) - a worker thread may still be writing its
 		// band's pixel_scratch/framebuffer rows. Don't touch ctx[]/m_ram
