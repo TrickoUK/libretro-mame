@@ -256,6 +256,13 @@ private:
 	dspp_internal_state* m_core;
 	dspp_internal_state m_local_core; // for non-DRC mode
 
+	// Idle-loop skipping (interpreter only) - see check_idle_loop()
+	void check_idle_loop(uint16_t loop_pc);
+	virtual bool idle_safe_read(offs_t addr) const { return false; }
+	int32_t     m_idle_pc;
+	bool        m_idle_dirty;
+	dspp_internal_state m_idle_state;
+
 	// DMA
 	struct fifo_dma
 	{
@@ -398,6 +405,9 @@ public:
 
 protected:
 	void data_bulldog_map(address_map &map) ATTR_COLD;
+
+	// Plain RAM and the side-effect-free status registers
+	virtual bool idle_safe_read(offs_t addr) const override { return addr < 0x2e0 || addr == 0x3de || addr == 0x3df; }
 };
 
 /***************************************************************************
