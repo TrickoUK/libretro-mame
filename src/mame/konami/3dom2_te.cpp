@@ -12,6 +12,7 @@
 #include "3dom2.h"
 
 #include "endianness.h"
+#include "multibyte.h"
 
 #include <cmath>
 #include <sstream>
@@ -4047,8 +4048,34 @@ void m2_te_device::load_texture()
 				// TRAM destination must be 32-bit aligned
 				assert((dstaddr & 3) == 0);
 
+				// RAM is a big-endian 64-bit bus (read_bus8() reads byte
+				// offset ^ 7 on a little-endian host), so an aligned run of 8
+				// source bytes in address order is one native 64-bit RAM word
+				// read big-endian.  Copy those a word at a time; the byte loop
+				// below still handles unaligned heads/tails and anything that
+				// would run off the end of RAM or TRAM.
+				const uint8_t *const ram = static_cast<const uint8_t *>(m_bda->ram_ptr());
+				const uint32_t ram_mask = m_bda->ram_end() - m_bda->ram_start();
+				uint8_t *const tram = reinterpret_cast<uint8_t *>(&m_tram[0]);
+
 				while (bytes > 0)
 				{
+					const uint32_t offs = srcaddr & ram_mask;
+					if (bytes >= 8 && !(offs & 7) && (offs + 7) <= ram_mask && (dstaddr + 8) <= TEXTURE_RAM_WORDS * 4)
+					{
+						uint64_t data;
+						memcpy(&data, ram + offs, sizeof(data));
+						put_u64be(tram + dstaddr, data);
+						dstaddr += 8;
+						srcaddr += 8;
+						bytes -= 8;
+
+#if TEST_TIMING
+						g_statistics[STAT_TEXEL_BYTES] += 8;
+#endif
+						continue;
+					}
+
 #if 0
 					uint32_t data = m_bda->read_bus32(srcaddr);
 					write_tram32(dstaddr, data);
