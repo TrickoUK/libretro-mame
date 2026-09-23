@@ -795,7 +795,10 @@ void ppc_device::static_generate_tlb_mismatch()
 	UML_LOAD(block, I1, (void *)vtlb_table(), I1, SIZE_DWORD, SCALE_x4);    // load    i1,[vtlb],i1,dword
 	UML_TEST(block, I1, FETCH_ALLOWED);                                     // test    i1,FETCH_ALLOWED
 	UML_JMPc(block, COND_Z, isi = label++);                                 // jmp     isi,z
-	UML_CMP(block, I2, 0);                                                  // cmp     i2,0
+	// If the stale entry didn't allow fetches (flushed, or only filled by data
+	// accesses so far), the block itself may still be valid: re-enter it and let
+	// its TLB check decide.  Only recompile if a fetchable mapping was replaced.
+	UML_TEST(block, I2, FETCH_ALLOWED);                                     // test    i2,FETCH_ALLOWED
 	UML_JMPc(block, COND_NZ, exit = label++);                               // jmp     exit,nz
 	UML_HASHJMP(block, mem(&m_core->mode), I0, *m_nocode);                  // hashjmp <mode>,i0,nocode
 	UML_LABEL(block, exit);                                                 // exit:
@@ -1893,8 +1896,15 @@ void ppc_device::generate_sequence_instruction(drcuml_block &block, compiler_sta
 				UML_MOV(block, mem(&m_core->arg0), desc->pc);                    // mov     [arg0],desc->pc
 				UML_CALLC(block, cfunc_printf_debug, this);                                  // callc   printf_debug
 			}
+			// vtlb_fill() adds read/write permission bits lazily as data accesses
+			// hit the page, so a flushed-and-refilled entry for unchanged code can
+			// differ in those bits alone.  Only the physical page and fetch/valid
+			// state matter for executing this code; comparing the whole entry made
+			// shared code/data pages recompile constantly (Konami M2).
+			const vtlb_entry mask = ~vtlb_entry(READ_ALLOWED | WRITE_ALLOWED | USER_READ_ALLOWED | USER_WRITE_ALLOWED);
 			UML_LOAD(block, I0, &tlbtable[desc->pc >> 12], 0, SIZE_DWORD, SCALE_x4);// load    i0,tlbtable[desc->pc >> 12],dword
-			UML_CMP(block, I0, tlbtable[desc->pc >> 12]);                           // cmp     i0,*tlbentry
+			UML_AND(block, I0, I0, mask);                                           // and     i0,i0,mask
+			UML_CMP(block, I0, tlbtable[desc->pc >> 12] & mask);                    // cmp     i0,*tlbentry & mask
 			UML_EXHc(block, COND_NE, *m_tlb_mismatch, 0);                  // exh     tlb_mismatch,0,NE
 		}
 
