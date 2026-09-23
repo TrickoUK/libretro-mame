@@ -889,6 +889,51 @@ to `install_write_handler()`) but out of scope here.
 - Also not yet re-tested: `btltryst`, `starswep`, `nagano98` (per this
   driver's shared-device blast-radius note elsewhere in this doc).
 
+### Post-commit performance test on polystar (2026-09-22)
+
+Re-added the temporary `[TEPROF2]` instrumentation (flush count, summed/max
+blocked microseconds, total span-job count per real second) plus live
+`speed_percent` polling via the Lua console, ran a 60s attract-mode capture,
+then reverted the instrumentation and rebuilt the clean committed binary
+(all sequential, no overlapping RetroArch instances - see the process-kill
+fix note below).
+
+- **`speed_percent`: 60-89%** across 12 samples over the run (rising over
+  time as the attract-mode demo settles into less TE-heavy content) - a
+  real improvement over the pre-threading 31.3% baseline recorded in
+  Session 2 (though that number was measured during actual stage-1
+  gameplay, not attract mode, so not a strictly apples-to-apples
+  comparison).
+- **No single CPU core pegged near 100% any more.** Measured via a
+  `/proc/stat` before/after delta over a 3s window: highest core was 63.7%,
+  with load spread across ~5-6 cores (consistent with the main thread plus
+  the 4 render-worker bands all being active), aggregate ~12% across all 16
+  cores. This directly addresses the "one CPU core regularly hitting 100%"
+  symptom originally reported for Polystars.
+- `[TEPROF2]` shows flush count dropped to ~100-250/sec (vs. the
+  thousands/sec seen pre-fix in Session 4's evilngt trace), each covering a
+  far larger batch - up to hundreds of thousands of span jobs summed per
+  second, confirming register writes are no longer triggering a flush.
+  Total *blocked* time per second is still substantial (~250-330ms/sec,
+  25-33% of wall clock) - this reflects Polystars' genuinely large
+  rendering workload (now consolidated into fewer, larger waits) rather
+  than synchronization overhead, matching the design note below: this fix
+  targeted stall *frequency*/audio jitter, not the underlying per-pixel
+  computation cost, so some residual slowdown on this specific
+  heavy-content title is expected and not a sign the fix didn't work.
+
+**Test-harness bug found and fixed mid-session**: the pty-driven soak-test
+script's cleanup only `SIGTERM`'d its own direct child (`distrobox enter ...`),
+which does **not** kill the real `retroarch` process running inside the
+Distrobox container - the exact same process-group issue this repo's
+CLAUDE.md already documents for killed *builds*. Caught because the user
+was watching CPU usage and noticed two `retroarch` instances running at
+once after two sequential-looking test invocations. Fixed by matching and
+`pkill -9 -f`-ing the actual `retroarch -v -L <core> <rom>` command line,
+then polling `pgrep` until confirmed gone before the script returns -
+required for any future performance/timing test here, since overlapping
+runs silently corrupt CPU/speed measurements without any visible error.
+
 ### Why this should help Polystars too, not just Evil Night/Total Vice
 
 Even though the *total* per-pixel computation cost is unchanged (same
@@ -902,6 +947,119 @@ is how much of Polystars' pegged-core symptom was pure computation
 (unaffected by this change) versus synchronization overhead (which this
 directly reduces).
 
+## Session 6 (2026-09-22, later same day): band-count experiment, spin-wait root cause, audio decoupling (partial fix)
+
+### `NUM_RENDER_BANDS=8` experiment: no gain, reverted to 4
+
+Tried bumping the constant on this 16-core host, expecting more parallelism.
+No improvement, and the user reported a longer watch-through (into real
+gameplay, not just attract mode) still showed a single core spiking to 100%
+and real slowdown.
+
+**Root cause, not fixable safely at the driver level.** `NUM_RENDER_BANDS`
+is not a thread-count cap - the real worker pool size comes from
+`osd_work_queue_alloc()` (`src/osd/osdsync.cpp:261-311`): `numprocs - 1`
+(host core count, up to 15 here), independent of band count entirely. What
+actually causes the single-core spike: `osd_work_queue_wait()` for a
+`WORK_QUEUE_FLAG_MULTI | WORK_QUEUE_FLAG_HIGH_FREQ` queue (`osdsync.cpp:
+371-390`) has the *calling* thread - the main emulation thread - join in as
+an extra worker (`worker_thread_process()`), then **busy-spin** with zero
+yield/pause instruction (`spin_while_not()`, `osdsync.cpp:68-87`) until the
+other bands finish. This pegs whatever core the main thread runs on near
+100% for the whole flush duration, by design, regardless of `NUM_RENDER_
+BANDS`.
+
+Not touching this, for two reasons: (1) `osdsync.cpp` is shared MAME-wide
+OSD infrastructure used by every driver's work queues - changing it is a
+much bigger blast radius than anything done in `3dom2_te.cpp` so far, and
+conflicts with every future upstream merge; (2) `HIGH_FREQ`'s spin exists
+specifically because the event-based fallback path has a real,
+already-hit-once race in this exact codebase (see Session 3's bug #2
+above) - moving away from it now, even with fewer flushes than before,
+reduces how *often* that race fires, not whether it can still happen.
+
+### GPU-offload vs. per-pixel-audit risk discussion (informational, nothing started)
+
+Asked to compare which approach has more real upside vs. risk of breaking
+games on hardware quirks. Per-pixel audit (same shape as the already-shipped
+`texture_blend()` gate): low risk, but low ceiling - it can only remove
+computation that's *provably unused*, and Polystars' TE genuinely needs
+most of what it computes, so there's a hard floor this approach can't get
+under. GPU offload: real upside (moving to hardware built for this), but
+meaningfully *more* risk here than this repo's own PS1 GPU HLE precedent,
+specifically because M2's Triangle Engine has no external gold-standard
+reference implementation the way PS1 has Beetle PSX HW to check against -
+and this driver's *own* software rasterizer still carries open
+`// TODO: Why isn't this working?` / `// This is probably wrong` comments
+on core logic (Z-buffer comparison, bilinear filtering), meaning the ground
+truth to port from is itself uncertain in spots. A GPU port would be
+self-referencing that same shaky baseline across all five games with no
+independent way to tell a new bug from a pre-existing quirk. If GPU work is
+picked up later, look for an independent correctness reference first
+(another emulator's M2 implementation, real hardware documentation) rather
+than trusting this driver's own model as sole ground truth.
+
+### Audio decoupling: real, measured improvement - but only a partial fix
+
+**Shipped, but NOT YET COMMITTED as of this writing** - check `git status`
+before doing anything else next session; the change is sitting in
+`src/osd/libretro/libretro-internal/libretro.cpp`.
+
+Changed `retro_audio_queue()` to call `audio_batch_cb()` **immediately**
+instead of accumulating into `output_audio_buffer` and flushing everything
+in one batch at the end of `retro_run()` (after `video_cb()`).
+`upload_output_audio_buffer()` is now only the silence-padding fallback for
+a frame where no real audio was generated at all. Rationale: MAME's
+`sound_manager` stream updates run interleaved with CPU execution during
+machine-advance, not strictly after it - a frame's audio is frequently
+fully generated *before* that same frame's Triangle Engine stall even
+starts, so waiting for the entire `retro_run()` call (stall included) to
+finish before handing audio to the frontend was adding delay on top of the
+stall for no reason.
+
+**Measured via re-added AUDPROF instrumentation** (temporary, reverted
+after use - same disposable `std::chrono` pattern as the TE profiling
+above) on `evilngt`/`totlvice`: typical gap between real `audio_batch_cb`
+calls dropped from ~6,700-9,000us to ~80us (delivery frequency jumped from
+~60 calls/sec to ~3,500-3,600/sec, tracking `stream_sink_update()`'s real
+granularity instead of once per video frame), and worst-case max gap
+dropped from 24,000-38,000us (with boot-time spikes over 100,000us) down to
+a steady 12,000-22,000us with no more huge spikes. **Sanity-checked on
+`daytona`** (Model 2, unrelated driver) since this is a global OSD-level
+change affecting every driver's audio path, not just M2 - clean boot,
+correct sample delivery, no regressions.
+
+**Live-tested by the user watching/listening to `evilngt` and the real
+result is mixed**: title screen (light content) sounds correct now.
+**Heavy gameplay in attract mode - speech still sounds slowed down.**
+Diagnosed why this fix has a ceiling: it only speeds up delivery of audio
+that finishes generating *before* a TE stall starts in a given frame - it
+cannot do anything for audio still being generated *during or after* one,
+since that audio genuinely doesn't exist yet regardless of delivery speed.
+Heavier gameplay means longer/more stalls, so a growing fraction of each
+frame's audio generation window overlaps with a stall, and that fraction
+is exactly as delayed as it was before this fix. Light content has short
+or no stalls, so nearly all of its audio finishes before any stall starts
+- this matches the observed light/heavy split exactly, not a fluke.
+
+### Where this leaves things (pick up here next session)
+
+1. **Commit or discard the audio-decoupling change first** (currently
+   uncommitted) - it's a real, measured, sanity-checked improvement worth
+   keeping even though it doesn't fully solve the heavy-gameplay case.
+2. **The remaining heavy-gameplay audio delay is the same underlying
+   problem as Polystars' remaining slowdown** - both come down to genuine
+   TE stall duration, not synchronization or audio-delivery overhead. No
+   further lever is available on the audio-delivery side; progress on
+   either symptom now requires actually shortening the stalls.
+3. Two options for that, per the risk discussion above: the safer,
+   lower-ceiling per-pixel audit (extend the `texture_blend()`-style "skip
+   provably-unused computation" pattern to `destination_blend()`'s
+   clip-test chain and `get_texture_color()`'s filtering - both already
+   flagged as candidates earlier in this doc), or the higher-risk/
+   higher-ceiling GPU-offload option (needs an independent correctness
+   reference identified first - not yet found).
+
 ## Notes on provenance / how this document was produced
 
 This was reconstructed by static analysis of the current mamedev/mame source
@@ -913,3 +1071,274 @@ merged MAME fix (namcos23 idle-clock removal) and (b) close reading of the M2
 driver's own code and comments for analogous "free-running / burning cycles for
 no benefit" patterns. Treat the ranked findings as hypotheses to test, not a
 confirmed diff.
+
+## Session 7 (2026-09-23): baseline profile from `savestates/polystar.state`
+
+**All testing from here on uses `savestates/polystar.state`** (a mid-game save
+with severe slowdown, provided by the user). Harness: `fork-specific/tools/m2_profile_run.py`
+(gitignored). It copies the state to RetroArch slot 0, turns on
+`mame_lua_console` for the run and restores `MAME.opt` afterward, launches under a
+pty with `video_vsync=false`, attaches `perf` inside `mame-dev`, polls
+`speed_percent` every 5s, samples per-thread CPU from `/proc`, then
+`pkill -9 -x retroarch` and polls until it's gone.
+`python3 fork-specific/tools/m2_profile_run.py <tag> 60` gives a flat profile; add `cg` for a DWARF call graph (slow
+to report, around 10 minutes for 30s of data). Build under test: the commit `8360d4469ce` tree plus the
+uncommitted audio-decoupling change in `libretro.cpp`. CPU governor was
+`powersave`, the same for all runs.
+
+**Result: `speed_percent` 0.44-0.58, mean ~0.54.** The number is repeatable: two
+separate runs gave the same per-5s sequence (0.57/0.44/0.51/0.57/... and
+0.58/0.43/0.53/0.58/...), so this state works as an A/B benchmark.
+
+Threads: **the main emulation thread is pegged (98%)**. Exactly 3 worker
+threads run at about 20% each. With NUM_RENDER_BANDS=4 there are only 4 work
+items per flush, and the main thread takes one of them itself inside
+`osd_work_queue_wait()`, so the band count does limit parallelism in practice.
+
+Main-thread self time, by category (flat 60s profile, 1999Hz):
+
+| Share | Category |
+|---|---|
+| **24.4%** | **PPC DRC recompilation** (asmjit `_emit`, `drcbe_x64::generate*`, `uml::*`, `drcuml_block::optimize`, `describe_code`) |
+| 21.2% | TE rasterizer work on the main thread (its share of the bands) |
+| 6.7% | `osd_work_queue_wait` spin |
+| 6.8% | DSPP interpreter (`execute_run`/`parse_operands`/`exec_arithmetic`/`read_next_operand`) |
+| 6.6% | JIT-generated code (the PPCs actually running game code) |
+| ~8% | memory handlers, `m2_bda_device::read_bus8`/`16` (mostly `load_texture()` on the main thread) |
+| ~2.6% | libc memset/memmove |
+| ~1.6-2% | `util::stream_format` (caller not identified yet, probably in the compile path) |
+
+Inclusive (call graph, 30s): `ppc_device::code_compile_block` is **29%**
+of main-thread time. That is about 4x the time spent running the compiled code.
+`m2_te_device::execute` (called from a PPC write) is 33%, and 26% of that is
+`flush_span_jobs`. `load_texture` 3.9%, DSPP 7.6%.
+
+### What this means
+
+1. **The biggest single cost is new, and it isn't the TE: the PPC DRC recompiles
+   constantly.** Warm-up after the state load doesn't explain it, because the rate
+   holds across the whole 60s window. Possible sources in
+   `src/devices/cpu/powerpc/`: (a) `icbi` →
+   `ppccom_execute_icbi()` throwing away a whole 4K page of compiled code;
+   (b) `m_translation_generation` bumps (tlbie/tlbia/SR/BAT writes) that make
+   blocks fail `ppc_check_translation`; (c) `PPCDRC_STRICT_VERIFY`
+   (part of `PPCDRC_COMPATIBLE_OPTIONS`, which `konamim2.cpp:696` sets) byte-compare
+   failures when code or data pages get rewritten; (d) full `code_flush_cache()`
+   from `m_cache_dirty` or cache exhaustion. The cause is not known yet, so the
+   next step is counters.
+2. The TE is still about a quarter of the main thread, because the main thread
+   rasterizes one band and then spins until the rest finish. It waits at every list end.
+3. The DSPP interpreter and per-byte `read_bus8` texture loads are
+   secondary but real.
+
+### Step 1 done: PPC DRC recompile thrash found and fixed (2026-09-23)
+
+Temporary counters (`[PPCPROF]`, since removed) in `ppcdrc.cpp`/`ppccom.cpp`
+showed `:ppc1` recompiling ~10,500 blocks/s (~390 ms of each wall-clock second
+spent compiling). About 90% of those were blocks whose hash already existed.
+`icbi`=0, translation-check failures=0 and cache flushes were rare. The recompile
+count exactly matched the number of **TLB-mismatch handler exits with a non-zero stale
+entry**. The same ~500 PCs (the OS kernel around 0x4001xxxx) were recompiled ~190x/s each.
+
+**Root cause.** Blocks compiled with `validate_tlb()` bake in the *exact* vtlb
+entry value (`ppcdrc.cpp`, `generate_sequence_instruction`). `vtlb_fill()`
+adds permission bits lazily, one intention at a time (FETCH, then READ once a data read
+hits the page, etc.). The game changes segment registers ~220x/s
+(`vtlb_flush_dynamic`), and the dynamic vtlb pool is round-robin, so code-page
+entries are constantly flushed and refilled in a different order: 0x0C
+(VALID|FETCH) one time, 0x0D (+READ) or 0x1C (+USER_READ) the next. The xor of
+old and new entries was always 0x01 or 0x10. The whole-entry compare then failed,
+and the mismatch handler recompiled because the stale entry was non-zero.
+
+**Fix** (`src/devices/cpu/powerpc/ppcdrc.cpp`, 2 hunks):
+1. The per-block TLB check masks out READ/WRITE/USER_READ/USER_WRITE before
+   comparing. Only the physical page plus fetch/valid state matter for running the code.
+2. `tlb_mismatch` handler: re-enter (hashjmp) instead of recompiling when the
+   stale entry lacked FETCH_ALLOWED (not just when it was 0). The block's own
+   check then decides. This terminates: after the fill, the entry has FETCH, so a
+   second mismatch means the physical page really changed, and that recompiles.
+
+**Result** (same state, clean 60s run): `speed_percent` **0.54 → ~0.86**
+(0.72-1.05). Compiles ~10,500/s → ~800/s, compile time ~390 → ~29 ms/s.
+Main-thread share: DRC recompilation 24% → 2.4%, and `stream_format` went
+away too (it was in the compile path). Workers are busier (~34% each, was ~20%), because
+more frames get rendered. New main-thread top items: TE work 28.6%, queue spin 12.5%, JIT
+12.9%, memory handlers/`read_bus8` 10.8%, DSPP 9.1%.
+
+**Regression checks**: this is the shared PPC DRC, so it affects Model 3, Konami
+PPC boards, Viper and Mac. Boot smoke tests with no errors: daytona2 (renders
+test menu), gticlub, hangplt, kviper, evilngt, totlvice, btltryst. A/B against a
+baseline build at 90s (kviper, btltryst) gave pixel-identical screenshots (both
+still black at that point: kviper is BIOS-only, btltryst boots slowly).
+code1d/wcombat/jpark3 are missing ROM files in the collection (jpark3 is also
+known-unreliable generally). Polystars from the state renders correctly.
+
+**Leftover**: ~800 rehash compiles/s remain, concentrated on a few page-start
+PCs (0x40024000 ~460/s, 0x40122008, 0x4007F000) where the entry's xor is 0. This is
+probably the "no valid TLB at compile time → unconditional EXH" path when a block
+is compiled while its page's entry is momentarily empty. Now only ~3% of the main thread; low
+priority.
+
+### PPC fix committed; audio decoupling stashed (2026-09-23)
+
+The PPC fix is committed as `af439229f3d`. The Session 6 audio-decoupling change in
+`libretro.cpp` is **stashed, not committed** (`git stash list`: "audio
+decoupling (retro_audio_queue immediate delivery)"). The user's call: it
+touches every game's audio path and made no noticeable real-world difference.
+Retest without it on `polystar.state` (60s): speed_percent mean ~0.85
+(0.79-1.04), vs ~0.86 with it, i.e. within noise. The new baseline for the next
+steps is **~0.85**, on HEAD `af439229f3d` with no audio change.
+
+### Step 2a: TE worker pool was capped at 3 threads - fixed, Polystars now ~full speed (2026-09-23)
+
+The profile showed exactly 3 busy worker threads even at 16 bands. The cause is
+`src/osd/osdsync.cpp`: `osd_work_queue_alloc()` calls
+`effective_num_processors(!(flags & WORK_QUEUE_FLAG_HIGH_FREQ))`, and with
+`heavy_mt=false` `osd_get_num_processors()` returns `min(cores, 4)`, so a
+HIGH_FREQ queue gets **3 workers**, whatever the core count. **This corrects Session 6's
+note**, which said the pool sized itself from `numprocs - 1` (up to 15). That is
+only true for non-HIGH_FREQ queues. It's why the Session 6 8-band experiment
+did nothing.
+
+Fix (driver-local only, no OSD change): `NUM_RENDER_BANDS` 4 → 16, plus
+`NUM_RENDER_QUEUES = 4` HIGH_FREQ queues (12 workers total). Bands go
+round-robin across the queues, and `flush_span_jobs()` waits on each queue.
+The main thread still helps with each queue it waits on.
+
+`polystar.state`, 60s each (baseline ~0.85 on af439229f3d):
+
+| Config | mean | min | total CPU (all threads) |
+|---|---|---|---|
+| 8 bands, 1 queue | 0.88 | 0.76 | ~200% |
+| 16 bands, 1 queue | 0.89 | 0.86 | ~195% |
+| 16 bands, 3 queues | 0.995 | 0.908 | 284% |
+| **16 bands, 4 queues (chosen)** | **1.006** | **0.965** | 346% |
+| 16 bands, 5 queues | 1.000 | 0.972 | 386% |
+
+speed_percent ~1.0 means real time. The benchmark is now capped, so it can't show
+further gains. Future steps need CPU-time or main-thread-headroom metrics
+instead: the main thread is still ~93% busy at 1.0x. Visual check: polystar from the state,
+evilngt, totlvice and btltryst all boot and render correctly.
+
+### Committed; user playtest (2026-09-23)
+
+Step 2a is committed as `ee732efc388`. The user played `evilngt` and `polystar` and
+says both are **playable now**, and gameplay audio is OK. **Known, parked issue**: in
+`evilngt` **cutscenes**, speech samples still play slowly. The user thinks this
+is not related to the CPU/TE performance work, and it doesn't affect gameplay, so it's
+noted but deliberately not being worked on now. (The Session 6 audio-decoupling stash
+was aimed at a version of this symptom and didn't fix it.)
+
+### Step 3: load_texture() TRAM DMA fast path (2026-09-23, uncommitted at time of writing)
+
+The MMDMA→TRAM path copied textures one byte at a time via
+`read_bus8()`/`write_tram8()`. Polystars does ~1,900 loads/s of ~15.5KB each
+(nearly all 16KB of TRAM every time, ~30MB/s). The new fast path copies 8 bytes per
+step when the source is 8-byte aligned: RAM is a big-endian 64-bit bus
+(`BYTE8_XOR_BE`), so 8 address-ordered bytes are one native 64-bit RAM word
+stored with `put_u64be`. The original byte loop still handles unaligned heads/tails and anything
+that would run past the end of RAM (mask wrap) or TRAM.
+
+Verified with a temporary self-check (removed): each load was replayed with
+the original byte loop into a copy of TRAM, then the whole 16KB was memcmp'd. **0
+mismatches** over ~84k real loads (~1.2GB): polystar.state 57k loads, evilngt
+11k, totlvice 14k, btltryst 1k.
+
+Main-thread share on polystar.state, 60s: `read_bus8` 4.34% → 0.01%,
+`load_texture` 1.14% → 0.51%. Total texture-load cost went from ~5.5% to ~0.5%
+of the main thread; main-thread CPU 93.5% → 91.1%. So all of `read_bus8`'s cost was TE
+texture loads, not DSPP DMA. Speed stays capped at real time (mean 1.01, min 0.968).
+
+### Step 4: DSPP idle-loop skipping (2026-09-23, committed)
+
+Committed step 3 first as `d94c41f8448`. The DSPP DRC (`dsppdrc.cpp`) exists but is disabled
+upstream (`m_isdrc = false;//allow_drc();`, several TODO/unimplemented ops),
+so the interpreter always runs. Temporary counters (removed) on polystar.state:
+~8.2M DSPP instructions/s, **~64% of them at PCs 0x006/0x009**. That's a
+2-instruction poll loop: `006: 4640 [0x3DF],#7` / `009: E806` (branch to
+006). 0x3DF on Bulldog is `output_status_r()`, the output FIFO fill count. The FIFO
+is only drained by the BDA's 44.1kHz `dac_update` timer, so it can never change
+within the DSPP's own timeslice. The rest of the program runs ~44k times/s (once
+per sample frame). SLEEP is `--pc` with a TODO and is never used here (0 hits).
+
+Fix (`src/devices/cpu/dspp/dspp.{cpp,h}`): generic idle-loop skipping in the
+interpreter. On each backward branch (or SLEEP), `check_idle_loop()`
+snapshots the whole `dspp_internal_state`. It skips only if all of these hold:
+the loop returns to the same PC with an identical core state (ignoring icount/tclock);
+it made no `write_data()`; it made no DMA service that did work; and every
+`read_data()` was side-effect-free. `idle_safe_read()` is virtual: for Bulldog
+it's RAM <0x2e0 plus 0x3DE/0x3DF, and for the base (3DO console) device it's
+nothing, so any read blocks skipping. When all that holds, the remaining iterations
+are provably identical, so skip whole iterations by decrementing icount and tclock by
+k*len. That leaves 1..len cycles so the slice ends exactly where it would have.
+Detection resets at each execute_run (other devices only run between slices).
+Debugger-enabled runs never skip.
+
+Verified: dumped every DAC sample for the first 15 emulated seconds from
+polystar.state, with skipping forced off and on (same binary, temporary env
+switch). **Bit-identical**: 661,500 stereo frames, ~32% non-silent. Main-thread
+share on polystar.state: DSPP (+ its 16-bit memory handlers) 13.4% → 7.5%;
+main-thread CPU 91.1% → 87.0%; speed min 0.968 → 0.99 (mean ~1.02, capped).
+evilngt/totlvice/btltryst boot clean. 3do.cpp (console) also uses the base DSPP,
+but it's not in the arcade build, so it's untested here.
+
+### Test scope and where things stand (2026-09-23)
+
+Proven-working M2 titles, and the only ones to test from now on: polystar, totlvice, evilngt
+(hellngt clone). btltryst is MACHINE_NOT_WORKING (black screen, broken audio)
+and is excluded, as are heatof11 and the totlvicj/a/u clones. The TE (`3dom2_te.cpp`)
+is used only by `konamim2.cpp`.
+
+Current main thread on polystar.state (all 4 commits, real time): ~87% busy.
+TE spin ~19%, TE raster/setup ~15%, PPC JIT ~18%, DSPP ~7.5%, memory
+handlers/devices ~6.5%, recompiles ~3%. Remaining TE options:
+- **Per-pixel optimisation** (~50% would take the main thread from ~87% to ~72% and the workers from
+  ~2.5 cores to ~1.3). Verifiable via per-frame framebuffer hashes from the save
+  state. This is the preferred option if more headroom is ever needed.
+- **Deferring the list-end wait**: not recommended. PPC RAM is DRC fastram, so CPU
+  framebuffer access can't be intercepted, and any race would be timing-dependent.
+
+### Step 5: TE per-pixel optimisation, frame-hash verified (2026-09-23, committed)
+
+**Verification method** (temporary instrumentation, removed afterwards; re-add it to
+resume): an FNV-1a hash of every displayed frame from `m2_vdu_device::screen_update`,
+counted from the first frame seen. The runs were 1500 frames of polystar.state,
+and 3000 frames each of evilngt/totlvice from boot. A/A runs of the same build gave
+identical hashes on all 7,500 frames (987/543/969 distinct images), so the output is
+deterministic. **Negative control**: flipping one bit of one pixel's blue channel
+at (200,120) was caught in 1488/1500, 2835/3000 and 2826/3000 frames. A work-based
+timing meter was used too, because speed is capped at 1.0: per-thread CPU time inside
+`render_band` (CLOCK_THREAD_CPUTIME_ID) summed over exactly those frames, plus
+main-thread wall time in `flush_span_jobs`. Noise is about ±2-3%.
+
+Raster CPU in seconds (polystar / evilngt / totlvice). Every round was bit-identical:
+
+| Round | Change | polystar | evilngt | totlvice | Kept? |
+|---|---|---|---|---|---|
+| base | - | 55.5 | 31.6 | 50.2 | |
+| 1 | force-inline (`inline ATTR_FORCE_INLINE`) the 19 per-pixel helpers | 39.0 | 22.4 | 36.0 | yes |
+| 2 | bus accessors `read_bus*/write_bus*` moved inline into 3dom2.h | 38.7 | 22.0 | 34.6 | yes (marginal) |
+| 3 | `span_regs`: per-span local copy of gc/es/tm/db + tram/pipram passed by ref | **31.6** | **17.9** | **29.2** | **yes** |
+| 4 | also a local copy of pixel_scratch | 33.0 | 18.6 | 29.9 | no (slower) |
+| 5 | per-span stats/status accumulators in span_regs (non-const) | 34.4 | 18.6 | 31.1 | no (slower) |
+| 6 | clz instead of shift loops (nr_invert, texcoord_gen normalise) | 31.5 | 17.6 | 29.4 | no (noise) |
+
+Why round 3 matters: the build uses `-fno-strict-aliasing`, so every framebuffer/Z store
+through a uint16_t*/uint32_t* could alias the snapshot. The compiler therefore reloaded and
+re-decoded every register after each pixel store. A local copy whose address never
+escapes (all callees are force-inlined) can't alias RAM.
+
+**Net: ~43% less raster CPU on all three games.** Main-thread flush wall time is down ~37%.
+On the 60s polystar benchmark: main thread 87% → 76%, total process CPU 330% → 221%,
+speed mean 1.02 / min 0.979. evilngt/totlvice boot clean, totlvice screenshot correct.
+Remaining time is spread across get_texel (~22% of walk_span), destination_blend (~18%)
+and many small items, so there are diminishing returns and we stopped here. `TEST_TIMING` is
+on in this driver, so the per-pixel stats counters feed the TE's completion timing and must
+stay exact.
+
+### Moved to fork-specific/ (2026-09-23)
+
+This doc now lives in `fork-specific/`, the home for this fork's investigation docs
+and tools. It was at the repo root before. The tools are in `fork-specific/tools/`
+(see `fork-specific/README.md`): `m2_profile_run.py`, `smoke.py`, and the frame-hash
+pair `fbcheck.sh`/`fbcompare.sh`. Their output goes to `fork-specific/out/`.

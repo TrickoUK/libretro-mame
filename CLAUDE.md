@@ -18,6 +18,13 @@ change, not a shader tweak — see "The core problem" below before starting.
 
 ## Repo layout cheat sheet
 
+- `fork-specific/` — **home for this fork's investigation docs and test tools**
+  (under the blanket `/*/` ignore rule, so new files need `git add -f`). Put new
+  write-ups and reusable profiling/test scripts here, not
+  in the repo root. See `fork-specific/README.md`; e.g.
+  `fork-specific/m2-fix-investigation.md` (Konami M2 performance work) and
+  `fork-specific/tools/` (save-state profiling, boot smoke tests, bit-exact
+  per-frame render checks).
 - `src/mame/<manufacturer>/*.cpp` — per-driver code, organized by manufacturer
   (e.g. `sega/`, `namco/`, `nintendo/`, `konami/`, `williams/`), not by game
   name. A driver's video/rasterizer code is usually `<name>_v.cpp` or `<name>_video.cpp`.
