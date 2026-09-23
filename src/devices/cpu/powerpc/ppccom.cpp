@@ -1606,11 +1606,61 @@ bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 		if (BIT(m_codepage_bits[page >> 3], page & 7))
 		{
 			m_drcuml->hash_invalidate_range(page << 12, (page << 12) | 0xfff);
+			m_code_snapshots.erase(page);
 			invalidated = true;
 		}
 		page++;
 	}
 	return invalidated;
+}
+
+
+/*-------------------------------------------------
+    snapshot_code_page - remember the contents of
+    a page the DRC has just compiled code from
+    (see icache_flash_invalidate)
+-------------------------------------------------*/
+
+void ppc_device::snapshot_code_page(uint32_t page, uint32_t physbase)
+{
+	auto const [it, inserted] = m_code_snapshots.try_emplace(page);
+	if (!inserted && it->second.physbase == physbase)
+		return;
+
+	code_page_snapshot &snap = it->second;
+	snap.physbase = physbase;
+	if (!snap.words)
+		snap.words = std::make_unique<uint32_t []>(0x1000 / 4);
+	for (int i = 0; i < 0x1000 / 4; i++)
+		snap.words[i] = m_pr32(physbase + i * 4);
+}
+
+
+/*-------------------------------------------------
+    icache_flash_invalidate - HID0[ICFI] was set:
+    discard compiled code for every page whose
+    bytes changed since it was compiled.  Returns
+    true if anything was invalidated.
+-------------------------------------------------*/
+
+bool ppc_device::icache_flash_invalidate()
+{
+	std::vector<uint32_t> changed;
+	for (auto const &[page, snap] : m_code_snapshots)
+	{
+		for (int i = 0; i < 0x1000 / 4; i++)
+		{
+			if (snap.words[i] != m_pr32(snap.physbase + i * 4))
+			{
+				changed.push_back(page);
+				break;
+			}
+		}
+	}
+
+	for (uint32_t page : changed)
+		invalidate_code_range(page << 12, (page << 12) | 0xfff);
+	return !changed.empty();
 }
 
 
@@ -2093,8 +2143,18 @@ void ppc_device::ppccom_execute_mtspr()
 				return;
 
 			/* write-through no-ops */
-			case SPR603_RPA:
 			case SPR603_HID0:
+			{
+				m_core->spr[m_core->param0] = m_core->param1;
+
+				// Setting ICFI invalidates the whole instruction cache.  Tell the
+				// DRC (via param1) whether compiled code was discarded, so it can
+				// leave the current block like it does after an icbi.
+				const bool icfi = m_core->param1 & 0x00000800;
+				m_core->param1 = (icfi && icache_flash_invalidate()) ? 1 : 0;
+				return;
+			}
+			case SPR603_RPA:
 			case SPR603_HID1:
 			case SPR603_IABR:
 			case SPR603_HID2:

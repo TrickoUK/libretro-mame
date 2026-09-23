@@ -316,6 +316,7 @@ void ppc_device::code_flush_cache()
 	// no compiled code remains, so forget which pages held it
 	std::fill(m_codepage_bits.begin(), m_codepage_bits.end(), 0);
 	m_core->m_codepage_any = false;
+	m_code_snapshots.clear();
 
 	// also release the per-block translation checks
 	for (ppc_entry_check *chk : m_entry_checks)
@@ -375,6 +376,18 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 				// code, so a later TLB invalidation of one of them can trigger a flush
 				for (uint32_t pg = seqhead->pc >> 12; pg <= (seqlast->pc >> 12); pg++)
 					note_code_page(pg);
+
+				// and what those pages held, so an icache flash invalidate can tell
+				// whether the code was replaced behind the DRC's back
+				if (m_cap & PPCCAP_603_MMU)
+				{
+					for (const opcode_desc *curdesc = seqhead; ; curdesc = curdesc->next())
+					{
+						snapshot_code_page(curdesc->pc >> 12, curdesc->physpc & ~0xfff);
+						if (curdesc == seqlast)
+							break;
+					}
+				}
 
 				// if we don't have a hash for this mode/pc, or if we are overriding all, add one
 				if (override || !m_drcuml->hash_exists(mode, seqhead->pc))
@@ -4174,6 +4187,13 @@ bool ppc_device::generate_instruction_1f(drcuml_block &block, compiler_state *co
 					// the little endian mode bit is in HID0 on PPC601;
 					// thus, update mode for that scenario in case HID0_LM changed
 					generate_update_mode(block);                                // <update mode>
+				}
+				else if (spr == SPR603_HID0 && (m_cap & PPCCAP_603_MMU))
+				{
+					// ppccom_execute_mtspr() sets param1 if an icache flash
+					// invalidate discarded compiled code, which may include this
+					// block.  Exit so execution continues with a fresh lookup.
+					generate_recompile_if(block, compiler, desc, uml::mem(&m_core->param1), EXECUTE_MISSING_CODE);
 				}
 				compiler->checkints = true;
 				generate_update_cycles(block, compiler, desc->pc + 4, true);    // <update cycles>

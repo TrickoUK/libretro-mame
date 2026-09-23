@@ -20,6 +20,8 @@
 #include "divtlb.h"
 
 #include <algorithm>
+#include <memory>
+#include <unordered_map>
 
 
 /***************************************************************************
@@ -626,6 +628,20 @@ protected:
 	void note_code_page(uint32_t page) { if (page != m_codewrite_skip_page) { m_codepage_bits[page >> 3] |= 1 << (page & 7); m_core->m_codepage_any = 1; } }
 	bool code_page_has_code(offs_t addr) const { uint32_t const page = (addr >> 12) & 0xfffff; return BIT(m_codepage_bits[page >> 3], page & 7); }
 	bool invalidate_code_range(offs_t start, offs_t end);
+
+	// 603-family instruction cache flash invalidate (HID0[ICFI]): code can be
+	// replaced by writers the DRC never sees (DMA, another CPU), and software
+	// then invalidates the whole icache instead of issuing icbi.  Keep a copy of
+	// every compiled code page so an ICFI only discards pages whose bytes
+	// actually changed, rather than flushing the entire cache each time.
+	struct code_page_snapshot
+	{
+		uint32_t physbase;
+		std::unique_ptr<uint32_t []> words;
+	};
+	std::unordered_map<uint32_t, code_page_snapshot> m_code_snapshots;    // keyed by effective page number
+	void snapshot_code_page(uint32_t page, uint32_t physbase);
+	bool icache_flash_invalidate();
 
 	// reservation granularity
 	uint32_t m_reservation_mask;
