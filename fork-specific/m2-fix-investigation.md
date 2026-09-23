@@ -1158,6 +1158,11 @@ and the mismatch handler recompiled because the stale entry was non-zero.
    check then decides. This terminates: after the fill, the entry has FETCH, so a
    second mismatch means the physical page really changed, and that recompiles.
 
+> **Regression, since fixed:** this change exposed a missing icache invalidation in
+> MAME's PPC core. Cold-boot polystar went black at the Stage 1 start. See
+> "Regression: black Stage 1 in live play (HID0[ICFI])" at the end of this doc,
+> fixed in `914dc7e06b8`.
+
 **Result** (same state, clean 60s run): `speed_percent` **0.54 → ~0.86**
 (0.72-1.05). Compiles ~10,500/s → ~800/s, compile time ~390 → ~29 ms/s.
 Main-thread share: DRC recompilation 24% → 2.4%, and `stream_format` went
@@ -1342,3 +1347,126 @@ This doc now lives in `fork-specific/`, the home for this fork's investigation d
 and tools. It was at the repo root before. The tools are in `fork-specific/tools/`
 (see `fork-specific/README.md`): `m2_profile_run.py`, `smoke.py`, and the frame-hash
 pair `fbcheck.sh`/`fbcompare.sh`. Their output goes to `fork-specific/out/`.
+
+## Regression: black Stage 1 in live play (HID0[ICFI]) - fixed in `914dc7e06b8` (2026-09-23)
+
+### Symptom
+
+The user reported this from a Batocera image built from `c02b8f3`. In a live game
+from a normal boot, the screen went **black at "STAGE1 START!"**: no stage geometry
+and **no music**. Later the ship appeared, responded to input and fired with sound
+effects, but no stage was ever drawn. Attract mode, coin-up and SELECT CONTROL were all
+fine. It happened reliably after the 20-second SELECT CONTROL countdown ran out.
+totlvice and evilngt were unaffected.
+
+**Key observation: loading a save state never showed it**, even states saved seconds
+before the blackout in the same run. Only a live run from boot failed.
+
+### Red herrings (all ruled out, recorded so nobody repeats them)
+
+Every early local test started from a save state, so nothing reproduced. That sent
+the investigation after device-side differences:
+
+- **Compiler flags**: a full local build with Batocera's flags (`-march=x86-64-v3
+  -fstack-protector-strong -fopenmp`, in a separate worktree) played fine from a state.
+- **The Batocera binary itself**: `mame_libretro.so` copied off the device played
+  fine here from a state. That ruled out GCC 14 vs 16 and Batocera's patches.
+- **Content/config**: the CHD was byte-identical and the zip had the same ROM CRCs. The
+  hiscore plugin had no polystar entry, there was no cheat file and no mame/polystar ini,
+  and the core options matched apart from PSX-only settings.
+- **TE worker-thread race**: a temporary detector computed every queued span's
+  dst/Z/src byte ranges per flush. It found zero cross-band overlaps in 4,000 flushes
+  across the stage start.
+- **Controller input**: no buttons were pressed on the device either.
+- **CD-DA playback**: comparing `state8` (the device's hung state) with local saves lined
+  up by emulated time showed the CD-DA read position (LBA) matching exactly.
+
+A state saved *during* the blackout (`state3`/`state8`) stayed black when loaded
+locally. That proved the emulated state itself had diverged, and wasn't a display
+problem. The breakthrough was the user noting "states always work, live boot always
+fails". That points at state that a load resets but a save doesn't carry: the DRC code
+cache, which a state load flushes.
+
+### Reproduction without a gamepad
+
+A MAME Lua `-autoboot_script`, passed through a `.cmd` content file (the libretro OSD
+parses any `*.cmd` as a MAME command line), presses `Coin 1` and then
+`1 Player Start` every 600 frames:
+
+```
+polystar -rompath "<roms>" -autoboot_script "<dir>/coinstart.lua"
+```
+```lua
+-- find fields by name ("Coin 1", "1 Player Start") across manager.machine.ioport.ports,
+-- then in emu.register_frame_done: f % 600 == 10 -> coin:set_value(1), == 16 -> clear_value(),
+--                                   f % 600 == 70 -> start:set_value(1), == 76 -> clear_value()
+```
+
+Screenshots: send UDP `SCREENSHOT` to RetroArch's network command port, with
+`screenshot_directory` set in an `--appendconfig`. **Don't use `spectacle -a`**, which
+captures whatever window is active. It captured the user's terminal twice during this
+session. Mean brightness is an easy black/not-black test: ~2-5 means the black stage,
+~150+ means the town.
+
+### Bisection
+
+- HEAD `c02b8f3` with `af439229f3d` reverted: Stage 1 renders correctly.
+- Hunk 2 alone reverted (mismatch handler back to `cmp i2,0`), hunk 1 (masked TLB
+  compare) kept: **still black**, so the mask is what exposed the bug.
+
+The mask itself is correct: the vtlb bits it ignores really are only data read/write
+permissions. The real problem was elsewhere.
+
+### Root cause
+
+The polystar OS invalidates the instruction cache by setting **HID0[ICFI]** (`0x800`,
+instruction cache flash invalidate) on the PPC602. It does this ~60 times/s during play,
+almost all from one routine at `pc=4001fb7c`. It does so after placing new code in RAM
+that the DRC never saw being written: a stage overlay at the Stage 1 start. The 602/603
+store write-watch only exists for the 601, and nothing on the 602 invalidates
+compiled code apart from `icbi`.
+
+Upstream MAME treats HID0 writes as **write-through no-ops** (`ppccom_execute_mtspr`),
+so ICFI never touched the DRC. Upstream only worked **by accident**: the TLB-compare thrash
+recompiled the OS/game blocks ~10,500 times/s, so new code was picked up almost immediately.
+`af439229f3d` removed that thrash (the whole point of the speedup). Stale blocks then
+survived, and the game took a wrong path at the stage start. A state load flushes the
+DRC cache, which is why loading states always hid it.
+
+### Fix (`914dc7e06b8`, `ppc.h` / `ppccom.cpp` / `ppcdrc.cpp`)
+
+Content-verified invalidation on ICFI, for 603-MMU cores only:
+
+- `code_compile_block()` snapshots every effective code page it compiles from:
+  `m_code_snapshots`, keyed by effective page, holding the physical base plus 4 KB of words
+  read via `m_pr32`. That's the same path the frontend uses to fetch opcodes.
+- `SPR603_HID0` write with ICFI set: `icache_flash_invalidate()` compares every
+  snapshot with current memory. It calls `invalidate_code_range()` only for pages whose
+  bytes changed, which also drops that page's snapshot so the recompile takes a fresh one.
+  It returns whether anything was discarded, in `param1`.
+- The DRC's `mtspr HID0` codegen (603-MMU) then calls `generate_recompile_if()`, the
+  same exit `icbi` uses, so a block that may have been invalidated isn't resumed.
+- `code_flush_cache()` clears the snapshots.
+- Both hunks of `af439229f3d` stay in place.
+
+Flushing the whole cache on every ICFI was rejected. At ~60/s it would bring back the
+recompile thrash that `af439229f3d` removed.
+
+### Verification
+
+- Cold-boot live run (Lua coin/start): SELECT CONTROL → "STAGE1 START!" over the
+  checkered floor → town → normal gameplay → CONTINUE?. This held on the final clean
+  build too.
+- `m2_profile_run.py` on `polystar.state`: speed_percent 0.96-1.04, main thread ~81%.
+  **No measurable cost.**
+- Shared-core regression smoke (60 s, alive, no fatal/unmapped/segfault errors):
+  evilngt, totlvice, daytona2, gticlub, hangplt, kviper.
+
+### Lesson
+
+**Always cold-boot test PPC DRC changes.** Starting from a save state resets the
+code cache and hides stale-code bugs completely. `polystar.state` is still the right
+*performance* benchmark, but it can't serve as a *correctness* check for anything
+touching code invalidation, TLB or DRC caching. `fork-specific/tools/smoke.py` boots
+from scratch, but only checks liveness. It needs the coin/start Lua script, plus a wait
+past the 20 s SELECT CONTROL countdown, to reach the Stage 1 start.
