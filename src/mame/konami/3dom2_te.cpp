@@ -1711,10 +1711,10 @@ void m2_te_device::walk_edges(uint32_t wrange)
 //  texcoord_gen -
 //-------------------------------------------------
 
-void m2_te_device::texcoord_gen(pixel_scratch &ps, uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
+inline ATTR_FORCE_INLINE void m2_te_device::texcoord_gen(pixel_scratch &ps, const span_regs &rg, uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
 								uint32_t & uo, uint32_t & vo, uint32_t & wo)
 {
-	const auto &m_es = ps.cfg->es;
+	const auto &m_es = rg.es;
 
 	// Perspective correction
 	if (!(m_es.es_cntl & ESCNTL_PERSPECTIVEOFF))
@@ -1783,7 +1783,7 @@ void m2_te_device::texcoord_gen(pixel_scratch &ps, uint32_t wrange, uint32_t uw,
 //  lod_calc -
 //-------------------------------------------------
 
-uint32_t m2_te_device::lod_calc(uint32_t u0, uint32_t v0, uint32_t u1, uint32_t v1)
+inline ATTR_FORCE_INLINE uint32_t m2_te_device::lod_calc(uint32_t u0, uint32_t v0, uint32_t u1, uint32_t v1)
 {
 	return 0;
 }
@@ -1793,9 +1793,9 @@ uint32_t m2_te_device::lod_calc(uint32_t u0, uint32_t v0, uint32_t u1, uint32_t 
 //  get_tram_bitdepth
 //-------------------------------------------------
 
-uint32_t m2_te_device::get_tram_bitdepth(pixel_scratch &ps)
+inline ATTR_FORCE_INLINE uint32_t m2_te_device::get_tram_bitdepth(pixel_scratch &ps, const span_regs &rg)
 {
-	const auto &m_tm = ps.cfg->tm;
+	const auto &m_tm = rg.tm;
 
 	// TODO: Could cache this
 	const uint32_t tex_type = m_tm.tex_exptype;
@@ -1816,14 +1816,14 @@ uint32_t m2_te_device::get_tram_bitdepth(pixel_scratch &ps)
 //-------------------------------------------------
 //  get_texture_color -
 //-------------------------------------------------
-void m2_te_device::get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
+inline ATTR_FORCE_INLINE void m2_te_device::get_texture_color(pixel_scratch &ps, const span_regs &rg, uint32_t u, uint32_t v, uint32_t lod,
 									uint32_t & r, uint32_t & g, uint32_t & b, uint32_t & a, uint32_t & s)
 {
-	const auto &m_tm = ps.cfg->tm;
+	const auto &m_tm = rg.tm;
 
 	uint32_t texaddr;
 	uint32_t texbit;
-	uint32_t texdepth = get_tram_bitdepth(ps);
+	uint32_t texdepth = get_tram_bitdepth(ps, rg);
 
 	// TODO: Multiple LODs
 	uint32_t filter = (m_tm.tex_addr_cntl >> TXTADDRCNTL_R12FILTERSEL_SHIFT) & TXTADDRCNTL_FILTERSEL_MASK;
@@ -1833,8 +1833,8 @@ void m2_te_device::get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, 
 		case TXTADDRCNTL_FILTERSEL_POINT:
 		case TXTADDRCNTL_FILTERSEL_LINEAR: // TODO
 		{
-			addr_calc(ps, u, v, lod, texaddr, texbit, texdepth);
-			get_texel(ps, texaddr, texbit, texdepth, r, g, b, a, s);
+			addr_calc(ps, rg, u, v, lod, texaddr, texbit, texdepth);
+			get_texel(ps, rg, texaddr, texbit, texdepth, r, g, b, a, s);
 			break;
 		}
 
@@ -1847,14 +1847,14 @@ void m2_te_device::get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, 
 			uint32_t r2, g2, b2, a2, s2;
 			uint32_t r3, g3, b3, a3, s3;
 
-			addr_calc(ps, u, v, lod, texaddr, texbit, texdepth);
-			get_texel(ps, texaddr, texbit, texdepth, r0, g0, b0, a0, s0);
-			addr_calc(ps, u + 0x10, v, lod, texaddr, texbit, texdepth);
-			get_texel(ps, texaddr, texbit, texdepth, r1, g1, b1, a1, s1);
-			addr_calc(ps, u, v + 0x10, lod, texaddr, texbit, texdepth);
-			get_texel(ps, texaddr, texbit, texdepth, r2, g2, b2, a2, s2);
-			addr_calc(ps, u + 0x10, v + 0x10, lod, texaddr, texbit, texdepth);
-			get_texel(ps, texaddr, texbit, texdepth, r3, g3, b3, a3, s3);
+			addr_calc(ps, rg, u, v, lod, texaddr, texbit, texdepth);
+			get_texel(ps, rg, texaddr, texbit, texdepth, r0, g0, b0, a0, s0);
+			addr_calc(ps, rg, u + 0x10, v, lod, texaddr, texbit, texdepth);
+			get_texel(ps, rg, texaddr, texbit, texdepth, r1, g1, b1, a1, s1);
+			addr_calc(ps, rg, u, v + 0x10, lod, texaddr, texbit, texdepth);
+			get_texel(ps, rg, texaddr, texbit, texdepth, r2, g2, b2, a2, s2);
+			addr_calc(ps, rg, u + 0x10, v + 0x10, lod, texaddr, texbit, texdepth);
+			get_texel(ps, rg, texaddr, texbit, texdepth, r3, g3, b3, a3, s3);
 
 			// LERP
 			uint32_t ufrac = u & 0xf;
@@ -1897,10 +1897,10 @@ void m2_te_device::get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, 
 //-------------------------------------------------
 //  addr_calc -
 //-------------------------------------------------
-void m2_te_device::addr_calc(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
+inline ATTR_FORCE_INLINE void m2_te_device::addr_calc(pixel_scratch &ps, const span_regs &rg, uint32_t u, uint32_t v, uint32_t lod,
 							uint32_t & texaddr, uint32_t & texbit, uint32_t & tdepth)
 {
-	const auto &m_tm = ps.cfg->tm;
+	const auto &m_tm = rg.tm;
 
 	uint32_t u_mask = (m_tm.uv_mask & TXTUVMASK_UMASK_MASK) >> TXTUVMASK_UMASK_SHIFT;
 	uint32_t v_mask = (m_tm.uv_mask & TXTUVMASK_VMASK_MASK) >> TXTUVMASK_VMASK_SHIFT;
@@ -1947,12 +1947,12 @@ void m2_te_device::addr_calc(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t
 }
 
 
-void m2_te_device::get_texel(pixel_scratch &ps, uint32_t tex_addr, uint32_t tex_bit, uint32_t tdepth,
+inline ATTR_FORCE_INLINE void m2_te_device::get_texel(pixel_scratch &ps, const span_regs &rg, uint32_t tex_addr, uint32_t tex_bit, uint32_t tdepth,
 							uint32_t & r, uint32_t & g, uint32_t & b, uint32_t & a, uint32_t & ssb)
 {
-	const auto &m_tm = ps.cfg->tm;
-	const uint32_t *m_tram = ps.cfg->tram.data();
-	const uint32_t *m_pipram = ps.cfg->pipram.data();
+	const auto &m_tm = rg.tm;
+	const uint32_t *m_tram = rg.tram;
+	const uint32_t *m_pipram = rg.pipram;
 
 	const uint32_t tex_type = m_tm.tex_exptype;
 
@@ -2161,12 +2161,12 @@ static inline uint8_t multiply(uint8_t a, uint8_t b)
 //  texture_blend -
 //-------------------------------------------------
 
-void m2_te_device::texture_blend(pixel_scratch &ps,
+inline ATTR_FORCE_INLINE void m2_te_device::texture_blend(pixel_scratch &ps, const span_regs &rg,
 	uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
 	uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 	uint32_t &ro, uint32_t &go, uint32_t &bo, uint32_t &ao, uint32_t &ssbo)
 {
-	const auto &m_tm = ps.cfg->tm;
+	const auto &m_tm = rg.tm;
 
 	uint32_t rbl = 0, gbl = 0, bbl = 0, abl = 0;
 
@@ -2186,17 +2186,17 @@ void m2_te_device::texture_blend(pixel_scratch &ps,
 		uint32_t br, bb, bg, ba;
 		uint32_t tr, tb, tg;
 
-		select_lerp( ps, (m_tm.tex_tab_cntl & TXTTABCNTL_C_ASEL_MASK) >> TXTTABCNTL_C_ASEL_SHIFT,
+		select_lerp(ps, rg, (m_tm.tex_tab_cntl & TXTTABCNTL_C_ASEL_MASK) >> TXTTABCNTL_C_ASEL_SHIFT,
 					ri, gi, bi, ai,
 					rt, gt, bt, at, ssbt,
 					ar, ag, ab );
 
-		select_lerp( ps, (m_tm.tex_tab_cntl & TXTTABCNTL_C_BSEL_MASK) >> TXTTABCNTL_C_BSEL_SHIFT,
+		select_lerp(ps, rg, (m_tm.tex_tab_cntl & TXTTABCNTL_C_BSEL_MASK) >> TXTTABCNTL_C_BSEL_SHIFT,
 					ri, gi, bi, ai,
 					rt, gt, bt, at, ssbt,
 					br, bg, bb );
 
-		select_lerp( ps, (m_tm.tex_tab_cntl & TXTTABCNTL_C_TSEL_MASK) >> TXTTABCNTL_C_TSEL_SHIFT,
+		select_lerp(ps, rg, (m_tm.tex_tab_cntl & TXTTABCNTL_C_TSEL_MASK) >> TXTTABCNTL_C_TSEL_SHIFT,
 					ri, gi, bi, ai,
 					rt, gt, bt, at, ssbt,
 					tr, tg, tb );
@@ -2211,11 +2211,11 @@ void m2_te_device::texture_blend(pixel_scratch &ps,
 		{
 			// TODO: CHECK ME
 			// Alpha is multiply only
-			select_mul( ps, (m_tm.tex_tab_cntl & TXTTABCNTL_A_ASEL_MASK) >> TXTTABCNTL_A_ASEL_SHIFT,
+			select_mul(ps, rg, (m_tm.tex_tab_cntl & TXTTABCNTL_A_ASEL_MASK) >> TXTTABCNTL_A_ASEL_SHIFT,
 						ai, at, ssbt,
 						aa);
 
-			select_mul( ps, (m_tm.tex_tab_cntl & TXTTABCNTL_A_BSEL_MASK) >> TXTTABCNTL_A_BSEL_SHIFT,
+			select_mul(ps, rg, (m_tm.tex_tab_cntl & TXTTABCNTL_A_BSEL_MASK) >> TXTTABCNTL_A_BSEL_SHIFT,
 						ai, at, ssbt,
 						ba);
 
@@ -2283,12 +2283,12 @@ void m2_te_device::texture_blend(pixel_scratch &ps,
 	}
 }
 
-void m2_te_device::select_lerp( pixel_scratch &ps, uint32_t sel,
+inline ATTR_FORCE_INLINE void m2_te_device::select_lerp(pixel_scratch &ps, const span_regs &rg, uint32_t sel,
 								uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
 								uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 								uint32_t & ar, uint32_t & ag, uint32_t & ab )
 {
-	const auto &m_tm = ps.cfg->tm;
+	const auto &m_tm = rg.tm;
 
 	switch (sel)
 	{
@@ -2353,10 +2353,10 @@ void m2_te_device::select_lerp( pixel_scratch &ps, uint32_t sel,
 }
 
 
-void m2_te_device::select_mul(pixel_scratch &ps, uint32_t sel, uint32_t ai, uint32_t at, uint32_t ssbt,
+inline ATTR_FORCE_INLINE void m2_te_device::select_mul(pixel_scratch &ps, const span_regs &rg, uint32_t sel, uint32_t ai, uint32_t at, uint32_t ssbt,
 							   uint32_t & a )
 {
-	const auto &m_tm = ps.cfg->tm;
+	const auto &m_tm = rg.tm;
 
 	switch (sel)
 	{
@@ -2392,9 +2392,9 @@ void m2_te_device::select_mul(pixel_scratch &ps, uint32_t sel, uint32_t ai, uint
 //  write_dst_pixel - Write pixel to framebuffer
 //-------------------------------------------------
 
-void m2_te_device::write_dst_pixel(pixel_scratch &ps)
+inline ATTR_FORCE_INLINE void m2_te_device::write_dst_pixel(pixel_scratch &ps, const span_regs &rg)
 {
-	const auto &m_db = ps.cfg->db;
+	const auto &m_db = rg.db;
 
 	uint32_t mask = m_db.usergen_ctrl & DBUSERGENCTL_DESTOUT_MASK;
 
@@ -2447,10 +2447,10 @@ void m2_te_device::write_dst_pixel(pixel_scratch &ps)
 //  destination_blend -
 //-------------------------------------------------
 
-void m2_te_device::destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb)
+inline ATTR_FORCE_INLINE void m2_te_device::destination_blend(pixel_scratch &ps, const span_regs &rg, uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb)
 {
-	const auto &m_gc = ps.cfg->gc;
-	const auto &m_db = ps.cfg->db;
+	const auto &m_gc = rg.gc;
+	const auto &m_db = rg.db;
 
 	ps.x = x;
 	ps.y = y;
@@ -2498,11 +2498,11 @@ void m2_te_device::destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, 
 			ps.status_bits |= DBSTATUS_WINCLIP;
 	}
 
-	select_src_pixel(ps);
+	select_src_pixel(ps, rg);
 
-	select_tex_pixel(ps);
+	select_tex_pixel(ps, rg);
 
-	select_alpha_dsb(ps);
+	select_alpha_dsb(ps, rg);
 
 
 	{
@@ -2519,7 +2519,7 @@ void m2_te_device::destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, 
 			dm11 = txtcnst1 & 0xff; txtcnst1 >>= 8;
 			dm20 = srccnst0 & 0xff; srccnst0 >>= 8;
 			dm21 = srccnst1 & 0xff; srccnst1 >>= 8;
-			ps.blend.b = color_blend(ps, ps.texpath.b, ps.ti.b, ps.srcpath.b, ps.src.b, dm10, dm11, dm20, dm21);
+			ps.blend.b = color_blend(ps, rg, ps.texpath.b, ps.ti.b, ps.srcpath.b, ps.src.b, dm10, dm11, dm20, dm21);
 
 			// TODO: ALURGEL for each
 
@@ -2528,14 +2528,14 @@ void m2_te_device::destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, 
 			dm11 = txtcnst1 & 0xff; txtcnst1 >>= 8;
 			dm20 = srccnst0 & 0xff; srccnst0 >>= 8;
 			dm21 = srccnst1 & 0xff; srccnst1 >>= 8;
-			ps.blend.g = color_blend(ps, ps.texpath.g, ps.ti.g, ps.srcpath.g, ps.src.g, dm10, dm11, dm20, dm21);
+			ps.blend.g = color_blend(ps, rg, ps.texpath.g, ps.ti.g, ps.srcpath.g, ps.src.g, dm10, dm11, dm20, dm21);
 
 			// Red
 			dm10 = txtcnst0 & 0xff;
 			dm11 = txtcnst1 & 0xff;
 			dm20 = srccnst0 & 0xff;
 			dm21 = srccnst1 & 0xff;
-			ps.blend.r = color_blend(ps, ps.texpath.r, ps.ti.r, ps.srcpath.r, ps.src.r, dm10, dm11, dm20, dm21);
+			ps.blend.r = color_blend(ps, rg, ps.texpath.r, ps.ti.r, ps.srcpath.r, ps.src.r, dm10, dm11, dm20, dm21);
 		}
 		else
 		{
@@ -2677,7 +2677,7 @@ void m2_te_device::destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, 
 		// Color
 		if (zpixout && (m_db.supergen_ctrl & DBSUPERGENCTL_DESTOUTEN))
 		{
-			write_dst_pixel(ps);
+			write_dst_pixel(ps, rg);
 		}
 	}
 
@@ -2698,9 +2698,9 @@ void m2_te_device::destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, 
 }
 
 // Select between texture unit and source pixel
-void m2_te_device::select_tex_pixel(pixel_scratch &ps)
+inline ATTR_FORCE_INLINE void m2_te_device::select_tex_pixel(pixel_scratch &ps, const span_regs &rg)
 {
-	const auto &m_db = ps.cfg->db;
+	const auto &m_db = rg.db;
 
 	uint32_t cntl;
 
@@ -2760,10 +2760,10 @@ void m2_te_device::select_tex_pixel(pixel_scratch &ps)
 	}
 }
 
-void m2_te_device::select_src_pixel(pixel_scratch &ps)
+inline ATTR_FORCE_INLINE void m2_te_device::select_src_pixel(pixel_scratch &ps, const span_regs &rg)
 {
-	const auto &m_gc = ps.cfg->gc;
-	const auto &m_db = ps.cfg->db;
+	const auto &m_gc = rg.gc;
+	const auto &m_db = rg.db;
 
 	if ((m_db.usergen_ctrl & DBUSERGENCTL_SRCINEN)
 		&& (m_db.usergen_ctrl & DBUSERGENCTL_BLENDEN)
@@ -2872,7 +2872,7 @@ void m2_te_device::select_src_pixel(pixel_scratch &ps)
 	ps.srcpath.a = ps.src.a;
 }
 
-uint8_t m2_te_device::dither(uint8_t in, uint8_t dithval)
+inline ATTR_FORCE_INLINE uint8_t m2_te_device::dither(uint8_t in, uint8_t dithval)
 {
 	int32_t res;
 	int32_t sgn_val;
@@ -2892,9 +2892,9 @@ uint8_t m2_te_device::dither(uint8_t in, uint8_t dithval)
 	return (uint8_t)res;
 }
 
-uint8_t m2_te_device::get_src_coef(pixel_scratch &ps, uint8_t cti, uint8_t dm2const0, uint8_t dm2const1)
+inline ATTR_FORCE_INLINE uint8_t m2_te_device::get_src_coef(pixel_scratch &ps, const span_regs &rg, uint8_t cti, uint8_t dm2const0, uint8_t dm2const1)
 {
-	const auto &m_db = ps.cfg->db;
+	const auto &m_db = rg.db;
 
 	uint32_t sel=0;
 	uint8_t cnst, coef=0;
@@ -2921,9 +2921,9 @@ uint8_t m2_te_device::get_src_coef(pixel_scratch &ps, uint8_t cti, uint8_t dm2co
 		return coef;
 }
 
-uint8_t m2_te_device::get_tex_coef(pixel_scratch &ps, uint8_t cs, uint8_t dm1const0, uint8_t dm1const1)
+inline ATTR_FORCE_INLINE uint8_t m2_te_device::get_tex_coef(pixel_scratch &ps, const span_regs &rg, uint8_t cs, uint8_t dm1const0, uint8_t dm1const1)
 {
-	const auto &m_db = ps.cfg->db;
+	const auto &m_db = rg.db;
 
 	uint32_t sel=0;
 	uint8_t cnst, coef=0;
@@ -2952,10 +2952,10 @@ uint8_t m2_te_device::get_tex_coef(pixel_scratch &ps, uint8_t cs, uint8_t dm1con
 		return coef;
 }
 
-void m2_te_device::select_alpha_dsb(pixel_scratch &ps)
+inline ATTR_FORCE_INLINE void m2_te_device::select_alpha_dsb(pixel_scratch &ps, const span_regs &rg)
 {
-	const auto &m_gc = ps.cfg->gc;
-	const auto &m_db = ps.cfg->db;
+	const auto &m_gc = rg.gc;
+	const auto &m_db = rg.db;
 
 	if ((m_db.usergen_ctrl & DBUSERGENCTL_BLENDEN) && !(m_gc.te_master_mode & TEMASTER_MODE_DBLEND))
 	{
@@ -2996,27 +2996,27 @@ void m2_te_device::select_alpha_dsb(pixel_scratch &ps)
 }
 
 
-uint8_t m2_te_device::color_blend(pixel_scratch &ps, uint8_t ct, uint8_t cti, uint8_t cs, uint8_t csrc,
+inline ATTR_FORCE_INLINE uint8_t m2_te_device::color_blend(pixel_scratch &ps, const span_regs &rg, uint8_t ct, uint8_t cti, uint8_t cs, uint8_t csrc,
 								uint8_t dm10, uint8_t dm11,
 								uint8_t dm20, uint8_t dm21)
 {
 	uint8_t tcoef, scoef;
 	uint16_t tm, sm;
 
-	tcoef = get_tex_coef(ps, csrc, dm10, dm11);
-	scoef = get_src_coef(ps, cti, dm20, dm21);
+	tcoef = get_tex_coef(ps, rg, csrc, dm10, dm11);
+	scoef = get_src_coef(ps, rg, cti, dm20, dm21);
 
 	tm = (tcoef == 255) ? ct : ((ct == 255) ? tcoef : ((tcoef * ct) >> 8));
 	sm = (scoef == 255) ? cs : ((cs == 255) ? scoef : ((scoef * cs) >> 8));
 
-	return alu_calc(ps, tm, sm);
+	return alu_calc(ps, rg, tm, sm);
 }
 
 #if 1
 
-uint8_t m2_te_device::alu_calc(pixel_scratch &ps, uint16_t a, uint16_t b)
+inline ATTR_FORCE_INLINE uint8_t m2_te_device::alu_calc(pixel_scratch &ps, const span_regs &rg, uint16_t a, uint16_t b)
 {
-	const auto &m_db = ps.cfg->db;
+	const auto &m_db = rg.db;
 
 	int32_t result = 0;
 	uint32_t blendout;
@@ -3128,8 +3128,16 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 							 uint32_t es_ddx_r, uint32_t es_ddx_g, uint32_t es_ddx_b, uint32_t es_ddx_a,
 							 uint32_t es_ddx_uw, uint32_t es_ddx_vw, uint32_t es_ddx_w)
 {
-	const auto &m_gc = ps.cfg->gc;
-	const auto &m_tm = ps.cfg->tm;
+	// Private copy of this job's register state for the per-pixel functions
+	// below.  Framebuffer/Z stores go through uint16_t/uint32_t pointers
+	// into emulated RAM, and without strict aliasing the compiler must
+	// otherwise assume any of them could modify the snapshot, re-loading and
+	// re-decoding every register after every pixel.  A local whose address
+	// never escapes (the pixel functions are force-inlined) can't alias RAM.
+	const span_regs rg{ ps.cfg->gc, ps.cfg->es, ps.cfg->tm, ps.cfg->db, ps.cfg->tram.data(), ps.cfg->pipram.data() };
+
+	const auto &m_gc = rg.gc;
+	const auto &m_tm = rg.tm;
 
 	bool scan_lr = !es_r2l;
 
@@ -3215,12 +3223,12 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 			uint32_t u, v;
 
 			// UV and W
-			texcoord_gen(ps, wrange, uw, vw, w, u, v, w16);
+			texcoord_gen(ps, rg, wrange, uw, vw, w, u, v, w16);
 
 			// TODO: FIXME
 			uint32_t lod = lod_calc(u, v, u, v);
 
-			get_texture_color(ps, u, v, lod, rt, gt, bt, at, ssbt);
+			get_texture_color(ps, rg, u, v, lod, rt, gt, bt, at, ssbt);
 		}
 		else
 		{
@@ -3251,7 +3259,7 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 		uint32_t ssbo = ssbt;
 
 		// Blend iterated RGB with texel
-		texture_blend(ps, ri, gi, bi, ai,
+		texture_blend(ps, rg, ri, gi, bi, ai,
 					  rt, gt, bt, at, ssbt,
 					  ro, go, bo, ao, ssbo);
 
@@ -3267,7 +3275,7 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 		texout.b = bo;
 		texout.a = ao;
 
-		destination_blend(ps, sx, sy, w16, texout, ssbo);
+		destination_blend(ps, rg, sx, sy, w16, texout, ssbo);
 
 		// Update interpolated paramters
 		if (scan_lr)

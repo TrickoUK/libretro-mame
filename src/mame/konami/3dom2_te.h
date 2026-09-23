@@ -115,6 +115,7 @@ private:
 	// Defined below (after m_gc/m_es/m_tm/m_db, whose types it captures via
 	// decltype) - see the definition for what this is and why it exists.
 	struct render_snapshot;
+	struct span_regs;
 
 	// Per-render-batch scratch: destination-blender working state (previously
 	// the member field m_dbstate) plus locally-accumulated status/statistics
@@ -222,51 +223,51 @@ private:
 	void walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right, uint32_t y, uint32_t xs, uint32_t xe, int32_t r, int32_t g, int32_t b, int32_t a, uint32_t uw, uint32_t vw, uint32_t w,
 					uint32_t es_r2l, uint32_t es_ddx_r, uint32_t es_ddx_g, uint32_t es_ddx_b, uint32_t es_ddx_a, uint32_t es_ddx_uw, uint32_t es_ddx_vw, uint32_t es_ddx_w);
 
-	void texcoord_gen(pixel_scratch &ps, uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
+	void texcoord_gen(pixel_scratch &ps, const span_regs &rg, uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
 						uint32_t & uo, uint32_t & vo, uint32_t & wo);
 
 	uint32_t lod_calc(uint32_t u0, uint32_t v0, uint32_t u1, uint32_t v1);
 
-	uint32_t get_tram_bitdepth(pixel_scratch &ps);
+	uint32_t get_tram_bitdepth(pixel_scratch &ps, const span_regs &rg);
 
-	void addr_calc(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
+	void addr_calc(pixel_scratch &ps, const span_regs &rg, uint32_t u, uint32_t v, uint32_t lod,
 					uint32_t & texaddr, uint32_t & texbit, uint32_t & tdepth);
 
-	void get_texture_color(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
+	void get_texture_color(pixel_scratch &ps, const span_regs &rg, uint32_t u, uint32_t v, uint32_t lod,
 							uint32_t & r, uint32_t & g, uint32_t & b, uint32_t & a, uint32_t & s);
 
-	void get_texel(pixel_scratch &ps, uint32_t u, uint32_t v, uint32_t lod,
+	void get_texel(pixel_scratch &ps, const span_regs &rg, uint32_t u, uint32_t v, uint32_t lod,
 		uint32_t &r_ti, uint32_t &g_ti, uint32_t &b_ti, uint32_t &a_ti, uint32_t &ssb_ti);
 
 	void texture_fetch(uint32_t texaddr, uint32_t texbit, uint32_t tdepth,
 		uint32_t &r_ti, uint32_t &g_ti, uint32_t &b_ti, uint32_t &a_ti, uint32_t &ssb_ti);
 
-	void select_lerp(pixel_scratch &ps, uint32_t sel,
+	void select_lerp(pixel_scratch &ps, const span_regs &rg, uint32_t sel,
 					uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
 					uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 					uint32_t & ar, uint32_t & ag, uint32_t & ab );
 
-	void select_mul(pixel_scratch &ps, uint32_t sel, uint32_t ai, uint32_t at, uint32_t ssbt,
+	void select_mul(pixel_scratch &ps, const span_regs &rg, uint32_t sel, uint32_t ai, uint32_t at, uint32_t ssbt,
 					uint32_t & a );
 
-	void texture_blend(pixel_scratch &ps, uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
+	void texture_blend(pixel_scratch &ps, const span_regs &rg, uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
 						uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 						uint32_t &ro, uint32_t &go, uint32_t &bo, uint32_t &ao, uint32_t &ssbo);
 
-	void destination_blend(pixel_scratch &ps, uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb);
+	void destination_blend(pixel_scratch &ps, const span_regs &rg, uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb);
 
-	uint8_t color_blend(pixel_scratch &ps, uint8_t ct, uint8_t cti, uint8_t cs, uint8_t csrc,
+	uint8_t color_blend(pixel_scratch &ps, const span_regs &rg, uint8_t ct, uint8_t cti, uint8_t cs, uint8_t csrc,
 						uint8_t dm10, uint8_t dm11,
 						uint8_t dm20, uint8_t dm21);
 
-	void select_alpha_dsb(pixel_scratch &ps);
-	uint8_t get_tex_coef(pixel_scratch &ps, uint8_t cs, uint8_t dm1const0, uint8_t dm1const1);
-	uint8_t get_src_coef(pixel_scratch &ps, uint8_t cti, uint8_t dm2const0, uint8_t dm2const1);
+	void select_alpha_dsb(pixel_scratch &ps, const span_regs &rg);
+	uint8_t get_tex_coef(pixel_scratch &ps, const span_regs &rg, uint8_t cs, uint8_t dm1const0, uint8_t dm1const1);
+	uint8_t get_src_coef(pixel_scratch &ps, const span_regs &rg, uint8_t cti, uint8_t dm2const0, uint8_t dm2const1);
 	uint8_t dither(uint8_t in, uint8_t dithval);
-	uint8_t alu_calc(pixel_scratch &ps, uint16_t a, uint16_t b);
-	void select_src_pixel(pixel_scratch &ps);
-	void select_tex_pixel(pixel_scratch &ps);
-	void write_dst_pixel(pixel_scratch &ps);
+	uint8_t alu_calc(pixel_scratch &ps, const span_regs &rg, uint16_t a, uint16_t b);
+	void select_src_pixel(pixel_scratch &ps, const span_regs &rg);
+	void select_tex_pixel(pixel_scratch &ps, const span_regs &rg);
+	void write_dst_pixel(pixel_scratch &ps, const span_regs &rg);
 
 	uint8_t read_tram8(offs_t address) const;
 	uint16_t read_tram16(offs_t address) const;
@@ -498,6 +499,18 @@ private:
 		decltype(m_db) db;
 		std::array<uint32_t, PIP_RAM_WORDS> pipram;
 		std::array<uint32_t, TEXTURE_RAM_WORDS> tram;
+	};
+
+	// Register state the per-pixel functions read, copied per span from a
+	// render_snapshot - see walk_span()
+	struct span_regs
+	{
+		decltype(m_gc) gc;
+		decltype(m_es) es;
+		decltype(m_tm) tm;
+		decltype(m_db) db;
+		const uint32_t *tram;
+		const uint32_t *pipram;
 	};
 
 	// Most-recently-taken snapshot and whether a register write has touched
