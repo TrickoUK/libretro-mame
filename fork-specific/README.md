@@ -11,7 +11,7 @@ to be tracked; `m2-fix-investigation.md` is tracked.
   and what was tried and reverted.
 
 - `viper-investigation.md`: Konami Viper (`viper.cpp`, gticlub2). Covers the PPC DRC recompile
-  storm and the Voodoo 3 TMU1/multibase texture fixes.
+  storm, the Voodoo 3 TMU1/multibase texture fixes and the I2C analog-control fix.
 
 ## Tools (`tools/`)
 

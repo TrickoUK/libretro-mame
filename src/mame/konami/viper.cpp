@@ -635,6 +635,7 @@ private:
 	required_shared_ptr<uint64_t> m_workram;
 	required_ioport_array<8> m_io_ports;
 	required_ioport_array<4> m_analog_input;
+	bool m_analog_8bit[4]{};
 	required_ioport_array<4> m_gun_input;
 	optional_ioport_array<4> m_io_ppp_sensors;
 	required_device_array<dmadac_sound_device, 2> m_dmadac;
@@ -807,13 +808,29 @@ uint8_t viper_state::i2cdr_r(offs_t offset)
 					// 0x1c: voltage, assume 5v
 					if (m_i2c.addr_latch == 0x1c)
 						return 0x80;
-					const u16 adc_value = m_analog_input[m_i2c.addr_latch & 0x3]->read();
-					// FIXME: upper nibble is currently discarded in port defs
-					// is it expecting 7 bits of data and 1 of parity?
-					// cfr. input tests returning different values for each nibble when both are equal.
-					const u8 adc_nibble = BIT(m_i2c.addr_latch, 2) ? 0 : 8;
+					const unsigned channel = m_i2c.addr_latch & 0x3;
+					const u16 adc_value = m_analog_input[channel]->read();
+					if (m_analog_8bit[channel])
+					{
+						// gticlub2's i2c handler reads each channel as a 9-bit sign/magnitude sample around
+						// 0x100: latch 0x10-0x13 returns the distance above it, 0x14-0x17 the distance below.
+						// A zero byte means "not in this half", so the game flips to the other half and reads
+						// again (it keeps the last half per channel), then uses 0x100 +/- the byte.
+						const u16 sample = ((adc_value & 0xff) << 1) | BIT(adc_value, 7);
+						if (BIT(m_i2c.addr_latch, 2))
+							res = (sample < 0x100) ? std::min<u16>(0x100 - sample, 0xff) : 0;
+						else
+							res = (sample >= 0x100) ? sample - 0x100 : 0;
+					}
+					else
+					{
+						// FIXME: upper nibble is currently discarded in port defs
+						// is it expecting 7 bits of data and 1 of parity?
+						// cfr. input tests returning different values for each nibble when both are equal.
+						const u8 adc_nibble = BIT(m_i2c.addr_latch, 2) ? 0 : 8;
 
-					res = (adc_value) >> adc_nibble;
+						res = (adc_value) >> adc_nibble;
+					}
 				}
 				else
 					LOG("I2C: unmapped read access %02x\n", m_i2c.addr_latch);
@@ -1994,10 +2011,10 @@ INPUT_PORTS_START( thrild2 )
 	PORT_BIT( 0xfff, 0x000, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x800,0x7ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50)
 
 	PORT_MODIFY("AN1")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25) PORT_REVERSE
+	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
 
 	PORT_MODIFY("AN2")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25) PORT_REVERSE
+	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
 INPUT_PORTS_END
 
 INPUT_PORTS_START( gticlub2 )
@@ -2005,10 +2022,10 @@ INPUT_PORTS_START( gticlub2 )
 
 	// K-Type steering wheel
 	PORT_MODIFY("AN0")
-	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
+	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50)
 
 	PORT_MODIFY("AN3")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(100) PORT_KEYDELTA(25) PORT_REVERSE
+	PORT_BIT( 0xff, 0x00, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(100) PORT_KEYDELTA(25)
 INPUT_PORTS_END
 
 INPUT_PORTS_START( gticlub2ea )
@@ -2429,6 +2446,16 @@ void viper_state::machine_start()
 	mpc8240_epic_init();
 
 	m_i2c.timer = timer_alloc(FUNC(viper_state::i2c_timer_callback), this);
+
+	// channels whose port defines only bits 0-7 are plain 8-bit ADC samples (gticlub2, thrild2 pedals)
+	for (int i = 0; i < 4; i++)
+	{
+		ioport_value used = 0;
+		for (ioport_field &field : m_analog_input[i]->fields())
+			if (field.type() != IPT_UNUSED && field.type() != IPT_UNKNOWN)
+				used |= field.mask();
+		m_analog_8bit[i] = used != 0 && !(used & ~ioport_value(0xff));
+	}
 
 	/* set conservative DRC options */
 	m_maincpu->ppcdrc_set_options(PPCDRC_COMPATIBLE_OPTIONS);

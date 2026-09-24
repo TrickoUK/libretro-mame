@@ -82,6 +82,8 @@ from the launch source X/Y to the current destination, then advance the destinat
 height. A tiled surface's stride is in 128-byte tiles; the 3D engine renders it linearly with
 that row pitch, so it's addressed the same way. Only ROP 0xCC between surfaces of the same
 depth is handled; anything else is logged. After the fix, spit-damage frames render cleanly.
+Confirmed in live play (2026-09-24): the intended red damage tint shows for a few frames. The
+periodic screenshots missed it because it only lasts a few frames.
 carnking (Voodoo 3) is unchanged. gticlub2 never issues screen-to-screen blits.
 
 Also: unlike gticlub2 (CMDFIFO packet 5), jpark3 uploads its textures with 2D host-to-screen
@@ -93,6 +95,39 @@ Repro with no gun needed: `profile_run.py jpark3 <tag> --warmup 60 --duration 12
 --shot-every 2 --lua "70:manager.machine.ioport.ports[':IN3'].fields['Coin 1']:set_value(1)"
 ...` Send the coin twice and `1 Player Start` once, 0.5s set/clear apart. If nobody shoots,
 the Dilophosaurus in Area 1 Stage 1 spits within ~90s of the game starting.
+
+## Fix 5: analog controls (ADC over I2C)
+
+Symptom: steering and pedals did nothing. The game's I/O CHECK showed every analog channel
+pinned (ADC FFFF, steering F87C) whatever MAME sent, and the car sat at 0 km/h with gas held.
+
+The analog chip is reached over the MPC8240 I2C controller, and the I2C interrupt handler
+(vector table entry 0x3a0 -> 0x3d2b4) runs a small state machine per channel. It writes the
+address byte `0x21 + 2*channel + 8*half`, does a dummy read, then reads one data byte. `half` is a
+per-channel bit kept at RAM 0x84b. If the byte is zero, it flips that channel's bit and reads the
+other half. The sample is 9-bit sign/magnitude around 0x100: latch 0x10-0x13 returns the distance
+above 0x100, and 0x14-0x17 the distance below it. The game rebuilds 0x100 +/- byte, and the I/O
+CHECK's ADC field shows that value * 128.25. Found by logging PC/LR at the I2C data register
+(the LR pointed into the EPIC dispatcher at 0xf0a0), dumping main RAM via Lua
+`read_range` and disassembling with capstone.
+
+MAME's stub returned `port >> 8` for 0x10-0x13. gticlub2's ports are 8-bit, so that was the
+base `viper` port's unused active-low high byte (always 0xff). Fix: channels whose port only
+uses bits 0-7 (detected from the fields at machine_start) now scale the 8-bit value to 9 bits
+and answer in the split-half format. Channels with wider ports (thrild2's 12-bit steering) keep
+the old path. The PORT_REVERSE flags on the pedals, handbrake and K-type wheel were backwards
+(verified in I/O CHECK: raw 0xff is full RIGHT / pedal MAX), so they are removed.
+
+Result: I/O CHECK shows centre/MIN at rest and full LEFT/RIGHT and MIN/MAX at the extremes, and
+the car drives (89 km/h with gas held). Pedals saturate before full raw travel with the NVRAM
+calibration used here; the test menu's CALIBRATION page adjusts that. Smoke-booted gticlub2,
+thrild2 and jpark3, with no errors. thrild2's pedals now go through the same path; its gameplay
+is untested.
+
+Lua gotchas: an I2C tap on this 64-bit bus aborts the core ("integer value will be
+misrepresented in lua", the byte-lane mask has bit 63 set). `ioport_field:set_value()` on an
+analog field writes the unshifted override into the whole port, so it only behaves for fields
+at bit 0.
 
 ## Checked and ruled out
 
