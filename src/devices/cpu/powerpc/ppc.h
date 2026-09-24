@@ -258,6 +258,7 @@ public:
 	void ppc_cfunc_ppccom_mismatch();
 	void ppccom_tlb_fill();
 	int  ppccom_fetch_intention() const;
+	void compile_time_tlb_fill(offs_t pc);
 	void ppccom_update_fprf();
 	void ppccom_dcstore_callback();
 	void ppccom_dcbz_check();
