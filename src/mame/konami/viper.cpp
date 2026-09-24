@@ -448,6 +448,7 @@ public:
 		m_io_ports(*this, "IN%u", 0U),
 		m_analog_input(*this, "AN%u", 0U),
 		m_gun_input(*this, "GUN%u", 0U),
+		m_steering_response(*this, "STEERING"),
 		m_io_ppp_sensors(*this, "SENSOR%u", 1U),
 		m_dmadac(*this, { "dacr", "dacl" })
 	{
@@ -637,10 +638,12 @@ private:
 	required_ioport_array<4> m_analog_input;
 	bool m_analog_8bit[4]{};
 	required_ioport_array<4> m_gun_input;
+	optional_ioport m_steering_response;
 	optional_ioport_array<4> m_io_ppp_sensors;
 	required_device_array<dmadac_sound_device, 2> m_dmadac;
 
 	uint32_t mpc8240_pci_r(int function, int reg, uint32_t mem_mask);
+	u16 apply_steering_response(u16 value);
 	void mpc8240_pci_w(int function, int reg, uint32_t data, uint32_t mem_mask);
 	uint32_t voodoo3_pci_r(int function, int reg, uint32_t mem_mask);
 	void voodoo3_pci_w(int function, int reg, uint32_t data, uint32_t mem_mask);
@@ -772,6 +775,21 @@ void viper_state::pci_config_data_w(uint64_t data)
 // most if not all games in the driver sets fdr = 0x27 = 512, dffsr = 0x21
 #define I2C_TIMER_FREQ (SDRAM_CLOCK / 512) / 10
 
+// Optional non-linear steering curve for gamepad sticks: shrinks small deflections around centre
+// while still reaching full lock. Not arcade behaviour, so it defaults to linear.
+u16 viper_state::apply_steering_response(u16 value)
+{
+	static constexpr double exponents[] = { 1.0, 1.5, 2.0, 3.0 };
+	const double exponent = exponents[m_steering_response->read() & 3];
+	if (exponent == 1.0)
+		return value;
+
+	const double range = (value >= 0x80) ? 0x7f : 0x80;
+	const double d = (double(value) - 0x80) / range;
+	const double curved = std::copysign(std::pow(std::abs(d), exponent), d);
+	return std::clamp<int>(int(std::lround(0x80 + curved * range)), 0x00, 0xff);
+}
+
 uint8_t viper_state::i2cdr_r(offs_t offset)
 {
 	u8 res = 0;
@@ -809,9 +827,12 @@ uint8_t viper_state::i2cdr_r(offs_t offset)
 					if (m_i2c.addr_latch == 0x1c)
 						return 0x80;
 					const unsigned channel = m_i2c.addr_latch & 0x3;
-					const u16 adc_value = m_analog_input[channel]->read();
+					u16 adc_value = m_analog_input[channel]->read();
 					if (m_analog_8bit[channel])
 					{
+						if (channel == 0 && m_steering_response)
+							adc_value = apply_steering_response(adc_value & 0xff);
+
 						// gticlub2's i2c handler reads each channel as a 9-bit sign/magnitude sample around
 						// 0x100: latch 0x10-0x13 returns the distance above it, 0x14-0x17 the distance below.
 						// A zero byte means "not in this half", so the game flips to the other half and reads
@@ -2006,23 +2027,27 @@ INPUT_PORTS_START( thrild2 )
 	PORT_MODIFY("IN4")
 	PORT_BIT(0x01, IP_ACTIVE_LOW, IPT_BUTTON2 ) PORT_NAME("Shift Up")
 
-	// TODO: normal type steering wheel (non-K type)
+	// read as an 8-bit sample like the pedals: 0x00 full left, 0x80 centre, 0xff full right
 	PORT_MODIFY("AN0")
-	PORT_BIT( 0xfff, 0x000, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x800,0x7ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50)
+	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50)
 
 	PORT_MODIFY("AN1")
 	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
 
 	PORT_MODIFY("AN2")
 	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
+
+	// not a hardware setting: eases steering with a gamepad stick (see apply_steering_response)
+	PORT_START("STEERING")
+	PORT_CONFNAME( 0x03, 0x00, "Steering Response" )
+	PORT_CONFSETTING(    0x00, "Linear (arcade)" )
+	PORT_CONFSETTING(    0x01, "Mild curve" )
+	PORT_CONFSETTING(    0x02, "Squared curve" )
+	PORT_CONFSETTING(    0x03, "Cubic curve" )
 INPUT_PORTS_END
 
 INPUT_PORTS_START( gticlub2 )
 	PORT_INCLUDE( thrild2 )
-
-	// K-Type steering wheel
-	PORT_MODIFY("AN0")
-	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50)
 
 	PORT_MODIFY("AN3")
 	PORT_BIT( 0xff, 0x00, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(100) PORT_KEYDELTA(25)
@@ -2447,7 +2472,7 @@ void viper_state::machine_start()
 
 	m_i2c.timer = timer_alloc(FUNC(viper_state::i2c_timer_callback), this);
 
-	// channels whose port defines only bits 0-7 are plain 8-bit ADC samples (gticlub2, thrild2 pedals)
+	// channels whose port defines only bits 0-7 are plain 8-bit ADC samples (gticlub2, thrild2)
 	for (int i = 0; i < 4; i++)
 	{
 		ioport_value used = 0;

@@ -124,6 +124,20 @@ calibration used here; the test menu's CALIBRATION page adjusts that. Smoke-boot
 thrild2 and jpark3, with no errors. thrild2's pedals now go through the same path; its gameplay
 is untested.
 
+Follow-up (2026-09-24): thrild2's steering was still pinned full right. Its I/O CHECK showed
+ADC FC7E at rest: the game uses the same 9-bit split-half format, but its AN0 was a 12-bit port
+so it took the old path. AN0 is now the same 8-bit wheel as gticlub2, defined once in the
+thrild2 ports and inherited by gticlub2, so no Viper driving game uses the wide path any more.
+Measured in thrild2 I/O CHECK: raw 0xa0 = +28%, 0xe0 = +83%, and the stored calibration hits full
+lock at about raw 0x80 +/- 0x74. The inner `+` markers on the bar are at about +/-72%.
+
+Steering felt too twitchy on a stick. MAME's analog sensitivity setting does nothing for absolute
+axes (`apply_inverse_sensitivity` and then `apply_sensitivity` cancel), so lowering it can't help.
+Added a "Steering Response" Machine Configuration setting (Linear (arcade) default / Mild x^1.5 /
+Squared / Cubic) applied to channel 0 in `apply_steering_response()`. Full lock is still reached at
+full stick. It saves to the game's MAME cfg (`saves/MAME/mame/cfg/<game>.cfg`). Verified at raw
+0xc0 in gticlub2 I/O CHECK: the bar marker moves +382 px linear, +191 squared, +77 cubic.
+
 Lua gotchas: an I2C tap on this 64-bit bus aborts the core ("integer value will be
 misrepresented in lua", the byte-lane mask has bit 63 set). `ioport_field:set_value()` on an
 analog field writes the unshifted override into the whole port, so it only behaves for fields
