@@ -441,9 +441,10 @@ void voodoo_banshee_device::device_start()
 	// expand CLUT to 512 entries
 	m_clut.resize(512);
 
-	// pre-set the chipmask and clear the TMU memory to indicate we're shared
+	// pre-set the chipmask and clear the TMU memory to indicate we're shared;
+	// Banshee has one TMU, Voodoo 3 has two
 	if (m_chipmask == 0x01)
-		m_chipmask = 0x03;
+		m_chipmask = (m_model == voodoo::voodoo_model::VOODOO_3) ? 0x07 : 0x03;
 	m_tmumem0_in_mb = m_tmumem1_in_mb = 0;
 
 	// start like a Voodoo-2
