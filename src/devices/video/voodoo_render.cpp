@@ -844,15 +844,19 @@ void rasterizer_texture::recompute(voodoo_regs const &regs, u8 *ram, u32 mask, r
 	// Add check for upper nibble not equal to zero to fix funkball -- TG
 	if (texlod.tmultibaseaddr() && texlod.magic() == 0)
 	{
-		// TODO: konami/viper.cpp still don't work right here
-		// it seems to expect relative offsets in every game,
-		// where the base addresses are actually set with negative numbers
-		// (i.e. 0xff0000, 0xffc000, 0xfff000 ...)
-		base = (regs.texture_baseaddr_1() & addrmask) << addrshift;
+		// Banshee and later still add the sizes of the LODs this TMU holds below
+		// each base, as in single-base mode, and Glide programs every base minus
+		// those sizes.  Konami Viper points unused LODs at address 0 that way,
+		// giving "negative" bases like 0xff0000 (256x256 8bpp LOD 0 below LOD 2).
+		u32 below[4] = { 0, 0, 0, 0 };
+		if (addrshift == 0)
+			for (int lod = 0; lod < 3; lod++)
+				below[lod + 1] = below[lod] + ((m_lodmask & (1 << lod)) ? ((((m_wmask >> lod) + 1) * ((m_hmask >> lod) + 1)) << bppscale) : 0);
+		base = ((regs.texture_baseaddr_1() & addrmask) << addrshift) + below[1];
 		m_lodoffset[1] = base & mask;
-		base = (regs.texture_baseaddr_2() & addrmask) << addrshift;
+		base = ((regs.texture_baseaddr_2() & addrmask) << addrshift) + below[2];
 		m_lodoffset[2] = base & mask;
-		base = (regs.texture_baseaddr_3_8() & addrmask) << addrshift;
+		base = ((regs.texture_baseaddr_3_8() & addrmask) << addrshift) + below[3];
 		m_lodoffset[3] = base & mask;
 	}
 	else
