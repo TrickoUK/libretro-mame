@@ -146,11 +146,33 @@ the Steering Response curve can't help. Candidate cause: the x64 DRC entry re-sy
 `m_state.fmod`, so a later SETFMOD can be skipped and float code runs in the wrong rounding
 mode. Upstream's one-line fix (`0e3c9c6cd14`) is backported. Not yet confirmed in gameplay.
 
-Save states hang on load (the game idles at 0x45e1c-0x45ebc, its RTOS idle loop). Fixed so far:
-`m_epic.pctpr` was not saved (it stayed at the reset value 0xf, which blocks every IRQ), nor were
-`m_i2c.addr_latch`/`rw`, and the PPC DRC now flushes its code cache in `device_post_load()`.
-After these, IRQs 0/3/16/20 are delivered after a load, but the game still idles, so some other
-state the tasks wait on is still not restored. Not solved yet.
+Rolling, ruled out so far (2026-09-24). Symptom: at ~150 km/h on a straight, the slightest right
+input throws the car into a roll to the left, as if taking an extreme corner.
+- Input path: see above. The game's steering value is small for small inputs.
+- x64 DRC back-end: still rolls with `-drc_use_c` (C back-end), so it's not x64 code generation.
+  The rounding-mode backport (`da0e7a6c62a`) didn't change it either.
+- Lazy-FPU exception (upstream `696900611dc`): gticlub2's 0x800 vector branches to a ROM halt
+  loop (`0xfff00c04`...`b 0xfff00c40`), and the game never takes it. Not ported.
+- Frame pacing: the game issues an immediate swap (`swapbufferCMD` data 0) at scanline 395 every
+  2 vblanks, always, and stays at 30 fps with the CPU overclocked 200%, so 30 fps is by design, not
+  CPU-bound. Voodoo status polling is ~1 read/s, so `set_status_cycles(1000)` doesn't matter.
+- `fsel`, `fmadds`/`fmsubs`/`fnmadds`/`fnmsubs` (accurate-singles path), `fres`/`frsqrte`: the UML
+  translation matches 603e semantics (the recip/rsqrt ops are exact in both back-ends).
+
+Save states (fixed 2026-09-24). Loading a state used to hang: the game sat in its RTOS idle loop
+(0x45e1c-0x45ebc) forever. Found by counting interrupts per second in a normal run vs a loaded
+run: after a load IRQ1 (LANC), IRQ4 (Voodoo user interrupt, once per frame), IRQ16 (I2C ADC
+burst) and buffer swaps were all missing. Four pieces of state were not being saved:
+- `m_epic.pctpr` (viper.cpp): stayed at the reset value 0xf, which blocks every IRQ.
+- `m_i2c.addr_latch` / `m_i2c.rw` (viper.cpp).
+- `k056230_viper_device` `m_irq_enable` / `m_control` / `m_unk`: with IRQ enable false after a
+  load, the LANC interrupt the main loop waits on is never re-asserted.
+- `voodoo_banshee_device::m_lfb_base`: derived from lfbMemoryConfig but not saved. After a load
+  it was 0, so every LFB write took the direct-framebuffer path and the CMDFIFO (fed through the
+  LFB aperture) never received the next frame, so no user interrupt and no swap.
+Also the PPC DRC now flushes its code cache in `device_post_load()`. Verified: a state saved mid
+race loads in a new session and the race continues (timer, speed, checkpoints), with IRQ and swap
+rates matching normal play. States saved on older builds are not compatible.
 
 Lua gotchas: an I2C tap on this 64-bit bus aborts the core ("integer value will be
 misrepresented in lua", the byte-lane mask has bit 63 set). `ioport_field:set_value()` on an

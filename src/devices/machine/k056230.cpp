@@ -131,6 +131,15 @@ k056230_viper_device::k056230_viper_device(const machine_config &mconfig, const 
 {
 }
 
+void k056230_viper_device::device_start()
+{
+	k056230_device::device_start();
+
+	save_item(NAME(m_control));
+	save_item(NAME(m_irq_enable));
+	save_item(NAME(m_unk));
+}
+
 void k056230_viper_device::device_reset()
 {
 	k056230_device::device_reset();

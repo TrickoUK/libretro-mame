@@ -48,6 +48,7 @@ public:
 	virtual void regs_map(address_map &map) override ATTR_COLD;
 
 protected:
+	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
 
 private:

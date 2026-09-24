@@ -502,6 +502,7 @@ void voodoo_banshee_device::register_save(save_proxy &save, u32 total_allocation
 	voodoo_2_device::register_save(save, total_allocation);
 
 	// Voodoo Banshee stuff
+	save.save_item(NAME(m_lfb_base));
 	save.save_class(NAME(m_cmdfifo2));
 	save.save_class(NAME(m_io_regs));
 	save.save_class(NAME(m_cmd_agp_regs));
