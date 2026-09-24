@@ -510,6 +510,15 @@ static void Set_Default_Option(void)
    Add_Option("-joystick_threshold");
    Add_Option(joystick_threshold);
 
+   // debug aid: start an extra Lua plugin by name, e.g. the replay plugin in
+   // fork-specific/tools/replay-plugin (-autoboot_script can't be used here: it runs
+   // from a machine timer, which an entry save state load discards)
+   if (const char *plugin = getenv("MAME_EXTRA_PLUGIN"))
+   {
+      Add_Option("-plugin");
+      Add_Option(plugin);
+   }
+
    if (mame_4way_enable)
    {
       Add_Option("-joystick_map");

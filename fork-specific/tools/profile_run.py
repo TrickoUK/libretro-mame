@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Usage: profile_run.py <romset> <tag> [--warmup S] [--duration S] [--shot-every S] [--state FILE] [--cg]
-#                       [--no-perf] [--core PATH] [--lua T:CMD ...]
+#                       [--no-perf] [--core PATH] [--lua T:CMD ...] [--env K=V ...]
 # Generic version of m2_profile_run.py: boots <romset> (optionally from a save state) under a pty with the
 # Lua console enabled, waits --warmup seconds, then attaches perf for --duration seconds while polling
 # speed_percent and taking core-framebuffer screenshots (UDP SCREENSHOT) every --shot-every seconds.
@@ -16,6 +16,8 @@ ap.add_argument("--state"); ap.add_argument("--cg", action="store_true")
 ap.add_argument("--no-perf", action="store_true")
 ap.add_argument("--lua", action="append", default=[], metavar="T:CMD",
                 help="send Lua console command CMD at T seconds after launch (repeatable)")
+ap.add_argument("--env", action="append", default=[], metavar="K=V",
+                help="set an environment variable for RetroArch, e.g. MAME_REPLAY_SCRIPT=/path/x.lua (repeatable)")
 ap.add_argument("--core", default="/var/home/bazzite/Projects/libretro/mame/mame_libretro.so")
 a = ap.parse_args()
 
@@ -48,7 +50,7 @@ open(cfg, "w").write(f'video_vsync = "false"\nnetwork_cmd_enable = "true"\nscree
                      'auto_screenshot_filename = "true"\n')
 
 log = open(os.path.join(OUT, "ra.log"), "wb")
-args = ["distrobox", "enter", "mame-dev", "--", "retroarch", "-v"] + (["-e", "0"] if a.state else []) + \
+args = ["distrobox", "enter", "mame-dev", "--", "env"] + a.env + ["retroarch", "-v"] + (["-e", "0"] if a.state else []) + \
        ["--appendconfig", cfg, "-L", a.core, ROM]
 pid, fd = pty.fork()
 if pid == 0:

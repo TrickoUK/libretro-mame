@@ -1,0 +1,10 @@
+{
+	"plugin": {
+		"name": "replay",
+		"description": "Runs the Lua file named by MAME_REPLAY_SCRIPT at machine start (fork debug aid)",
+		"version": "0.1",
+		"author": "libretro-mame fork",
+		"type": "plugin",
+		"start": "false"
+	}
+}

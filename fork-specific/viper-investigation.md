@@ -201,3 +201,22 @@ cartfury and pumpitup are missing files in the local ROM collection, so they're 
 - Main thread is now ~52% JIT guest code, ~10% memory handlers (`handler_entry_read_memory`),
   ~10% Voodoo setup. The Voodoo rasterizer already runs on 3 worker threads (~26% each).
 - `voodoo_1_device::update_common` + software render compositing: ~3%.
+
+## Frame-exact replays from a save state (2026-09-24)
+
+`tools/replay_inputs.py` writes a Lua script that, from the first frame after a state load,
+holds the gas, applies steering taps on chosen frames and dumps memory per frame (and whole
+work RAM on chosen frames). `tools/replay-plugin/` is a MAME plugin that runs that script at
+machine start: copy it to `<retroarch system>/mame/plugins/replay`, then
+`profile_run.py gticlub2 TAG --state S --env MAME_EXTRA_PLUGIN=replay --env MAME_REPLAY_SCRIPT=X.lua`.
+The core starts extra plugins from the `MAME_EXTRA_PLUGIN` environment variable
+(`retro_init.cpp`). `-autoboot_script` can't be used: it runs from a machine timer, which the
+entry state load discards. Two identical replays match byte for byte over 180 frames.
+
+Rolling repro (user state at ~113 km/h, 1'12" into a race): a 6-frame full-right tap (0xff) rolls
+the car past 50 degrees in 40 frames. Player physics body at 0x7f5ed0..0x7f5f24: x/z position
+(0x7f5ed0/d4), heading (0x7f5edc, copies at +0x10/+0x20/+0x48), yaw rate (0x7f5ee0/0x7f5f0c), front
+steer angle (0x7f5f08, full lock 0.524 rad, ramps over 3 game frames), roll-related angles
+(0x7f5f18/1c), forward speed m/s (0x7f5f20). Render copy of position/orientation at 0x801440. Peak
+yaw rate 0.033 rad per game frame (~1 rad/s) at 32 m/s means ~3.3 g lateral, so the tyre side force
+looks uncapped, and the roll keeps growing after the wheels straighten.
