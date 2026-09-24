@@ -220,3 +220,21 @@ steer angle (0x7f5f08, full lock 0.524 rad, ramps over 3 game frames), roll-rela
 (0x7f5f18/1c), forward speed m/s (0x7f5f20). Render copy of position/orientation at 0x801440. Peak
 yaw rate 0.033 rad per game frame (~1 rad/s) at 32 m/s means ~3.3 g lateral, so the tyre side force
 looks uncapped, and the roll keeps growing after the wheels straighten.
+
+Cause of the rolling (2026-09-24): not an emulation bug. The physics code (~0x976d8) puts the car
+on two wheels when speed > K[0x04] = 16.667 m/s (60 km/h) and the front-wheel angle > K[0x0c] =
+0.34907 rad (20 degrees), K = *(r2+0x81c) = 0x102cc0, r2 = 0x154da8. Replays match it exactly:
+0.347 rad never tilts, 0.388 rad always does. Full lock is 30 degrees, so it takes ~2/3 lock (raw
+~0xd4 with the stored calibration). Nothing CPU-side changed the result (accurate singles, 100 MHz
+bus/time base, saturating fctiwz, the rounding backport, C back-end). A stick reaches that easily,
+and the game swings the wheels to the commanded angle within 3 game frames, which a real wheel
+can't do. Other notes: car object at *(r2+0x488) = 0x8c1d28 (+0x6c steer angle, +0xcc speed,
++0x350 tilt state, +0x358/+0x35c tilt angles); per-frame info copy at *(r2+0x54) = 0x7f5eb8,
+filled by 0xaf8b4; main loop 0x8ebe4; maths library at 0x12500 (rsqrt = frsqrte + 3 Newton steps,
+sin/cos polynomials, atan2).
+
+Mitigation: "Steering Smoothing" Machine Configuration setting (Off (arcade) default / Light /
+Medium / Heavy = 0.25/0.5/1 s lock to lock, in emulated time, applied after Steering Response in
+`apply_steering_smoothing()`, not saved in save states). Replay at 113 km/h with Medium: a 6-frame
+full-lock flick peaks at 0.142 rad and no longer tilts; a 30-frame 75% hold still tilts, as it
+would on a cabinet.

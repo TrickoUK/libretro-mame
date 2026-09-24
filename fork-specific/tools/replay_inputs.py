@@ -18,6 +18,8 @@ ap.add_argument("--tap", action="append", default=[], metavar="START:LEN:VALUE")
 ap.add_argument("--dump")
 ap.add_argument("--dump-range", default="0x560000:0x56ffff")
 ap.add_argument("--frames", type=int, default=240)
+ap.add_argument("--steering-response", type=int, help="gticlub2 Steering Response config value (0 = linear)")
+ap.add_argument("--steering-smoothing", type=lambda x: int(x, 0), help="gticlub2 Steering Smoothing config value (0, 4, 8 or 0xc)")
 ap.add_argument("--full-dump", help="prefix for whole-work-RAM snapshots (PREFIX_<frame>.bin)")
 ap.add_argument("--full-dump-frames", default="", help="comma-separated frame numbers for --full-dump")
 a = ap.parse_args()
@@ -36,6 +38,8 @@ local space = manager.machine.devices[':maincpu'].spaces['program']
 local taps = {{ {", ".join(taps)} }}
 local dumpfile = {f"io.open('{a.dump}', 'wb')" if a.dump else "nil"}
 local frame = -1
+{f"ports[':STEERING'].fields['Steering Response'].user_value = {a.steering_response}" if a.steering_response is not None else ""}
+{f"ports[':STEERING'].fields['Steering Smoothing'].user_value = {a.steering_smoothing}" if a.steering_smoothing is not None else ""}
 local full_prefix = {repr(a.full_dump) if a.full_dump else "nil"}
 local full_frames = {{ {", ".join(f"[{int(x)}]=true" for x in a.full_dump_frames.split(",") if x)} }}
 replay_sub = emu.add_machine_frame_notifier(function()
