@@ -23,9 +23,10 @@ Run the tools one at a time: each one force-kills RetroArch when it finishes.
   (flat, or a DWARF call graph with `cg`), polls `speed_percent` through the Lua
   console, records CPU per thread, then kills RetroArch and restores `MAME.opt`.
 - `profile_run.py <romset> <tag> [--warmup S] [--duration S] [--shot-every S] [--state F] [--cg]
-  [--no-perf] [--core PATH]`: a generic version of `m2_profile_run.py` for any romset. It boots
+  [--no-perf] [--core PATH] [--lua T:CMD ...]`: a generic version of `m2_profile_run.py` for any romset. It boots
   cold (or from a state), then records perf, speed_percent, per-thread CPU and periodic
-  core-framebuffer screenshots (UDP `SCREENSHOT`, into `<tag>/shots/`).
+  core-framebuffer screenshots (UDP `SCREENSHOT`, into `<tag>/shots/`). `--lua` sends a
+  Lua console command at T seconds after launch, e.g. to insert coins and press start.
 - `smoke.py <seconds> <romset>...`: boots each romset, checks it's still
   running, takes a screenshot and logs any errors.
 - `fbcheck.sh <tag>` / `fbcompare.sh <ref-tag> <tag>`: the bit-exact

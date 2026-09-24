@@ -66,6 +66,34 @@ Voodoo 2 multibase path is unchanged.
 Fixes 2 and 3 were needed together. With only fix 2, corruption remained on the env-mapped
 surfaces (car windows, chrome car), and fix 3 cleared it.
 
+## Fix 4: 2D screen-to-screen blit (jpark3 damage overlay)
+
+Found via `jpark3`: when a dinosaur hits the player, a full-screen overlay was drawn as
+rainbow noise. jpark3 grabs the rendered frame into textures with the 2D engine's
+screen-to-screen blit: the command is `0xCC000801` (SRCCOPY). The source is the tiled colour
+buffer (`srcBaseAddr` bit 31, stride 8 tiles). The destination is linear 16bpp textures at
+0x4100/0x24100 (256 rows each) and 0x44100/0x54100 (128 rows each). It does one launch per
+row: the launch data is the source X/Y, `dstSize` is 256x1, and `dstXY` is never rewritten.
+That's ~200k launches in a couple of minutes. MAME's screen-to-screen blit was a `// TODO`
+no-op, so the textures kept stale garbage.
+
+Implemented in `voodoo_banshee.cpp` `execute_blit()` case 1: copy the `dstSize` rectangle
+from the launch source X/Y to the current destination, then advance the destination Y by the
+height. A tiled surface's stride is in 128-byte tiles; the 3D engine renders it linearly with
+that row pitch, so it's addressed the same way. Only ROP 0xCC between surfaces of the same
+depth is handled; anything else is logged. After the fix, spit-damage frames render cleanly.
+carnking (Voodoo 3) is unchanged. gticlub2 never issues screen-to-screen blits.
+
+Also: unlike gticlub2 (CMDFIFO packet 5), jpark3 uploads its textures with 2D host-to-screen
+blits (cmd 3, srcFormat 0x0041xxxx 8bpp and 0x0073xxxx 16bpp with host byte/word swizzle).
+These already render correctly, but MAME's host blit ignores the srcFormat swizzle bits and
+hard-codes the byte order. Worth remembering if another Viper game shows swapped texels.
+
+Repro with no gun needed: `profile_run.py jpark3 <tag> --warmup 60 --duration 120
+--shot-every 2 --lua "70:manager.machine.ioport.ports[':IN3'].fields['Coin 1']:set_value(1)"
+...` Send the coin twice and `1 Player Start` once, 0.5s set/clear apart. If nobody shoots,
+the Dilophosaurus in Area 1 Stage 1 spits within ~90s of the game starting.
+
 ## Checked and ruled out
 
 - Texture download apertures (`map_texture_w`, which is a logerror stub on Banshee) and the 2D

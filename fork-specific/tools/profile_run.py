@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Usage: profile_run.py <romset> <tag> [--warmup S] [--duration S] [--shot-every S] [--state FILE] [--cg]
-#                       [--no-perf] [--core PATH]
+#                       [--no-perf] [--core PATH] [--lua T:CMD ...]
 # Generic version of m2_profile_run.py: boots <romset> (optionally from a save state) under a pty with the
 # Lua console enabled, waits --warmup seconds, then attaches perf for --duration seconds while polling
 # speed_percent and taking core-framebuffer screenshots (UDP SCREENSHOT) every --shot-every seconds.
@@ -14,6 +14,8 @@ ap.add_argument("--duration", type=int, default=60)
 ap.add_argument("--shot-every", type=int, default=5)
 ap.add_argument("--state"); ap.add_argument("--cg", action="store_true")
 ap.add_argument("--no-perf", action="store_true")
+ap.add_argument("--lua", action="append", default=[], metavar="T:CMD",
+                help="send Lua console command CMD at T seconds after launch (repeatable)")
 ap.add_argument("--core", default="/var/home/bazzite/Projects/libretro/mame/mame_libretro.so")
 a = ap.parse_args()
 
@@ -53,10 +55,14 @@ if pid == 0:
     os.execvp(args[0], args)
 
 buf = b""
+t_launch = time.time()
+lua_sched = sorted((float(x.split(":", 1)[0]), x.split(":", 1)[1]) for x in a.lua)
 def pump(t):
     global buf
     end = time.time() + t
     while time.time() < end:
+        while lua_sched and time.time() - t_launch >= lua_sched[0][0]:
+            os.write(fd, (lua_sched.pop(0)[1] + "\n").encode())
         r, _, _ = select.select([fd], [], [], 0.1)
         if r:
             try: d = os.read(fd, 65536)
