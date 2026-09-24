@@ -2,7 +2,7 @@
 
 Investigation notes and tools for this fork's own work (not upstream MAME).
 The directory is gitignored (blanket `/*/` rule), so new files need `git add -f`
-to be tracked; `m2-fix-investigation.md` is tracked.
+to be tracked.
 
 ## Documents
 
@@ -10,8 +10,16 @@ to be tracked; `m2-fix-investigation.md` is tracked.
   performance investigation, covering every session's findings, measurements
   and what was tried and reverted.
 
-- `viper-investigation.md`: Konami Viper (`viper.cpp`, gticlub2). Covers the PPC DRC recompile
-  storm, the Voodoo 3 TMU1/multibase texture fixes and the I2C analog-control fix.
+- `viper-investigation.md`: Konami Viper (`viper.cpp`, gticlub2/thrild2/jpark3). Covers the PPC
+  DRC recompile storm, the Voodoo 3 TMU1/multibase texture and blit fixes, the I2C analog
+  controls, save states, why gticlub2 cars roll at speed (a game rule) and the optional gamepad
+  Steering Response/Smoothing settings, plus game RAM notes.
+
+- `voodoo-gpu-idea.md`: feasibility notes for GPU-offloaded 3dfx Voodoo rendering (not started).
+
+- `potential-upstream-sync.md`: upstream MAME commits since mame0289 that would help this fork
+  (PPC 603 TLB/vTLB, DRC rounding, PS1 SPU overhaul, System 22/Zeus/Model 3 fixes), whether
+  each applies cleanly, and where they conflict with our changes. Nothing has been pulled yet.
 
 ## Tools (`tools/`)
 
@@ -23,10 +31,17 @@ Run the tools one at a time: each one force-kills RetroArch when it finishes.
   (flat, or a DWARF call graph with `cg`), polls `speed_percent` through the Lua
   console, records CPU per thread, then kills RetroArch and restores `MAME.opt`.
 - `profile_run.py <romset> <tag> [--warmup S] [--duration S] [--shot-every S] [--state F] [--cg]
-  [--no-perf] [--core PATH] [--lua T:CMD ...]`: a generic version of `m2_profile_run.py` for any romset. It boots
-  cold (or from a state), then records perf, speed_percent, per-thread CPU and periodic
-  core-framebuffer screenshots (UDP `SCREENSHOT`, into `<tag>/shots/`). `--lua` sends a
-  Lua console command at T seconds after launch, e.g. to insert coins and press start.
+  [--no-perf] [--core PATH] [--lua T:CMD ...] [--env K=V ...]`: a generic version of `m2_profile_run.py`
+  for any romset. It boots cold (or from a state), then records perf, speed_percent, per-thread
+  CPU and periodic core-framebuffer screenshots (UDP `SCREENSHOT`, into `<tag>/shots/`). `--lua`
+  sends a Lua console command at T seconds after launch, e.g. to insert coins and press start.
+  `--env` sets an environment variable for RetroArch (used by the replay plugin below).
+- `replay_inputs.py OUT.lua [--tap START:LEN:VALUE ...] [--dump F --dump-range LO:HI]
+  [--full-dump PREFIX --full-dump-frames N,...] [--steering-response N] [--steering-smoothing N]`
+  and `replay-plugin/`: frame-exact input replays from a save state (gticlub2 port names), with
+  per-frame memory dumps. Copy `replay-plugin/` to `<retroarch system>/mame/plugins/replay` and run
+  `profile_run.py ... --state S --env MAME_EXTRA_PLUGIN=replay --env MAME_REPLAY_SCRIPT=OUT.lua`.
+  See `viper-investigation.md`.
 - `smoke.py <seconds> <romset>...`: boots each romset, checks it's still
   running, takes a screenshot and logs any errors.
 - `fbcheck.sh <tag>` / `fbcompare.sh <ref-tag> <tag>`: the bit-exact

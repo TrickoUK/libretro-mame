@@ -19,6 +19,10 @@ core-framebuffer screenshots over UDP). gticlub2 needs ~50s from boot to reach 3
 | `speed_percent` minimum over 60s | 0.72 | 0.99 |
 | texture corruption | widespread | none seen in attract mode |
 
+Later the same day: analog controls (Fix 5), Thrill Drive 2 steering (Fix 6), save states (Fix 7),
+a traced-down explanation of cars rolling at speed (a game rule, not an emulation bug) and
+optional gamepad steering settings to live with it.
+
 ## Fix 1: PPC DRC recompile storm (performance)
 
 `ppcdrc.cpp` `generate_sequence_instruction()`: code compiled while its page's vtlb entry was
@@ -114,8 +118,8 @@ CHECK's ADC field shows that value * 128.25. Found by logging PC/LR at the I2C d
 MAME's stub returned `port >> 8` for 0x10-0x13. gticlub2's ports are 8-bit, so that was the
 base `viper` port's unused active-low high byte (always 0xff). Fix: channels whose port only
 uses bits 0-7 (detected from the fields at machine_start) now scale the 8-bit value to 9 bits
-and answer in the split-half format. Channels with wider ports (thrild2's 12-bit steering) keep
-the old path. The PORT_REVERSE flags on the pedals, handbrake and K-type wheel were backwards
+and answer in the split-half format. Channels with wider ports (thrild2's 12-bit steering at the time,
+see Fix 6) keep the old path. The PORT_REVERSE flags on the pedals, handbrake and K-type wheel were backwards
 (verified in I/O CHECK: raw 0xff is full RIGHT / pedal MAX), so they are removed.
 
 Result: I/O CHECK shows centre/MIN at rest and full LEFT/RIGHT and MIN/MAX at the extremes, and
@@ -124,55 +128,142 @@ calibration used here; the test menu's CALIBRATION page adjusts that. Smoke-boot
 thrild2 and jpark3, with no errors. thrild2's pedals now go through the same path; its gameplay
 is untested.
 
-Follow-up (2026-09-24): thrild2's steering was still pinned full right. Its I/O CHECK showed
-ADC FC7E at rest: the game uses the same 9-bit split-half format, but its AN0 was a 12-bit port
-so it took the old path. AN0 is now the same 8-bit wheel as gticlub2, defined once in the
-thrild2 ports and inherited by gticlub2, so no Viper driving game uses the wide path any more.
-Measured in thrild2 I/O CHECK: raw 0xa0 = +28%, 0xe0 = +83%, and the stored calibration hits full
-lock at about raw 0x80 +/- 0x74. The inner `+` markers on the bar are at about +/-72%.
+## Fix 6: Thrill Drive 2 steering pinned full right
 
-Steering felt too twitchy on a stick. MAME's analog sensitivity setting does nothing for absolute
-axes (`apply_inverse_sensitivity` and then `apply_sensitivity` cancel), so lowering it can't help.
-Added a "Steering Response" Machine Configuration setting (Linear (arcade) default / Mild x^1.5 /
-Squared / Cubic) applied to channel 0 in `apply_steering_response()`. Full lock is still reached at
-full stick. It saves to the game's MAME cfg (`saves/MAME/mame/cfg/<game>.cfg`). Verified at raw
-0xc0 in gticlub2 I/O CHECK: the bar marker moves +382 px linear, +191 squared, +77 cubic.
+thrild2's accelerator and brake worked after Fix 5, but its steering sat at full right lock. Its
+I/O CHECK showed ADC FC7E at rest. The game reads the wheel in the same 9-bit split-half format as
+gticlub2, but thrild2's AN0 was defined as a 12-bit port (`PORT_MINMAX(0x800,0x7ff)`), so it took
+the old path. AN0 is now the same 8-bit wheel as gticlub2, defined once in the thrild2 ports and
+inherited by gticlub2, so no Viper driving game uses the wide path any more. Measured in thrild2's
+I/O CHECK: raw 0xa0 = +28%, 0xe0 = +83%, and the stored calibration reaches full lock at about raw
+0x80 +/- 0x74. The inner `+` markers on the bar are at about +/-72%.
 
-Follow-up 2 (2026-09-24): cars roll far too easily at speed. The user confirmed against arcade
-footage (wheel turned >90 degrees each way, no rolls) that this is an emulation bug, not the
-game's handling. Stationary RAM reads show the input side is fine: the game's steering value
-(0x5677ac) is symmetric and progressive (raw 0x90 = 3.5%, 0xa0 = 20%, 0xc0 = 61% of lock), so
-the Steering Response curve can't help. Candidate cause: the x64 DRC entry re-syncs MXCSR but not
-`m_state.fmod`, so a later SETFMOD can be skipped and float code runs in the wrong rounding
-mode. Upstream's one-line fix (`0e3c9c6cd14`) is backported. Not yet confirmed in gameplay.
+## Fix 7: save states hung on load
 
-Rolling, ruled out so far (2026-09-24). Symptom: at ~150 km/h on a straight, the slightest right
-input throws the car into a roll to the left, as if taking an extreme corner.
-- Input path: see above. The game's steering value is small for small inputs.
-- x64 DRC back-end: still rolls with `-drc_use_c` (C back-end), so it's not x64 code generation.
-  The rounding-mode backport (`da0e7a6c62a`) didn't change it either.
-- Lazy-FPU exception (upstream `696900611dc`): gticlub2's 0x800 vector branches to a ROM halt
-  loop (`0xfff00c04`...`b 0xfff00c40`), and the game never takes it. Not ported.
-- Frame pacing: the game issues an immediate swap (`swapbufferCMD` data 0) at scanline 395 every
-  2 vblanks, always, and stays at 30 fps with the CPU overclocked 200%, so 30 fps is by design, not
-  CPU-bound. Voodoo status polling is ~1 read/s, so `set_status_cycles(1000)` doesn't matter.
-- `fsel`, `fmadds`/`fmsubs`/`fnmadds`/`fnmsubs` (accurate-singles path), `fres`/`frsqrte`: the UML
-  translation matches 603e semantics (the recip/rsqrt ops are exact in both back-ends).
+Loading any gticlub2 state (on this PC or the Batocera box) froze the game: the picture stayed
+still while the CPU sat in the game's RTOS idle loop (0x45e1c-0x45ebc). Found by counting
+interrupts per emulated second in a normal race and in a loaded one:
 
-Save states (fixed 2026-09-24). Loading a state used to hang: the game sat in its RTOS idle loop
-(0x45e1c-0x45ebc) forever. Found by counting interrupts per second in a normal run vs a loaded
-run: after a load IRQ1 (LANC), IRQ4 (Voodoo user interrupt, once per frame), IRQ16 (I2C ADC
-burst) and buffer swaps were all missing. Four pieces of state were not being saved:
-- `m_epic.pctpr` (viper.cpp): stayed at the reset value 0xf, which blocks every IRQ.
+| | normal | after load (before the fixes) |
+|---|---|---|
+| IRQ0 vblank | 58 | 58 |
+| IRQ1 LANC | 61 | missing |
+| IRQ3 sound | 173 | 173 |
+| IRQ4 Voodoo user interrupt (one per frame) | 29 | missing |
+| IRQ16 I2C (ADC bursts) | 290 | missing |
+| IRQ20 global timer 0 | 61 | 61 |
+| Voodoo buffer swaps | 30 | none |
+
+Four pieces of state weren't in the save state:
+- `m_epic.pctpr` (viper.cpp): stayed at its reset value 0xf, which blocks every EPIC interrupt.
 - `m_i2c.addr_latch` / `m_i2c.rw` (viper.cpp).
-- `k056230_viper_device` `m_irq_enable` / `m_control` / `m_unk`: with IRQ enable false after a
-  load, the LANC interrupt the main loop waits on is never re-asserted.
-- `voodoo_banshee_device::m_lfb_base`: derived from lfbMemoryConfig but not saved. After a load
-  it was 0, so every LFB write took the direct-framebuffer path and the CMDFIFO (fed through the
-  LFB aperture) never received the next frame, so no user interrupt and no swap.
-Also the PPC DRC now flushes its code cache in `device_post_load()`. Verified: a state saved mid
-race loads in a new session and the race continues (timer, speed, checkpoints), with IRQ and swap
-rates matching normal play. States saved on older builds are not compatible.
+- `k056230_viper_device` `m_irq_enable` / `m_control` / `m_unk`: with the IRQ enable back at
+  false, the LANC interrupt the game's main loop waits on was never re-asserted.
+- `voodoo_banshee_device::m_lfb_base`: derived from `lfbMemoryConfig` but not saved. After a load
+  it was 0, so every LFB write took the direct-framebuffer path, the CMDFIFO (fed through the LFB
+  aperture) never received the next frame, and so no user interrupt and no swap.
+
+The PPC DRC also now flushes its code cache in `device_post_load()`, because a load rewrites RAM
+without going through the write tracking that invalidates compiled blocks. Verified: a state saved
+mid-race loads in a fresh session and the race carries on (timer, speed, checkpoints), with
+interrupt and swap rates matching normal play. States saved by earlier builds aren't compatible.
+Along the way the lazy-FPU exception (upstream `696900611dc`) was checked and isn't needed:
+gticlub2's 0x800 vector branches to a ROM halt loop (`0xfff00c04` ... `b 0xfff00c40`), and the
+game never takes it.
+
+## gticlub2 cars rolling: a game rule, not an emulation bug
+
+Symptom: at ~110-150 km/h on a straight, a small-feeling flick of the stick put the car up on two
+wheels or rolled it, far more easily than in arcade footage (where a real wheel is turned past
+half lock at speed without rolling). The user's save state at ~113 km/h reproduced it every time
+with a 6-frame full-lock tap.
+
+Cause: the physics code (~0x976d8) puts the car on two wheels when speed > `K[0x04]` = 16.667 m/s
+(60 km/h) and the front-wheel angle > `K[0x0c]` = 0.34907 rad (20 degrees). `K` = `*(r2+0x81c)` =
+0x102cc0, with `r2` = 0x154da8. Frame-exact replays match it exactly: holding 0.347 rad never tilts
+and 0.388 rad always does. Full lock is 0.524 rad (30 degrees), so it takes about two-thirds lock.
+
+| wheel input (raw, linear response) | front-wheel angle | tilt at 113 km/h |
+|---|---|---|
+| 0x90 | 0.020 rad | no |
+| 0xa0 | 0.102 rad | no |
+| 0xc0 | 0.265 rad (15 deg) | no |
+| 0xd0 | 0.347 rad (20 deg) | no |
+| 0xd8 | 0.388 rad (22 deg) | yes |
+| 0xe0 | 0.429 rad (25 deg) | yes |
+
+So "past half lock without rolling" in the arcade fits the same rule. The difference is the input
+device: a thumbstick reaches 2/3 of its travel in a frame or two where a heavy force-feedback wheel
+can't, and the game swings the front wheels to the commanded angle within 3 game frames.
+
+Ruled out on the way (none changed the replay results at all):
+- x64 code generation: still rolls with `-drc_use_c` (the portable C back-end).
+- DRC rounding mode: upstream's `drcbex64` fix (`0e3c9c6cd14`, re-sync `m_state.fmod` on entry)
+  is backported as `da0e7a6c62a`, since it's a real bug, but it didn't change this.
+- `PPCDRC_ACCURATE_SINGLES` off, a 100 MHz bus (the time base and decrementer run at bus/4, so
+  MAME's 67.7 MHz bus makes them ~1.5x slow; the physics doesn't use them), and a saturating
+  `fctiwz` (x86 gives 0x80000000 for any overflow, PPC saturates to 0x7fffffff).
+- Frame pacing: the game swaps immediately (`swapbufferCMD` data 0) at scanline 395 every 2
+  vblanks, and stays at 30 fps with the CPU overclocked 200%, so 30 fps is by design. Voodoo status
+  polling is ~1 read/s, so `set_status_cycles(1000)` doesn't matter.
+- `fsel`, the `fmadds`/`fmsubs`/`fnmadds`/`fnmsubs` family, `fres`/`frsqrte`: the UML translation
+  matches 603e semantics.
+
+Game RAM notes (gticlub2, JAB):
+- Player car object at `*(r2+0x488)` = 0x8c1d28: +0x6c front-wheel angle, +0xcc speed (m/s),
+  +0x174/+0x178 x/z, +0x1b0/+0x1b4/+0x1b8 heading angles (+0x1b4/+0x1b8 are smoothed, probably for
+  the camera), +0x350 tilt state (0 or +/-1), +0x358/+0x35c tilt angles, +0x364 tilt rate.
+- Per-frame info copy at `*(r2+0x54)` = 0x7f5eb8, filled by 0xaf8b4 from the car object (for
+  camera/sound). Earlier notes called 0x7f5ed0.. a "physics body"; it's this copy.
+- Render position/orientation at 0x801440 (and three more copies).
+- Main per-frame loop 0x8ebe4. Front-wheel angle computed in 0x946f8 (a wrapped angle difference).
+- Maths library at 0x12500: rsqrt = `frsqrte` + 3 Newton steps (constants 0.5/1.5 at 0x708/0x70c),
+  cos 0x12648 and sin 0x12618 (polynomials), tan 0x12694, atan2 0x126e4, fabs 0x58838.
+
+## Gamepad steering settings (not arcade behaviour)
+
+Both live in MAME's Machine Configuration menu for the Viper driving games, take effect
+immediately and are saved in the game's MAME cfg (`saves/MAME/mame/cfg/<game>.cfg`). Both default
+to the arcade behaviour.
+
+- **Steering Response** (`apply_steering_response()`): Linear (arcade) / Mild (x^1.5) / Squared /
+  Cubic. Shrinks small deflections and still reaches full lock at full stick. MAME's per-input
+  analog sensitivity can't do this: for absolute axes `apply_inverse_sensitivity` and
+  `apply_sensitivity` cancel out. The game already has its own progressive curve and dead zone.
+- **Steering Smoothing** (`apply_steering_smoothing()`): Off (arcade) / Light 0.25 s / Medium
+  0.5 s / Medium+ 0.625 s / Firm 0.75 s / Firm+ 0.875 s / Heavy 1 s, the lock-to-lock time of a
+  rate limit on the steering position, in emulated time, applied after Steering Response. It isn't
+  saved in save states, so after a load it restarts from the current input. This is the fix for
+  the rolling above. Replayed at 113 km/h: a 6-frame full-lock flick peaks at 0.524 rad with it
+  off, 0.142 rad on Medium and 0.073 rad on Firm (no tilt either way), and a sustained 75% input
+  still reaches 0.429 rad and tilts, as it would on a cabinet.
+
+Played on a gamepad (2026-09-24), Medium still popped up too easily and Heavy made extreme
+corners hard; Firm (0.75 s) with Squared response felt right. The 3-bit field replaced an earlier
+2-bit one, so a smoothing value saved before that falls back to Off.
+
+## Frame-exact replays from a save state
+
+`tools/replay_inputs.py` writes a Lua script that, from the first frame after a state load, holds
+the gas, applies steering taps on chosen frames, can set Steering Response/Smoothing, and dumps
+memory every frame (plus whole work RAM on chosen frames). `tools/replay-plugin/` is a MAME plugin
+that runs that script at machine start. Copy it to `<retroarch system>/mame/plugins/replay`, then:
+
+```
+replay_inputs.py X.lua --dump D.bin --dump-range 0x8c1d28:0x8c2327 --tap 2:6:0xff --frames 150
+profile_run.py gticlub2 TAG --state S --env MAME_EXTRA_PLUGIN=replay --env MAME_REPLAY_SCRIPT=X.lua
+```
+
+The core starts extra plugins from the `MAME_EXTRA_PLUGIN` environment variable (`retro_init.cpp`).
+`-autoboot_script` can't be used: it runs from a machine timer, which the entry state load
+discards. Two identical replays match byte for byte over 180 frames. Frame 0 is detected as the
+first frame with machine time over 5 s, so it only works from a save state.
+
+Finding code without a debugger: the DRC writes work RAM directly, so memory taps don't fire, and
+`state_int(PPC_PC)` isn't reliable at a tap. What worked: temporarily drop the
+`ppcdrc_add_fastram()` call, install a write tap, log LR (reliable), then disassemble the caller
+from a RAM dump with capstone. Searching the code for stores with a known field offset
+(`stfs fN, 0x1b4(rM)`) is also quick.
 
 Lua gotchas: an I2C tap on this 64-bit bus aborts the core ("integer value will be
 misrepresented in lua", the byte-lane mask has bit 63 set). `ioport_field:set_value()` on an
@@ -201,40 +292,3 @@ cartfury and pumpitup are missing files in the local ROM collection, so they're 
 - Main thread is now ~52% JIT guest code, ~10% memory handlers (`handler_entry_read_memory`),
   ~10% Voodoo setup. The Voodoo rasterizer already runs on 3 worker threads (~26% each).
 - `voodoo_1_device::update_common` + software render compositing: ~3%.
-
-## Frame-exact replays from a save state (2026-09-24)
-
-`tools/replay_inputs.py` writes a Lua script that, from the first frame after a state load,
-holds the gas, applies steering taps on chosen frames and dumps memory per frame (and whole
-work RAM on chosen frames). `tools/replay-plugin/` is a MAME plugin that runs that script at
-machine start: copy it to `<retroarch system>/mame/plugins/replay`, then
-`profile_run.py gticlub2 TAG --state S --env MAME_EXTRA_PLUGIN=replay --env MAME_REPLAY_SCRIPT=X.lua`.
-The core starts extra plugins from the `MAME_EXTRA_PLUGIN` environment variable
-(`retro_init.cpp`). `-autoboot_script` can't be used: it runs from a machine timer, which the
-entry state load discards. Two identical replays match byte for byte over 180 frames.
-
-Rolling repro (user state at ~113 km/h, 1'12" into a race): a 6-frame full-right tap (0xff) rolls
-the car past 50 degrees in 40 frames. Player physics body at 0x7f5ed0..0x7f5f24: x/z position
-(0x7f5ed0/d4), heading (0x7f5edc, copies at +0x10/+0x20/+0x48), yaw rate (0x7f5ee0/0x7f5f0c), front
-steer angle (0x7f5f08, full lock 0.524 rad, ramps over 3 game frames), roll-related angles
-(0x7f5f18/1c), forward speed m/s (0x7f5f20). Render copy of position/orientation at 0x801440. Peak
-yaw rate 0.033 rad per game frame (~1 rad/s) at 32 m/s means ~3.3 g lateral, so the tyre side force
-looks uncapped, and the roll keeps growing after the wheels straighten.
-
-Cause of the rolling (2026-09-24): not an emulation bug. The physics code (~0x976d8) puts the car
-on two wheels when speed > K[0x04] = 16.667 m/s (60 km/h) and the front-wheel angle > K[0x0c] =
-0.34907 rad (20 degrees), K = *(r2+0x81c) = 0x102cc0, r2 = 0x154da8. Replays match it exactly:
-0.347 rad never tilts, 0.388 rad always does. Full lock is 30 degrees, so it takes ~2/3 lock (raw
-~0xd4 with the stored calibration). Nothing CPU-side changed the result (accurate singles, 100 MHz
-bus/time base, saturating fctiwz, the rounding backport, C back-end). A stick reaches that easily,
-and the game swings the wheels to the commanded angle within 3 game frames, which a real wheel
-can't do. Other notes: car object at *(r2+0x488) = 0x8c1d28 (+0x6c steer angle, +0xcc speed,
-+0x350 tilt state, +0x358/+0x35c tilt angles); per-frame info copy at *(r2+0x54) = 0x7f5eb8,
-filled by 0xaf8b4; main loop 0x8ebe4; maths library at 0x12500 (rsqrt = frsqrte + 3 Newton steps,
-sin/cos polynomials, atan2).
-
-Mitigation: "Steering Smoothing" Machine Configuration setting (Off (arcade) default / Light /
-Medium / Medium+ / Firm / Firm+ / Heavy = 0.25/0.5/0.625/0.75/0.875/1 s lock to lock, in emulated time, applied after Steering Response in
-`apply_steering_smoothing()`, not saved in save states). Replay at 113 km/h with Medium: a 6-frame
-full-lock flick peaks at 0.142 rad and no longer tilts; a 30-frame 75% hold still tilts, as it
-would on a cabinet.
