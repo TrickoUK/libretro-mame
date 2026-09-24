@@ -2502,6 +2502,7 @@ void viper_state::machine_start()
 	save_item(NAME(m_epic.iack));
 	save_item(NAME(m_epic.eicr)); // written but never used
 	save_item(NAME(m_epic.svr));
+	save_item(NAME(m_epic.pctpr));
 	save_item(NAME(m_epic.active_irq));
 
 	save_item(NAME(m_i2c.adr));
@@ -2510,6 +2511,8 @@ void viper_state::machine_start()
 	save_item(NAME(m_i2c.cr));
 	save_item(NAME(m_i2c.sr));
 	save_item(NAME(m_i2c.state));
+	save_item(NAME(m_i2c.addr_latch));
+	save_item(NAME(m_i2c.rw));
 
 	save_item(STRUCT_MEMBER(m_epic.irq, vector));
 	save_item(STRUCT_MEMBER(m_epic.irq, priority));

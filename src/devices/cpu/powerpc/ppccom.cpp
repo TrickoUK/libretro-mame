@@ -1203,6 +1203,18 @@ void ppc_device::state_string_export(const device_state_entry &entry, std::strin
 
 
 /*-------------------------------------------------
+    device_post_load - a state load rewrites RAM
+    behind the DRC's back, so blocks compiled from
+    the old contents must not be reused
+-------------------------------------------------*/
+
+void ppc_device::device_post_load()
+{
+	m_cache_dirty = true;
+}
+
+
+/*-------------------------------------------------
     ppccom_exit - common cleanup/exit
 -------------------------------------------------*/
 

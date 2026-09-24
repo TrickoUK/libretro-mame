@@ -138,6 +138,20 @@ Squared / Cubic) applied to channel 0 in `apply_steering_response()`. Full lock 
 full stick. It saves to the game's MAME cfg (`saves/MAME/mame/cfg/<game>.cfg`). Verified at raw
 0xc0 in gticlub2 I/O CHECK: the bar marker moves +382 px linear, +191 squared, +77 cubic.
 
+Follow-up 2 (2026-09-24): cars roll far too easily at speed. The user confirmed against arcade
+footage (wheel turned >90 degrees each way, no rolls) that this is an emulation bug, not the
+game's handling. Stationary RAM reads show the input side is fine: the game's steering value
+(0x5677ac) is symmetric and progressive (raw 0x90 = 3.5%, 0xa0 = 20%, 0xc0 = 61% of lock), so
+the Steering Response curve can't help. Candidate cause: the x64 DRC entry re-syncs MXCSR but not
+`m_state.fmod`, so a later SETFMOD can be skipped and float code runs in the wrong rounding
+mode. Upstream's one-line fix (`0e3c9c6cd14`) is backported. Not yet confirmed in gameplay.
+
+Save states hang on load (the game idles at 0x45e1c-0x45ebc, its RTOS idle loop). Fixed so far:
+`m_epic.pctpr` was not saved (it stayed at the reset value 0xf, which blocks every IRQ), nor were
+`m_i2c.addr_latch`/`rw`, and the PPC DRC now flushes its code cache in `device_post_load()`.
+After these, IRQs 0/3/16/20 are delivered after a load, but the game still idles, so some other
+state the tasks wait on is still not restored. Not solved yet.
+
 Lua gotchas: an I2C tap on this 64-bit bus aborts the core ("integer value will be
 misrepresented in lua", the byte-lane mask has bit 63 set). `ioport_field:set_value()` on an
 analog field writes the unshifted override into the whole port, so it only behaves for fields
