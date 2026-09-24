@@ -1541,6 +1541,29 @@ void ppc_device::ppccom_tlb_fill()
 
 
 /*-------------------------------------------------
+    compile_time_tlb_fill - fill the fetch TLB
+    entry for a page the recompiler is about to
+    validate, without disturbing the 603 miss
+    registers the translation also writes
+-------------------------------------------------*/
+
+void ppc_device::compile_time_tlb_fill(offs_t pc)
+{
+	uint32_t const cmp = m_core->mmu603_cmp;
+	uint32_t const hash0 = m_core->mmu603_hash[0];
+	uint32_t const hash1 = m_core->mmu603_hash[1];
+
+	offs_t address = pc;
+	if (ppccom_translate_address_internal(TR_FETCH, false, address) <= 1)
+		vtlb_fill(pc, address, TR_FETCH);
+
+	m_core->mmu603_cmp = cmp;
+	m_core->mmu603_hash[0] = hash0;
+	m_core->mmu603_hash[1] = hash1;
+}
+
+
+/*-------------------------------------------------
     ppccom_tlb_flush - flush the entire TLB,
     including fixed entries
 -------------------------------------------------*/

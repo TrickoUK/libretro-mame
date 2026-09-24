@@ -252,6 +252,7 @@ public:
 	void ppc_cfunc_unimplemented();
 	void ppc_cfunc_ppccom_mismatch();
 	void ppccom_tlb_fill();
+	void compile_time_tlb_fill(offs_t pc);
 	void ppccom_update_fprf();
 	void ppccom_dcstore_callback();
 	void ppccom_execute_tlbie();

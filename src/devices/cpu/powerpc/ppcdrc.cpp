@@ -1897,6 +1897,15 @@ void ppc_device::generate_sequence_instruction(drcuml_block &block, compiler_sta
 	{
 		const vtlb_entry *tlbtable = vtlb_table();
 
+		// If the page's entry can't fetch at compile time (evicted, flushed, or only
+		// filled by data accesses so far), fill it for fetch now as the TLB mismatch
+		// handler would.  Otherwise the block gets an unconditional mismatch exit, or
+		// a compare against a data-only entry, and is recompiled as soon as the page
+		// is fetched through the proper entry; with a busy vtlb (Konami Viper's 603e)
+		// that was thousands of recompiles per second.
+		if (!(tlbtable[desc->pc >> 12] & FETCH_ALLOWED))
+			compile_time_tlb_fill(desc->pc);
+
 		if (tlbtable[desc->pc >> 12] != 0)
 		{
 			if (PRINTF_MMU)
