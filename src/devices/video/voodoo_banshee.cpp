@@ -1568,10 +1568,45 @@ void voodoo_banshee_device::execute_blit(u32 data)
 			break;
 
 		case 1:         // Screen-to-screen blit
-			// TODO
+		{
+			// the launch data is the source X/Y; copy a dstSize rectangle to dstXY
+			u32 const width = BIT(m_2d_regs.read(banshee_2d_regs::dstSize), 0, 12);
+			u32 const height = BIT(m_2d_regs.read(banshee_2d_regs::dstSize), 16, 12);
+			u32 const srcx = BIT(data, 0, 12);
+			u32 const srcy = BIT(data, 16, 12);
+
 			if (LOG_BANSHEE_2D)
-				logerror("   blit_2d:screen_to_screen: src X %d, src Y %d\n", data & 0xfff, (data >> 16) & 0xfff);
+				logerror("   blit_2d:screen_to_screen: src X %d, src Y %d -> dst X %d, dst Y %d, %dx%d\n", srcx, srcy, m_blt_dst_x, m_blt_dst_y, width, height);
+
+			// only straight copies between surfaces of the same depth are handled
+			u32 const command = m_2d_regs.read(banshee_2d_regs::command);
+			if (BIT(command, 24, 8) != 0xcc || m_blt_src_bpp != m_blt_dst_bpp)
+			{
+				logerror("%s: Unsupported blit_2d:screen_to_screen ROP %02X, %d -> %d bytes per pixel\n", tag(), BIT(command, 24, 8), m_blt_src_bpp, m_blt_dst_bpp);
+				break;
+			}
+
+			// a tiled surface's stride is in 128-byte tiles; the 3D engine renders
+			// into it linearly with that row pitch, so address it the same way
+			u32 const srcstride = BIT(m_2d_regs.read(banshee_2d_regs::srcBaseAddr), 31) ? (BIT(m_blt_src_stride, 0, 7) * 128) : m_blt_src_stride;
+			u32 const dststride = BIT(m_2d_regs.read(banshee_2d_regs::dstBaseAddr), 31) ? (BIT(m_blt_dst_stride, 0, 7) * 128) : m_blt_dst_stride;
+			u32 const rowbytes = width * m_blt_dst_bpp;
+
+			m_renderer->wait("execute_blit(1)");
+
+			for (u32 y = 0; y < height; y++)
+			{
+				u32 const src = m_blt_src_base + (srcy + y) * srcstride + srcx * m_blt_src_bpp;
+				u32 const dst = m_blt_dst_base + (m_blt_dst_y + y) * dststride + m_blt_dst_x * m_blt_dst_bpp;
+				if (src + rowbytes - 1 <= m_fbmask && dst + rowbytes - 1 <= m_fbmask)
+					memmove(&m_fbram[dst], &m_fbram[src], rowbytes);
+			}
+
+			// the destination advances past the rectangle, so back-to-back
+			// one-line blits fill consecutive rows (Konami Viper's screen grabs)
+			m_blt_dst_y += height;
 			break;
+		}
 
 		case 2:         // Screen-to-screen stretch blit
 			fatalerror("%s: Unsupported blit_2d:screen_to_screen_stretch: src X %d, src Y %d\n", tag(), data & 0xfff, (data >> 16) & 0xfff);
