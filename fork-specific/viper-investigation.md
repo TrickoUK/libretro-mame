@@ -234,7 +234,7 @@ filled by 0xaf8b4; main loop 0x8ebe4; maths library at 0x12500 (rsqrt = frsqrte 
 sin/cos polynomials, atan2).
 
 Mitigation: "Steering Smoothing" Machine Configuration setting (Off (arcade) default / Light /
-Medium / Heavy = 0.25/0.5/1 s lock to lock, in emulated time, applied after Steering Response in
+Medium / Medium+ / Firm / Firm+ / Heavy = 0.25/0.5/0.625/0.75/0.875/1 s lock to lock, in emulated time, applied after Steering Response in
 `apply_steering_smoothing()`, not saved in save states). Replay at 113 km/h with Medium: a 6-frame
 full-lock flick peaks at 0.142 rad and no longer tilts; a 30-frame 75% hold still tilts, as it
 would on a cabinet.

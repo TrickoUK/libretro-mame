@@ -800,8 +800,8 @@ u16 viper_state::apply_steering_response(u16 value)
 // off. Deliberately not saved in save states: after a load it restarts from the current input.
 u16 viper_state::apply_steering_smoothing(u16 value)
 {
-	static constexpr double lock_to_lock_seconds[] = { 0.0, 0.25, 0.5, 1.0 };
-	const unsigned mode = BIT(m_steering_response->read(), 2, 2);
+	static constexpr double lock_to_lock_seconds[] = { 0.0, 0.25, 0.5, 0.625, 0.75, 0.875, 1.0, 1.0 };
+	const unsigned mode = BIT(m_steering_response->read(), 2, 3);
 	const attotime now = machine().time();
 	if (mode == 0 || m_steering_time.is_zero() || now < m_steering_time)
 	{
@@ -2071,11 +2071,14 @@ INPUT_PORTS_START( thrild2 )
 	PORT_CONFSETTING(    0x01, "Mild curve" )
 	PORT_CONFSETTING(    0x02, "Squared curve" )
 	PORT_CONFSETTING(    0x03, "Cubic curve" )
-	PORT_CONFNAME( 0x0c, 0x00, "Steering Smoothing" )
+	PORT_CONFNAME( 0x1c, 0x00, "Steering Smoothing" )
 	PORT_CONFSETTING(    0x00, "Off (arcade)" )
-	PORT_CONFSETTING(    0x04, "Light" )
-	PORT_CONFSETTING(    0x08, "Medium" )
-	PORT_CONFSETTING(    0x0c, "Heavy" )
+	PORT_CONFSETTING(    0x04, "Light (0.25 s lock to lock)" )
+	PORT_CONFSETTING(    0x08, "Medium (0.5 s)" )
+	PORT_CONFSETTING(    0x0c, "Medium+ (0.625 s)" )
+	PORT_CONFSETTING(    0x10, "Firm (0.75 s)" )
+	PORT_CONFSETTING(    0x14, "Firm+ (0.875 s)" )
+	PORT_CONFSETTING(    0x18, "Heavy (1 s)" )
 INPUT_PORTS_END
 
 INPUT_PORTS_START( gticlub2 )
