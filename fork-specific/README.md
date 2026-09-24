@@ -10,6 +10,9 @@ to be tracked; `m2-fix-investigation.md` is tracked.
   performance investigation, covering every session's findings, measurements
   and what was tried and reverted.
 
+- `viper-investigation.md`: Konami Viper (`viper.cpp`, gticlub2). Covers the PPC DRC recompile
+  storm and the Voodoo 3 TMU1/multibase texture fixes.
+
 ## Tools (`tools/`)
 
 Results go to `fork-specific/out/<tag>/`, or wherever `M2PROF_OUT` points.
@@ -19,6 +22,10 @@ Run the tools one at a time: each one force-kills RetroArch when it finishes.
   `savestates/polystar.state` (the standard M2 benchmark). It attaches `perf`
   (flat, or a DWARF call graph with `cg`), polls `speed_percent` through the Lua
   console, records CPU per thread, then kills RetroArch and restores `MAME.opt`.
+- `profile_run.py <romset> <tag> [--warmup S] [--duration S] [--shot-every S] [--state F] [--cg]
+  [--no-perf] [--core PATH]`: a generic version of `m2_profile_run.py` for any romset. It boots
+  cold (or from a state), then records perf, speed_percent, per-thread CPU and periodic
+  core-framebuffer screenshots (UDP `SCREENSHOT`, into `<tag>/shots/`).
 - `smoke.py <seconds> <romset>...`: boots each romset, checks it's still
   running, takes a screenshot and logs any errors.
 - `fbcheck.sh <tag>` / `fbcompare.sh <ref-tag> <tag>`: the bit-exact

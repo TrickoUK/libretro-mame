@@ -1,0 +1,90 @@
+# Konami Viper (gticlub2) investigation
+
+Started 2026-09-24. Target: `gticlub2` (GTI Club: Corso Italiano, `src/mame/konami/viper.cpp`,
+MPC8240 (603e core) + Voodoo 3). Symptoms at the start: slowdown in parts of attract mode, and
+textures drawn as coloured noise. Examples: car windows, the "best laps" car, trees and chairs in
+the town plaza, stair walls and the tunnel sign. The sea on the mountain course was dark green.
+
+Tool: `fork-specific/tools/profile_run.py <romset> <tag> --warmup 60 --duration 60 --shot-every 4`
+(boots cold, `perf record`s the process, polls `speed_percent` via the Lua console, and takes
+core-framebuffer screenshots over UDP). gticlub2 needs ~50s from boot to reach 3D attract mode.
+
+## Result
+
+| | baseline | fixed |
+|---|---|---|
+| main-thread CPU | 91.5% of a core | 66.5% |
+| main thread in the PPC recompiler | 22.5% | 0.3% |
+| PPC block recompiles/s | ~8,000-12,000 | ~40 (genuinely new code) |
+| `speed_percent` minimum over 60s | 0.72 | 0.99 |
+| texture corruption | widespread | none seen in attract mode |
+
+## Fix 1: PPC DRC recompile storm (performance)
+
+`ppcdrc.cpp` `generate_sequence_instruction()`: code compiled while its page's vtlb entry was
+empty got an *unconditional* `tlb_mismatch` exit. The first run refilled the entry and re-entered.
+The second run saw a valid, fetchable stale entry, so the handler took the "mapping replaced"
+path and recompiled. This fork's `af439229f3d` made that path recompile rather than flush. The
+603e's software TLB evicts vtlb entries constantly, so this looped at ~10k recompiles/s,
+almost all "override" recompiles of blocks whose code and TLB entry were unchanged. A variant
+of the same bug: the entry was present but filled only by a data read (`...009`, no
+FETCH), so the baked-in compare never matched a fetch-filled entry.
+
+Fix: if the entry can't fetch at compile time, fill it for fetch first
+(`ppc_device::compile_time_tlb_fill()`, the same translate + `vtlb_fill` the mismatch handler
+does). The 603 translate path writes the IMISS/ICMP/HASH miss registers as a side effect, so
+they're saved and restored in case the compile happens inside a guest TLB-miss handler. The
+unconditional exit is still generated if the translation really fails, so the guest still
+takes its ITLB miss.
+
+Diagnosis technique: counters in `code_compile_block` (compile vs. "override" recompiles,
+flushes, icbi/ICFI invalidations, top recompiled PCs), then logging the stale vtlb entry
+seen by `ppc_cfunc_ppccom_mismatch` and the compile-time expected value. The translation-
+generation checks and ICFI (`914dc7e06b8`) were ruled out; neither fired.
+
+## Fix 2: Voodoo 3 had only one TMU (textures)
+
+`voodoo_banshee.cpp` `device_start()` forced `m_chipmask = 0x03` (FBI + TMU0) for both
+Banshee and Voodoo 3, but Voodoo 3 has two TMUs. gticlub2 broadcasts texture state to both
+TMUs (chip field 0), then writes TMU0-only `textureMode`/`texBaseAddr3_8` (chip 2) and a
+TMU1-only `tLOD` (chip 4). The chip-4 writes were silently dropped. TMU1 is the TMU that
+samples the real texture; TMU0 is configured to pass TMU1's colour through. Now `0x07` for
+Voodoo 3 only. Both TMUs already shared framebuffer RAM in the Banshee+ path.
+
+## Fix 3: multibase texture addresses are base + owned-LOD offsets (textures)
+
+`voodoo_render.cpp` `rasterizer_texture::recompute()` treated `texBaseAddr_1/2/3_8` as
+absolute LOD addresses. That is the old upstream TODO, "viper expects relative offsets ...
+0xff0000, 0xffc000, 0xfff000". The logged values are exactly `0 - (sizes of the LODs this
+TMU owns below that LOD)`. For example, 0xff0000 is minus a 256x256 8bpp LOD0, 0xfef000 is
+minus LOD0 plus LOD2, and the 16bpp values are 0xfe0000/0xfde000. The aspect-ratio
+variants match too. So on Banshee+ the hardware still adds the cumulative
+owned-LOD offsets in multibase mode, and Glide programs each base minus them (pointing
+unused LODs at address 0). Applied only when `addrshift == 0` (Banshee/Voodoo 3); the
+Voodoo 2 multibase path is unchanged.
+
+Fixes 2 and 3 were needed together. With only fix 2, corruption remained on the env-mapped
+surfaces (car windows, chrome car), and fix 3 cleared it.
+
+## Checked and ruled out
+
+- Texture download apertures (`map_texture_w`, which is a logerror stub on Banshee) and the 2D
+  blitter: unused by gticlub2. Textures arrive via CMDFIFO packet type 5 (linear FB, 1KB
+  chunks). The direct `write_lfb` path is only a boot-time VRAM clear.
+- Palette/NCC writes don't set `tmu_state::m_regdirty`, so a palette-only change keeps
+  sampling the old palette copy until a texture register changes. This looks like a real
+  latent bug by reading, but fixing it made no visible difference here, so it isn't applied.
+- Some packet-5 upload runs skip 0x100 bytes every 0x900 (a strided surface); a few textures
+  overlap those holes by 1 block. No visible effect seen.
+
+## Regression check (post-fix, 50s cold boots)
+
+carnking (iteagle, Voodoo 3): attract renders correctly. sf2049 (Vegas, Voodoo 3), daytona2
+and scud (Model 3 PPC), polystar (M2, 602), kviper: boot clean, no errors. virtpool, bbh,
+cartfury and pumpitup are missing files in the local ROM collection, so they're untested.
+
+## Remaining ideas (not done)
+
+- Main thread is now ~52% JIT guest code, ~10% memory handlers (`handler_entry_read_memory`),
+  ~10% Voodoo setup. The Voodoo rasterizer already runs on 3 worker threads (~26% each).
+- `voodoo_1_device::update_common` + software render compositing: ~3%.
