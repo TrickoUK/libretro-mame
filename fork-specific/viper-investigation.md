@@ -136,7 +136,9 @@ gticlub2, but thrild2's AN0 was defined as a 12-bit port (`PORT_MINMAX(0x800,0x7
 the old path. AN0 is now the same 8-bit wheel as gticlub2, defined once in the thrild2 ports and
 inherited by gticlub2, so no Viper driving game uses the wide path any more. Measured in thrild2's
 I/O CHECK: raw 0xa0 = +28%, 0xe0 = +83%, and the stored calibration reaches full lock at about raw
-0x80 +/- 0x74. The inner `+` markers on the bar are at about +/-72%.
+0x80 +/- 0x74. The inner `+` markers on the bar are at about +/-72%. Checked in a real race
+(played on a gamepad, 2026-09-25): steering works normally, with none of gticlub2's
+roll-at-speed trouble.
 
 ## Fix 7: save states hung on load
 
