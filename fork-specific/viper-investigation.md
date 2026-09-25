@@ -173,6 +173,30 @@ Along the way the lazy-FPU exception (upstream `696900611dc`) was checked and is
 gticlub2's 0x800 vector branches to a ROM halt loop (`0xfff00c04` ... `b 0xfff00c40`), and the
 game never takes it.
 
+## Fix 8: jpark3 gun shots always reloaded
+
+Symptom (gun, or pad with MAME's crosshair): the trigger flashed the screen but the ammo never
+went down, as if every shot were an off-screen reload. The game polls the gun position once a
+frame at 0xffea0000-7 (routine at 0x42918 in RAM: P1 X, P1 Y, P2 X, P2 Y as big-endian 16-bit,
+kept as X & 0xfff and Y & 0x3ff, then a write of 0 to 0xffea0000). No gun interrupt is involved
+(the EPIC masks show only IRQ0-4, I2C and the global timers unmasked). The base `GUN0-3` ports
+define all 16 bits as active-low unused and the game ports only redefine the low 11 (X) / 9 (Y)
+bits, so X read 0xfaf8 and Y 0xfee7 at centre. Bit 11 of X / bit 9 of Y set is what the game
+treats as off screen. `viper_state::gun_r()` now returns only the position bits and sets those
+two bits when the gun is at the edge of its range. Upstream MAME has the same port definitions.
+
+Verified with a scripted game (replay plugin, no gun needed): centre shots use ammo and score
+hits; with the gun empty ("RELOAD! Shoot offscreen!"), aiming at X = 0xe0 and firing refills all
+six bullets. The same port layout is used by p911 and wcombat2p (not tested: no p911 set here,
+wcombat is missing ROMs). The service-mode GUN CHECK is reached with Test held for ~10 s, then
+2P Start (1P Start moves the cursor up) and the trigger.
+
+Debug notes: a Lua read tap on this space crashes the console ("integer value will be
+misrepresented in lua"), because the 64-bit data bus gives an all-ones 64-bit mem_mask. PPC PC
+from `m_maincpu->pc()` inside a handler is stale under the DRC (always 0xf24c here). stderr
+spam on the pty also garbles the Lua console input, so drive long input sequences from a
+script run by the replay plugin (`MAME_EXTRA_PLUGIN=replay MAME_REPLAY_SCRIPT=...`) instead.
+
 ## gticlub2 cars rolling: a game rule, not an emulation bug
 
 Symptom: at ~110-150 km/h on a straight, a small-feeling flick of the stick put the car up on two
