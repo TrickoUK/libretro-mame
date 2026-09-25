@@ -742,6 +742,20 @@ void retro_osd_interface::process_joystick_state(running_machine &machine)
       }
    }
 
+   // A light gun's Start/Select also count as that player's pad Start/Select, so the gun can
+   // start and credit a game even when a saved MAME cfg (e.g. Batocera's generated default.cfg)
+   // maps START/COIN to pad buttons only and drops the GUNCODE defaults.
+   if (lightgun_mode == RETRO_SETTING_LIGHTGUN_MODE_LIGHTGUN)
+   {
+      for (j = 0; j < RETRO_MAX_PLAYERS; j++)
+      {
+         if (input_state_cb(j, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_START))
+            ret[j] |= (1 << RETRO_DEVICE_ID_JOYPAD_START);
+         if (input_state_cb(j, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SELECT))
+            ret[j] |= (1 << RETRO_DEVICE_ID_JOYPAD_SELECT);
+      }
+   }
+
    for (j = 0; j < RETRO_MAX_PLAYERS; j++)
    {
       for (i = 0; i < RETRO_MAX_JOYSTICK_BUTTONS; i++)
@@ -1058,12 +1072,14 @@ void retro_osd_interface::process_lightgun_state(running_machine &machine)
 		}
 		else if (!offscreen && reload)
 		{
+			// the reload button must shoot off screen in every mode: in "free" mode it used to fire
+			// at the current aim, so games that reload by shooting off screen never reloaded
 			if (lightgun_offscreen_mode == RETRO_SETTING_LIGHTGUN_OFFSCREEN_MODE_TOP_LEFT)
 			{
 				lightgunstate[i].x = -LIGHTGUN_MAX;
 				lightgunstate[i].y = -LIGHTGUN_MAX;
 			}
-			else if (lightgun_offscreen_mode == RETRO_SETTING_LIGHTGUN_OFFSCREEN_MODE_BOTTOM_RIGHT)
+			else
 			{
 				lightgunstate[i].x = LIGHTGUN_MAX;
 				lightgunstate[i].y = LIGHTGUN_MAX;
