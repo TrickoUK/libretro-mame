@@ -638,6 +638,7 @@ private:
 	required_ioport_array<4> m_analog_input;
 	bool m_analog_8bit[4]{};
 	required_ioport_array<4> m_gun_input;
+	u16 gun_r(int which);
 	optional_ioport m_steering_response;
 	optional_ioport_array<4> m_io_ppp_sensors;
 	required_device_array<dmadac_sound_device, 2> m_dmadac;
@@ -1806,6 +1807,27 @@ void viper_state::unk_serial_w(offs_t offset, uint64_t data, uint64_t mem_mask)
 
 /*****************************************************************************/
 
+// GUN0-3 are P1 X, P1 Y, P2 X, P2 Y. For the optical gun games (jpark3, p911, wcombat) only the
+// low 11 (X) or 9 (Y) bits are position; the base ports define all 16 bits as active-low unused,
+// which made X read 0xf800|x and Y 0xfe00|y. jpark3 keeps X & 0xfff and Y & 0x3ff, and with bit 11
+// of X / bit 9 of Y set it treats every shot as off-screen (a reload): the screen flashes but the
+// ammo never goes down. So return only the position bits, and set those two bits when the gun sits
+// at the edge of its range, which is how an off-screen aim reaches MAME.
+u16 viper_state::gun_r(int which)
+{
+	const u16 data = m_gun_input[which]->read();
+	ioport_field *const xf = m_gun_input[which & ~1]->field(0x0001);
+	ioport_field *const yf = m_gun_input[which | 1]->field(0x0001);
+	if (!xf || !yf || xf->type() != IPT_LIGHTGUN_X || yf->type() != IPT_LIGHTGUN_Y || xf->mask() == 0xffff)
+		return data;
+
+	const u16 x = m_gun_input[which & ~1]->read() & xf->mask();
+	const u16 y = m_gun_input[which | 1]->read() & yf->mask();
+	const bool offscreen = x <= xf->minval() || x >= xf->maxval() || y <= yf->minval() || y >= yf->maxval();
+	const ioport_field *const f = (which & 1) ? yf : xf;
+	return (data & f->mask()) | (offscreen ? ((f->mask() + 1) & 0xffff) : 0);
+}
+
 void viper_state::viper_map(address_map &map)
 {
 //  map.unmap_value_high();
@@ -1842,7 +1864,7 @@ void viper_state::viper_map(address_map &map)
 	map(0xffe9a000, 0xffe9bfff).rw(m_lanc, FUNC(k056230_viper_device::ram_r), FUNC(k056230_viper_device::ram_w));
 	map(0xffea0000, 0xffea0007).lr8(
 		NAME([this] (offs_t offset) {
-			const u8 res = m_gun_input[offset >> 1]->read() >> ((offset & 1) ? 0 : 8);
+			const u8 res = gun_r(offset >> 1) >> ((offset & 1) ? 0 : 8);
 			return res;
 		})
 	).nopw(); // Gun sensor? Read heavily by p9112
