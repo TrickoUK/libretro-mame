@@ -60,6 +60,13 @@ ran `git apply --check` on each candidate against `arcade-focused`. Nothing was 
   upstream never took. Worth rechecking whether it still matters when merging.
 
 ## Tier 2: other candidate 3D drivers with ROMs in the local collection (low conflict)
+- **Status 2026-09-25**: the System 22 set below was pulled into `arcade-focused` (`01989a166b6`,
+  `cd0a41e0a21`, `cbf7becbc9a`, `f47e20b46fc`, `9bfb7941715`, `a0813ada663`, `42040098b84`).
+  All applied cleanly. `cd0a41e0a21` also changes the shared `poly.h` `render_polygon` clipping.
+  10 S22/SS22 sets plus daytona, crusnusa and mk4 cold-boot clean. Konami GX
+  (`af5376797f1`, `f10cb860392`, `45d303a983e`) was pulled too: Racin' Force now draws its road and
+  takes pedal input, and it plays well (its music is louder than its sound effects; not
+  investigated).
 - **Namco System 22** (ridgerac, timecris, acedrive, cybrcomm, propcycl, alpinerd, tokyowar,
   airco22b): `cbf7becbc9a` lighting with shared normals, `a0813ada663` Super System 22 per-poly
   fog, `9bfb7941715` quantum fix (acedrive/victlap video test), `f47e20b46fc` double-precision
