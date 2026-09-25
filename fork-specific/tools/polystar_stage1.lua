@@ -1,0 +1,4 @@
+-- polystar cold-boot stage-1 inputs, keyed on emulated time so every run plays the same frames.
+-- Send as one Lua console line: profile_run.py polystar TAG --warmup 60 --duration 20 --lua "3:$(grep -v '^--' fork-specific/tools/polystar_stage1.lua)"
+-- Coin at 25s, Start at 28s, Button 1 tapped at 3 Hz from 30s (picks the control scheme, then fires), left/right sweeps from 40s.
+_G.psn=emu.add_machine_frame_notifier(function() local t=manager.machine.time:as_double(); local P=manager.machine.ioport.ports; P[':P1'].fields['Coin 1']:set_value((t>25 and t<25.3) and 1 or 0); P[':P4'].fields['1 Player Start']:set_value((t>28 and t<28.3) and 1 or 0); local ph=math.floor(t*6)%2; P[':P4'].fields['P1 Button 1']:set_value((t>30 and ph==0) and 1 or 0); local m=math.floor(t/2)%4; P[':P4'].fields['P1 Left']:set_value((t>40 and m==0) and 1 or 0); P[':P4'].fields['P1 Right']:set_value((t>40 and m==2) and 1 or 0) end)

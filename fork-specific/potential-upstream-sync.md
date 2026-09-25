@@ -12,6 +12,20 @@ ran `git apply --check` on each candidate against `arcade-focused`. Nothing was 
 ## Tier 1: directly affects hardware we're actively working on
 
 ### PPC DRC (Viper gticlub2/jpark3, M2, Model 3, Hornet)
+**Status 2026-09-25: pulled on branch `ppc-upstream-sync`**. Taken: `6e65bf15368`,
+`764de9b5b48`, `8f158369e6a`, `1a8267fa579`. Conflict notes are in each commit message.
+- `8f158369e6a` replaces our `af439229f3d` compare. A reused block now also re-snapshots its code
+  pages so our ICFI handling still works.
+- **`0ee5c47faa7` was dropped.** With it, daytona2 and spikeout (Model 3) hang at boot. User-mode
+  code reads ~0x1500 through a page with SR Kp=1 and PP=00. The new check turns that into a DSI,
+  and the game's handler treats the DSI as fatal. It's architecturally "correct", so it's probably
+  an existing Model 3 inaccuracy that the old, permissive check hid. The other eight local Model 3
+  sets tested showed no protection faults. Model 3 is low priority, so this could be retaken if a
+  Viper/M2 game needs it.
+- Speed: no measurable change on gticlub2 or polystar (the recompile storms were already fixed by
+  our own commits). The value is TLB accuracy. Save states are not compatible across this change,
+  because the vTLB tables are saved.
+
 - **`8f158369e6a`**: the vTLB grows from **128 to 4096 entries**, adds a sequence cache, and adds
   the masked TLB compare. Our gticlub2 recompile storm was caused by the 603e's TLB constantly
   evicting vTLB entries, so a 32× larger vTLB may reduce it on its own. Upstream's message also

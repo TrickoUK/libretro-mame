@@ -19,7 +19,12 @@ to be tracked.
 
 - `potential-upstream-sync.md`: upstream MAME commits since mame0289 that would help this fork
   (PPC 603 TLB/vTLB, DRC rounding, PS1 SPU overhaul, System 22/Zeus/Model 3 fixes), whether
-  each applies cleanly, and where they conflict with our changes. Nothing has been pulled yet.
+  each applies cleanly, and where they conflict with our changes. The PPC vTLB/603 TLB set was
+  pulled on 2026-09-25 (minus `0ee5c47faa7`); see its status note.
+
+- `polystar-performance.md`: where polystar's time goes in busy stage-1 play (~0.96-0.98x,
+  limited by the main emulation thread waiting on the M2 triangle-engine workers), plus
+  ideas toward a steady 60 fps. Not started.
 
 ## Tools (`tools/`)
 
@@ -36,6 +41,9 @@ Run the tools one at a time: each one force-kills RetroArch when it finishes.
   CPU and periodic core-framebuffer screenshots (UDP `SCREENSHOT`, into `<tag>/shots/`). `--lua`
   sends a Lua console command at T seconds after launch, e.g. to insert coins and press start.
   `--env` sets an environment variable for RetroArch (used by the replay plugin below).
+- `polystar_stage1.lua`: cold-boot polystar inputs keyed on emulated time (coin, start, pick
+  control scheme, fire and sweep), for repeatable stage-1 profiling with `profile_run.py --lua`.
+  Usage is in the file header and in `polystar-performance.md`.
 - `replay_inputs.py OUT.lua [--tap START:LEN:VALUE ...] [--dump F --dump-range LO:HI]
   [--full-dump PREFIX --full-dump-frames N,...] [--steering-response N] [--steering-smoothing N]`
   and `replay-plugin/`: frame-exact input replays from a save state (gticlub2 port names), with
