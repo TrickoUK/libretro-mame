@@ -7555,6 +7555,17 @@ void model2_state::init_zerogun()
 	ROM[0x700/4] = 0x08000004;
 }
 
+void model2_state::init_hotd()
+{
+	// HACK: the game code fires a full-screen white "photo flash" quad every time the
+	// trigger is pulled (regardless of hit/miss). Patching the routine's entry point to
+	// an immediate `ret` skips the flash draw without touching gameplay/scoring.
+	// Community-sourced fix (mamecheat.co.uk); verified only against this Revision A dump -
+	// hotdo/hotdp use different maincpu ROMs and are not covered.
+	u32 *ROM = &memregion("maincpu")->as_u32();
+	ROM[0x18610/4] = 0x0a000000;
+}
+
 void model2_state::init_sgt24h()
 {
 	//u32 *ROM = &memregion("maincpu")->as_u32();
@@ -7705,7 +7716,7 @@ GAMEL(1996, stcca,      stcc,     stcc,         indy500,   model2c_state, empty_
 GAMEL(1996, stcco,      stcc,     stcc,         indy500,   model2c_state, empty_init,    ROT0, "Sega",   "Sega Touring Car Championship", MACHINE_NOT_WORKING, layout_vr )
 GAME( 1996, waverunr,   0,        waverunr,     waverunr,  model2c_state, empty_init,    ROT0, "Sega",   "Wave Runner (Japan, Revision A)", MACHINE_NOT_WORKING )
 GAME( 1997, bel,        0,        bel,          bel,       model2c_state, empty_init,    ROT0, "Sega / EPL Productions", "Behind Enemy Lines", MACHINE_NOT_WORKING )
-GAME( 1997, hotd,       0,        hotd,         hotd,      model2c_state, empty_init,    ROT0, "Sega",   "The House of the Dead (Revision A)", MACHINE_NOT_WORKING )
+GAME( 1997, hotd,       0,        hotd,         hotd,      model2c_state, init_hotd,     ROT0, "Sega",   "The House of the Dead (Revision A)", MACHINE_NOT_WORKING )
 GAME( 1997, hotdo,      hotd,     hotd,         hotd,      model2c_state, empty_init,    ROT0, "Sega",   "The House of the Dead", MACHINE_NOT_WORKING )
 GAME( 1997, hotdp,      hotd,     hotd,         hotd,      model2c_state, empty_init,    ROT0, "Sega",   "The House of the Dead (prototype)", MACHINE_NOT_WORKING )
 GAME( 1997, overrev,    0,        overrev2c,    overrev,   model2c_state, empty_init,    ROT0, "Jaleco", "Over Rev (Model 2C, Revision A)", MACHINE_NOT_WORKING )

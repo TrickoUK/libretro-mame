@@ -98,6 +98,7 @@ public:
 	void init_manxttdx();
 	void init_doa();
 	void init_zerogun();
+	void init_hotd();
 	void init_sgt24h();
 	void init_srallyc();
 	void init_powsledm();
