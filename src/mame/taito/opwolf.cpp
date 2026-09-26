@@ -363,6 +363,11 @@ private:
 	int m_gun_xoffs = 0;
 	int m_gun_yoffs = 0;
 
+	// no-gun-flash HACK state (see interrupt()); m_noflash_hack is set once in
+	// init_opwolf(), m_noflash_frames counts up from machine_reset() each boot
+	bool m_noflash_hack = false;
+	int m_noflash_frames = 0;
+
 	/* devices */
 	required_device<cpu_device> m_maincpu;
 	required_device<cpu_device> m_audiocpu;
@@ -763,6 +768,11 @@ void opwolf_state::init_opwolf()
 	// World & US version have different gun offsets, presumably slightly different gun hardware
 	m_gun_xoffs = 0xec - (rom[0x03ffb0 / 2] & 0xff);
 	m_gun_yoffs = 0x1c - (rom[0x03ffae / 2] & 0xff);
+
+	// The no-gun-flash HACK (see interrupt()) can't be applied here: the C-chip verifies
+	// the maincpu ROM at boot and the game reports "BAD ROM" if it's been tampered with
+	// by the time that check runs, which is before this ROM patch would otherwise apply.
+	m_noflash_hack = !strcmp(machine().system().name, "opwolf");
 }
 
 void opwolf_state::init_opwolfb()
@@ -802,6 +812,8 @@ void opwolf_state::machine_reset()
 
 	m_msm[0]->reset_w(1);
 	m_msm[1]->reset_w(1);
+
+	m_noflash_frames = 0;
 }
 
 uint16_t opwolf_state::cchip_r(offs_t offset)
@@ -822,6 +834,25 @@ INTERRUPT_GEN_MEMBER(opwolf_state::interrupt)
 		m_cchip->ext_interrupt(ASSERT_LINE);
 	if (m_cchip_irq_clear)
 		m_cchip_irq_clear->adjust(attotime::zero);
+
+	// HACK: the game flashes the whole screen white for a frame every time the trigger
+	// is pulled. The shot-fired handler at 0x001128 calls the reload/timer-advance
+	// routine at 0x482a then does `addi.w #1, ($966,a5)` (immediate operand is the byte
+	// at 0x001131) to kick off a small per-frame counter at ($966,a5); elsewhere, once
+	// that counter reaches 1 the video code renders the flash. Bumping the immediate
+	// from 1 to 2 makes the counter skip over 1 on the very first tick, so the flash
+	// check never matches - the following per-frame `addq.w #1` still runs normally
+	// afterwards, so the reload/hardware-register logic gated on 2/3 is unaffected.
+	// Community-sourced fix (mamecheat.co.uk); verified only against this exact ROM set
+	// (opwolf, World rev 2 set 1) - see init_opwolf() for why opwolfa/opwolfj/opwolfjsc/
+	// opwolfu aren't covered. Applied here rather than at ROM-load time (~15 real seconds
+	// into each boot, well after the C-chip's own ROM check has long since passed) since
+	// a static ROM patch trips that check and the game refuses to boot ("BAD ROM").
+	if (m_noflash_hack && ++m_noflash_frames == 900)
+	{
+		uint16_t *rom = (uint16_t *)memregion("maincpu")->base();
+		rom[0x1130 / 2] = (rom[0x1130 / 2] & 0xff00) | 0x02;
+	}
 }
 
 TIMER_DEVICE_CALLBACK_MEMBER(opwolf_state::cchip_irq_clear_cb)
