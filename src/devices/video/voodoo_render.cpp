@@ -914,15 +914,14 @@ inline rgb_t rasterizer_texture::lookup_single_texel(u32 format, u32 texbase, s3
 
 
 //-------------------------------------------------
-//  fetch_texel - fetch the texel value based on
-//  the S,T coordinates and LOD
+//  compute_st - compute 24.8 S/T from the
+//  iterated S/T/W values
 //-------------------------------------------------
 
-inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::fetch_texel(reg_texture_mode const texmode, dither_helper const &dither, s32 x, double iters, double itert, double iterw, s32 &lod, u8 bilinear_mask)
+inline void ATTR_FORCE_INLINE rasterizer_texture::compute_st(reg_texture_mode const texmode, double iters, double itert, double iterw, s32 &s, s32 &t)
 {
-	// determine the S/T/LOD values for this texture; iterated S/T are
+	// determine the S/T values for this texture; iterated S/T are
 	// in 32.32 format and we want final S/T in 24.8 format
-	s32 s, t;
 	if (texmode.enable_perspective())
 	{
 		// iterws is also 32.32, so division would leave no fractional bits;
@@ -930,10 +929,6 @@ inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::fetch_texel(reg_texture_m
 		double recip = 256.0 / iterw;
 		s = s32(iters * recip);
 		t = s32(itert * recip);
-
-		// compute the log2 of the non-reciprocal W value; negating it gives
-		// the log2 of the reciprocal, so we subtract instead of add it
-		lod -= fast_log2(iterw, 32);
 	}
 	else
 	{
@@ -946,17 +941,16 @@ inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::fetch_texel(reg_texture_m
 	// clamp S/T if the iterated W is negative
 	if (texmode.clamp_neg_w() && iterw < 0)
 		s = t = 0;
+}
 
-	// clamp the LOD after applying bias and dither
-	lod += m_lodbias;
-	if (texmode.enable_lod_dither())
-		lod += dither.raw_4x4(x) << 4;
-	lod = std::clamp<s32>(lod, m_lodmin, m_lodmax);
 
-	// now the LOD is in range; if we don't own this LOD, take the next one
-	s32 ilod = lod >> 8;
-	ilod += (~m_lodmask >> ilod) & 1;
+//-------------------------------------------------
+//  sample_texel - point or bilinear sample at a
+//  24.8 S/T coordinate in the given LOD
+//-------------------------------------------------
 
+inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::sample_texel(reg_texture_mode const texmode, bool point, s32 ilod, s32 s, s32 t, u8 bilinear_mask)
+{
 	// fetch the texture base
 	u32 texbase = m_lodoffset[ilod];
 
@@ -964,9 +958,8 @@ inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::fetch_texel(reg_texture_m
 	s32 smax = m_wmask >> ilod;
 	s32 tmax = m_hmask >> ilod;
 
-	// determine whether we are point-sampled or bilinear
 	rgbaint_t result;
-	if ((lod == m_lodmin && !texmode.magnification_filter()) || (lod != m_lodmin && !texmode.minification_filter()))
+	if (point)
 	{
 		// incorporate the fraction shift into ilod
 		ilod += 8;
@@ -1036,6 +1029,84 @@ inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::fetch_texel(reg_texture_m
 		result.bilinear_filter_rgbaint(texel0, texel1, texel2, texel3, sfrac, tfrac);
 	}
 	return result;
+}
+
+
+//-------------------------------------------------
+//  fetch_texel - fetch the texel value based on
+//  the S,T coordinates and LOD
+//-------------------------------------------------
+
+inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::fetch_texel(reg_texture_mode const texmode, dither_helper const &dither, s32 x, double iters, double itert, double iterw, s32 &lod, u8 bilinear_mask, texture_footprint const &footprint, u8 supersample)
+{
+	s32 s, t;
+	compute_st(texmode, iters, itert, iterw, s, t);
+
+	// compute the log2 of the non-reciprocal W value; negating it gives
+	// the log2 of the reciprocal, so we subtract instead of add it
+	if (texmode.enable_perspective())
+		lod -= fast_log2(iterw, 32);
+	s32 const footprint_lod = lod;
+
+	// clamp the LOD after applying bias and dither
+	lod += m_lodbias;
+	if (texmode.enable_lod_dither())
+		lod += dither.raw_4x4(x) << 4;
+	lod = std::clamp<s32>(lod, m_lodmin, m_lodmax);
+
+	// now the LOD is in range; if we don't own this LOD, take the next one
+	s32 ilod = lod >> 8;
+	ilod += (~m_lodmask >> ilod) & 1;
+
+	// determine whether we are point-sampled or bilinear
+	bool const point = (lod == m_lodmin && !texmode.magnification_filter()) || (lod != m_lodmin && !texmode.minification_filter());
+
+	// enhancement: when the pixel covers more than one texel of the LOD we
+	// sample (games often clamp to a single LOD), average an NxN grid of
+	// samples spread across the pixel instead of letting texels alias
+	if (supersample > 1)
+	{
+		s32 const excess = footprint_lod - (ilod << 8);
+		if (excess >= 0x80)
+		{
+			int const n = std::min<int>(supersample, (excess < 0x100) ? 2 : (excess < 0x196) ? 3 : 4);
+			rgbaint_t sum(0);
+			for (int j = 0; j < n; j++)
+			{
+				double const oy = (j + 0.5) / n - 0.5;
+				for (int i = 0; i < n; i++)
+				{
+					double const ox = (i + 0.5) / n - 0.5;
+					s32 ss, st;
+					compute_st(texmode,
+							iters + ox * footprint.dsdx + oy * footprint.dsdy,
+							itert + ox * footprint.dtdx + oy * footprint.dtdy,
+							iterw + ox * footprint.dwdx + oy * footprint.dwdy, ss, st);
+					sum.add(sample_texel(texmode, point, ilod, ss, st, bilinear_mask));
+				}
+			}
+			if (n == 2)
+			{
+				sum.add_imm(2);
+				sum.shr_imm(2);
+			}
+			else if (n == 4)
+			{
+				sum.add_imm(8);
+				sum.shr_imm(4);
+			}
+			else
+			{
+				// divide by 9
+				sum.mul_imm(7282);
+				sum.add_imm(0x8000);
+				sum.shr_imm(16);
+			}
+			return sum;
+		}
+	}
+
+	return sample_texel(texmode, point, ilod, s, t, bilinear_mask);
 }
 
 
@@ -1246,6 +1317,7 @@ void rasterizer_palette::compute_ncc(u32 const *regs)
 voodoo_renderer::voodoo_renderer(running_machine &machine, u16 tmu_config, const rgb_t *rgb565, voodoo_regs &fbi_regs, voodoo_regs *tmu0_regs, voodoo_regs *tmu1_regs) :
 	poly_manager(machine),
 	m_bilinear_mask(0xf0),
+	m_tex_supersample(0),
 	m_tmu_config(tmu_config),
 	m_rowpixels(0),
 	m_yorigin(0),
@@ -2239,6 +2311,7 @@ void voodoo_renderer::rasterizer(s32 y, const voodoo_renderer::extent_t &extent,
 	reg_fog_mode const fogmode(FogMode, poly.raster.fogmode());
 	double iters0, itert0, iterw0, iters1, itert1, iterw1;
 	double deltas0, deltat0, deltaw0, deltas1, deltat1, deltaw1;
+	texture_footprint footprint0, footprint1;
 	u32 stipple = poly.stipple;
 
 	// determine the screen Y
@@ -2316,6 +2389,7 @@ void voodoo_renderer::rasterizer(s32 y, const voodoo_renderer::extent_t &extent,
 		itert0 = double(poly.startt0 + dy * poly.dt0dy + dx * poly.dt0dx);
 		iterw0 = double(poly.startw0 + dy * poly.dw0dy + dx * poly.dw0dx);
 		lodbase0 = compute_lodbase(poly.ds0dx, poly.ds0dy, poly.dt0dx, poly.dt0dy);
+		footprint0 = { deltas0, deltat0, deltaw0, double(poly.ds0dy), double(poly.dt0dy), double(poly.dw0dy) };
 	}
 	s32 lodbase1 = 0;
 	if (GenericFlags & rasterizer_params::GENERIC_TEX1)
@@ -2327,6 +2401,7 @@ void voodoo_renderer::rasterizer(s32 y, const voodoo_renderer::extent_t &extent,
 		itert1 = double(poly.startt1 + dy * poly.dt1dy + dx * poly.dt1dx);
 		iterw1 = double(poly.startw1 + dy * poly.dw1dy + dx * poly.dw1dx);
 		lodbase1 = compute_lodbase(poly.ds1dx, poly.ds1dy, poly.dt1dx, poly.dt1dy);
+		footprint1 = { deltas1, deltat1, deltaw1, double(poly.ds1dy), double(poly.dt1dy), double(poly.dw1dy) };
 	}
 	poly.info->scanlines++;
 
@@ -2355,7 +2430,7 @@ void voodoo_renderer::rasterizer(s32 y, const voodoo_renderer::extent_t &extent,
 			if (GenericFlags & rasterizer_params::GENERIC_TEX1)
 			{
 				s32 lod1 = lodbase1;
-				rgbaint_t texel_t1 = poly.tex1->fetch_texel(texmode1, dither, x, iters1, itert1, iterw1, lod1, m_bilinear_mask);
+				rgbaint_t texel_t1 = poly.tex1->fetch_texel(texmode1, dither, x, iters1, itert1, iterw1, lod1, m_bilinear_mask, footprint1, m_tex_supersample);
 				if (GenericFlags & rasterizer_params::GENERIC_TEX1_IDENTITY)
 					texel = texel_t1;
 				else
@@ -2370,7 +2445,7 @@ void voodoo_renderer::rasterizer(s32 y, const voodoo_renderer::extent_t &extent,
 				if (!texmode0.seq_8_downld())
 				{
 					s32 lod0 = lodbase0;
-					rgbaint_t texel_t0 = poly.tex0->fetch_texel(texmode0, dither, x, iters0, itert0, iterw0, lod0, m_bilinear_mask);
+					rgbaint_t texel_t0 = poly.tex0->fetch_texel(texmode0, dither, x, iters0, itert0, iterw0, lod0, m_bilinear_mask, footprint0, m_tex_supersample);
 					if (GenericFlags & rasterizer_params::GENERIC_TEX0_IDENTITY)
 						texel = texel_t0;
 					else

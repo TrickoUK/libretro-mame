@@ -1008,6 +1008,10 @@ void voodoo_1_device::device_start()
 	// create the renderer
 	m_renderer = std::make_unique<voodoo_renderer>(machine(), tmu_config, m_shared->rgb565, m_reg, &m_tmu[0].regs(), BIT(m_chipmask, 2) ? &m_tmu[1].regs() : nullptr);
 
+	// PROTOTYPE: texture supersampling enhancement, max NxN per pixel
+	if (char const *texss = getenv("MAME_VOODOO_TEXSS"))
+		m_renderer->set_tex_supersample(atoi(texss));
+
 	// set up the PCI FIFO
 	m_pci_fifo.configure(m_pci_fifo_mem, 64*2);
 	m_stall_state = NOT_STALLED;

@@ -15,6 +15,10 @@ to be tracked.
   controls, save states, why gticlub2 cars roll at speed (a game rule) and the optional gamepad
   Steering Response/Smoothing settings, plus game RAM notes.
 
+- `voodoo-texture-supersampling.md`: jpark3 shimmer (texture aliasing, single forced LOD) and the
+  WIP per-pixel texture supersampling in the Voodoo renderer (branch `voodoo-texture-supersample`),
+  with the plan for the next session.
+
 - `voodoo-gpu-idea.md`: feasibility notes for GPU-offloaded 3dfx Voodoo rendering (not started).
 
 - `potential-upstream-sync.md`: upstream MAME commits since mame0289 that would help this fork

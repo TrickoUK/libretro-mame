@@ -337,6 +337,14 @@ private:
 
 // ======================> rasterizer_texture
 
+// per-pixel S/T/W deltas in X and Y, used to spread texture supersamples
+// across a pixel
+struct texture_footprint
+{
+	double dsdx, dtdx, dwdx;
+	double dsdy, dtdy, dwdy;
+};
+
 // this class holds TMU-specific decoded data regarding a texture; it is
 // encapsulated here, with functions to derive it from register info and
 // functions to process it as part of the rendering pipeline
@@ -350,7 +358,7 @@ public:
 	rgb_t lookup_single_texel(u32 format, u32 texbase, s32 s, s32 t);
 
 	// fetch a texel given coordinates and LOD information
-	rgbaint_t fetch_texel(voodoo::reg_texture_mode const texmode, voodoo::dither_helper const &dither, s32 x, double iters, double itert, double iterw, s32 &lod, u8 bilinear_mask);
+	rgbaint_t fetch_texel(voodoo::reg_texture_mode const texmode, voodoo::dither_helper const &dither, s32 x, double iters, double itert, double iterw, s32 &lod, u8 bilinear_mask, texture_footprint const &footprint, u8 supersample);
 
 	// texture-specific color combination unit
 	rgbaint_t combine_texture(voodoo::reg_texture_mode const texmode, rgbaint_t const &c_local, rgbaint_t const &c_other, s32 lod);
@@ -363,6 +371,12 @@ public:
 	}
 
 private:
+	// compute 24.8 S/T from iterated S/T/W
+	void compute_st(voodoo::reg_texture_mode const texmode, double iters, double itert, double iterw, s32 &s, s32 &t);
+
+	// point or bilinear sample at a 24.8 S/T in the given LOD
+	rgbaint_t sample_texel(voodoo::reg_texture_mode const texmode, bool point, s32 ilod, s32 s, s32 t, u8 bilinear_mask);
+
 	// internal state
 	rgb_t const *m_lookup;      // currently selected lookup
 	u8 *m_ram;                  // pointer to base of TMU RAM
@@ -515,6 +529,7 @@ public:
 	void set_tmu_config(u16 value) { m_tmu_config = value; }
 	void set_fogdelta_mask(u8 value) { m_fogdelta_mask = value; }
 	void set_bilinear_mask(u8 value) { m_bilinear_mask = value; }
+	void set_tex_supersample(u8 value) { m_tex_supersample = value; }
 
 	// allocate a new poly_data and fill in the rasterizer_params
 	poly_data &alloc_poly();
@@ -593,6 +608,7 @@ private:
 
 	// internal state
 	u8 m_bilinear_mask;         // mask for bilinear resolution (0xf0 for V1, 0xff for V2)
+	u8 m_tex_supersample;       // enhancement: max NxN texture supersamples per pixel (0/1 = off)
 	u16 m_tmu_config;           // TMU configuration
 	u32 m_rowpixels;            // current pixels per row
 	s32 m_yorigin;              // current Y origin
