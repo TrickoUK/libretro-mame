@@ -5,7 +5,7 @@ This file guides Claude Code when working in this repository.
 ## What this repo is
 
 A fork of [libretro/mame](https://github.com/libretro/mame) (upstream MAME with a
-`libretro` OSD grafted on), pushed to `TrickoUK/mame`. It's MAME itself
+`libretro` OSD grafted on), pushed to `TrickoUK/libretro-mame`. It's MAME itself
 (`src/mame`, `src/devices`, `src/emu`) plus a libretro frontend layer in
 `src/osd/libretro`. Regular upstream MAME merges land as commits like
 `Merge tag 'mame0289'...` — expect large, unrelated diffs from upstream syncs
@@ -60,6 +60,18 @@ upstream has fixed the same thing before re-porting one:
   Revision A only); `gunblade` gun Y gets `PORT_REVERSE` under `__LIBRETRO__`.
 - `src/mame/taito/opwolf.cpp`: no trigger flash on `opwolf` only. It's a runtime ROM
   patch about 900 frames in, because the C-chip ROM check rejects a static patch.
+
+### Light guns on Batocera (Sinden)
+
+- The core side is `src/osd/modules/input/input_retro.cpp` (`d8f3c392f0f`). In "free" offscreen mode
+  the reload button shoots off screen, and gun Start/Select also press pad Start/Select. jpark3's
+  port fix is `c79b34ab13b` (`fork-specific/viper-investigation.md` Fix 8).
+- It also needs Batocera's RetroArch to use its `udev` input driver. Batocera patch
+  `019-disable-wayland-events-by-wayland.patch` must cover `wayland_vk_ctx.c` (the box runs Vulkan),
+  otherwise every gun shares the same buttons and gun Start/Coin fail. **If gun buttons break
+  after a new image, check RetroArch before the core**: `[udev] Mouse/Touch #N` lines in the box's
+  `es_launch_stderr.log` mean udev input is live. On 2026-09-26 an image shipped a stale RetroArch
+  without the fix (buildroot per-package copies); batocera's `rebuild.sh` now checks for that.
 
 **Project goal for this fork**: improve 3D rendering for specific
 arcade drivers by offloading polygon rasterization to the host GPU, instead of
@@ -426,11 +438,11 @@ architecture.
   boot, correct 512x480 scaling with that board's own 1.333 aspect ratio
   (confirms the scaling isn't accidentally Brave-Blade-specific), stable
   through an extended soak test. `nagano98` (Konami GV) **could not be
-  tested** - the romset in this project's ROM collection is a 128-byte
-  stub, not a real dump (confirmed via `unzip -l`), and no other
-  `konamigv.cpp` game in the collection has a real dump either. This is a
-  ROM-collection availability gap, not a code issue - revisit if a real
-  dump for any `konamigv.cpp` game becomes available.
+  tested** at the time. Its zip is tiny (128 bytes) because Konami GV games
+  run from a CD image: the game needs `roms/nagano98/nagano98.chd`, which
+  wasn't in the collection. The user started copying the missing CHDs for
+  the test sets on 2026-09-26 (nagano98, lacrazyc, hyperath, powyak96,
+  btchamp, kdeadeye for Konami GV), so this can be retried.
 
 ### Post-Phase-3 fixes: gdarius2 crash + ghosting (2026-09-17)
 
@@ -769,7 +781,7 @@ upstream merges.
 | Namco System 22 | `src/mame/namco/namcos22_v.cpp` (~2700 lines) | `ridgerac`, `timecris`, `acedrive`, `cybrcomm` | Uses the shared legacy software polygon helper (`src/mame/ausnz/poly.h` / `src/devices/video/poly.h`). |
 | Namco System 11 (3D) | `src/mame/namco/namcos11.cpp` | `starswep` | PS1-derived 3D hardware, simpler than System 22/23. |
 | Konami GTI Club-class | `src/mame/konami/gticlub.cpp`, `nwk-tr.cpp`, `hornet.cpp` | `gticlub`, `hangplt`, `thrilld`, `gradius4` | Custom 3D chip (K001005/K001006) does the real rasterizing. **Correction (2026-09-17)**: these files also wire a `generic_voodoo_device` into their memory map (via `konppc_device`), but it's bus/register glue only, not the renderer — confirmed no `K001005`/`K001006` config exists without it and the Voodoo device has no framebuffer/screen of its own here. Not a Voodoo rasterizer target. |
-| Konami (3D, other) | `src/mame/konami/konamigv.cpp` | `nagano98` | PS1-derived GV system (uses `psxgpu_device`, same device already GPU-accelerated for Sony ZN — see "Active target" above). `nagano98`'s romset in this collection is a stub, untestable currently. |
+| Konami (3D, other) | `src/mame/konami/konamigv.cpp` | `nagano98` | PS1-derived GV system (uses `psxgpu_device`, same device already GPU-accelerated for Sony ZN — see "Active target" above). `nagano98` needs its CHD (`nagano98/nagano98.chd`), being added 2026-09-26. |
 | Midway "Vegas Flavor" | `src/mame/williams/midvunit.cpp` | `crusnusa`, `crusnwld`, `offroadc` | **Correction (2026-09-17)**: does **not** use `voodoo*.cpp` — has its own self-contained rasterizer, `midvunit_renderer : poly_manager<...>` in `midvunit_v.cpp`. Custom TMS34010-driven polygon rasterizer, not Voodoo-based. Kept here as a candidate in its own right, not as a Voodoo target. |
 | Midway "Seattle" (Voodoo 1) | `src/mame/williams/seattle.cpp` | `sfrush`, `sfrushrk`, `mace`, `calspeed`, `vaportrx`, `carnevil`, `hyprdriv` | True Voodoo-rasterizer target (`voodoo_render.cpp`, ~2900 lines total). Entry point: `enqueue_triangle()` in `src/devices/video/voodoo.cpp:3015`. Best-covered board in the local ROM collection. |
 | Midway "Vegas" (Voodoo 2) | `src/mame/williams/vegas.cpp` | `gauntleg`, `tenthdeg`, `gauntdl`, `warfa`, `roadburn`, `sf2049`, `cartfury` | Also a true Voodoo target, same device/entry point as Seattle above. Second-best-covered board locally. |

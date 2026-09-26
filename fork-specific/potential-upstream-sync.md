@@ -1,5 +1,11 @@
 # Upstream MAME changes worth pulling into this fork (investigation only)
 
+> **Superseded 2026-09-26: everything below is now merged.** `arcade-focused` merged the whole local
+> upstream checkout (`mame0289-1156-gb01b8826c2b`) as merge commit `845d4f80649`, so every commit this
+> document lists as "not yet pulled" (e.g. Model 3's `2b5c770ba76`, the PS1 SPU overhaul, the `.c_str()`
+> removal from `8089ec90d35`) is in the tree. Conflict resolutions are in that commit's message and in
+> CLAUDE.md "Branches and upstream syncs". The PPC notes below are still accurate as history.
+
 Written 2026-09-24 against upstream `mame0289-1112-g7a134a7b767` and `arcade-focused` at `7c1fa0f62bb`. Commit hashes are upstream ones (`/var/home/bazzite/Projects/upstream/mame`).
 
 ## Context
