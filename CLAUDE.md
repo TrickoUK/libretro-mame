@@ -11,6 +11,42 @@ A fork of [libretro/mame](https://github.com/libretro/mame) (upstream MAME with 
 `Merge tag 'mame0289'...` — expect large, unrelated diffs from upstream syncs
 mixed into history.
 
+### Branches and upstream syncs
+
+- **`arcade-focused`** is the long-term branch for all of this fork's work.
+  **`master`** only tracks libretro/mame upstream. Short task branches get
+  merged into `arcade-focused` and then deleted.
+- **Full mamedev sync, 2026-09-26**: merge commit `845d4f80649` merged mamedev
+  master `mame0289-1156-gb01b8826c2b` (1,156 commits) into `arcade-focused`.
+  The source was the local upstream checkout at
+  `/var/home/bazzite/Projects/upstream/mame`, fetched into
+  `refs/upstream-tmp/master`. The commit message lists every conflict
+  resolution. For the next sync, update that checkout, fetch it the same way
+  and `git merge` it (not cherry-picks), so SHAs stay aligned with upstream.
+- Conflicts to expect again: `src/devices/cpu/powerpc` (our ICFI snapshots,
+  compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
+  handler, which we drop), `src/devices/video/psx.{cpp,h}` (GPU HLE path),
+  `src/devices/cpu/dspp` (our idle-loop skip), `scripts/genie.lua`,
+  `scripts/src/main.lua` and `src/osd/modules/lib/osdobj_common.cpp` (libretro
+  hooks).
+- Upstream API changes in that sync that broke fork/libretro code:
+  - `screen_device` is split per type (`screen_svg_device`, vector screens).
+    Use `video_output_interface_enumerator`/`is_vector()` instead of
+    `screen_type()`.
+  - `screen_device::configure()` takes an `attotime` (`attotime::from_hz()`),
+    not attoseconds.
+  - `emu.h` no longer pulls in `video.h`. Include it wherever
+    `machine().video()` is used.
+  - PS1 GPU VRAM is now a `ram_device` (`m_ram`), wired up with `set_cpu()`.
+    `p_vram` is a raw pointer into it.
+  - DSPP was split into Opera (runs the program once per frame) and Bulldog
+    (free-running, used by M2). The fork's idle-loop skip only runs on
+    Bulldog.
+- After any upstream sync, **regenerate `arcade.flt`** (see "Arcade-only build
+  filter"). genie fails with `Pattern "..." did not match any source files`
+  when upstream has moved files. Then run genie directly and do a full `-j4`
+  build.
+
 **Project goal for this fork**: improve 3D rendering for specific
 arcade drivers by offloading polygon rasterization to the host GPU, instead of
 MAME's normal fully-software rendering. This is a nontrivial architecture
@@ -809,9 +845,9 @@ to forward `SOURCEFILTER=` to the underlying GENie build — see the
 real on disk and required for this to work; regenerate it if it ever goes
 missing (see below).
 
-**Regenerating** (only needed if `src/mame/` driver files get renamed/moved/
-split by a future upstream merge — verified unnecessary as of the mame0289
-merge currently checked out):
+**Regenerating** (needed after any upstream merge that renames, moves or splits
+`src/mame/` driver files. The 2026-09-26 mamedev sync needed it. The file is
+untracked, so back it up before regenerating if you might want the old one):
 ```sh
 python3 /var/home/bazzite/Projects/libretro/speed-mame/make_arcade_filter.py src/mame arcade.flt
 # then validate statically before trusting it:
