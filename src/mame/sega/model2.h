@@ -236,6 +236,7 @@ protected:
 	void render_frame_start();
 	void geo_parse();
 	void render_polygons(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void draw_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
 	void model2_timers(machine_config &config) ATTR_COLD;
@@ -653,6 +654,13 @@ struct m2_poly_extra_data
 	u8       luma;
 };
 
+// destmap/fillmap are rendered at MODEL2_SUPERSAMPLE times the linear
+// resolution of the real screen and box-filtered back down when composited
+// (see render_polygons()), to give the software 3D rasterizer some
+// antialiasing on polygon edges that real Model 2 hardware had via a
+// dedicated AA circuit this driver doesn't otherwise emulate.
+constexpr int MODEL2_SUPERSAMPLE = 2;
+
 // 0x10000 = size of the poly_sorted_list array
 class model2_renderer : public poly_manager<float, m2_poly_extra_data, 4>
 {
@@ -667,8 +675,8 @@ public:
 				{ &model2_renderer::draw_scanline_tex<false>, this },
 				{ &model2_renderer::draw_scanline_tex<true>, this } },
 		m_state(state),
-		m_destmap(512, 512),
-		m_fillmap(512, 512),
+		m_destmap(512 * MODEL2_SUPERSAMPLE, 512 * MODEL2_SUPERSAMPLE),
+		m_fillmap(512 * MODEL2_SUPERSAMPLE, 512 * MODEL2_SUPERSAMPLE),
 		m_xoffs(90),
 		m_yoffs(-8)
 	{

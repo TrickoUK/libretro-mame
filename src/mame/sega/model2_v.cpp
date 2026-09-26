@@ -567,8 +567,9 @@ void model2_renderer::model2_3d_render(polygon *poly, const rectangle &cliprect)
 	/* select renderer based on attributes (bit14 = textured, bit13 = transparent) */
 	u8 renderer = (poly->texheader[0] >> 13) & 3;
 
-	/* calculate and clip to viewport */
-	rectangle vp(poly->viewport[0] + m_xoffs, poly->viewport[2] + m_xoffs, (384-poly->viewport[3]) + m_yoffs, (384-poly->viewport[1]) + m_yoffs);
+	/* calculate and clip to viewport (destmap-space, i.e. already scaled by MODEL2_SUPERSAMPLE) */
+	rectangle vp(MODEL2_SUPERSAMPLE * (poly->viewport[0] + m_xoffs), MODEL2_SUPERSAMPLE * (poly->viewport[2] + m_xoffs),
+	             MODEL2_SUPERSAMPLE * ((384-poly->viewport[3]) + m_yoffs), MODEL2_SUPERSAMPLE * ((384-poly->viewport[1]) + m_yoffs));
 	vp &= cliprect;
 
 	extra.state = &m_state;
@@ -657,9 +658,9 @@ inline void model2_state::model2_3d_project(polygon *poly)
 {
 	for (int i = 0; i < poly->num_vertices; i++)
 	{
-		/* project the vertices */
-		poly->v[i].x = m_crtc_xoffset + poly->center[0] + (poly->v[i].x / (poly->v[i].pz + std::numeric_limits<float>::min()));
-		poly->v[i].y = ((384 - poly->center[1])+m_crtc_yoffset) - (poly->v[i].y / (poly->v[i].pz + std::numeric_limits<float>::min()));
+		/* project the vertices into destmap space (scaled by MODEL2_SUPERSAMPLE) */
+		poly->v[i].x = MODEL2_SUPERSAMPLE * (m_crtc_xoffset + poly->center[0] + (poly->v[i].x / (poly->v[i].pz + std::numeric_limits<float>::min())));
+		poly->v[i].y = MODEL2_SUPERSAMPLE * (((384 - poly->center[1])+m_crtc_yoffset) - (poly->v[i].y / (poly->v[i].pz + std::numeric_limits<float>::min())));
 	}
 }
 
@@ -693,10 +694,15 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	raster_state *raster = m_raster.get();
 	int32_t z;
 
+	// destmap/fillmap are rendered at MODEL2_SUPERSAMPLE times cliprect's resolution
+	rectangle const ss_cliprect(
+			cliprect.min_x * MODEL2_SUPERSAMPLE, (cliprect.max_x + 1) * MODEL2_SUPERSAMPLE - 1,
+			cliprect.min_y * MODEL2_SUPERSAMPLE, (cliprect.max_y + 1) * MODEL2_SUPERSAMPLE - 1);
+
 	// if the geometrizer hasn't presented a new frame, just copy the previous frame and bail
 	if (m_render_done)
 	{
-		copybitmap_trans(bitmap, m_renderer->destmap(), 0, 0, 0, 0, cliprect, 0x00000000);
+		downsample_3d_layer(bitmap, cliprect);
 		return;
 	}
 
@@ -704,8 +710,8 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	if (raster->poly_list_index == 0)
 		return;
 
-	m_renderer->destmap().fill(0x00000000, cliprect);
-	m_renderer->fillmap().fill(0x00, cliprect);
+	m_renderer->destmap().fill(0x00000000, ss_cliprect);
+	m_renderer->fillmap().fill(0x00, ss_cliprect);
 
 	for (int window = raster->cur_window; window >= 0; window--)
 	{
@@ -725,7 +731,7 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 					{
 						/* project and render */
 						model2_3d_project(poly);
-						m_renderer->model2_3d_render(poly, cliprect);
+						m_renderer->model2_3d_render(poly, ss_cliprect);
 					}
 
 					poly = (polygon *)poly->next;
@@ -735,9 +741,53 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	}
 	m_renderer->wait("End of frame");
 
-	copybitmap_trans(bitmap, m_renderer->destmap(), 0, 0, 0, 0, cliprect, 0x00000000);
+	downsample_3d_layer(bitmap, cliprect);
 
 	m_render_done = true;
+}
+
+// Box-filter downsample of the supersampled 3D polygon layer (m_renderer->destmap()/fillmap())
+// into the real screen bitmap. Only opaque (fillmap-marked) source texels are averaged, and a
+// destination pixel is left untouched (transparent) if none of its source block is opaque, so
+// the tilemap/sprite layers drawn before/after this one in screen_update() still show through
+// wherever no polygon covers that pixel - a plain average would incorrectly blend edges to black.
+void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect)
+{
+	bitmap_rgb32 &src = m_renderer->destmap();
+	bitmap_ind8 &srcfill = m_renderer->fillmap();
+
+	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		int const sy0 = y * MODEL2_SUPERSAMPLE;
+		u32 *const dest = &bitmap.pix(y);
+
+		for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+		{
+			int const sx0 = x * MODEL2_SUPERSAMPLE;
+			u32 r = 0, g = 0, b = 0, count = 0;
+
+			for (int sy = 0; sy < MODEL2_SUPERSAMPLE; sy++)
+			{
+				u8 const *const fillrow = &srcfill.pix(sy0 + sy);
+				u32 const *const srcrow = &src.pix(sy0 + sy);
+
+				for (int sx = 0; sx < MODEL2_SUPERSAMPLE; sx++)
+				{
+					if (fillrow[sx0 + sx])
+					{
+						rgb_t const c(srcrow[sx0 + sx]);
+						r += c.r();
+						g += c.g();
+						b += c.b();
+						count++;
+					}
+				}
+			}
+
+			if (count > 0)
+				dest[x] = rgb_t(r / count, g / count, b / count);
+		}
+	}
 }
 
 // direct framebuffer drawing (enabled with render test mode, Last Bronx title screen)
