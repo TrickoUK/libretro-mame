@@ -28,6 +28,8 @@
 #include "render.h"
 #include "rendlay.h"
 #include "rendutil.h"
+#include "screen_svg.h"
+#include "video.h"
 #include "ui/uimain.h"
 
 // OSD headers
@@ -255,8 +257,8 @@ int retro_window_info::window_init()
 	result = complete_create();
 
 	// store more reasonable geometry for SVG screens
-	const screen_device *screen = screen_device_enumerator(machine().root_device()).byindex(index());
-	if ((screen != nullptr) && (screen->screen_type() == SCREEN_TYPE_SVG))
+	const device_video_output_interface *screen = video_output_interface_enumerator(machine().root_device()).byindex(index());
+	if ((screen != nullptr) && dynamic_cast<const screen_svg_device *>(screen))
 	{
 		const rectangle &visarea = screen->visible_area();
 		svg_width  = render_round_nearest(visarea.width());
@@ -478,7 +480,7 @@ void retro_window_info::update()
 		if (m_rendered_event.wait(event_wait_ticks))
 		{
 			const int update = 1;
-			const screen_device *screen = screen_device_enumerator(machine().root_device()).byindex(index());
+			const device_video_output_interface *screen = video_output_interface_enumerator(machine().root_device()).byindex(index());
 
 			// ensure the target bounds are up-to-date, and then get the primitives
 
@@ -492,7 +494,7 @@ void retro_window_info::update()
 
 			// Check whether window has vector screens
 
-			if ((screen != nullptr) && (screen->screen_type() == SCREEN_TYPE_VECTOR))
+			if ((screen != nullptr) && (screen->is_vector()))
 				renderer().set_flags(osd_renderer::FLAG_HAS_VECTOR_SCREEN);
 			else
 				renderer().clear_flags(osd_renderer::FLAG_HAS_VECTOR_SCREEN);

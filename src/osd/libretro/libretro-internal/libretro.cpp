@@ -9,6 +9,7 @@
 
 #include "emu.h"
 #include "emuopts.h"
+#include "video.h"
 #include "render.h"
 #include "ui/uimain.h"
 #include "uiinput.h"

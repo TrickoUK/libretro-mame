@@ -109,7 +109,7 @@ void h8500_device::device_start()
 
 	// General registers
 	for (int n = 0; n < 6; n++) {
-		state_add(H8500_R0 + n, string_format("R%d", n).c_str(), m_r[n]);
+		state_add(H8500_R0 + n, string_format("R%d", n), m_r[n]);
 	}
 	state_add(H8500_FP, "FP", m_r[6]);
 	state_add(H8500_SP, "SP", m_r[7]);
@@ -718,7 +718,7 @@ u8 h8500_device::do_subx8(u8 v1, u8 v2)
 {
 	const u8 c = m_sr & SR_C ? 1 : 0;
 	const u16 res = v1 - v2 - c;
-	m_sr &= ~(SR_N | SR_V | SR_Z | SR_C);
+	m_sr &= ~(SR_N | SR_V | SR_C);
 	if(u8(res))
 		m_sr &= ~SR_Z;
 	if(s8(res) < 0)

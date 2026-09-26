@@ -30,6 +30,7 @@ TODO:
 - ss22 testmode video test screen#04 translucent polygon should be higher priority than sprite
 - find out how/where vics num_sprites is determined exactly, currently a workaround is needed for airco22b and dirtdash
 - there's a sprite limit per scanline, eg. timecris submarine explosion smoke partially erases sprites on real hardware
+- adillor race end should fade polygons to red, these are vics sprites with a size of 0, expected x/y size is 0x100
 - propcycl attract mode, when the altar button is pressed, global fade should affect the background sprite
 - polygon position problems? (also has glitches on real hw, but not as bad)
   + timecris stage 1-2 start, beam appears through platform
@@ -3797,7 +3798,7 @@ void namcos22_state::namcos22(machine_config &config)
 	EEPROM_2864(config, "eeprom").write_time(attotime::zero);
 
 	// video hardware
-	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
+	SCREEN(config, m_screen);
 	m_screen->set_raw(PIXEL_CLOCK, HTOTAL, HBEND, HBSTART, VTOTAL, VBEND, VBSTART);
 	m_screen->set_screen_update(FUNC(namcos22_state::screen_update_namcos22));
 	m_screen->screen_vblank().set(FUNC(namcos22_state::screen_vblank));
@@ -6319,7 +6320,7 @@ void propcycl_state::init_propcycl()
 {
 	u32 *ROM = (u32 *)memregion("maincpu")->base();
 
-	// patch out strange routine (uninitialized-eeprom related?)
+	// HACK: patch out strange routine (uninitialized-eeprom related?)
 	// maybe needs more accurate 28C64 eeprom device emulation
 	ROM[0x1992c/4] = 0x4e754e75;
 
@@ -6341,7 +6342,7 @@ void propcycl_state::init_propcycl()
 
 void propcycl_state::init_propcyclj()
 {
-	// see init_propcycl for notes
+	// HACK: see init_propcycl for notes
 	u32 *ROM = (u32 *)memregion("maincpu")->base();
 
 	ROM[0x1990a/4] = 0x4e754e75;
