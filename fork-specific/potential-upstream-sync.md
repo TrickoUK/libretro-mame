@@ -12,11 +12,45 @@ ran `git apply --check` on each candidate against `arcade-focused`. Nothing was 
 ## Tier 1: directly affects hardware we're actively working on
 
 ### PPC DRC (Viper gticlub2/jpark3, M2, Model 3, Hornet)
-**Status 2026-09-25: pulled on branch `ppc-upstream-sync`**. Taken: `6e65bf15368`,
+**Status 2026-09-26: the PowerPC core now matches upstream `mame0289-1156-gb01b8826c2b`, plus our
+own changes** (branch `ppc-upstream-sync-2`). Everything upstream changed under
+`src/devices/cpu/powerpc` is in, except `89bd53eb70a` (we keep our own ICFI) and the `.c_str()`
+removal from `8089ec90d35` (it needs upstream's `distate.h` change, so it comes with the full
+merge). Multi-area commits were taken for their PowerPC files only; each commit message says so.
+Taken, in order: `696900611dc` (no-FPU exception, Mac DCBZ hack option), the PowerPC part of
+`4a83bce04f3` (`get_dsisr` takes a fetch intent, `tlbie` in all 16 segments on non-603 parts,
+MSR[POW] nap, `rfi`/`bclr` mask the low target bits), `6028cef16cb` (zero-cycle branch loop),
+`85388fbf4ae` (bdnz/bdz branch folding), `ab1d1b5616e` (DRC `retry_access()`, adds one inline
+accessor to `devcpu.h`), `0ee5c47faa7` and `96016fbe55c` (split 603 I/D TLB).
+- **`0ee5c47faa7` is back.** On its own it hung daytona2/spikeout (see below). Upstream's
+  `96016fbe55c` ("mixing up the 603's split instruction and data TLBs... spikeout does") fixes
+  that. Both now boot like the old core: spikeout reaches attract play, and daytona2 sits in the
+  same link-wait loop (PC `0x4C6CC`-`0x4C6D4`, sampled every 2 s) and shows the identical frame on
+  the old and new cores.
+- Our local changes kept on top: `914dc7e06b8` ICFI snapshots, `6a0cf6b4aaf` compile-time fetch
+  fill, `c732e9c9cf6` post-load cache flush, and `af439229f3d`'s tlb_mismatch re-entry. The
+  compile-time fill and the re-entry test now use the current mode's fetch permission
+  (`ppccom_fetch_intention()`, `FETCH_ALLOWED` or `USER_FETCH_ALLOWED`), and the fill also
+  preserves the new `mmu603_key`.
+- Tested (cold boots, 90 s, screenshots every 10 s): gticlub2, jpark3, thrild2, kviper; polystar,
+  evilngt, totlvice, and a polystar stage-1 run with `tools/polystar_stage1.lua` (stage 1 draws
+  fine, so the ICFI fix still works); daytona2, spikeout, scud, vf3, lemans24, srally2, harley;
+  gradius4, hangplt, thrilld, gticlub. All at ~1.0 speed_percent except srally2 (~0.68, same as
+  before) and harley in its first race (~0.49 new vs ~0.53 old core, same scene, within noise).
+  The static screens (daytona2/scud/lemans24 link checks, gradius4 RTC, thrilld backup data,
+  gticlub steering error) match the old core. gticlub2 perf A/B: recompiler ~0.01% of samples on
+  both, main thread 66.8% vs 65.2% of a core.
+- Save states: `0ee5c47faa7` adds `mmu603_key` to the saved state of 602/603 cores (M2, Viper,
+  Model 3), so states made before this don't load.
+- Model 3's only unmerged functional upstream fix is `2b5c770ba76` (texture-coordinate mask,
+  out-of-bounds read); it isn't PowerPC, so it waits for the full merge.
+
+**Earlier status 2026-09-25: pulled on branch `ppc-upstream-sync`**. Taken: `6e65bf15368`,
 `764de9b5b48`, `8f158369e6a`, `1a8267fa579`. Conflict notes are in each commit message.
 - `8f158369e6a` replaces our `af439229f3d` compare. A reused block now also re-snapshots its code
   pages so our ICFI handling still works.
-- **`0ee5c47faa7` was dropped.** With it, daytona2 and spikeout (Model 3) hang at boot. User-mode
+- **`0ee5c47faa7` was dropped** (retaken 2026-09-26, see above). With it, daytona2 and spikeout
+  (Model 3) hang at boot. User-mode
   code reads ~0x1500 through a page with SR Kp=1 and PP=00. The new check turns that into a DSI,
   and the game's handler treats the DSI as fatal. It's architecturally "correct", so it's probably
   an existing Model 3 inaccuracy that the old, permissive check hid. The other eight local Model 3

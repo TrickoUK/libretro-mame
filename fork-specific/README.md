@@ -20,7 +20,8 @@ to be tracked.
 - `potential-upstream-sync.md`: upstream MAME commits since mame0289 that would help this fork
   (PPC 603 TLB/vTLB, DRC rounding, PS1 SPU overhaul, System 22/Zeus/Model 3 fixes), whether
   each applies cleanly, and where they conflict with our changes. The PPC vTLB/603 TLB set was
-  pulled on 2026-09-25 (minus `0ee5c47faa7`); see its status note.
+  pulled on 2026-09-25, and on 2026-09-26 the whole PowerPC core was synced to upstream
+  (including `0ee5c47faa7` + `96016fbe55c`); see its status note.
 
 - `polystar-performance.md`: where polystar's time goes in busy stage-1 play (~0.96-0.98x,
   limited by the main emulation thread waiting on the M2 triangle-engine workers), plus
