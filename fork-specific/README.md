@@ -27,6 +27,12 @@ to be tracked.
   limited by the main emulation thread waiting on the M2 triangle-engine workers), plus
   ideas toward a steady 60 fps. Not started.
 
+## Build files
+
+- `arcade.flt`: the arcade-only `SOURCEFILTER` (drivers that declare at least one
+  `GAME()`), used by local builds and batocera's `libretro-mame.mk`. Regenerate it after
+  upstream syncs; see CLAUDE.md "Arcade-only build filter".
+
 ## Tools (`tools/`)
 
 Results go to `fork-specific/out/<tag>/`, or wherever `M2PROF_OUT` points.

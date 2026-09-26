@@ -42,10 +42,24 @@ mixed into history.
   - DSPP was split into Opera (runs the program once per frame) and Bulldog
     (free-running, used by M2). The fork's idle-loop skip only runs on
     Bulldog.
-- After any upstream sync, **regenerate `arcade.flt`** (see "Arcade-only build
+- After any upstream sync, **regenerate `fork-specific/arcade.flt`** (see "Arcade-only build
   filter"). genie fails with `Pattern "..." did not match any source files`
   when upstream has moved files. Then run genie directly and do a full `-j4`
   build.
+
+### Game fixes carried in the fork (formerly batocera patches)
+
+These were batocera `libretro-mame` patches `003`-`007` and moved into the fork
+on 2026-09-26. Batocera now only keeps the upstream-batocera patches `000-makefile`
+and `002-batocera-ini`. Keep these fixes through upstream merges, and check whether
+upstream has fixed the same thing before re-porting one:
+- `plugins/offscreenreload/init.lua`: batocera's lightgun reload auto-bind, which
+  skips the bind when BUTTON2 is already used by gameplay.
+- `src/mame/sega/model2*`: 2x supersample antialiasing of the 3D layer
+  (`MODEL2_SUPERSAMPLE`); `hotd` has no trigger flash (`init_hotd` ROM patch,
+  Revision A only); `gunblade` gun Y gets `PORT_REVERSE` under `__LIBRETRO__`.
+- `src/mame/taito/opwolf.cpp`: no trigger flash on `opwolf` only. It's a runtime ROM
+  patch about 900 frames in, because the C-chip ROM check rejects a static patch.
 
 **Project goal for this fork**: improve 3D rendering for specific
 arcade drivers by offloading polygon rasterization to the host GPU, instead of
@@ -250,7 +264,7 @@ for full phase-by-phase detail):
 
 **Build command** (verified working):
 ```sh
-MAME_DYNAMIC_LIBSTDCXX=1 HAVE_RETRO_GPU_TARGET=1 make -f Makefile.libretro -j4 SOURCEFILTER=arcade.flt PREMAKE=0
+MAME_DYNAMIC_LIBSTDCXX=1 HAVE_RETRO_GPU_TARGET=1 make -f Makefile.libretro -j4 SOURCEFILTER=fork-specific/arcade.flt PREMAKE=0
 ```
 Two build-system quirks discovered/worked around this session, both
 independent of this feature and likely to bite future work too:
@@ -263,7 +277,7 @@ independent of this feature and likely to bite future work too:
   --LIBRETRO_CPU=x86_64 --with-emulator --OPTIMIZE=3 --NOWERROR='1'
   --target='mame' --subtarget='mame' --build-dir='build'
   --NO_USE_MIDI='1' --NO_USE_PORTAUDIO='1' --PYTHON_EXECUTABLE='python3'
-  --SOURCEFILTER='arcade.flt' --HAVE_RETRO_GPU_TARGET='1' --osd='retro'
+  --SOURCEFILTER='fork-specific/arcade.flt' --HAVE_RETRO_GPU_TARGET='1' --osd='retro'
   --targetos='linux' --PLATFORM='x86' --gcc=linux-gcc --gcc_version=16.2.1
   gmake` (confirm `Generating "..."` output appears, then `grep` the
   relevant generated `.make` file for your change) — then build with
@@ -808,7 +822,7 @@ make -f Makefile.libretro -j4 PREMAKE=0  # faster incremental rebuild after the 
   -lstdc++` without this flag. The opt-out (added to `scripts/genie.lua`) falls
   back to dynamically linking the system's `libstdc++.so`, which is fine when
   building and running on the same machine. Full invocation:
-  `MAME_DYNAMIC_LIBSTDCXX=1 make -f Makefile.libretro -j4 SOURCEFILTER=arcade.flt`.
+  `MAME_DYNAMIC_LIBSTDCXX=1 make -f Makefile.libretro -j4 SOURCEFILTER=fork-specific/arcade.flt`.
 - **If you ever force-kill a build mid-compile** (e.g. `kill -9 -<pgid>` on a
   runaway job — note killing just the top-level `make` PID is not enough, its
   per-directory child `make` processes keep spawning compiler jobs; kill the
@@ -823,7 +837,7 @@ make -f Makefile.libretro -j4 PREMAKE=0  # faster incremental rebuild after the 
 
 ### Arcade-only build filter (much faster iteration)
 
-`arcade.flt` at the repo root is a `SOURCEFILTER=` file — a plain list of
+`fork-specific/arcade.flt` is a `SOURCEFILTER=` file — a plain list of
 `src/mame/<mfg>/<driver>.cpp` paths, one per line — that restricts the build to
 files declaring at least one `GAME()`/`GAMEL()` (arcade) system, dropping
 console/computer/gambling/mechanical (`CONS`/`COMP`/`SYST`)-only driver files
@@ -835,23 +849,23 @@ files kept, ~28% smaller `mame_libretro.so`, dramatically fewer files to
 recompile on a full build.
 
 ```sh
-make -f Makefile.libretro -j4 SOURCEFILTER=arcade.flt
+make -f Makefile.libretro -j4 SOURCEFILTER=fork-specific/arcade.flt
 ```
 
 `Makefile.libretro` was patched (mirroring its existing `SOURCES=` passthrough)
 to forward `SOURCEFILTER=` to the underlying GENie build — see the
-`TARGETFLAGS` block. `arcade.flt` is covered by this repo's root `.gitignore`
-(`/*` blanket rule) so it won't show up in `git status`/be committed, but it's
-real on disk and required for this to work; regenerate it if it ever goes
-missing (see below).
+`TARGETFLAGS` block. The filter is tracked in git (since 2026-09-26; before
+that it was an untracked root `arcade.flt`, with a separate copy in batocera).
+Batocera's `libretro-mame.mk` builds with this same file, so it's the only
+copy. Paths are relative to the repo root (genie joins them with `MAME_DIR`).
 
 **Regenerating** (needed after any upstream merge that renames, moves or splits
-`src/mame/` driver files. The 2026-09-26 mamedev sync needed it. The file is
-untracked, so back it up before regenerating if you might want the old one):
+`src/mame/` driver files. The 2026-09-26 mamedev sync needed it. Commit the
+regenerated file with the merge, because batocera builds use it too):
 ```sh
-python3 /var/home/bazzite/Projects/libretro/speed-mame/make_arcade_filter.py src/mame arcade.flt
+python3 /var/home/bazzite/Projects/libretro/speed-mame/make_arcade_filter.py src/mame fork-specific/arcade.flt
 # then validate statically before trusting it:
-python3 scripts/build/makedep.py -r . filterproject -t mame_arcade -f arcade.flt src/mame/mame.lst > /dev/null
+python3 scripts/build/makedep.py -r . filterproject -t mame_arcade -f fork-specific/arcade.flt src/mame/mame.lst > /dev/null
 # expect: exit 0, "N source file(s) found" on stderr, no errors.
 ```
 The static check alone doesn't catch everything — see
