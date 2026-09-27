@@ -556,6 +556,12 @@ static void check_variables(void)
          voodoo_tex_supersample_max = 4;
    }
 
+   var.key   = CORE_NAME "_voodoo_edge_aa";
+   var.value = NULL;
+   voodoo_edge_aa_enable = false;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      voodoo_edge_aa_enable = !strcmp(var.value, "enabled");
+
    var.key   = CORE_NAME "_lightgun_mode";
    var.value = NULL;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)

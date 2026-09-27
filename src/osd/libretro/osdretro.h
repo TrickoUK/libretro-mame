@@ -182,6 +182,7 @@ public:
 #endif
 	}
 	virtual int voodoo_tex_supersample() const override { return voodoo_tex_supersample_max; }
+	virtual bool voodoo_edge_aa() const override { return voodoo_edge_aa_enable; }
 	virtual osd::gpu_render_target *get_gpu_render_target() override;
 
 private:

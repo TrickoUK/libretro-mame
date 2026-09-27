@@ -19,8 +19,8 @@ to be tracked.
   `mame_voodoo_tex_supersample` core option (per-pixel texture supersampling in the Voodoo
   renderer): cause, billboard fringing fix, regression checks and speed per setting.
 
-- `voodoo-edge-aa.md`: prototype depth-guided edge anti-aliasing for Voodoo 3D (branch
-  `voodoo-edge-aa`, env var `MAME_VOODOO_EDGEAA`): trace findings, design, results, next steps.
+- `voodoo-edge-aa.md`: `mame_voodoo_edge_aa` core option, depth-guided edge anti-aliasing for
+  Voodoo 3D: depth traces, design (3D mask, overlay rules), results, speed, regression.
 
 - `voodoo-gpu-idea.md`: feasibility notes for GPU-offloaded 3dfx Voodoo rendering (not started).
 

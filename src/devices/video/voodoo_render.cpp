@@ -2229,10 +2229,12 @@ inline void ATTR_FORCE_INLINE voodoo_renderer::write_pixel(thread_stats_block &t
 	{
 		destbase[x] = dither.pixel(x, color);
 
-		// edge AA enhancement: remember whether a 3D (depth-tested) triangle
-		// drew this pixel in the current frame
+		// edge AA enhancement: remember whether a 3D triangle drew this pixel
+		// in the current frame; 3D means depth-tested with a real compare,
+		// since games draw logos, text and HUD either without depth testing
+		// or with an ALWAYS compare (7)
 		if (m_aa_mask)
-			m_aa_mask[&destbase[x] - m_aa_fbbase] = fbzmode.enable_depthbuf() ? m_aa_stamp : 0;
+			m_aa_mask[&destbase[x] - m_aa_fbbase] = (fbzmode.enable_depthbuf() && fbzmode.depth_function() != 7) ? m_aa_stamp : 0;
 	}
 
 	// write to aux buffer

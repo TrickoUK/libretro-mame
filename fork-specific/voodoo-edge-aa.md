@@ -1,7 +1,9 @@
-# Voodoo edge anti-aliasing (prototype)
+# Voodoo edge anti-aliasing
 
-Branch: `voodoo-edge-aa` (not merged). Switch: env var `MAME_VOODOO_EDGEAA` (0 = off, 1 = on,
-2 = debug view: every smoothed pixel painted red). No core option yet.
+Core option `mame_voodoo_edge_aa` (Video: Disabled/Enabled, default Disabled), via
+`osd_interface::voodoo_edge_aa()`. The env var `MAME_VOODOO_EDGEAA` overrides it for testing
+(0 = off, 1 = on, 2 = debug view: every smoothed pixel painted red). Developed on branch
+`voodoo-edge-aa`.
 
 ## Goal
 
@@ -30,11 +32,17 @@ inherit the 3D depth under it. Hence the per-pixel 3D mask below.
 ## Design
 
 1. `voodoo_renderer::write_pixel()` stamps a per-pixel mask (one byte per frame-buffer pixel,
-   indexed by address) on every colour write: the current frame's stamp if the triangle is
-   depth-tested (3D), 0 otherwise (2D/HUD). A rolling stamp avoids clearing the mask.
+   indexed by address) on every colour write: the current frame's stamp if the triangle is 3D,
+   0 otherwise. 3D = depth test enabled with a real compare, not ALWAYS (7): jpark3's HUD has no
+   depth test, calspeed draws its logo/text with ALWAYS plus depth writes. A rolling stamp avoids
+   clearing the mask.
 2. `voodoo_1_device::compute_edge_aa()` runs in `swap_buffers()` after `rotate_buffers()`: the new
    front buffer is the finished frame and the aux buffer still holds its depth. Candidates are
-   3D pixels next to a depth jump (> 0x200 raw) or a non-3D pixel. On those it runs an FXAA-style
+   3D pixels with a depth jump (> 0x200 raw) to a valid partner: other 3D geometry, or non-3D
+   content clearly *behind* (a backdrop). Non-3D content not behind is an overlay (HUD/logo/text
+   drawn on top, leaving the 3D depth or writing a nearer one) and is never blended toward; the
+   final FXAA blend direction must also point at a valid partner. Both games use LESS/LEQUAL
+   depth tests, so larger values are farther. On those it runs an FXAA-style
    analysis (local contrast gate, edge orientation, search along the edge up to 8 pixels, sub-pixel
    term) and stores per screen pixel a blend direction (N/S/W/E) and weight in `m_aa_map`.
 3. `update_common()` applies the blends at scan-out when the front buffer matches the buffer the
@@ -52,17 +60,27 @@ inherit the 3D depth under it. Hence the per-pixel 3D mask below.
   interiors and HUD icons unchanged. Noisy foliage cut-outs (island ridge) change little.
 - 2D-only screens (attract title/ranking/copyright): pixel-identical with it on.
 - Off (0): pixel-identical to the pre-feature baseline on the frames checked.
-- **No performance numbers yet**: a Batocera build was using the CPU during this work.
+- Speed was measured later, once the machine was idle (see below).
 
-## Next steps
+## Live check, speed, core option, regression (2026-09-27)
 
-1. User live look (`MAME_VOODOO_EDGEAA=1`), including motion.
-2. Performance measurement once the machine is idle. `compute_edge_aa()` is single-threaded
-   and uses floats over the visible area; if it's too slow, restrict the luma pass to candidate
-   rows or thread it.
-3. Tuning: `DEPTH_EDGE`, `EDGE_MIN`/`EDGE_REL`, `SUBPIX` (constants at the top of
-   `compute_edge_aa()`), maybe a strength setting.
-4. Core option (e.g. `mame_voodoo_edge_aa`: disabled/enabled), plumbed like
-   `mame_voodoo_tex_supersample`.
-5. Regression on gticlub2, gauntdl, calspeed (Voodoo 1/2 have separate frame-buffer/aux layout;
-   check the aux buffer is valid at swap there too).
+- User live look on jpark3: "a nice improvement".
+- Speed (jpark3, 150 s attract, machine idle): main thread 49% -> 53% of a core, render threads
+  unchanged, full speed throughout with no dips. `compute_edge_aa()` stays single-threaded.
+- Core option `mame_voodoo_edge_aa` added; option alone gives pixel-identical output to the env var.
+- calspeed (Seattle, Voodoo 1) first showed its logo and "CREDITS" text outlined: they're drawn
+  with depth test ALWAYS + depth writes, and 3D pixels next to them were blended toward them.
+  Fixed by the ALWAYS rule and the "partner" rule above; logo/text now untouched, track/car/
+  pillar edges smoothed.
+- gauntdl (Vegas): table/geometry edges smoothed. Its HUD ("0 CREDITS", logo) is depth-tested
+  so it counts as 3D; a few pixels around it change (20 px around the text, max 50/255), not
+  visible in practice. Known limitation.
+- A frame whose 3D scene starts one row below a black row 0 (gauntdl) gets that top row blended
+  slightly toward black: a real scene edge, harmless.
+- jpark3 after the rule changes: detection 5-30% lower per frame, HUD still untouched, 2D
+  screens still pixel-identical.
+
+## Possible follow-ups
+
+- Tuning constants (top of `compute_edge_aa()`), maybe a strength setting.
+- Exclude gauntdl-style depth-tested HUDs (e.g. by depth near the near plane) if it ever shows.

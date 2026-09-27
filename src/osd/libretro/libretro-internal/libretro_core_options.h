@@ -653,6 +653,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
+      CORE_NAME "_voodoo_edge_aa",
+      "Voodoo Edge Anti-Aliasing (Enhancement)",
+      NULL,
+      "3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others). Smooths the stair-stepped outlines of 3D objects. Only edges of depth-tested 3D geometry are touched; textures, HUD and text stay sharp, and emulation is unaffected. Low CPU cost. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "enabled",  "Enabled" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
       CORE_NAME "_cpu_overclock",
       "Main CPU Overclock %",
       NULL,

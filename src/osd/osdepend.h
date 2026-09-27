@@ -203,6 +203,11 @@ public:
 	// samples averaged per minified pixel; 0 = off (hardware-accurate).
 	virtual int voodoo_tex_supersample() const { return 0; }
 
+	// Voodoo edge anti-aliasing enhancement (see the retro OSD's
+	// mame_voodoo_edge_aa core option): smooths the outlines of 3D geometry
+	// at scan-out; false = off (hardware-accurate).
+	virtual bool voodoo_edge_aa() const { return false; }
+
 protected:
 	virtual ~osd_interface() { }
 };

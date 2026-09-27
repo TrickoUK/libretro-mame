@@ -1018,8 +1018,9 @@ void voodoo_1_device::device_start()
 		texss = atoi(env);
 	m_renderer->set_tex_supersample(std::clamp(texss, 0, 4));
 
-	// PROTOTYPE: edge anti-aliasing enhancement (1 = on, 2 = debug view)
-	m_edge_aa = 0;
+	// edge anti-aliasing enhancement (1 = on, 2 = debug view: smoothed pixels
+	// in red), from the OSD; MAME_VOODOO_EDGEAA overrides it for testing
+	m_edge_aa = machine().osd().voodoo_edge_aa() ? 1 : 0;
 	if (char const *env = getenv("MAME_VOODOO_EDGEAA"))
 		m_edge_aa = std::clamp(atoi(env), 0, 2);
 	m_aa_map_offs = ~0;
@@ -2774,7 +2775,14 @@ void voodoo_1_device::compute_edge_aa()
 			if (!is3d[i])
 				continue;
 
-			// only pixels on a depth edge or next to non-3D pixels
+			// a neighbour this pixel may blend toward: other 3D geometry, or
+			// non-3D content clearly behind it (a backdrop). Non-3D content that
+			// isn't behind is an overlay (HUD, logo, text drawn on top, leaving
+			// the 3D depth or writing a nearer one) and must not bleed into it.
+			// Games here use LESS/LEQUAL depth tests: larger values are farther
+			auto const partner = [&] (s32 q) { return is3d[q] || s32(depth[q]) > s32(depth[i]) + DEPTH_EDGE; };
+
+			// only pixels on a depth edge with a valid partner
 			bool edge = false;
 			static constexpr s32 dx[4] = { 0, 0, -1, 1 }, dy[4] = { -1, 1, 0, 0 };
 			for (int n = 0; n < 4 && !edge; n++)
@@ -2783,7 +2791,7 @@ void voodoo_1_device::compute_edge_aa()
 				if (qx < 0 || qx >= w || qy < 0 || qy >= h)
 					continue;
 				s32 const q = qy * w + qx;
-				edge = !is3d[q] || std::abs(s32(depth[i]) - s32(depth[q])) > DEPTH_EDGE;
+				edge = partner(q) && std::abs(s32(depth[i]) - s32(depth[q])) > DEPTH_EDGE;
 			}
 			if (!edge)
 				continue;
@@ -2835,9 +2843,9 @@ void voodoo_1_device::compute_edge_aa()
 			if (weight == 0)
 				continue;
 
-			// don't blend toward a pixel outside the area
+			// don't blend toward a pixel outside the area, or an overlay
 			s32 const nx = x + cx, ny = y + cy;
-			if (nx < 0 || nx >= w || ny < 0 || ny >= h)
+			if (nx < 0 || nx >= w || ny < 0 || ny >= h || !partner(ny * w + nx))
 				continue;
 
 			// direction codes match the step table in update_common

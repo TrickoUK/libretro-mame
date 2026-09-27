@@ -149,6 +149,9 @@ extern int psx_gpu_filter_exclude_2d_polygon_mode;
 // mame_voodoo_tex_supersample core option: max NxN texture supersamples per
 // minified pixel in the Voodoo renderer, 0 = off (see osdepend.h).
 extern int voodoo_tex_supersample_max;
+// mame_voodoo_edge_aa core option: smooth 3D geometry outlines in the Voodoo
+// renderer (see osdepend.h).
+extern bool voodoo_edge_aa_enable;
 
 extern int fb_width;
 extern int fb_height;
