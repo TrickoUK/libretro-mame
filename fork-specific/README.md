@@ -53,6 +53,9 @@ Run the tools one at a time: each one force-kills RetroArch when it finishes.
   CPU and periodic core-framebuffer screenshots (UDP `SCREENSHOT`, into `<tag>/shots/`). `--lua`
   sends a Lua console command at T seconds after launch, e.g. to insert coins and press start.
   `--env` sets an environment variable for RetroArch (used by the replay plugin below).
+- `snap_run.sh <romset> <tag> <first> <last> <step> [K=V ...]`: cold boot, saving MAME's
+  native-resolution snapshot at every `<step>`th emulated frame (frame-exact, deterministic from
+  boot) into `out/<tag>/snaps/`. K=V become RetroArch env vars. Good for A/B image comparisons.
 - `polystar_stage1.lua`: cold-boot polystar inputs keyed on emulated time (coin, start, pick
   control scheme, fire and sweep), for repeatable stage-1 profiling with `profile_run.py --lua`.
   Usage is in the file header and in `polystar-performance.md`.

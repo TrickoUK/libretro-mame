@@ -53,20 +53,47 @@ python3 fork-specific/tools/profile_run.py jpark3 texss4 --warmup 20 --duration 
   core each, main thread 50% -> 58%.
 - Island scene: hillside foliage goes from per-pixel sparkle noise to a coherent texture.
   User confirmed live: "much better image".
-- **Known artifact**: visible fringing along the boundaries of layers (cut-out / overlapping
-  layer edges). User judged it less noticeable than the shimmer, but it should be fixed.
-  Likely cause: the average is taken *before* the chroma-key and alpha tests, so texels from
-  the keyed-out/transparent side bleed into the edge colour. Faint horizontal cyan lines on the
-  hillside are pre-existing (present with the option off).
+- Initial prototype had **fringing along layer boundaries** (user report; worst in jpark3,
+  which builds foliage and the island hills from stacked 2D billboards). Fixed 2026-09-27, see
+  below.
+
+## Fringing fix (2026-09-27)
+
+A trace of per-triangle state (chroma key, alpha test, blend, texture format) during attract
+mode showed chroma key is never used. Nearly every textured triangle uses alpha blend
+(src alpha / 1-src alpha) plus alpha test >= 0x7f or >= 0x0c, mostly with alpha-carrying formats
+(6 = palette+alpha, 12 = ARGB4444, 2 = A8). Frame-exact snapshots (`tools/snap_run.sh`, frames
+2400-4200 step 60) of off / plain-average / variants showed thin pale lines along the top edge of
+each hillside billboard with supersampling on. The same lines exist faintly with it off.
+
+Experiments, each on the same frame:
+- Alpha-weighted averaging between samples: no visible change.
+- Keeping samples inside the centre's texture repeat (wrap bleed): changed <200 pixels.
+- Alpha-weighted bilinear taps, and even opaque-only taps: lines unchanged.
+- Skipping samples in the texture's edge rows: lines unchanged (and it opened tile seams).
+- Debug colour for supersampled pixels: the line pixels are on the supersampled path.
+
+Conclusion: the lines come from **averaging alpha**. The cards are drawn with alpha blend and
+depth writes at a low alpha-test threshold. Without supersampling, edge texels are mostly fully
+opaque or transparent, so only a scattered few pixels are semi-transparent (blend with sky,
+write depth, block the farther card = the faint dotted lines in the original). Averaged alpha
+makes a continuous band of semi-transparent pixels along every card edge, which shows as a line.
+
+**Fix**: supersample colour only. Alpha is the normal single sample at the pixel centre, so alpha
+test, blending and depth writes cover exactly the pixels they did before. Kept as well:
+alpha-weighted colour (between samples and inside each bilinear tap, so transparent texels'
+RGB doesn't tint edges) and the wrap-repeat clamp (cheap, correct for billboards).
+Result: the extra pale lines are gone. What remains (e.g. dark blue streaks) is identical to the
+original render. Off path verified pixel-identical to the committed baseline (31 frames).
+
+Cost (jpark3, 150 s attract, 4x4): full speed on average; Voodoo worker threads ~36% each
+(plain average was 28.5%, off 18%); one 0.67x speed sample. Easy optimisation if needed:
+accumulate premultiplied sums across all taps and divide once per pixel instead of per tap.
 
 ## Plan for the next session
 
-1. **Fix the fringing.** Options, in order to try:
-   - When chroma key is enabled (`fbzcp`/`fbzmode` chromakey) or the texture format has alpha
-     used for alpha test, exclude keyed/zero-alpha samples from the average (average only the
-     opaque samples, keep alpha as coverage), or skip supersampling for those triangles.
-   - Compare against a simple "skip SS when chromakey/alphatest is on" build to see which
-     layers are affected.
+1. ~~Fix the fringing~~ done 2026-09-27 (colour-only supersampling, see above). Get a live
+   look from the user in motion.
 2. **Core option** replacing the env var: e.g. `mame_voodoo_tex_supersample`
    (disabled/2x2/4x4, default disabled), plumbed through the OSD like the `mame_psx_gpu_*`
    options (`libretro_core_options.h` -> `check_variables()` -> an `osd_interface` query ->

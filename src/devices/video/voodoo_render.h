@@ -375,7 +375,7 @@ private:
 	void compute_st(voodoo::reg_texture_mode const texmode, double iters, double itert, double iterw, s32 &s, s32 &t);
 
 	// point or bilinear sample at a 24.8 S/T in the given LOD
-	rgbaint_t sample_texel(voodoo::reg_texture_mode const texmode, bool point, s32 ilod, s32 s, s32 t, u8 bilinear_mask);
+	rgbaint_t sample_texel(voodoo::reg_texture_mode const texmode, bool point, s32 ilod, s32 s, s32 t, u8 bilinear_mask, bool alpha_weighted);
 
 	// internal state
 	rgb_t const *m_lookup;      // currently selected lookup
