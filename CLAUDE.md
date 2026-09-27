@@ -23,6 +23,9 @@ mixed into history.
   `refs/upstream-tmp/master`. The commit message lists every conflict
   resolution. For the next sync, update that checkout, fetch it the same way
   and `git merge` it (not cherry-picks), so SHAs stay aligned with upstream.
+- **Follow-up sync, 2026-09-27**: merge commit `4553d69283b` merged mamedev master
+  `mame0289-1168-g1cfb79ea82d` (12 commits). No conflicts, `arcade.flt` unchanged;
+  smoke-tested daytona2, scud, metamrph, mystwarr, hotd, jpark3, brvblade, polystar.
 - Conflicts to expect again: `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
   handler, which we drop), `src/devices/video/psx.{cpp,h}` (GPU HLE path),
@@ -591,9 +594,8 @@ no crash, no ghosting; `brvblade` re-verified unaffected by either fix):
    different from what should be visible" bug in this device, since
    VERBOSE-gated `LOGMASKED` calls need a rebuild to toggle and are easy
    to drown in unrelated log lines otherwise. Verified via screenshot
-   (`spectacle`, since RetroArch's window is a native Wayland client
-   invisible to X11-only capture tools like `xdotool`/`wmctrl` on this
-   KDE/Wayland desktop) across three passes - fixed the vertical jump the
+   (at the time with `spectacle` - don't: use RetroArch's own screenshot,
+   see "Screenshots" under "Debugging / monitoring progress") across three passes - fixed the vertical jump the
    display-start fix alone introduced, then fixed the still-remaining
    duplicate band and CLUT swatch with the border-crop fix; `gdarius2`,
    `starswep`, `brvblade` re-confirmed unaffected.
@@ -711,9 +713,10 @@ mask bits (never set on any triangle across 760 frames of trace), blend modes
 **Debug technique worth reusing**: to screenshot a specific game state
 deterministically, copy the `.state` to `~/.config/retroarch/states/MAME/
 <romname>.state`, launch with `-e 0 --appendconfig <file containing
-network_cmd_enable = "true">`, wait for the GPU-target-initialized log line,
-send `PAUSE_TOGGLE` via UDP to 127.0.0.1:55355 (python3 socket - no `nc`
-here), then `spectacle -a -b -n -o out.png`. A save state restores software
+network_cmd_enable = "true"` and `screenshot_directory = "<dir>"`>`, wait for
+the GPU-target-initialized log line, send `PAUSE_TOGGLE` via UDP to
+127.0.0.1:55355 (python3 socket - no `nc` here), then send `SCREENSHOT` the
+same way (RetroArch's own screen save). A save state restores software
 VRAM only, not the GPU target's persistent framebuffer.
 
 ### Beetle PSX HW parity review (2026-09-21)
@@ -1006,6 +1009,15 @@ missing, just nothing telling it to activate. Three things were needed:
 To add another autostart-able plugin, just add its name to the
 `mame_debug_plugin` value list in `libretro_core_options.h` — no other code
 changes needed, since `-plugin <name>` resolution is generic.
+
+### Screenshots
+
+**Always use RetroArch's own screenshot** (the UDP `SCREENSHOT` network command with
+`network_cmd_enable = "true"` and `screenshot_directory` in an `--appendconfig` file;
+`profile_run.py --shot-every` and `smoke.py` do this). **Never use a desktop capture tool**
+(`spectacle`, grim, etc.): it grabs whatever window is active, and has captured the user's
+terminal instead of the game. For frame-exact captures, `fork-specific/tools/snap_run.sh` uses
+MAME's own `video:snapshot()` (the emulated frame at native resolution).
 
 ### Other monitoring options
 
