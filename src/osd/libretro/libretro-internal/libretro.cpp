@@ -543,6 +543,19 @@ static void check_variables(void)
          psx_gpu_filter_exclude_2d_polygon_mode = 2;
    }
 
+   var.key   = CORE_NAME "_voodoo_tex_supersample";
+   var.value = NULL;
+   voodoo_tex_supersample_max = 0;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "2x2"))
+         voodoo_tex_supersample_max = 2;
+      if (!strcmp(var.value, "3x3"))
+         voodoo_tex_supersample_max = 3;
+      if (!strcmp(var.value, "4x4"))
+         voodoo_tex_supersample_max = 4;
+   }
+
    var.key   = CORE_NAME "_lightgun_mode";
    var.value = NULL;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)

@@ -637,6 +637,22 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "all"
    },
    {
+      CORE_NAME "_voodoo_tex_supersample",
+      "Voodoo Texture Supersampling (Enhancement)",
+      NULL,
+      "3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others). Reduces shimmering on detailed textures seen at a distance, such as foliage and terrain, by averaging several texture samples across each pixel wherever a texture is shrunk. Only texture colour is smoothed; transparency, polygon edges and resolution are unchanged. 4x4 costs the most CPU. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "2x2",      "2x2" },
+         { "3x3",      "3x3" },
+         { "4x4",      "4x4" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
       CORE_NAME "_cpu_overclock",
       "Main CPU Overclock %",
       NULL,

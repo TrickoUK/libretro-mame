@@ -949,7 +949,7 @@ inline void ATTR_FORCE_INLINE rasterizer_texture::compute_st(reg_texture_mode co
 //  24.8 S/T coordinate in the given LOD
 //-------------------------------------------------
 
-inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::sample_texel(reg_texture_mode const texmode, bool point, s32 ilod, s32 s, s32 t, u8 bilinear_mask, bool alpha_weighted)
+inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::sample_texel(reg_texture_mode const texmode, bool point, s32 ilod, s32 s, s32 t, u8 bilinear_mask, premultiplied_sum *accum)
 {
 	// fetch the texture base
 	u32 texbase = m_lodoffset[ilod];
@@ -976,7 +976,11 @@ inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::sample_texel(reg_texture_
 		t *= smax + 1;
 
 		// fetch texel data
-		result.set(lookup_single_texel(texmode.format(), texbase, s, t));
+		u32 const texel = lookup_single_texel(texmode.format(), texbase, s, t);
+		if (accum)
+			accum->add(texel, 0x100);
+		else
+			result.set(texel);
 	}
 	else
 	{
@@ -1026,29 +1030,14 @@ inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::sample_texel(reg_texture_
 		u32 texel1 = lookup_single_texel(texmode.format(), texbase, s1, t);
 		u32 texel2 = lookup_single_texel(texmode.format(), texbase, s, t1);
 		u32 texel3 = lookup_single_texel(texmode.format(), texbase, s1, t1);
-		if (alpha_weighted)
+		if (accum)
 		{
 			// enhancement path: weight each texel's colour by its alpha, so the
 			// RGB of transparent texels doesn't bleed into cut-out edges
-			u32 const texels[4] = { texel0, texel1, texel2, texel3 };
-			s32 const weights[4] = {
-				s32(((0x100 - sfrac) * (0x100 - tfrac)) >> 8),
-				s32((sfrac * (0x100 - tfrac)) >> 8),
-				s32(((0x100 - sfrac) * tfrac) >> 8),
-				s32((sfrac * tfrac) >> 8) };
-			s32 suma = 0, sumr = 0, sumg = 0, sumb = 0;
-			for (int i = 0; i < 4; i++)
-			{
-				s32 const aw = s32(texels[i] >> 24) * weights[i];
-				suma += aw;
-				sumr += s32(BIT(texels[i], 16, 8)) * aw;
-				sumg += s32(BIT(texels[i], 8, 8)) * aw;
-				sumb += s32(BIT(texels[i], 0, 8)) * aw;
-			}
-			if (suma != 0)
-				result.set((suma + 0x80) >> 8, (sumr + suma / 2) / suma, (sumg + suma / 2) / suma, (sumb + suma / 2) / suma);
-			else
-				result.bilinear_filter_rgbaint(texel0, texel1, texel2, texel3, sfrac, tfrac);
+			accum->add(texel0, ((0x100 - sfrac) * (0x100 - tfrac)) >> 8);
+			accum->add(texel1, (sfrac * (0x100 - tfrac)) >> 8);
+			accum->add(texel2, ((0x100 - sfrac) * tfrac) >> 8);
+			accum->add(texel3, (sfrac * tfrac) >> 8);
 		}
 		else
 			result.bilinear_filter_rgbaint(texel0, texel1, texel2, texel3, sfrac, tfrac);
@@ -1105,8 +1094,9 @@ inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::fetch_texel(reg_texture_m
 			s32 const tbase = t & ~(tperiod - 1);
 
 			// weight each sample's colour by its alpha, so the RGB of transparent
-			// texels in cut-out textures doesn't bleed into edges as a fringe
-			s32 suma = 0, sumr = 0, sumg = 0, sumb = 0;
+			// texels in cut-out textures doesn't bleed into edges as a fringe;
+			// summed premultiplied over all samples, divided once at the end
+			premultiplied_sum sum;
 			for (int j = 0; j < n; j++)
 			{
 				double const oy = (j + 0.5) / n - 0.5;
@@ -1122,12 +1112,7 @@ inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::fetch_texel(reg_texture_m
 						ss = std::clamp(ss, sbase, sbase + speriod - 1);
 					if (!texmode.clamp_t())
 						st = std::clamp(st, tbase, tbase + tperiod - 1);
-					rgbaint_t const texel = sample_texel(texmode, point, ilod, ss, st, bilinear_mask, true);
-					s32 const a = texel.get_a();
-					suma += a;
-					sumr += texel.get_r() * a;
-					sumg += texel.get_g() * a;
-					sumb += texel.get_b() * a;
+					sample_texel(texmode, point, ilod, ss, st, bilinear_mask, &sum);
 				}
 			}
 			// alpha comes from the normal single sample at the pixel centre, so
@@ -1135,14 +1120,14 @@ inline rgbaint_t ATTR_FORCE_INLINE rasterizer_texture::fetch_texel(reg_texture_m
 			// as without supersampling; averaging alpha too turns cut-out edges
 			// into bands of semi-transparent pixels, which show as lines where
 			// the game draws billboards with alpha blend and depth writes
-			rgbaint_t result = sample_texel(texmode, point, ilod, s, t, bilinear_mask, false);
-			if (suma != 0)
-				result.set(result.get_a(), (sumr + suma / 2) / suma, (sumg + suma / 2) / suma, (sumb + suma / 2) / suma);
+			rgbaint_t result = sample_texel(texmode, point, ilod, s, t, bilinear_mask, nullptr);
+			if (sum.a != 0)
+				result.set(result.get_a(), (sum.r + sum.a / 2) / sum.a, (sum.g + sum.a / 2) / sum.a, (sum.b + sum.a / 2) / sum.a);
 			return result;
 		}
 	}
 
-	return sample_texel(texmode, point, ilod, s, t, bilinear_mask, false);
+	return sample_texel(texmode, point, ilod, s, t, bilinear_mask, nullptr);
 }
 
 

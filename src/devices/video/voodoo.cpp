@@ -118,6 +118,8 @@ TODO:
 #include "emu.h"
 #include "voodoo.h"
 
+#include "osdepend.h"
+
 #include "input.h" // for video debug keys
 
 #include "endianness.h"
@@ -1008,9 +1010,13 @@ void voodoo_1_device::device_start()
 	// create the renderer
 	m_renderer = std::make_unique<voodoo_renderer>(machine(), tmu_config, m_shared->rgb565, m_reg, &m_tmu[0].regs(), BIT(m_chipmask, 2) ? &m_tmu[1].regs() : nullptr);
 
-	// PROTOTYPE: texture supersampling enhancement, max NxN per pixel
-	if (char const *texss = getenv("MAME_VOODOO_TEXSS"))
-		m_renderer->set_tex_supersample(atoi(texss));
+	// texture supersampling enhancement (max NxN per minified pixel, 0 = off),
+	// from the OSD; the MAME_VOODOO_TEXSS environment variable overrides it
+	// for testing
+	int texss = machine().osd().voodoo_tex_supersample();
+	if (char const *env = getenv("MAME_VOODOO_TEXSS"))
+		texss = atoi(env);
+	m_renderer->set_tex_supersample(std::clamp(texss, 0, 4));
 
 	// set up the PCI FIFO
 	m_pci_fifo.configure(m_pci_fifo_mem, 64*2);

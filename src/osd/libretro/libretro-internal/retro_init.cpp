@@ -84,6 +84,7 @@ int psx_gpu_texfilter_mode = 0;
 // comments in libretro_core_options.h.
 int psx_gpu_filter_exclude_sprite_mode = 2;
 int psx_gpu_filter_exclude_2d_polygon_mode = 2;
+int voodoo_tex_supersample_max = 0;
 
 // emu flags
 static bool arcade = false;

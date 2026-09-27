@@ -198,6 +198,11 @@ public:
 	virtual int gpu_render_filter_exclude_sprite() const { return 0; }
 	virtual int gpu_render_filter_exclude_2d_polygon() const { return 0; }
 
+	// Voodoo texture supersampling enhancement (see the retro OSD's
+	// mame_voodoo_tex_supersample core option): maximum NxN grid of texture
+	// samples averaged per minified pixel; 0 = off (hardware-accurate).
+	virtual int voodoo_tex_supersample() const { return 0; }
+
 protected:
 	virtual ~osd_interface() { }
 };

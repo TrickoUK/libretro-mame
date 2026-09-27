@@ -345,6 +345,22 @@ struct texture_footprint
 	double dsdy, dtdy, dwdy;
 };
 
+// running alpha-weighted (premultiplied) colour sums for texture supersampling;
+// each texel adds alpha * weight to a and colour * alpha * weight to r/g/b
+struct premultiplied_sum
+{
+	s32 a = 0, r = 0, g = 0, b = 0;
+
+	void add(u32 texel, s32 weight)
+	{
+		s32 const aw = s32(texel >> 24) * weight;
+		a += aw;
+		r += s32(BIT(texel, 16, 8)) * aw;
+		g += s32(BIT(texel, 8, 8)) * aw;
+		b += s32(BIT(texel, 0, 8)) * aw;
+	}
+};
+
 // this class holds TMU-specific decoded data regarding a texture; it is
 // encapsulated here, with functions to derive it from register info and
 // functions to process it as part of the rendering pipeline
@@ -375,7 +391,8 @@ private:
 	void compute_st(voodoo::reg_texture_mode const texmode, double iters, double itert, double iterw, s32 &s, s32 &t);
 
 	// point or bilinear sample at a 24.8 S/T in the given LOD
-	rgbaint_t sample_texel(voodoo::reg_texture_mode const texmode, bool point, s32 ilod, s32 s, s32 t, u8 bilinear_mask, bool alpha_weighted);
+	// (or, with accum, add it to a premultiplied supersample sum instead)
+	rgbaint_t sample_texel(voodoo::reg_texture_mode const texmode, bool point, s32 ilod, s32 s, s32 t, u8 bilinear_mask, premultiplied_sum *accum);
 
 	// internal state
 	rgb_t const *m_lookup;      // currently selected lookup

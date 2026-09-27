@@ -146,6 +146,9 @@ extern int psx_gpu_texfilter_mode;
 // semi-transparent draws. Only meaningful when psx_gpu_texfilter_mode > 0.
 extern int psx_gpu_filter_exclude_sprite_mode;
 extern int psx_gpu_filter_exclude_2d_polygon_mode;
+// mame_voodoo_tex_supersample core option: max NxN texture supersamples per
+// minified pixel in the Voodoo renderer, 0 = off (see osdepend.h).
+extern int voodoo_tex_supersample_max;
 
 extern int fb_width;
 extern int fb_height;
