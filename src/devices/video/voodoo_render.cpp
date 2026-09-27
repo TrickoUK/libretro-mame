@@ -2226,7 +2226,14 @@ inline void ATTR_FORCE_INLINE voodoo_renderer::write_pixel(thread_stats_block &t
 {
 	// write to framebuffer
 	if (fbzmode.rgb_buffer_mask())
+	{
 		destbase[x] = dither.pixel(x, color);
+
+		// edge AA enhancement: remember whether a 3D (depth-tested) triangle
+		// drew this pixel in the current frame
+		if (m_aa_mask)
+			m_aa_mask[&destbase[x] - m_aa_fbbase] = fbzmode.enable_depthbuf() ? m_aa_stamp : 0;
+	}
 
 	// write to aux buffer
 	if (fbzmode.aux_buffer_mask())

@@ -548,6 +548,13 @@ public:
 	void set_bilinear_mask(u8 value) { m_bilinear_mask = value; }
 	void set_tex_supersample(u8 value) { m_tex_supersample = value; }
 
+	// edge anti-aliasing enhancement: per-pixel mask (one byte per frame buffer
+	// pixel) that colour writes stamp with the current frame's stamp if the
+	// triangle is depth-tested (3D), or 0 otherwise (2D, e.g. HUD)
+	void set_edge_aa_mask(u8 *mask, u16 const *fbbase) { m_aa_mask = mask; m_aa_fbbase = fbbase; }
+	u8 aa_stamp() const { return m_aa_stamp; }
+	void next_aa_stamp() { if (++m_aa_stamp == 0) m_aa_stamp = 1; }
+
 	// allocate a new poly_data and fill in the rasterizer_params
 	poly_data &alloc_poly();
 
@@ -626,6 +633,9 @@ private:
 	// internal state
 	u8 m_bilinear_mask;         // mask for bilinear resolution (0xf0 for V1, 0xff for V2)
 	u8 m_tex_supersample;       // enhancement: max NxN texture supersamples per pixel (0/1 = off)
+	u8 *m_aa_mask = nullptr;    // enhancement: edge AA per-pixel 3D stamp mask (nullptr = off)
+	u16 const *m_aa_fbbase = nullptr; // frame buffer base the mask is indexed from
+	u8 m_aa_stamp = 1;          // stamp for the frame currently being drawn
 	u16 m_tmu_config;           // TMU configuration
 	u32 m_rowpixels;            // current pixels per row
 	s32 m_yorigin;              // current Y origin

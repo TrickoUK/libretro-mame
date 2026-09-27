@@ -1018,6 +1018,18 @@ void voodoo_1_device::device_start()
 		texss = atoi(env);
 	m_renderer->set_tex_supersample(std::clamp(texss, 0, 4));
 
+	// PROTOTYPE: edge anti-aliasing enhancement (1 = on, 2 = debug view)
+	m_edge_aa = 0;
+	if (char const *env = getenv("MAME_VOODOO_EDGEAA"))
+		m_edge_aa = std::clamp(atoi(env), 0, 2);
+	m_aa_map_offs = ~0;
+	if (m_edge_aa)
+	{
+		m_aa_mask = std::make_unique<u8[]>((m_fbmask + 1) / 2);
+		std::fill_n(m_aa_mask.get(), (m_fbmask + 1) / 2, 0);
+		m_renderer->set_edge_aa_mask(m_aa_mask.get(), (u16 const *)m_fbram);
+	}
+
 	// set up the PCI FIFO
 	m_pci_fifo.configure(m_pci_fifo_mem, 64*2);
 	m_stall_state = NOT_STALLED;
@@ -2635,6 +2647,11 @@ void voodoo_1_device::swap_buffers()
 	// rotate the buffers; implementation differs between models
 	rotate_buffers();
 
+	// the new front buffer is the frame just finished and the aux buffer
+	// still holds its depth, so work out the edge AA blends for it now
+	if (m_edge_aa)
+		compute_edge_aa();
+
 	// decrement the pending count and reset our state
 	if (m_swaps_pending != 0)
 		m_swaps_pending--;
@@ -2691,6 +2708,149 @@ void voodoo_1_device::rotate_buffers()
 
 
 //-------------------------------------------------
+//  compute_edge_aa - edge anti-aliasing
+//  enhancement; called at swap, when the new
+//  front buffer is the frame just drawn and the
+//  aux buffer still holds its depth. Finds 3D
+//  pixels on a depth edge (or a 3D/2D boundary),
+//  runs an FXAA-style analysis on them and stores
+//  a blend (direction + weight) per screen pixel,
+//  which update_common() applies at scan-out. The
+//  frame buffer itself is never modified.
+//-------------------------------------------------
+
+void voodoo_1_device::compute_edge_aa()
+{
+	// tuning: raw 16-bit depth difference that counts as an edge, minimum
+	// local luma contrast (absolute, and relative to the brightest pixel),
+	// how far to search along an edge, and the sub-pixel smoothing amount
+	static constexpr s32 DEPTH_EDGE = 0x200;
+	static constexpr float EDGE_MIN = 0.03f;
+	static constexpr float EDGE_REL = 0.125f;
+	static constexpr int SEARCH = 8;
+	static constexpr float SUBPIX = 0.75f;
+
+	u8 const stamp = m_renderer->aa_stamp();
+	m_renderer->next_aa_stamp();
+	m_aa_map_offs = ~0;
+	u16 const *const aux = aux_buffer();
+	if (aux == nullptr)
+		return;
+
+	// work on the visible area, skipping lines above the buffer start
+	rectangle rect = screen().visible_area();
+	rect.min_y = std::max<s32>(rect.min_y, m_yoffs);
+	if (rect.empty())
+		return;
+	s32 const w = rect.width(), h = rect.height();
+	u32 const rowpixels = m_renderer->rowpixels();
+	u16 const *const front = front_buffer();
+	u16 const *const fbbase = (u16 const *)m_fbram;
+	rgb_t const *const rgb565 = m_shared->rgb565;
+
+	// gather luma, depth and the 3D flag for the area
+	std::vector<float> luma(w * h);
+	std::vector<u16> depth(w * h);
+	std::vector<u8> is3d(w * h);
+	for (s32 y = 0; y < h; y++)
+	{
+		s32 const base = (rect.min_y + y - m_yoffs) * rowpixels + rect.min_x - m_xoffs;
+		for (s32 x = 0; x < w; x++)
+		{
+			u16 const *const pix = &front[base + x];
+			rgb_t const c = rgb565[*pix];
+			luma[y * w + x] = (c.r() * 0.299f + c.g() * 0.587f + c.b() * 0.114f) * (1.0f / 255.0f);
+			depth[y * w + x] = aux[base + x];
+			is3d[y * w + x] = m_aa_mask[pix - fbbase] == stamp;
+		}
+	}
+	auto L = [&] (s32 x, s32 y) { return luma[std::clamp(y, 0, h - 1) * w + std::clamp(x, 0, w - 1)]; };
+
+	m_aa_map.assign(w * h, 0);
+	for (s32 y = 0; y < h; y++)
+		for (s32 x = 0; x < w; x++)
+		{
+			s32 const i = y * w + x;
+			if (!is3d[i])
+				continue;
+
+			// only pixels on a depth edge or next to non-3D pixels
+			bool edge = false;
+			static constexpr s32 dx[4] = { 0, 0, -1, 1 }, dy[4] = { -1, 1, 0, 0 };
+			for (int n = 0; n < 4 && !edge; n++)
+			{
+				s32 const qx = x + dx[n], qy = y + dy[n];
+				if (qx < 0 || qx >= w || qy < 0 || qy >= h)
+					continue;
+				s32 const q = qy * w + qx;
+				edge = !is3d[q] || std::abs(s32(depth[i]) - s32(depth[q])) > DEPTH_EDGE;
+			}
+			if (!edge)
+				continue;
+
+			// FXAA-style: local contrast
+			float const M = L(x, y), N = L(x, y - 1), S = L(x, y + 1), W = L(x - 1, y), E = L(x + 1, y);
+			float const mx = std::max({ M, N, S, W, E }), mn = std::min({ M, N, S, W, E });
+			float const range = mx - mn;
+			if (range < std::max(EDGE_MIN, mx * EDGE_REL))
+				continue;
+
+			// edge orientation: horizontal edges blend vertically
+			float const NW = L(x - 1, y - 1), NE = L(x + 1, y - 1), SW = L(x - 1, y + 1), SE = L(x + 1, y + 1);
+			float const edge_horz = std::abs(NW - 2 * W + SW) + 2 * std::abs(N - 2 * M + S) + std::abs(NE - 2 * E + SE);
+			float const edge_vert = std::abs(NW - 2 * N + NE) + 2 * std::abs(W - 2 * M + E) + std::abs(SW - 2 * S + SE);
+			bool const horz = edge_horz >= edge_vert;
+
+			// pick the side of the edge with the larger gradient
+			float const l1 = horz ? N : W, l2 = horz ? S : E;
+			bool const side1 = std::abs(l1 - M) >= std::abs(l2 - M);
+			float const gradient = std::max(std::abs(l1 - M), std::abs(l2 - M)) * 0.25f;
+			float const local = (M + (side1 ? l1 : l2)) * 0.5f;
+			s32 const cx = horz ? 0 : (side1 ? -1 : 1), cy = horz ? (side1 ? -1 : 1) : 0;
+			s32 const ax = horz ? 1 : 0, ay = horz ? 0 : 1;
+
+			// search along the edge in both directions for its ends
+			int distn = SEARCH + 1, distp = SEARCH + 1;
+			float endn = 0, endp = 0;
+			for (int k = 1; k <= SEARCH; k++)
+			{
+				float const e = (L(x - k * ax, y - k * ay) + L(x - k * ax + cx, y - k * ay + cy)) * 0.5f - local;
+				if (std::abs(e) >= gradient) { distn = k; endn = e; break; }
+			}
+			for (int k = 1; k <= SEARCH; k++)
+			{
+				float const e = (L(x + k * ax, y + k * ay) + L(x + k * ax + cx, y + k * ay + cy)) * 0.5f - local;
+				if (std::abs(e) >= gradient) { distp = k; endp = e; break; }
+			}
+			bool const nearn = distn < distp;
+			bool const good = ((nearn ? endn : endp) < 0) != ((M - local) < 0);
+			float offset = good ? 0.5f - float(std::min(distn, distp)) / float(distn + distp) : 0.0f;
+
+			// sub-pixel term for isolated or very thin features
+			float const lumal = (2 * (N + S + E + W) + (NW + NE + SW + SE)) * (1.0f / 12.0f);
+			float const sub = std::clamp(std::abs(lumal - M) / range, 0.0f, 1.0f);
+			float const subf = (-2 * sub + 3) * sub * sub;
+			offset = std::min(std::max(offset, subf * subf * SUBPIX), 0.75f);
+			u32 const weight = u32(offset * 256.0f);
+			if (weight == 0)
+				continue;
+
+			// don't blend toward a pixel outside the area
+			s32 const nx = x + cx, ny = y + cy;
+			if (nx < 0 || nx >= w || ny < 0 || ny >= h)
+				continue;
+
+			// direction codes match the step table in update_common
+			u32 const dir = horz ? (side1 ? 1 : 2) : (side1 ? 3 : 4);
+			m_aa_map[i] = (dir << 8) | std::min<u32>(weight, 0xff);
+		}
+
+	m_aa_rect = rect;
+	m_aa_map_offs = m_rgboffs[m_frontbuf];
+}
+
+
+//-------------------------------------------------
 //  update_common -- shared update function
 //-------------------------------------------------
 
@@ -2719,6 +2879,7 @@ int voodoo_1_device::update_common(bitmap_rgb32 &bitmap, const rectangle &clipre
 	u32 rowpixels = m_renderer->rowpixels();
 	u16 *buffer_base = draw_buffer(drawbuf);
 	if (LOG_VBLANK_SWAP) logerror("--- update_common %d-%d @ %d from %08X\n", cliprect.min_y, cliprect.max_y, screen().vpos(), u32((u8 *)buffer_base - m_fbram));
+	bool const use_aa = m_edge_aa && m_aa_map_offs == m_rgboffs[drawbuf];
 	for (s32 y = cliprect.min_y; y <= cliprect.max_y; y++)
 	{
 		if (y < m_yoffs)
@@ -2727,6 +2888,33 @@ int voodoo_1_device::update_common(bitmap_rgb32 &bitmap, const rectangle &clipre
 		u32 *dst = &bitmap.pix(y);
 		for (s32 x = cliprect.min_x; x <= cliprect.max_x; x++)
 			dst[x] = pens[src[x]];
+
+		// edge AA enhancement: blend edge pixels toward the neighbour across
+		// the edge, as computed at swap time
+		if (use_aa && y >= m_aa_rect.min_y && y <= m_aa_rect.max_y)
+		{
+			u16 const *const map = &m_aa_map[(y - m_aa_rect.min_y) * m_aa_rect.width() - m_aa_rect.min_x];
+			s32 const step[5] = { 0, -s32(rowpixels), s32(rowpixels), -1, 1 };
+			s32 const x0 = std::max(cliprect.min_x, m_aa_rect.min_x), x1 = std::min(cliprect.max_x, m_aa_rect.max_x);
+			for (s32 x = x0; x <= x1; x++)
+			{
+				u16 const entry = map[x];
+				if (entry == 0)
+					continue;
+				if (m_edge_aa == 2)
+				{
+					dst[x] = rgb_t(0xff, 0, 0);
+					continue;
+				}
+				rgb_t const a = pens[src[x]];
+				rgb_t const b = pens[src[x + step[BIT(entry, 8, 3)]]];
+				s32 const w = entry & 0xff;
+				dst[x] = rgb_t(
+						a.r() + (((b.r() - a.r()) * w) >> 8),
+						a.g() + (((b.g() - a.g()) * w) >> 8),
+						a.b() + (((b.b() - a.b()) * w) >> 8));
+			}
+		}
 	}
 
 	// update stats display

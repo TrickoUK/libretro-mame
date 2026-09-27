@@ -644,6 +644,14 @@ protected:
 	std::unique_ptr<voodoo::shared_tables> m_shared; // shared tables
 	std::unique_ptr<voodoo::voodoo_renderer> m_renderer; // rendering helper
 
+	// edge anti-aliasing enhancement (see compute_edge_aa())
+	void compute_edge_aa();
+	u8 m_edge_aa;                            // 0 = off, 1 = on, 2 = debug (smoothed pixels in red)
+	std::unique_ptr<u8[]> m_aa_mask;         // per frame buffer pixel: 3D stamp (see voodoo_renderer)
+	std::vector<u16> m_aa_map;               // per screen pixel: blend direction (bits 8-10), weight (0-7)
+	u32 m_aa_map_offs;                       // frame buffer offset the map belongs to (~0 = none)
+	rectangle m_aa_rect;                     // screen area the map covers
+
 	// video buffer configuration
 	u32 m_rgboffs[3];                        // word offset to 3 RGB buffers
 	u32 m_auxoffs;                           // word offset to 1 aux buffer
