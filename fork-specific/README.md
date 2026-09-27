@@ -16,8 +16,8 @@ to be tracked.
   Steering Response/Smoothing settings, plus game RAM notes.
 
 - `voodoo-texture-supersampling.md`: jpark3 shimmer (texture aliasing, single forced LOD) and the
-  WIP per-pixel texture supersampling in the Voodoo renderer (branch `voodoo-texture-supersample`),
-  with the plan for the next session.
+  `mame_voodoo_tex_supersample` core option (per-pixel texture supersampling in the Voodoo
+  renderer): cause, billboard fringing fix, regression checks and speed per setting.
 
 - `voodoo-gpu-idea.md`: feasibility notes for GPU-offloaded 3dfx Voodoo rendering (not started).
 

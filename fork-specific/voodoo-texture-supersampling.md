@@ -1,6 +1,7 @@
-# Voodoo texture supersampling (jpark3 shimmer) - WIP
+# Voodoo texture supersampling (jpark3 shimmer)
 
-Branch: `voodoo-texture-supersample` (not merged into `arcade-focused` yet).
+Core option `mame_voodoo_tex_supersample` (Video: Disabled/2x2/3x3/4x4, default Disabled).
+Developed on branch `voodoo-texture-supersample`, merged into `arcade-focused` 2026-09-27.
 
 ## Problem
 
@@ -38,9 +39,10 @@ come from `texture_footprint` (per-pixel dS/dT/dW in X and Y, filled in
 `voodoo_renderer::rasterizer()`), and each goes through the normal perspective divide. Pixels at
 1:1 or magnified take the original path unchanged.
 
-Switch (prototype only): env var `MAME_VOODOO_TEXSS=0/2/3/4` (max N), read in
-`voodoo_1_device::device_start()` in `voodoo.cpp` -> `voodoo_renderer::set_tex_supersample()`.
-Default off.
+Switch: core option `mame_voodoo_tex_supersample` -> `check_variables()` (`libretro.cpp`) ->
+`voodoo_tex_supersample_max` -> `osd_interface::voodoo_tex_supersample()` (default 0 for other
+OSDs) -> read in `voodoo_1_device::device_start()` -> `voodoo_renderer::set_tex_supersample()`.
+The env var `MAME_VOODOO_TEXSS=0/2/3/4` overrides it (used by the test tools).
 
 ```sh
 distrobox enter mame-dev -- env MAME_VOODOO_TEXSS=4 retroarch -v -L mame_libretro.so .../jpark3.zip
@@ -90,20 +92,26 @@ Cost (jpark3, 150 s attract, 4x4): full speed on average; Voodoo worker threads 
 (plain average was 28.5%, off 18%); one 0.67x speed sample. Easy optimisation if needed:
 accumulate premultiplied sums across all taps and divide once per pixel instead of per tap.
 
-## Plan for the next session
+## Core option, optimisation and regression check (2026-09-27)
 
-1. ~~Fix the fringing~~ done 2026-09-27 (colour-only supersampling, see above). Get a live
-   look from the user in motion.
-2. **Core option** replacing the env var: e.g. `mame_voodoo_tex_supersample`
-   (disabled/2x2/4x4, default disabled), plumbed through the OSD like the `mame_psx_gpu_*`
-   options (`libretro_core_options.h` -> `check_variables()` -> an `osd_interface` query ->
-   `voodoo_renderer::set_tex_supersample()`), so Batocera can use it.
-3. **Regression/visual pass** on other Voodoo boards (the renderer is shared): gticlub2 and
-   thrild2 (Viper), a Seattle game (`sfrush`/`calspeed`) and a Vegas game (`gauntleg`). Check the
-   off path is bit-identical (same-frame screenshots or frame hashes).
-4. Performance on slower Batocera hardware: consider an anisotropic grid (more samples along
-   the major axis only) if 4x4 is too heavy.
-5. Then document in `viper-investigation.md`, merge to `arcade-focused`.
+- User confirmed the colour-only version looks good live.
+- Core option added (see top). Verified the option alone (no env var) gives pixel-identical
+  output to `MAME_VOODOO_TEXSS=4`.
+- The supersample path accumulates premultiplied sums (`premultiplied_sum`) over every bilinear
+  tap and divides once per pixel, instead of per tap. Rounding-only change (mean 0.03/channel).
+- Regression, off vs 4x4 snapshots in attract (`snap_run.sh`, frames 1800-7200 step 900):
+  gticlub2 (Viper; user also checked it live), gauntdl (Vegas), calspeed (Seattle, Voodoo 1 with
+  its coarser 4-bit bilinear). All clean: distant floors/tracks smoother, HUD/logos/alpha effects
+  unchanged. `sfrush` can't be tested: its local CHD fails with "DIFF CHD ERROR: Invalid parent".
+  Off path pixel-identical to the pre-feature baseline on jpark3.
+- jpark3 speed (150 s attract; Voodoo worker thread CPU each, worst speed sample):
+  off 18% / 0.92x, 2x2 24% / 0.91x, 3x3 29.5% / 0.94x, 4x4 34% / 0.70x (one or two dips per run
+  in a heavy scene). **3x3 is the safe recommendation**; 4x4 for fast machines.
+
+## Possible follow-ups
+
+- Anisotropic grid (more samples along the major axis only) to make 4x4-quality cheaper.
+- Skip the alpha weighting for formats without alpha (RGB565 etc.).
 
 Longer term (not planned): full 2x supersampling of the Voodoo framebuffer would also fix edge
 crawl, but it needs a shadow high-res buffer kept in sync with LFB access and 2D blits.

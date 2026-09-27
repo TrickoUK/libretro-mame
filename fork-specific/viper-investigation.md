@@ -296,6 +296,14 @@ misrepresented in lua", the byte-lane mask has bit 63 set). `ioport_field:set_va
 analog field writes the unshifted override into the whole port, so it only behaves for fields
 at bit 0.
 
+## Enhancement: texture supersampling (jpark3 shimmer)
+
+jpark3 shimmers because it clamps each object to a single mip level and renders at 512x384, so
+detailed textures alias when shrunk (dithering and LOD dither are off). The core option
+`mame_voodoo_tex_supersample` (off by default; 3x3 recommended) averages texture colour over a
+grid of samples per shrunk pixel. It's an enhancement, not accuracy. Details, the billboard edge
+fringing fix and measurements: `voodoo-texture-supersampling.md`.
+
 ## Checked and ruled out
 
 - Texture download apertures (`map_texture_w`, which is a logerror stub on Banshee) and the 2D
