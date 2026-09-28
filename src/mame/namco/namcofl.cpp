@@ -574,6 +574,9 @@ static INPUT_PORTS_START( speedrcr )
 
 	PORT_START("WHEEL")
 	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_SENSITIVITY(100) PORT_KEYDELTA(4)
+
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 INPUT_PORTS_END
 
 

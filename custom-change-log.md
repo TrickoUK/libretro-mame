@@ -194,3 +194,8 @@ builds get them straight from here.
   `gamepad_steering.h`, the same code as Pole Position and the Final Laps. The settings and saved
   cfg values are unchanged. Smoothing can now differ by at most 1 of 255 from the old code, which
   can't be felt.
+
+### Speed Racer: steering response and smoothing
+- The same **Steering Response** and **Steering Smoothing** settings as Final Lap R, from the shared
+  helper. Default is arcade behaviour.
+- The user tested it (Squared curve, Medium+ smoothing) and approved it.
