@@ -12,6 +12,7 @@
 
 #include "atarimo.h"
 #include "slapstic.h"
+#include "gamepad_steering.h"
 
 #include "machine/6522via.h"
 #include "machine/74259.h"
@@ -54,6 +55,7 @@ public:
 		, m_tms(*this, "tms")
 		, m_outlatch(*this, "outlatch")
 		, m_via(*this, "via")
+		, m_steering_config(*this, "STEERING")
 	{ }
 
 	void indytemp(machine_config &config) ATTR_COLD;
@@ -126,6 +128,10 @@ protected:
 	uint8_t           m_bankselect = 0;
 
 	uint8_t           m_cur[2][2]{};
+
+	// optional gamepad steering assists for Road Blasters (see gamepad_steering.h)
+	optional_ioport   m_steering_config;
+	gamepad_steering  m_gamepad_steering;
 
 	void video_int_ack_w(uint8_t data = 0);
 	template <int Input> uint8_t digital_joystick_r();

@@ -311,9 +311,15 @@ uint16_t atarisy1_state::trakball_r(offs_t offset)
 		result = m_cur[player][which];
 	}
 
-	/* Road Blasters steering wheel */
+	/* Road Blasters steering wheel: 0x00-0x7f, centre 0x40. The game turns the offset from centre
+	   into a sideways speed (about 1.1 units per frame per count, easing in over ~6 frames), so full
+	   stick crosses half the road in about a quarter of a second */
 	else if (m_trackball_type == 2)
+	{
 		result = ioport("IN0")->read();
+		if (m_steering_config && !machine().side_effects_disabled())
+			result = m_gamepad_steering.apply(result & 0x7f, 0x00, 0x40, 0x7f, m_steering_config->read(), machine().time());
+	}
 
 	return result;
 }
@@ -671,6 +677,9 @@ INPUT_PORTS_END
 static INPUT_PORTS_START( roadblst )
 	PORT_START("IN0")   // F20000
 	PORT_BIT( 0x7f, 0x00, IPT_AD_STICK_X ) PORT_SENSITIVITY(50) PORT_KEYDELTA(5) PORT_REVERSE
+
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 
 	PORT_START("IN1")   // F40000
 	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_SENSITIVITY(100) PORT_KEYDELTA(64)

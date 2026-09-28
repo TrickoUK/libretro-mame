@@ -199,3 +199,12 @@ builds get them straight from here.
 - The same **Steering Response** and **Steering Smoothing** settings as Final Lap R, from the shared
   helper. Default is arcade behaviour.
 - The user tested it (Squared curve, Medium+ smoothing) and approved it.
+
+### Road Blasters: steering response and smoothing
+- The game reads the yoke as a position (centre 0x40, range 0x00-0x7f) and turns the offset into a
+  sideways speed, rounded to only about 10 steps each way. On a linear stick the first step comes
+  at about 10% deflection, so it felt jerky, and MAME's sensitivity setting has no effect on it.
+- Added the shared **Steering Response** and **Steering Smoothing** settings. With Squared, half
+  stick gives 2 steps instead of 5. Default is arcade behaviour, and the default path is
+  byte-identical (700 frames of RAM compared).
+- The user tested it (Squared curve, Medium smoothing) and approved it.
