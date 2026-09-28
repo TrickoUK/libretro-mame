@@ -183,3 +183,8 @@ builds get them straight from here.
 - The user confirmed Final Lap 3 is much better (Squared curve, Heavy smoothing). Final Lap 1/2
   need `lh5762.6n`, a ROM added upstream that 0.289 romsets don't have, so they're untested until
   a 0.290 set is available.
+
+### Final Lap R: steering response and smoothing
+- The same **Steering Response** and **Steering Smoothing** settings as the other Final Laps, using
+  the shared helper. Default is arcade behaviour.
+- The user tested it (Squared curve, Firm smoothing) and approved it.

@@ -167,6 +167,7 @@ OSC3: 48.384MHz
 #include "namco_c169roz.h"
 #include "namco_c355spr.h"
 #include "namcomcu.h"
+#include "gamepad_steering.h"
 
 #include "cpu/i960/i960.h"
 #include "sound/c352.h"
@@ -205,7 +206,8 @@ public:
 		m_misc(*this, "MISC"),
 		m_accel(*this, "ACCEL"),
 		m_brake(*this, "BRAKE"),
-		m_wheel(*this, "WHEEL")
+		m_wheel(*this, "WHEEL"),
+		m_steering_config(*this, "STEERING")
 	{ }
 
 	void namcofl(machine_config &config);
@@ -234,6 +236,8 @@ private:
 	required_ioport m_accel;
 	optional_ioport m_brake;
 	required_ioport m_wheel;
+	optional_ioport m_steering_config;
+	gamepad_steering m_gamepad_steering;
 
 	emu_timer *m_raster_interrupt_timer = nullptr;
 	emu_timer *m_vblank_interrupt_timer = nullptr;
@@ -254,6 +258,7 @@ private:
 	void port6_w(u8 data);
 	u8 port7_r();
 	u8 dac6_r();
+	u8 wheel_r();
 	void spritebank_w(offs_t offset, u32 data, u32 mem_mask = ~0);
 	bool sprite_mix_callback(u16 &dest, u8 &destpri, u16 colbase, u16 src, int srcpri, int pri);
 	u32 screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
@@ -492,6 +497,15 @@ u8 namcofl_state::dac6_r()
 	return m_brake.read_safe(0xff);
 }
 
+// 0x00 full left, 0x80 centre, 0xff full right; games without a "STEERING" config port read it unchanged
+u8 namcofl_state::wheel_r()
+{
+	const u8 value = m_wheel->read();
+	if (!m_steering_config)
+		return value;
+	return m_gamepad_steering.apply(value, 0x00, 0x80, 0xff, m_steering_config->read(), machine().time());
+}
+
 void namcofl_state::namcoc75_am(address_map &map)
 {
 	map(0x002000, 0x002fff).rw("c352", FUNC(c352_device::read), FUNC(c352_device::write));
@@ -624,6 +638,9 @@ static INPUT_PORTS_START( finalapr )
 
 	PORT_START("WHEEL")
 	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_SENSITIVITY(100) PORT_KEYDELTA(6)
+
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 INPUT_PORTS_END
 
 
@@ -697,7 +714,7 @@ void namcofl_state::namcofl(machine_config &config)
 	m_mcu->p7_in_cb().set(FUNC(namcofl_state::port7_r));
 	m_mcu->an7_cb().set_ioport("ACCEL");
 	m_mcu->an6_cb().set(FUNC(namcofl_state::dac6_r));
-	m_mcu->an5_cb().set_ioport("WHEEL");
+	m_mcu->an5_cb().set(FUNC(namcofl_state::wheel_r));
 	m_mcu->an4_cb().set_constant(0xff);
 	m_mcu->an3_cb().set_constant(0xff);
 	m_mcu->an2_cb().set_constant(0xff);
