@@ -165,3 +165,21 @@ builds get them straight from here.
 - Found the game's 30 fps frame lock and a patch that removes it. The game logic runs a fixed step
   per frame, so unlocking it makes the whole game run at double speed. The patch was written up
   and not shipped.
+
+## 2026-09-28
+
+### Pole Position / Pole Position II: gamepad stick steering
+- The real wheel spins freely, and the game steers by how fast it turns. MAME's default stick
+  mapping spun it about 5x too fast, so most of the stick's travel was full lock.
+- New Machine Configuration setting **Steering Input: Gamepad stick** (default is the arcade
+  wheel/spinner). The stick sets the spin speed, with a **Stick Steering Speed**
+  (Slow/Medium/Fast/Very fast) and the gticlub2-style **Steering Response** curve. Holding the stick
+  holds a steady turn, and letting go straightens up.
+- The user confirmed it's now playable (Squared curve, Slow speed).
+
+### Final Lap 1/2/3, Four Trax, Suzuka 8 Hours, Dirt Fox: steering response and smoothing
+- The same **Steering Response** and **Steering Smoothing** settings as gticlub2, now in a shared
+  helper (`src/mame/shared/gamepad_steering.h`). Default is arcade behaviour.
+- The user confirmed Final Lap 3 is much better (Squared curve, Heavy smoothing). Final Lap 1/2
+  need `lh5762.6n`, a ROM added upstream that 0.289 romsets don't have, so they're untested until
+  a 0.290 set is available.

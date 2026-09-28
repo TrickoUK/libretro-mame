@@ -1149,6 +1149,9 @@ static INPUT_PORTS_START( finallap )
 	NAMCOS2_MCU_DIPSW_DEFAULT /* 63B05Z0 - $2000 DIP SW */
 
 	NAMCOS2_MCU_DIAL_DEFAULT  /* 63B05Z0 - $3000 */
+
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( finalap3 )
@@ -1212,6 +1215,9 @@ static INPUT_PORTS_START( finalap3 )
 	NAMCOS2_MCU_DIPSW_DEFAULT /* 63B05Z0 - $2000 DIP SW */
 
 	NAMCOS2_MCU_DIAL_DEFAULT  /* 63B05Z0 - $3000 */
+
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( fourtrax )
@@ -1298,6 +1304,9 @@ static INPUT_PORTS_START( fourtrax )
 
 	NAMCOS2_MCU_DIPSW_DEFAULT
 	NAMCOS2_MCU_DIAL_DEFAULT
+
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( assault )
@@ -1392,6 +1401,9 @@ static INPUT_PORTS_START( suzuka )
 	PORT_SERVICE( 0x80, IP_ACTIVE_LOW )
 
 	NAMCOS2_MCU_DIAL_DEFAULT
+
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 INPUT_PORTS_END
 
 /* note, even with perfectly calibrated gun settings the on-screen cursor won't align with the MAME cursor
@@ -1518,6 +1530,9 @@ static INPUT_PORTS_START( dirtfox )
 
 	NAMCOS2_MCU_DIPSW_DEFAULT
 	NAMCOS2_MCU_DIAL_DEFAULT
+
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( metlhawk )
@@ -1644,6 +1659,16 @@ void namcos2_base_state::configure_c148_standard(machine_config &config)
 	m_slave_intc->link_c148_device(m_master_intc);
 }
 
+// AN5 is the steering wheel on the racing games (0x01 full left, 0x80 centre, 0xff full right);
+// games without a "STEERING" config port read it unchanged
+u8 namcos2_base_state::steering_wheel_r()
+{
+	const u8 value = m_steering_wheel.read_safe(0xff);
+	if (!m_steering_config)
+		return value;
+	return m_gamepad_steering.apply(value, 0x01, 0x80, 0xff, m_steering_config->read(), machine().time());
+}
+
 void namcos2_base_state::configure_c65_standard(machine_config &config)
 {
 	NAMCOC65(config, m_c65, C65_CPU_CLOCK);
@@ -1660,7 +1685,7 @@ void namcos2_base_state::configure_c65_standard(machine_config &config)
 	m_c65->an2_in_cb().set_ioport("AN2");
 	m_c65->an3_in_cb().set_ioport("AN3");
 	m_c65->an4_in_cb().set_ioport("AN4");
-	m_c65->an5_in_cb().set_ioport("AN5");
+	m_c65->an5_in_cb().set(FUNC(namcos2_base_state::steering_wheel_r));
 	m_c65->an6_in_cb().set_ioport("AN6");
 	m_c65->an7_in_cb().set_ioport("AN7");
 	m_c65->dp_in_callback().set(FUNC(namcos2_base_state::dpram_byte_r));
@@ -1683,7 +1708,7 @@ void namcos2_base_state::configure_c68_standard(machine_config &config)
 	m_c68->an2_in_cb().set_ioport("AN2");
 	m_c68->an3_in_cb().set_ioport("AN3");
 	m_c68->an4_in_cb().set_ioport("AN4");
-	m_c68->an5_in_cb().set_ioport("AN5");
+	m_c68->an5_in_cb().set(FUNC(namcos2_base_state::steering_wheel_r));
 	m_c68->an6_in_cb().set_ioport("AN6");
 	m_c68->an7_in_cb().set_ioport("AN7");
 	m_c68->dp_in_callback().set(FUNC(namcos2_base_state::dpram_byte_r));

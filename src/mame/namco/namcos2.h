@@ -24,6 +24,7 @@
 #include "namcos2_roz.h"
 
 #include "namco_c355spr.h"
+#include "gamepad_steering.h"
 
 #include "machine/timer.h"
 #include "sound/c140.h"
@@ -60,6 +61,8 @@ protected:
 		m_audiobank(*this, "audiobank"),
 		m_c140_region(*this, "c140"),
 		m_dpram(*this, "dpram"),
+		m_steering_wheel(*this, "AN5"),
+		m_steering_config(*this, "STEERING"),
 		m_gametype(0),
 		m_update_to_line_before_posirq(false)
 	{ }
@@ -133,6 +136,12 @@ protected:
 	required_region_ptr<u16> m_c140_region;
 
 	required_shared_ptr<u8> m_dpram; /* 2Kx8 */
+
+	// optional gamepad steering assists for the racing games (see gamepad_steering.h)
+	optional_ioport m_steering_wheel;
+	optional_ioport m_steering_config;
+	gamepad_steering m_gamepad_steering;
+	u8 steering_wheel_r();
 
 	int m_gametype = 0;
 	bool m_update_to_line_before_posirq = false;
