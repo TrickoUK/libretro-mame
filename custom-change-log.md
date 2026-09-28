@@ -188,3 +188,9 @@ builds get them straight from here.
 - The same **Steering Response** and **Steering Smoothing** settings as the other Final Laps, using
   the shared helper. Default is arcade behaviour.
 - The user tested it (Squared curve, Firm smoothing) and approved it.
+
+### GTI Club 2 / Thrill Drive 2: steering code moved to the shared helper
+- gticlub2/thrild2's Steering Response and Steering Smoothing now use the shared
+  `gamepad_steering.h`, the same code as Pole Position and the Final Laps. The settings and saved
+  cfg values are unchanged. Smoothing can now differ by at most 1 of 255 from the old code, which
+  can't be felt.

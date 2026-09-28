@@ -250,13 +250,15 @@ Game RAM notes (gticlub2, JAB):
 
 Both live in MAME's Machine Configuration menu for the Viper driving games, take effect
 immediately and are saved in the game's MAME cfg (`saves/MAME/mame/cfg/<game>.cfg`). Both default
-to the arcade behaviour.
+to the arcade behaviour. Since 2026-09-28 the code is the shared header-only
+`src/mame/shared/gamepad_steering.h` (also used by Pole Position, Final Lap and Final Lap R); its
+smoothing steps are measured from centre, so they can differ from the numbers below by 1 of 255.
 
-- **Steering Response** (`apply_steering_response()`): Linear (arcade) / Mild (x^1.5) / Squared /
+- **Steering Response**: Linear (arcade) / Mild (x^1.5) / Squared /
   Cubic. Shrinks small deflections and still reaches full lock at full stick. MAME's per-input
   analog sensitivity can't do this: for absolute axes `apply_inverse_sensitivity` and
   `apply_sensitivity` cancel out. The game already has its own progressive curve and dead zone.
-- **Steering Smoothing** (`apply_steering_smoothing()`): Off (arcade) / Light 0.25 s / Medium
+- **Steering Smoothing**: Off (arcade) / Light 0.25 s / Medium
   0.5 s / Medium+ 0.625 s / Firm 0.75 s / Firm+ 0.875 s / Heavy 1 s, the lock-to-lock time of a
   rate limit on the steering position, in emulated time, applied after Steering Response. It isn't
   saved in save states, so after a load it restarts from the current input. This is the fix for

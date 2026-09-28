@@ -403,6 +403,8 @@ The golf club acts like a LED gun. PCB power input is 12V.
 #include "sound/dmadac.h"
 #include "video/voodoo_banshee.h"
 
+#include "gamepad_steering.h"
+
 #include "emupal.h"
 #include "screen.h"
 #include "speaker.h"
@@ -448,7 +450,7 @@ public:
 		m_io_ports(*this, "IN%u", 0U),
 		m_analog_input(*this, "AN%u", 0U),
 		m_gun_input(*this, "GUN%u", 0U),
-		m_steering_response(*this, "STEERING"),
+		m_steering_config(*this, "STEERING"),
 		m_io_ppp_sensors(*this, "SENSOR%u", 1U),
 		m_dmadac(*this, { "dacr", "dacl" })
 	{
@@ -639,15 +641,12 @@ private:
 	bool m_analog_8bit[4]{};
 	required_ioport_array<4> m_gun_input;
 	u16 gun_r(int which);
-	optional_ioport m_steering_response;
+	optional_ioport m_steering_config;
+	gamepad_steering m_gamepad_steering;
 	optional_ioport_array<4> m_io_ppp_sensors;
 	required_device_array<dmadac_sound_device, 2> m_dmadac;
 
 	uint32_t mpc8240_pci_r(int function, int reg, uint32_t mem_mask);
-	u16 apply_steering_response(u16 value);
-	u16 apply_steering_smoothing(u16 value);
-	double m_steering_pos = 0.0;
-	attotime m_steering_time;
 	void mpc8240_pci_w(int function, int reg, uint32_t data, uint32_t mem_mask);
 	uint32_t voodoo3_pci_r(int function, int reg, uint32_t mem_mask);
 	void voodoo3_pci_w(int function, int reg, uint32_t data, uint32_t mem_mask);
@@ -779,44 +778,6 @@ void viper_state::pci_config_data_w(uint64_t data)
 // most if not all games in the driver sets fdr = 0x27 = 512, dffsr = 0x21
 #define I2C_TIMER_FREQ (SDRAM_CLOCK / 512) / 10
 
-// Optional non-linear steering curve for gamepad sticks: shrinks small deflections around centre
-// while still reaching full lock. Not arcade behaviour, so it defaults to linear.
-u16 viper_state::apply_steering_response(u16 value)
-{
-	static constexpr double exponents[] = { 1.0, 1.5, 2.0, 3.0 };
-	const double exponent = exponents[m_steering_response->read() & 3];
-	if (exponent == 1.0)
-		return value;
-
-	const double range = (value >= 0x80) ? 0x7f : 0x80;
-	const double d = (double(value) - 0x80) / range;
-	const double curved = std::copysign(std::pow(std::abs(d), exponent), d);
-	return std::clamp<int>(int(std::lround(0x80 + curved * range)), 0x00, 0xff);
-}
-
-// Optional rate limit on the steering position for gamepad sticks. A stick can go from centre to
-// full lock in a frame or two, which a real wheel can't, and the game swings the front wheels to
-// the commanded angle almost at once; above 60 km/h anything past ~20 degrees puts the car on two
-// wheels. Limits are lock-to-lock times in emulated time. Not arcade behaviour, so it defaults to
-// off. Deliberately not saved in save states: after a load it restarts from the current input.
-u16 viper_state::apply_steering_smoothing(u16 value)
-{
-	static constexpr double lock_to_lock_seconds[] = { 0.0, 0.25, 0.5, 0.625, 0.75, 0.875, 1.0, 1.0 };
-	const unsigned mode = BIT(m_steering_response->read(), 2, 3);
-	const attotime now = machine().time();
-	if (mode == 0 || m_steering_time.is_zero() || now < m_steering_time)
-	{
-		m_steering_pos = value;
-		m_steering_time = now;
-		return value;
-	}
-
-	const double max_step = 255.0 * (now - m_steering_time).as_double() / lock_to_lock_seconds[mode];
-	m_steering_time = now;
-	m_steering_pos += std::clamp(double(value) - m_steering_pos, -max_step, max_step);
-	return u16(std::lround(m_steering_pos));
-}
-
 uint8_t viper_state::i2cdr_r(offs_t offset)
 {
 	u8 res = 0;
@@ -857,8 +818,11 @@ uint8_t viper_state::i2cdr_r(offs_t offset)
 					u16 adc_value = m_analog_input[channel]->read();
 					if (m_analog_8bit[channel])
 					{
-						if (channel == 0 && m_steering_response)
-							adc_value = apply_steering_smoothing(apply_steering_response(adc_value & 0xff));
+						// optional gamepad steering assists (see gamepad_steering.h). The game swings the
+						// front wheels to the commanded angle almost at once, and above 60 km/h anything
+						// past ~20 degrees puts the car on two wheels, so a stick flick rolls the car.
+						if (channel == 0 && m_steering_config)
+							adc_value = m_gamepad_steering.apply(adc_value & 0xff, 0x00, 0x80, 0xff, m_steering_config->read(), machine().time());
 
 						// gticlub2's i2c handler reads each channel as a 9-bit sign/magnitude sample around
 						// 0x100: latch 0x10-0x13 returns the distance above it, 0x14-0x17 the distance below.
@@ -2085,22 +2049,8 @@ INPUT_PORTS_START( thrild2 )
 	PORT_MODIFY("AN2")
 	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
 
-	// not hardware settings: ease steering with a gamepad stick (see apply_steering_response and
-	// apply_steering_smoothing)
-	PORT_START("STEERING")
-	PORT_CONFNAME( 0x03, 0x00, "Steering Response" )
-	PORT_CONFSETTING(    0x00, "Linear (arcade)" )
-	PORT_CONFSETTING(    0x01, "Mild curve" )
-	PORT_CONFSETTING(    0x02, "Squared curve" )
-	PORT_CONFSETTING(    0x03, "Cubic curve" )
-	PORT_CONFNAME( 0x1c, 0x00, "Steering Smoothing" )
-	PORT_CONFSETTING(    0x00, "Off (arcade)" )
-	PORT_CONFSETTING(    0x04, "Light (0.25 s lock to lock)" )
-	PORT_CONFSETTING(    0x08, "Medium (0.5 s)" )
-	PORT_CONFSETTING(    0x0c, "Medium+ (0.625 s)" )
-	PORT_CONFSETTING(    0x10, "Firm (0.75 s)" )
-	PORT_CONFSETTING(    0x14, "Firm+ (0.875 s)" )
-	PORT_CONFSETTING(    0x18, "Heavy (1 s)" )
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 INPUT_PORTS_END
 
 INPUT_PORTS_START( gticlub2 )
