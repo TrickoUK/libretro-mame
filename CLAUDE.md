@@ -81,6 +81,17 @@ arcade drivers by offloading polygon rasterization to the host GPU, instead of
 MAME's normal fully-software rendering. This is a nontrivial architecture
 change, not a shader tweak — see "The core problem" below before starting.
 
+## Custom change log (keep it updated)
+
+`custom-change-log.md` (repo root) is the long-term, dated record of this fork's own
+game/system work. **Whenever a fork change lands on `arcade-focused`** (a game fix, a system
+speed-up, a new core option, a moved-in patch), add an entry under that day's date heading
+(oldest first, new work at the bottom). Use a `###` headline naming the game(s) or system, then
+a few short bullets on the end result a player would notice. Commit the entry together with the
+work. Leave out upstream merges and cherry-picks unless fork work was needed to make them run,
+and leave out investigations that shipped no code unless they reached a conclusion worth keeping
+(like the jpark3 60 fps entry).
+
 ## Repo layout cheat sheet
 
 - `fork-specific/` — **home for this fork's investigation docs and test tools**
