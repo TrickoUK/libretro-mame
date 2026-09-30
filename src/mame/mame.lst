@@ -18724,7 +18724,7 @@ mag_burn
 mag_coco
 mag_day
 mag_ddrg
-mag_ddrgec
+mag_ddrgdd
 mag_dodg
 mag_drac
 mag_exzi
@@ -18733,6 +18733,7 @@ mag_fsha
 mag_pdak
 mag_scon
 mag_sconcc
+mag_sconce
 mag_time
 mag_war
 mag_wara
@@ -22023,6 +22024,7 @@ lhdmgp
 lhdmgp200c3m
 lhzb3
 lhzb3106c5m
+lhzb3p
 lhzb3sjb
 lhzb4
 lhzb4dhb
@@ -34790,6 +34792,7 @@ pacapp
 pacapp2
 pacappsp
 ptblank2
+questff
 soulclbr
 soulclbrab
 soulclbrac
@@ -44126,6 +44129,9 @@ hazl1420
 @source:skeleton/hkcastle.cpp
 hkcastle
 
+@source:skeleton/hkfbingo.cpp
+hkfbingo
+
 @source:skeleton/hohnadam.cpp
 hohnadam
 
@@ -47430,6 +47436,9 @@ spellba
 ti74
 ti74a
 ti95
+
+@source:ti/ti80.cpp
+ti80
 
 @source:ti/ti85.cpp
 ti73
