@@ -219,3 +219,11 @@ builds get them straight from here.
 - Xtreme Trial's gas, brake and handbrake read as fully pressed with nothing pressed. They now
   read MIN at rest and MAX at full.
 - Steering keeps the Steering Response and Smoothing settings and works as before.
+
+### Code One Dispatch: boots and steers
+- The game no longer stops at boot with "DEVICE ERROR / STEERING WHEEL". At power-on it checks its
+  motorised steering wheel by turning it left and right, and in MAME the wheel never moved.
+  It now follows the motor during that check, so the game calibrates its controls.
+- Steering, gas and brake now work in play. Before, they read zero whenever the check was
+  skipped.
+- After the check, steering is your input only: the in-game force feedback rumble doesn't move it.

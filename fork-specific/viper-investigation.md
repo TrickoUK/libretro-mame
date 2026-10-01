@@ -150,8 +150,7 @@ code and wheel ports, with two fork changes:
 - The gamepad steering helper runs on the 9-bit value (`apply(diff + 0x100, 0x001, 0x100, 0x1ff)`).
 - xtrial and code1d pedals lose PORT_REVERSE too. With it they read full (FFFF) at rest under the
   8-bit path, which was already wrong before the merge. Checked in xtrial's I/O CHECK: MIN at rest,
-  FFFF at full. code1d still stops at boot with "DEVICE ERROR: STEERING WHEEL", before and after the
-  merge, and its wheel path is plain upstream.
+  FFFF at full. code1d's boot "DEVICE ERROR: STEERING WHEEL" is a separate problem, see Fix 9.
 
 ## Fix 6: Thrill Drive 2 steering pinned full right
 
@@ -221,6 +220,36 @@ misrepresented in lua"), because the 64-bit data bus gives an all-ones 64-bit me
 from `m_maincpu->pc()` inside a handler is stale under the DRC (always 0xf24c here). stderr
 spam on the pty also garbles the Lua console input, so drive long input sequences from a
 script run by the replay plugin (`MAME_EXTRA_PLUGIN=replay MAME_REPLAY_SCRIPT=...`) instead.
+
+## Fix 9: code1d DEVICE ERROR STEERING WHEEL (motorised wheel)
+
+Symptom: Code One Dispatch (`code1d`, `code1db`) stopped every boot at "DEVICE ERROR / STEERING
+WHEEL". With "Calibrate Controls On Boot" turned off it boots, but steering and pedals do nothing
+in play (gas held at 130 mph drives straight into the walls). Its I/O CHECK shows the raw ADC
+values correctly but every calibrated value as `0.0000`, so the game had no calibration.
+
+The cabinet has a force feedback (k-type) wheel. Logging writes to `0xffe20000` (a `nopw` before)
+showed a one-byte motor command: bit 7 drives the motor, bit 4 is the direction and bits 0-3 the
+torque. With the DIP on (code1d's default), the boot DEVICE CHECK ("DO NOT TOUCH THE CONTROL
+DEVICES") ramps the torque left, 0x80-0x8e (`<<<<<`), then right, 0x90-0x9e (`>>>>>`), one step
+every ~0.5 s, while it reads the wheel ADC to find the stops. MAME's wheel never moved, so the check
+failed at ~23.6 s. The force-feedback code that writes it is at 0xa1c40-0xa1cfc (float force
+-> torque byte).
+
+Fix (`wheel_motor_w`/`wheel_motor_update` in viper.cpp): while the check can run, the wheel turns
+with the motor at 40 units/s per torque step and stops at full lock (+/-255). The motor model only
+runs if IN2 bit 2 (the calibrate DIP) is set at reset, and it switches off the first time the
+motor is released after being driven, or 60 s after reset. With the model, the game sees the wheel
+reach both stops, then drives it back to centre itself in a closed loop (0x8c down to 0x80) and
+releases it (0x00). The check passes ("Now Loading" in green), and steering and gas work in play
+(a left steer turns the car round). In play the game buzzes the motor between 0x89 and 0x99 for
+road feel; with the model switched off by then, that doesn't move the player's steering.
+
+Checked: code1d and code1db boot past the check (code1db then asks for the bookkeeping time,
+a first-boot NVRAM prompt); gticlub2 I/O CHECK identical; smoke boots of gticlub2, thrild2,
+xtrial and jpark3 OK. Those games default the DIP off, so they never run the model. With the DIP on,
+xtrial and gticlub2 run a different "MOTOR TYPE: K-TYPE" test with a countdown and repeating
+arrows, not looked into.
 
 ## gticlub2 cars rolling: a game rule, not an emulation bug
 
