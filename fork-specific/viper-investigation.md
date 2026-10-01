@@ -70,6 +70,15 @@ Voodoo 2 multibase path is unchanged.
 Fixes 2 and 3 were needed together. With only fix 2, corruption remained on the env-mapped
 surfaces (car windows, chrome car), and fix 3 cleared it.
 
+**Replaced by upstream (mamedev `7970384920c`, merged 2026-10-01).** Upstream made the same fix:
+each LOD's base plus its offset in the mipmap chain, citing Glide's `_grTexCalcBaseAddress`. On
+Banshee/Voodoo 3 it computes the same addresses as our version, so the merge took upstream's code.
+The one difference is that it also applies to Voodoo 2 multibase. Frame-exact snapshots (7 frames
+each) before and after the merge are identical on gticlub2, jpark3, carnking, gauntleg, warfa,
+sf2049 and calspeed. Logging old vs new LOD offsets on sf2049 found no case where they differ.
+Note: one sf2049 run diverged in attract mode, but two reruns of the same core matched the old core
+exactly. Rerun a game before treating a single divergent run as a real difference.
+
 ## Fix 4: 2D screen-to-screen blit (jpark3 damage overlay)
 
 Found via `jpark3`: when a dinosaur hits the player, a full-screen overlay was drawn as
@@ -127,6 +136,22 @@ the car drives (89 km/h with gas held). Pedals saturate before full raw travel w
 calibration used here; the test menu's CALIBRATION page adjusts that. Smoke-booted gticlub2,
 thrild2 and jpark3, with no errors. thrild2's pedals now go through the same path; its gameplay
 is untested.
+
+**Upstream rewrite (mamedev `5aae4e1f871`, merged 2026-10-01).** Upstream now models the chip
+as an ADC0838 in differential mode: the low latch nibble is the multiplexer word, ANn holds
+CH(2n+1) - CH(2n) as a 9-bit signed value, and ODD/SIGN (latch bit 2) picks the polarity. That is
+the same split-half read as above. Upstream's wheels are 9-bit signed ports with PORT_REVERSE, and
+they give the same bytes as our 8-bit wheel at the ends and centre. The merge keeps upstream's read
+code and wheel ports, with two fork changes:
+- 8-bit pedal ports still span the whole 9-bit range (position 0x001-0x1ff). Upstream's
+  PORT_REVERSE pedals only reach 0x001-0x100. In I/O CHECK with this NVRAM's calibration, gas at
+  position 0x101 is only 74% (0xBDF8), and full scale is near 0x13b, so upstream's pedals would top
+  out at about 74%. The new code returns the same bytes as the old fork code for all 256 pedal values.
+- The gamepad steering helper runs on the 9-bit value (`apply(diff + 0x100, 0x001, 0x100, 0x1ff)`).
+- xtrial and code1d pedals lose PORT_REVERSE too. With it they read full (FFFF) at rest under the
+  8-bit path, which was already wrong before the merge. Checked in xtrial's I/O CHECK: MIN at rest,
+  FFFF at full. code1d still stops at boot with "DEVICE ERROR: STEERING WHEEL", before and after the
+  merge, and its wheel path is plain upstream.
 
 ## Fix 6: Thrill Drive 2 steering pinned full right
 

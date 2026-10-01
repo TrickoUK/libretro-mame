@@ -814,31 +814,39 @@ uint8_t viper_state::i2cdr_r(offs_t offset)
 					// 0x1c: voltage, assume 5v
 					if (m_i2c.addr_latch == 0x1c)
 						return 0x80;
-					const unsigned channel = m_i2c.addr_latch & 0x3;
-					u16 adc_value = m_analog_input[channel]->read();
-					if (m_analog_8bit[channel])
+					if (!BIT(m_i2c.addr_latch, 3))
 					{
+						// The low nibble is the ADC0838 multiplexer word: SGL/DIF, ODD/SIGN,
+						// SELECT1, SELECT0. In differential mode, ODD/SIGN = 0 converts
+						// CH(2n) - CH(2n+1) and ODD/SIGN = 1 converts CH(2n+1) - CH(2n); a
+						// negative difference reads as 0. The games read both polarities and
+						// rebuild the position as 0x100 + first - second.
+						// ANn holds CH(2n+1) - CH(2n) as a 9-bit signed value.
+						const unsigned channel = m_i2c.addr_latch & 0x3;
+						const u16 adc_value = m_analog_input[channel]->read();
+						s32 diff;
+						if (m_analog_8bit[channel])
+						{
+							// libretro-mame fork: 8-bit pedal ports (0x00 released, 0xff full) span the
+							// whole 9-bit range, position 0x001-0x1ff. The stored calibrations only reach
+							// full travel above position 0x100 (gticlub2's gas saturates near 0x13b).
+							diff = 0x100 - s32(((adc_value & 0xff) << 1) | BIT(adc_value, 7));
+						}
+						else
+							diff = util::sext(adc_value, 9);
+
 						// optional gamepad steering assists (see gamepad_steering.h). The game swings the
 						// front wheels to the commanded angle almost at once, and above 60 km/h anything
 						// past ~20 degrees puts the car on two wheels, so a stick flick rolls the car.
 						if (channel == 0 && m_steering_config)
-							adc_value = m_gamepad_steering.apply(adc_value & 0xff, 0x00, 0x80, 0xff, m_steering_config->read(), machine().time());
+							diff = s32(m_gamepad_steering.apply(diff + 0x100, 0x001, 0x100, 0x1ff, m_steering_config->read(), machine().time())) - 0x100;
 
-						// gticlub2's i2c handler reads each channel as a 9-bit sign/magnitude sample around
-						// 0x100: latch 0x10-0x13 returns the distance above it, 0x14-0x17 the distance below.
-						// A zero byte means "not in this half", so the game flips to the other half and reads
-						// again (it keeps the last half per channel), then uses 0x100 +/- the byte.
-						const u16 sample = ((adc_value & 0xff) << 1) | BIT(adc_value, 7);
-						if (BIT(m_i2c.addr_latch, 2))
-							res = (sample < 0x100) ? std::min<u16>(0x100 - sample, 0xff) : 0;
-						else
-							res = (sample >= 0x100) ? sample - 0x100 : 0;
+						res = std::clamp<s32>(BIT(m_i2c.addr_latch, 2) ? diff : -diff, 0, 0xff);
 					}
 					else
 					{
-						// FIXME: upper nibble is currently discarded in port defs
-						// is it expecting 7 bits of data and 1 of parity?
-						// cfr. input tests returning different values for each nibble when both are equal.
+						const u16 adc_value = m_analog_input[m_i2c.addr_latch & 0x3]->read();
+						// FIXME: single-ended mode, only the supply voltage above is known
 						const u8 adc_nibble = BIT(m_i2c.addr_latch, 2) ? 0 : 8;
 
 						res = (adc_value) >> adc_nibble;
@@ -1964,16 +1972,16 @@ static INPUT_PORTS_START( viper )
 	PORT_BIT( 0xffff, IP_ACTIVE_LOW, IPT_UNUSED )
 
 	PORT_START("AN0")
-	PORT_BIT( 0xffff, IP_ACTIVE_LOW, IPT_UNUSED )
+	PORT_BIT( 0xffff, IP_ACTIVE_HIGH, IPT_UNUSED )
 
 	PORT_START("AN1")
-	PORT_BIT( 0xffff, IP_ACTIVE_LOW, IPT_UNUSED )
+	PORT_BIT( 0xffff, IP_ACTIVE_HIGH, IPT_UNUSED )
 
 	PORT_START("AN2")
-	PORT_BIT( 0xffff, IP_ACTIVE_LOW, IPT_UNUSED )
+	PORT_BIT( 0xffff, IP_ACTIVE_HIGH, IPT_UNUSED )
 
 	PORT_START("AN3")
-	PORT_BIT( 0xffff, IP_ACTIVE_LOW, IPT_UNUSED )
+	PORT_BIT( 0xffff, IP_ACTIVE_HIGH, IPT_UNUSED )
 INPUT_PORTS_END
 
 INPUT_PORTS_START( ppp2nd )
@@ -2039,9 +2047,9 @@ INPUT_PORTS_START( thrild2 )
 	PORT_MODIFY("IN4")
 	PORT_BIT(0x01, IP_ACTIVE_LOW, IPT_BUTTON2 ) PORT_NAME("Shift Up")
 
-	// read as an 8-bit sample like the pedals: 0x00 full left, 0x80 centre, 0xff full right
+	// TODO: normal type steering wheel (non-K type)
 	PORT_MODIFY("AN0")
-	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50)
+	PORT_BIT( 0x1ff, 0x000, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN1")
 	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
@@ -2055,6 +2063,10 @@ INPUT_PORTS_END
 
 INPUT_PORTS_START( gticlub2 )
 	PORT_INCLUDE( thrild2 )
+
+	// K-Type steering wheel
+	PORT_MODIFY("AN0")
+	PORT_BIT( 0x1ff, 0x000, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN3")
 	PORT_BIT( 0xff, 0x00, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(100) PORT_KEYDELTA(25)
@@ -2380,16 +2392,16 @@ INPUT_PORTS_START( xtrial )
 
 	// virtually identical to gticlub
 	PORT_MODIFY("AN0")
-	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
+	PORT_BIT( 0x1ff, 0x000, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN1")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25) PORT_REVERSE
+	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
 
 	PORT_MODIFY("AN2")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25) PORT_REVERSE
+	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
 
 	PORT_MODIFY("AN3")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(100) PORT_KEYDELTA(25) PORT_REVERSE
+	PORT_BIT( 0xff, 0x00, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(100) PORT_KEYDELTA(25)
 INPUT_PORTS_END
 
 INPUT_PORTS_START( code1d )
@@ -2412,13 +2424,13 @@ INPUT_PORTS_START( code1d )
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_BUTTON1 ) PORT_NAME("Action Button")
 
 	PORT_MODIFY("AN0")
-	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
+	PORT_BIT( 0x1ff, 0x000, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN1")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25) PORT_REVERSE
+	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
 
 	PORT_MODIFY("AN2")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25) PORT_REVERSE
+	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
 INPUT_PORTS_END
 
 /*****************************************************************************/
@@ -2479,7 +2491,7 @@ void viper_state::machine_start()
 
 	m_i2c.timer = timer_alloc(FUNC(viper_state::i2c_timer_callback), this);
 
-	// channels whose port defines only bits 0-7 are plain 8-bit ADC samples (gticlub2, thrild2)
+	// channels whose port defines only bits 0-7 are 8-bit pedals (see i2cdr_r)
 	for (int i = 0; i < 4; i++)
 	{
 		ioport_value used = 0;

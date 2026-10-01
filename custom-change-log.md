@@ -208,3 +208,14 @@ builds get them straight from here.
   stick gives 2 steps instead of 5. Default is arcade behaviour, and the default path is
   byte-identical (700 frames of RAM compared).
 - The user tested it (Squared curve, Medium smoothing) and approved it.
+
+## 2026-10-01
+
+### Viper driving games: pedals kept full range through the upstream merge
+- MAME's latest code changed how GTI Club 2, Thrill Drive 2, Xtreme Trial and Code One Dispatch
+  read their wheel and pedals. Taken as-is, the gas and brake would only reach about 74% with
+  the stored calibration, so the fork keeps the pedals spanning their full travel. The I/O CHECK
+  screen shows the same values as before.
+- Xtreme Trial's gas, brake and handbrake read as fully pressed with nothing pressed. They now
+  read MIN at rest and MAX at full.
+- Steering keeps the Steering Response and Smoothing settings and works as before.

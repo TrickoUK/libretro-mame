@@ -26,10 +26,23 @@ mixed into history.
 - **Follow-up sync, 2026-09-27**: merge commit `4553d69283b` merged mamedev master
   `mame0289-1168-g1cfb79ea82d` (12 commits). No conflicts, `arcade.flt` unchanged;
   smoke-tested daytona2, scud, metamrph, mystwarr, hotd, jpark3, brvblade, polystar.
+- **Follow-up sync, 2026-09-30**: merge commit `ad856c8a345` merged mamedev master
+  `mame0289-1217-g67129e77425` (49 commits). No conflicts, `arcade.flt` unchanged (the new
+  driver files are a bingo skeleton and a calculator). Genie regenerated directly, full `-j4`
+  build linked clean; smoke-tested daytona2, scud, metamrph, mystwarr, hotd, jpark3, brvblade,
+  polystar (`fork-specific/out/sync1217`).
+- **Follow-up sync, 2026-10-01**: merged mamedev master `mame0289-1243-g6743eb674d0`
+  (26 commits). Conflicts in `voodoo_render.cpp` (upstream's multibase LOD fix replaces ours,
+  identical on Banshee/Voodoo 3) and `konami/viper.cpp` (upstream's differential ADC0838 read;
+  we keep full-range 8-bit pedals and the gamepad steering helper on top, see
+  `fork-specific/viper-investigation.md` Fix 5). `arcade.flt` unchanged. Checked with I/O CHECK
+  (gticlub2, xtrial), frame-exact Voodoo snapshots (identical on 7 games) and smoke tests
+  (`fork-specific/out/sync1243`).
 - Conflicts to expect again: `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
   handler, which we drop), `src/devices/video/psx.{cpp,h}` (GPU HLE path),
-  `src/devices/cpu/dspp` (our idle-loop skip), `scripts/genie.lua`,
+  `src/devices/cpu/dspp` (our idle-loop skip), `src/mame/konami/viper.cpp` (analog
+  ADC read and ports, gun reads), `scripts/genie.lua`,
   `scripts/src/main.lua` and `src/osd/modules/lib/osdobj_common.cpp` (libretro
   hooks).
 - Upstream API changes in that sync that broke fork/libretro code:
