@@ -704,6 +704,9 @@ u32 ms32_f1superbattle_state::analog_r()
 	b = m_io_analog[2]->read(); // unused?
 	c = m_io_analog[1]->read();
 	d = m_io_analog[0]->read();
+	// steering: 0x00 full left, 0x80 centre, 0xff full right
+	if (m_steering_config && !machine().side_effects_disabled())
+		c = m_gamepad_steering.apply(c, 0x00, 0x80, 0xff, m_steering_config->read(), machine().time());
 	return a << 24 | b << 16 | c << 8 | d << 0;
 }
 
@@ -1416,6 +1419,9 @@ static INPUT_PORTS_START( f1superb )
 
 	PORT_START("AN1")   // Steering
 	PORT_BIT( 0xff, 0x80, IPT_AD_STICK_X ) PORT_SENSITIVITY(50) PORT_KEYDELTA(15) PORT_PLAYER(1)
+
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 
 	PORT_START("AN2")   // Shift + Brake (AN2?)
 	PORT_DIPNAME( 0x80, 0x80, "Shift Brake" ) // ???

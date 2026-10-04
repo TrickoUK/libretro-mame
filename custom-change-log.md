@@ -227,3 +227,11 @@ builds get them straight from here.
 - Steering, gas and brake now work in play. Before, they read zero whenever the check was
   skipped.
 - After the check, steering is your input only: the in-game force feedback rumble doesn't move it.
+
+## 2026-10-04
+
+### F-1 Super Battle: steering response and smoothing
+- The same **Steering Response** and **Steering Smoothing** settings as the Final Laps and Road
+  Blasters, from the shared helper (Machine Configuration menu). Default is arcade behaviour.
+- With Squared, half stick turns the wheel a quarter of the way instead of half, and full stick
+  still reaches full lock. Heavy smoothing takes about 1 s from full left to full right.
