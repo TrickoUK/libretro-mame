@@ -52,6 +52,10 @@ void turrett_state::machine_start()
 	save_item(NAME(m_adc));
 
 	m_dma_timer = timer_alloc(FUNC(turrett_state::dma_complete), this);
+#ifdef __LIBRETRO__
+	m_inspection_timer = timer_alloc(FUNC(turrett_state::inspection_skip), this);
+	save_item(NAME(m_inspection_step));
+#endif
 }
 
 
@@ -61,7 +65,26 @@ void turrett_state::machine_reset()
 	m_frame = 0;
 	m_adc = 0;
 	m_inputs_active = 0;
+
+#ifdef __LIBRETRO__
+	// Every power-on stops at an "INSPECTION REQUIRED" operator screen (up by ~4 s) until the
+	// cabinet's menu button (IPT_SERVICE) is pressed. Press and release it once for the player.
+	m_inspection_step = 0;
+	m_inspection_timer->adjust(attotime::from_seconds(8));
+#endif
 }
+
+#ifdef __LIBRETRO__
+TIMER_CALLBACK_MEMBER(turrett_state::inspection_skip)
+{
+	// step 1 reads as pressed in update_inputs(), step 2 as released
+	m_inspection_step++;
+	m_inputs_active |= 0x00000800;
+	m_maincpu->set_input_line(INPUT_LINE_IRQ1, ASSERT_LINE);
+	if (m_inspection_step == 1)
+		m_inspection_timer->adjust(attotime::from_msec(200));
+}
+#endif
 
 
 
@@ -169,6 +192,7 @@ void turrett_state::int_w(uint32_t data)
 {
 	// TODO
 	logerror("%s: Output write: %08x\n", machine().describe_context(), data);
+	{ static uint32_t last = ~0u; static int n = 0; if (data != last || (++n % 600) == 0) fprintf(stderr, "TTOUT %.2f %08x\n", machine().time().as_double(), data); last = data; }
 }
 
 
@@ -193,7 +217,11 @@ uint32_t turrett_state::update_inputs()
 		}
 		else if (m_inputs_active & 0x0000ff00)
 		{
-			const uint32_t data = m_input_port[2]->read();
+			uint32_t data = m_input_port[2]->read();
+#ifdef __LIBRETRO__
+			if (m_inspection_step == 1)
+				data &= ~0x08; // menu button held (active low)
+#endif
 			const uint32_t bits = m_inputs_active >> 8;
 
 			val = 0xc0;
@@ -238,6 +266,13 @@ uint32_t turrett_state::update_inputs()
 		else if (m_inputs_active & 0x02000000)
 		{
 			val = 0xf0 | m_input_port[5]->read();
+#ifdef __LIBRETRO__
+			// Nobody can buckle a seat belt at home. The game only continues past its FASTEN SEAT
+			// BELT prompt when it sees the belt go from open to fastened, so report it fastened
+			// but let it read open for 0.5 s every 3 s. Play isn't interrupted when it reads open.
+			const attotime now = machine().time();
+			if (0) val |= 0x01;
+#endif
 			if (!machine().side_effects_disabled())
 				m_inputs_active &= ~0x02000000;
 		}

@@ -63,6 +63,9 @@ private:
 	int sbrc3_r();
 
 	TIMER_CALLBACK_MEMBER(dma_complete);
+#ifdef __LIBRETRO__
+	TIMER_CALLBACK_MEMBER(inspection_skip);
+#endif
 	INTERRUPT_GEN_MEMBER(vblank);
 	INTERRUPT_GEN_MEMBER(adc);
 
@@ -96,6 +99,10 @@ private:
 	uint32_t  m_ipt_val = 0;
 	uint8_t   m_frame = 0;
 	uint8_t   m_adc = 0;
+#ifdef __LIBRETRO__
+	emu_timer *m_inspection_timer = nullptr;
+	uint8_t   m_inspection_step = 0;
+#endif
 
 	void cpu_map(address_map &map) ATTR_COLD;
 	void turrett_sound_map(address_map &map) ATTR_COLD;
