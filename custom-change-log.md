@@ -209,6 +209,16 @@ builds get them straight from here.
   byte-identical (700 frames of RAM compared).
 - The user tested it (Squared curve, Medium smoothing) and approved it.
 
+## 2026-09-29
+
+### Build filter: video games only
+- The arcade build no longer includes fruit machines, casino games (video slots, poker, bingo,
+  roulette, medal games), mahjong and hanafuda, quiz games, pinball, mechanical games (cranes,
+  coin pushers, redemption, darts) or console/computer systems. That's 12,549 romsets, down
+  from about 32,300. The full list is in `fork-specific/arcade-games.txt`.
+- 532 driver source files are no longer compiled, so builds are faster and the core is smaller.
+- Video games with a physical control stay in, e.g. Sonic Blast Man, Real Puncher, Arm Champs II.
+
 ## 2026-10-01
 
 ### Viper driving games: pedals kept full range through the upstream merge

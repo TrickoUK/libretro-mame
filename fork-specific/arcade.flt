@@ -12,7 +12,9 @@
 // because their manufacturer directory has >=1 included arcade file - needed to avoid
 // link errors, since MAME's own dependency scanner only catches same-named header/impl
 // sibling pairs, not arbitrary cross-file symbol references within a directory.
-
+// Pruned by fork-specific/tools/prune_arcade_filter.py: no fruit machines, casino,
+// mahjong, quiz, pinball or mechanical games. "-name" lines drop single games
+// from files that also hold kept games.
 acorn/acorn_serproc.cpp  // [HELPER]
 acorn/acrnsys_kbd.cpp  // [HELPER]
 acorn/aristmk5.cpp
@@ -25,16 +27,12 @@ acorn/ertictac.cpp
 acorn/riscpc_mouse.cpp  // [HELPER]
 acorn/ssfindo.cpp
 adp/adp.cpp
-adp/manohman.cpp
 adp/servicetastatur.cpp
-adp/stella8085.cpp
-adp/stellafr.cpp
 alliedleisure/ace.cpp
 alliedleisure/aleisttl.cpp
 alliedleisure/aztarac.cpp
 alliedleisure/clayshoo.cpp
 alliedleisure/killcom.cpp
-alliedleisure/trvquest.cpp
 alpha/ad_sound.cpp  // [HELPER]
 alpha/alpha68k.cpp
 alpha/alpha68k_i.cpp
@@ -46,8 +44,6 @@ alpha/equites.cpp
 alpha/meijinsn.cpp
 alpha/shougi.cpp
 alpha/splendor.cpp
-amcoe/au1250.cpp
-amcoe/sfbonus.cpp
 amiga/agnus_copper.cpp  // [HELPER]
 amiga/akiko.cpp  // [HELPER]
 amiga/alg.cpp
@@ -109,11 +105,6 @@ apple/v8.cpp  // [HELPER]
 apple/valkyrie.cpp  // [HELPER]
 apple/vasp.cpp  // [HELPER]
 apple/ymca.cpp  // [HELPER]
-aristocrat/aristmk4.cpp
-aristocrat/aristmk6.cpp
-aristocrat/aristmk7.cpp
-aristocrat/caswin.cpp
-astrocorp/astrcorp.cpp
 astrocorp/astropc.cpp
 astrocorp/hummer.cpp
 atari/a2600.cpp  // [MIXED]
@@ -200,12 +191,10 @@ atari/flyball.cpp
 atari/foodf.cpp
 atari/gauntlet.cpp
 atari/gtia.cpp  // [HELPER]
-atari/gumrally.cpp
 atari/harddriv.cpp
 atari/harddriv_a.cpp  // [HELPER]
 atari/harddriv_m.cpp  // [HELPER]
 atari/harddriv_v.cpp  // [HELPER]
-atari/hitparade.cpp
 atari/irobot.cpp
 atari/irobot_m.cpp  // [HELPER]
 atari/irobot_v.cpp  // [HELPER]
@@ -245,7 +234,6 @@ atari/pong.cpp
 atari/poolshrk.cpp
 atari/poolshrk_a.cpp  // [HELPER]
 atari/quantum.cpp
-atari/quizshow.cpp
 atari/rampart.cpp
 atari/redbaron.cpp  // [HELPER]
 atari/relief.cpp
@@ -290,22 +278,17 @@ atari/videopin_a.cpp  // [HELPER]
 atari/vindictr.cpp
 atari/wolfpack.cpp
 atari/xybots.cpp
-atlus/bowltry.cpp
 atlus/cave.cpp
 atlus/cave_v.cpp  // [HELPER]
 atlus/ohmygod.cpp
 atlus/patapata.cpp
-atlus/pitchtry.cpp
-atlus/rallypnt.cpp
 atlus/sprite013.cpp  // [HELPER]
 bally/astrocde.cpp
 bally/astrocde_v.cpp  // [HELPER]
 bally/balsente.cpp
 bally/balsente_m.cpp  // [HELPER]
 bally/balsente_v.cpp  // [HELPER]
-bally/cashline.cpp
 bally/csd.cpp  // [HELPER]
-bally/eurotec.cpp
 bally/gridlee.cpp
 bally/gridlee_a.cpp  // [HELPER]
 bally/gridlee_v.cpp  // [HELPER]
@@ -317,65 +300,13 @@ bally/mcr_m.cpp  // [HELPER]
 bally/mcr_v.cpp  // [HELPER]
 bally/midway_sound.cpp  // [HELPER]
 bally/midwayttl.cpp
-bally/mw18w.cpp
-bally/mwsub.cpp
 bally/omegrace.cpp
 bally/sente6vb.cpp  // [HELPER]
 bally/spyhuntertec.cpp
 bally/technik2000.cpp
 bally/zwackery.cpp
-barcrest/mpu1.cpp
-barcrest/mpu3.cpp
-barcrest/mpu4.cpp  // [HELPER]
-barcrest/mpu4_characteriser_bootleg.cpp  // [HELPER]
-barcrest/mpu4_characteriser_pal.cpp  // [HELPER]
-barcrest/mpu4_characteriser_pal_bwb.cpp  // [HELPER]
-barcrest/mpu4_oki_sampled_sound.cpp  // [HELPER]
-barcrest/mpu4avan.cpp
-barcrest/mpu4bwb.cpp
-barcrest/mpu4concept.cpp
-barcrest/mpu4crystal.cpp
-barcrest/mpu4dealem.cpp
-barcrest/mpu4empire.cpp
-barcrest/mpu4mdm.cpp
-barcrest/mpu4misc.cpp
-barcrest/mpu4mod2sw.cpp
-barcrest/mpu4mod4oki.cpp
-barcrest/mpu4mod4yam.cpp
-barcrest/mpu4plasma.cpp
-barcrest/mpu4redpoint.cpp
-barcrest/mpu4union.cpp
-barcrest/mpu4unsorted.cpp
-barcrest/mpu4vid.cpp
-barcrest/mpu5.cpp  // [HELPER]
-barcrest/mpu5sw.cpp
-bfm/bfcobra.cpp
-bfm/bfm_ad5.cpp  // [HELPER]
-bfm/bfm_ad5sw.cpp
-bfm/bfm_adr2.cpp  // [HELPER]
-bfm/bfm_bd1.cpp  // [HELPER]
-bfm/bfm_bda.cpp  // [HELPER]
-bfm/bfm_blackbox.cpp
-bfm/bfm_cobra3.cpp
-bfm/bfm_comn.cpp  // [HELPER]
-bfm/bfm_dm01.cpp  // [HELPER]
-bfm/bfm_gu96x8m_k657c2.cpp  // [HELPER]
-bfm/bfm_sc1.cpp
-bfm/bfm_sc2.cpp
-bfm/bfm_sc4.cpp
-bfm/bfm_sc45_helper.cpp  // [HELPER]
-bfm/bfm_sc5.cpp  // [HELPER]
-bfm/bfm_sc5sw.cpp
-bfm/bfm_sc6.cpp
-bfm/bfmsys83.cpp
-bfm/bfmsys85.cpp
-bfm/rastersp.cpp
 bmc/bmcbowl.cpp
-bmc/bmcpokr.cpp
-bmc/koftball.cpp
 bmc/popobear.cpp
-bordun/att.cpp
-bordun/skylncr.cpp
 capcom/1942.cpp
 capcom/1942_v.cpp  // [HELPER]
 capcom/1943.cpp
@@ -402,16 +333,13 @@ capcom/fcrash.cpp
 capcom/gng.cpp
 capcom/gunsmoke.cpp
 capcom/higemaru.cpp
-capcom/instantm.cpp
 capcom/kabuki.cpp  // [HELPER]
 capcom/kenseim.cpp
 capcom/lastduel.cpp
 capcom/lastduel_ms.cpp
 capcom/lwings.cpp
 capcom/mitchell.cpp
-capcom/miteshin.cpp
 capcom/nl_1942.cpp  // [HELPER]
-capcom/psrockman.cpp
 capcom/sf.cpp
 capcom/sidearms.cpp
 capcom/sonson.cpp
@@ -462,16 +390,9 @@ cinematronics/nl_starhawk.cpp  // [HELPER]
 cinematronics/nl_sundance.cpp  // [HELPER]
 cinematronics/nl_tailg.cpp  // [HELPER]
 cinematronics/nl_warrior.cpp  // [HELPER]
-cirsa/cirsa2080606.cpp
-cirsa/cirsa820xxx.cpp
-cirsa/cirsa910510.cpp
-cirsa/miniguay.cpp
-cirsa/missbamby.cpp
-cirsa/neptunp2.cpp
 comad/funybubl.cpp
 comad/galspnbl.cpp
 comad/zerozone.cpp
-cosmo/cosmo_ls9310.cpp
 cosmo/pkscram.cpp
 dataeast/actfancr.cpp
 dataeast/astrof.cpp
@@ -519,10 +440,8 @@ dataeast/decocpu7.cpp  // [HELPER]
 dataeast/decocrpt.cpp  // [HELPER]
 dataeast/decrmc3.cpp  // [HELPER]
 dataeast/deshoros.cpp
-dataeast/dfruit2.cpp
 dataeast/dietgo.cpp
 dataeast/dragngun.cpp
-dataeast/dreambal.cpp
 dataeast/dvi.cpp  // [HELPER]
 dataeast/exprraid.cpp
 dataeast/ffantasy_ms.cpp
@@ -545,7 +464,6 @@ dataeast/madalien_a.cpp  // [HELPER]
 dataeast/madalien_v.cpp  // [HELPER]
 dataeast/madmotor.cpp
 dataeast/metlclsh.cpp
-dataeast/mirage.cpp
 dataeast/oscar.cpp
 dataeast/pcktgal.cpp
 dataeast/pktgaldx.cpp
@@ -574,19 +492,15 @@ dgrm/pokechmp.cpp
 dooyong/dooyong.cpp
 dooyong/dooyong_tilemap.cpp  // [HELPER]
 dooyong/gundealr.cpp
-dyna/dyna_cpu91a.cpp
 dyna/dyna_d0404.cpp
 dyna/dyna_d0703.cpp
-dyna/dyna_dc4000.cpp
 dynax/ddenlovr.cpp
 dynax/dynax.cpp
 dynax/dynax_blitter_rev2.cpp  // [HELPER]
 dynax/dynax_v.cpp  // [HELPER]
 dynax/hanafuda.cpp  // [HELPER]
-dynax/hnayayoi.cpp
 dynax/realbrk.cpp
 dynax/realbrk_v.cpp  // [HELPER]
-dynax/royalmah.cpp
 edevices/diverboy.cpp
 edevices/edevices.cpp  // [HELPER]
 edevices/fantland.cpp
@@ -610,15 +524,8 @@ eolith/eolith_speedup.cpp  // [HELPER]
 eolith/ghosteo.cpp
 eolith/vegaeo.cpp
 excellent/aquarium.cpp
-excellent/d9final.cpp
-excellent/dblcrown.cpp
-excellent/es8906.cpp
-excellent/es9501.cpp
-excellent/es9606.cpp
 excellent/excellent_spr.cpp  // [HELPER]
 excellent/gcpinbal.cpp
-excellent/lastbank.cpp
-excellent/witch.cpp
 exidy/carpolo.cpp
 exidy/carpolo_m.cpp  // [HELPER]
 exidy/carpolo_v.cpp  // [HELPER]
@@ -645,8 +552,6 @@ exidy/victory_v.cpp  // [HELPER]
 f32/crospang.cpp
 f32/f-32.cpp
 f32/silvmil.cpp
-funtech/funtech_h8.cpp
-funtech/funtech_z80.cpp
 funworld/4roses.cpp
 funworld/funworld.cpp
 funworld/funworld_v.cpp  // [HELPER]
@@ -655,7 +560,6 @@ funworld/photoplys.cpp
 funworld/photoplysx.cpp
 funworld/snookr10.cpp
 funworld/snookr10_v.cpp  // [HELPER]
-funworld/supercrd.cpp
 fuuki/fuukifg2.cpp
 fuuki/fuukifg3.cpp
 fuuki/fuukispr.cpp  // [HELPER]
@@ -663,7 +567,6 @@ fuuki/fuukitmap.cpp  // [HELPER]
 gaelco/atvtrack.cpp
 gaelco/bigkarnk_ms.cpp
 gaelco/blmbycar.cpp
-gaelco/futbol3.cpp
 gaelco/gaelco.cpp
 gaelco/gaelco2.cpp
 gaelco/gaelco2_m.cpp  // [HELPER]
@@ -678,18 +581,15 @@ gaelco/gaelcopc.cpp
 gaelco/gaelcrpt.cpp  // [HELPER]
 gaelco/glass.cpp
 gaelco/goldart.cpp
-gaelco/lotoplay.cpp
 gaelco/lotoplay_prog.cpp
 gaelco/mastboy.cpp
 gaelco/mastboyo.cpp
 gaelco/mastboyo_ms.cpp
 gaelco/radsys.cpp
 gaelco/rollext.cpp
-gaelco/scalextric.cpp
 gaelco/splash.cpp
 gaelco/splash_ms.cpp
 gaelco/splash_v.cpp  // [HELPER]
-gaelco/sralslot.cpp
 gaelco/targeth.cpp
 gaelco/thoop2.cpp
 gaelco/wrally.cpp
@@ -729,26 +629,13 @@ hominn/hominn_mcs51.cpp
 huangyeh/hy-268a.cpp
 huangyeh/hy-9802.cpp
 ice/calchase.cpp
-ice/chexx.cpp
-ice/cutrope.cpp
-ice/fcourtfev.cpp
 ice/frenzyxprss.cpp
-ice/ice_bozopail.cpp
-ice/ice_hhhippos.cpp
-ice/ice_tbd.cpp
 ice/lethalj.cpp
-ice/schexx4gen.cpp
 ice/skimaxx.cpp
 ice/vp101.cpp
-igs/5clown.cpp
-igs/cabaret.cpp
-igs/dunhuang.cpp
-igs/goldstar.cpp
-igs/igs009.cpp
 igs/igs011.cpp
 igs/igs011_video.cpp  // [HELPER]
 igs/igs012.cpp  // [HELPER]
-igs/igs017.cpp
 igs/igs017_igs031.cpp  // [HELPER]
 igs/igs022.cpp  // [HELPER]
 igs/igs023_video.cpp  // [HELPER]
@@ -756,19 +643,13 @@ igs/igs025.cpp  // [HELPER]
 igs/igs027a.cpp  // [HELPER]
 igs/igs028.cpp  // [HELPER]
 igs/igs036crypt.cpp  // [HELPER]
-igs/igs_68k_023vid.cpp
 igs/igs_fear.cpp
 igs/igs_m027.cpp
-igs/igs_m027_023vid.cpp
-igs/igs_m027_033vid.cpp
 igs/igs_m027_link.cpp
-igs/igs_m027xa.cpp
 igs/igs_m036.cpp
 igs/igsmahjong.cpp  // [HELPER]
 igs/igspc.cpp
-igs/igspoker.cpp
 igs/iqblock.cpp
-igs/jackie.cpp
 igs/lordgun.cpp
 igs/lordgun_v.cpp  // [HELPER]
 igs/pgm.cpp
@@ -784,20 +665,12 @@ igs/pgmprot_igs027a_type1.cpp  // [HELPER]
 igs/pgmprot_igs027a_type2.cpp  // [HELPER]
 igs/pgmprot_igs027a_type3.cpp  // [HELPER]
 igs/pgmprot_orlegend.cpp  // [HELPER]
-igs/spoker.cpp
 igs/xamcu.cpp  // [HELPER]
-igt/drw80pkr.cpp
-igt/fortune1.cpp
-igt/gkigt.cpp
-igt/peplus.cpp
-igt/splus.cpp
 irem/irem.cpp  // [HELPER]
 irem/irem_cpu.cpp  // [HELPER]
 irem/m10.cpp
-irem/m102.cpp
 irem/m107.cpp
 irem/m119.cpp
-irem/m14.cpp
 irem/m52.cpp
 irem/m57.cpp
 irem/m58.cpp
@@ -808,7 +681,6 @@ irem/m63.cpp
 irem/m72.cpp
 irem/m72_a.cpp  // [HELPER]
 irem/m72_v.cpp  // [HELPER]
-irem/m78.cpp
 irem/m80.cpp
 irem/m90.cpp
 irem/m90_v.cpp  // [HELPER]
@@ -830,15 +702,12 @@ itech/itech32_v.cpp  // [HELPER]
 itech/itech8.cpp
 itech/itech8_m.cpp  // [HELPER]
 itech/itech8_v.cpp  // [HELPER]
-jaleco/acommand.cpp
 jaleco/aeroboto.cpp
 jaleco/argus.cpp
 jaleco/argus_v.cpp  // [HELPER]
-jaleco/armchamp.cpp
 jaleco/bestleag.cpp
 jaleco/bigstrkb.cpp
 jaleco/blueprnt.cpp
-jaleco/bnstars.cpp
 jaleco/cischeat.cpp
 jaleco/citycon.cpp
 jaleco/dday.cpp
@@ -855,7 +724,6 @@ jaleco/jaleco_vj_qtaro.cpp  // [HELPER]
 jaleco/jaleco_vj_sound.cpp  // [HELPER]
 jaleco/jaleco_vj_ups.cpp  // [HELPER]
 jaleco/jaleco_zoomspr.cpp  // [HELPER]
-jaleco/jalmah.cpp
 jaleco/megasys1.cpp
 jaleco/megasys1_v.cpp  // [HELPER]
 jaleco/momoko.cpp
@@ -870,22 +738,6 @@ jaleco/scudhamm.cpp
 jaleco/skyfox.cpp
 jaleco/tetrisp2.cpp
 jaleco/tetrisp2_v.cpp  // [HELPER]
-jpm/guab.cpp
-jpm/jpmimpct.cpp
-jpm/jpmimpct_v.cpp  // [HELPER]
-jpm/jpmimpctsw.cpp
-jpm/jpmmps.cpp
-jpm/jpms80.cpp
-jpm/jpmsru.cpp
-jpm/jpmsys5.cpp
-jpm/jpmsys5sw.cpp
-jpm/jpmsys7.cpp
-jpm/nl_jpmsru.cpp  // [HELPER]
-jpm/pl6_exp.cpp  // [HELPER]
-jpm/pl6_fpga.cpp  // [HELPER]
-jpm/pl6_pic.cpp  // [HELPER]
-jpm/pluto5.cpp
-jpm/pluto6.cpp
 kaneko/airbustr.cpp
 kaneko/djboy.cpp
 kaneko/expro02.cpp
@@ -893,7 +745,6 @@ kaneko/galpani2.cpp
 kaneko/galpani2_v.cpp  // [HELPER]
 kaneko/galpani3.cpp
 kaneko/galpanic.cpp
-kaneko/galpanic_ms.cpp
 kaneko/hvyunit.cpp
 kaneko/jchan.cpp
 kaneko/kan_pand.cpp  // [HELPER]
@@ -996,10 +847,6 @@ konami/konamigx_v.cpp  // [HELPER]
 konami/konamim2.cpp
 konami/konblands.cpp
 konami/konendev.cpp
-konami/kongs470.cpp
-konami/konmedal.cpp
-konami/konmedal020.cpp
-konami/konmedal68k.cpp
 konami/konmedalppc.cpp
 konami/konppc.cpp  // [HELPER]
 konami/konppc_jvshost.cpp  // [HELPER]
@@ -1026,11 +873,8 @@ konami/overdriv.cpp
 konami/pandoras.cpp
 konami/parodius.cpp
 konami/pingpong.cpp
-konami/piratesh.cpp
 konami/plygonet.cpp
 konami/pooyan.cpp
-konami/qdrmfgp.cpp
-konami/quickpick5.cpp
 konami/rockrage.cpp
 konami/rocnrope.cpp
 konami/rollerg.cpp
@@ -1040,7 +884,6 @@ konami/scotrsht.cpp
 konami/shaolins.cpp
 konami/simpsons.cpp
 konami/spy.cpp
-konami/stingnet.cpp
 konami/surpratk.cpp
 konami/tasman.cpp
 konami/tgtpanic.cpp
@@ -1069,28 +912,15 @@ konami/yiear.cpp
 konami/zr107.cpp
 konami/zs01.cpp  // [HELPER]
 matic/barata.cpp
-maygay/maygay1b.cpp  // [HELPER]
-maygay/maygay1bsw.cpp
-maygay/maygayep.cpp
-maygay/maygayew.cpp
-maygay/maygayv1.cpp
-maygay/mmm.cpp
 meadows/lazercmd.cpp
 meadows/meadows.cpp
 meadows/meadwttl.cpp
 meadows/warpsped.cpp
-merit/merit.cpp
-merit/merit3xx.cpp
 merit/meritm.cpp
-merit/merits.cpp
-merit/meritsdx.cpp
-merit/mgames.cpp
-merit/pubtimed.cpp
 metro/blzntrnd.cpp
 metro/hyprduel.cpp
 metro/metro.cpp
 metro/rabbit.cpp
-metro/tmmjprd.cpp
 midcoin/24cdjuke.cpp
 midcoin/wallc.cpp
 midcoin/wink.cpp
@@ -1117,64 +947,35 @@ misc/4enlinea.cpp
 misc/4enraya.cpp
 misc/a1supply.cpp
 misc/ace_sp_reelctrl.cpp  // [HELPER]
-misc/acefruit.cpp
-misc/aces1.cpp
-misc/acesp.cpp
 misc/adi_unk_kbd.cpp  // [HELPER]
-misc/age_candy.cpp
 misc/alinvade.cpp
-misc/amaticmg.cpp
-misc/amerihok.cpp
-misc/ampoker2.cpp
 misc/amspdwy.cpp
-misc/amstarz80.cpp
-misc/amusco.cpp
 misc/amuzy.cpp
-misc/anes.cpp
-misc/arachnid.cpp
 misc/artmagic.cpp
 misc/artmagic_v.cpp  // [HELPER]
-misc/astrafr.cpp
 misc/atronic.cpp
 misc/attckufo.cpp
 misc/avt.cpp
-misc/babysuprem.cpp
 misc/bailey.cpp
-misc/banpresto_bpsc68000.cpp
 misc/beaminv.cpp
 misc/beezer.cpp
-misc/bingoman.cpp
 misc/bingor.cpp
 misc/blitz68k.cpp
 misc/blocktax.cpp
 misc/bntyhunt.cpp
-misc/boramz80.cpp
-misc/brglitz.cpp
 misc/buster.cpp
 misc/calomega.cpp
-misc/cardline.cpp
-misc/carrera.cpp
-misc/castle.cpp
 misc/chamrx1.cpp
-misc/chance32.cpp
-misc/changyu.cpp
 misc/chicago.cpp
-misc/chsuper.cpp
-misc/cleartone.cpp
-misc/clowndwn.cpp
-misc/clpoker.cpp
 misc/cocoloco.cpp
 misc/coinmstr.cpp
 misc/coinmvga.cpp
 misc/cointek.cpp
 misc/comebaby.cpp
-misc/compucranes.cpp
 misc/coolpool.cpp
 misc/corona.cpp
-misc/cosmos_playc8f.cpp
 misc/cowtipping.cpp
 misc/crazybal.cpp
-misc/cromptons.cpp
 misc/crospuzl.cpp
 misc/crystal.cpp
 misc/cubeqst.cpp
@@ -1182,26 +983,16 @@ misc/cupidon.cpp
 misc/cvs.cpp
 misc/cwheel.cpp
 misc/cybertnk.cpp
-misc/daryde.cpp
 misc/dcheese.cpp
 misc/dcheese_v.cpp  // [HELPER]
 misc/ddz.cpp
 misc/dfruit.cpp
 misc/dgpix.cpp
-misc/diamondking.cpp
 misc/discoboy.cpp
-misc/dmainevent.cpp
 misc/dominob.cpp
 misc/dorachan.cpp
-misc/drdmania.cpp
 misc/dreamwld.cpp
-misc/dwarfd.cpp
 misc/dynadice.cpp
-misc/dynamoah.cpp
-misc/ecoinf1.cpp
-misc/ecoinf2.cpp
-misc/ecoinf3.cpp
-misc/ecoinfr.cpp
 misc/efdt.cpp
 misc/efg8080.cpp
 misc/electra.cpp
@@ -1211,167 +1002,100 @@ misc/esd16.cpp
 misc/esh.cpp
 misc/esripsys.cpp
 misc/esripsys_v.cpp  // [HELPER]
-misc/ettrivia.cpp
 misc/extrema.cpp
 misc/ez2d.cpp  // [MIXED]
-misc/falgas_m89.cpp
 misc/fastinvaders.cpp
-misc/fireball.cpp
 misc/flipjack.cpp
 misc/flower.cpp
 misc/flower_a.cpp  // [HELPER]
-misc/fortecar.cpp
 misc/freekick.cpp
-misc/freeway.cpp
-misc/fresh.cpp
-misc/funeball.cpp
 misc/fungames.cpp
 misc/funkball.cpp
-misc/galaxi.cpp
 misc/galgame.cpp
-misc/gambl186.cpp
 misc/gameace.cpp
-misc/gamemasters.cpp
 misc/gammagic.cpp
 misc/gamtor.cpp
 misc/gei.cpp
 misc/gfamily.cpp
-misc/gi6809.cpp
-misc/globalfr.cpp
 misc/globalvr.cpp
-misc/gluck2.cpp
 misc/gms.cpp
 misc/goldngam.cpp
 misc/goldnpkr.cpp
 misc/good.cpp
 misc/gotcha.cpp
-misc/gsspade.cpp
 misc/gumbo.cpp
 misc/gunpey.cpp
 misc/haiwei.cpp
 misc/hapyfish.cpp
-misc/hazelgr.cpp
 misc/hideseek.cpp
-misc/highvdeo.cpp
 misc/hitpoker.cpp
-misc/hobbyplay.cpp
 misc/homedata.cpp
 misc/homedata_v.cpp  // [HELPER]
 misc/hotblock.cpp
-misc/hotchili.cpp
 misc/hotstuff.cpp
-misc/houseball.cpp
 misc/imolagp.cpp
 misc/inder_sb.cpp  // [HELPER]
-misc/interflip8035.cpp
 misc/intrscti.cpp
-misc/island.cpp
 misc/istellar.cpp
 misc/itgambl2.cpp
 misc/itgambl3.cpp
 misc/itgamble.cpp
-misc/jackhouse.cpp
-misc/jackpool.cpp
-misc/jackpot.cpp
 misc/jokrwild.cpp
 misc/joystand.cpp
-misc/jubilee.cpp
-misc/jungleyo.cpp
 misc/kas89.cpp
-misc/katosmedz80.cpp
-misc/kingpin.cpp
 misc/ladyfrog.cpp
 misc/laserbas.cpp
-misc/laz_aftrshok.cpp
-misc/laz_ribrac.cpp
-misc/lependu.cpp
 misc/limenko.cpp
-misc/ltcasino.cpp
 misc/luckybal.cpp
-misc/magic10.cpp
-misc/magicard.cpp
 misc/magicfly.cpp
 misc/magictg.cpp
 misc/magreel.cpp
 misc/magtouch.cpp
-misc/majorpkr.cpp
 misc/malzak.cpp
 misc/marywu.cpp
 misc/matrix.cpp
 misc/mcatadv.cpp
 misc/megaphx.cpp
 misc/megaturbo.cpp
-misc/menghong.cpp
-misc/meyc8080.cpp
-misc/meyc8088.cpp
-misc/mgavegas.cpp
 misc/micro3d.cpp
 misc/micro3d_a.cpp  // [HELPER]
 misc/micro3d_m.cpp  // [HELPER]
 misc/micro3d_v.cpp  // [HELPER]
-misc/microdar.cpp
-misc/mil4000.cpp
-misc/miniboy7.cpp
 misc/minivideo.cpp
 misc/mirax.cpp
-misc/mirderby.cpp
-misc/mjsenpu.cpp
 misc/mosaic.cpp
-misc/mpu12wbk.cpp
-misc/multfish.cpp
-misc/multfish_boot.cpp
-misc/murogem.cpp
-misc/murogmbl.cpp
 misc/musclem.cpp
 misc/nabupc_kbd.cpp  // [HELPER]
-misc/ncarrera.cpp
 misc/neomania.cpp
 misc/news.cpp
 misc/nexus3d.cpp
 misc/nibble.cpp
 misc/nl_cocoloco.cpp  // [HELPER]
 misc/nl_gi6809.cpp  // [HELPER]
-misc/norautp.cpp
-misc/notechan.cpp
-misc/nsg6809.cpp
-misc/nsmpoker.cpp
 misc/odyssey.cpp
 misc/oneshot.cpp
-misc/opercoin.cpp
 misc/pachifev.cpp
 misc/paracaidista.cpp
 misc/pasha2.cpp
 misc/pass.cpp
 misc/photon.cpp
 misc/photon2.cpp
-misc/piggypas.cpp
 misc/pipeline.cpp
 misc/playcenter.cpp
 misc/plsonic4.cpp
 misc/pmc.cpp
 misc/pntnpuzl.cpp
 misc/pntnpuzls.cpp
-misc/poker72.cpp
-misc/pokerout.cpp
 misc/policetr.cpp
 misc/policetr_v.cpp  // [HELPER]
 misc/potgoldu.cpp
-misc/proconn.cpp
-misc/ps_m3.cpp
 misc/psattack.cpp
 misc/pse.cpp
-misc/quizo.cpp
-misc/quizpun2.cpp
 misc/rawthrillspc.cpp
 misc/rcorsair.cpp
 misc/re900.cpp
-misc/rgum.cpp
-misc/roul.cpp
-misc/rulechan.cpp
 misc/sanremmg.cpp
-misc/sanremo.cpp
 misc/savquest.cpp
-misc/scm_500.cpp
 misc/shangkid.cpp
 misc/shangkid_v.cpp  // [HELPER]
 misc/silverball.cpp
@@ -1382,42 +1106,25 @@ misc/smd2144c.cpp
 misc/smotor.cpp
 misc/smsmcorp.cpp
 misc/spcforce.cpp
-misc/spdamjes.cpp
-misc/spool99.cpp
-misc/sshanghai.cpp
+misc/spitfire.cpp
 misc/startouch.cpp
 misc/statriv2.cpp
 misc/stop.cpp
-misc/strkzn.cpp
 misc/sttechno.cpp
 misc/stuntair.cpp
 misc/su2000.cpp
-misc/summit.cpp
-misc/sumt8035.cpp
 misc/tapatune.cpp
 misc/tattack.cpp
 misc/taxidriv.cpp
-misc/teamjocs.cpp
-misc/tecnodar.cpp
 misc/thayers.cpp
 misc/tickee.cpp
 misc/timelimt.cpp
 misc/tmspoker.cpp
-misc/tomsadvs.cpp
 misc/toratora.cpp
-misc/triviaquiz.cpp
-misc/trivrus.cpp
-misc/truco.cpp
 misc/trucocl.cpp
 misc/truesys.cpp
-misc/trvmadns.cpp
 misc/ttchamp.cpp
 misc/tugboat.cpp
-misc/tvg01.cpp
-misc/twinbskt.cpp
-misc/umipoker.cpp
-misc/unkgolf.cpp
-misc/unkpoker.cpp
 misc/unktop.cpp
 misc/usbilliards.cpp
 misc/usgames.cpp
@@ -1426,19 +1133,13 @@ misc/vamphalf.cpp
 misc/vamphalf_prot.cpp  // [HELPER]
 misc/vampire.cpp
 misc/vcombat.cpp
-misc/videosaa.cpp
 misc/vlc.cpp
 misc/vlc34010.cpp
 misc/voyager.cpp
-misc/vpoker.cpp
-misc/vroulet.cpp
-misc/whtm68k.cpp
-misc/winbingo.cpp
 misc/wms.cpp
 misc/xtom3d.cpp
 misc/xtom3d_piu10.cpp  // [HELPER]
 misc/xyonix.cpp
-misc/yuvomz80.cpp
 modelracing/dribling.cpp
 modelracing/nl_dribling.cpp  // [HELPER]
 modelracing/sshot.cpp
@@ -1456,18 +1157,13 @@ msx/sangho.cpp
 msx/sfkick.cpp
 namco/20pacgal.cpp
 namco/20pacgal_v.cpp  // [HELPER]
-namco/30test.cpp
 namco/baraduke.cpp
 namco/bosco.cpp
 namco/c117.cpp  // [HELPER]
-namco/cgang.cpp
-namco/cswat.cpp
-namco/dangbar.cpp
 namco/digdug.cpp
 namco/dkmb.cpp
 namco/ds5000.cpp
 namco/ds6000.cpp
-namco/funcube.cpp
 namco/funcube_touchscreen.cpp  // [HELPER]
 namco/gal3.cpp
 namco/galaga.cpp
@@ -1544,16 +1240,12 @@ namco/pacland.cpp
 namco/polepos.cpp
 namco/polepos_a.cpp  // [HELPER]
 namco/polepos_v.cpp  // [HELPER]
-namco/quickncrash.cpp
 namco/rallyx.cpp
 namco/rallyx_v.cpp  // [HELPER]
 namco/rbowlorama.cpp
-namco/sg_vga.cpp
 namco/shootaway2.cpp
 namco/skykid.cpp
 namco/starfield_05xx.cpp  // [HELPER]
-namco/sweetland.cpp
-namco/sweetland4.cpp
 namco/tankbatt.cpp
 namco/tceptor.cpp
 namco/toypop.cpp
@@ -1561,7 +1253,6 @@ namco/turrett.cpp
 namco/turrett_a.cpp  // [HELPER]
 namco/turrett_v.cpp  // [HELPER]
 namco/vpx3220a.cpp  // [HELPER]
-namco/wacky_gator.cpp
 namco/warpwarp.cpp
 namco/warpwarp_a.cpp  // [HELPER]
 namco/warpwarp_v.cpp  // [HELPER]
@@ -1580,8 +1271,6 @@ nichibutsu/galivan.cpp
 nichibutsu/gomoku.cpp
 nichibutsu/gomoku_a.cpp  // [HELPER]
 nichibutsu/hrdvd.cpp
-nichibutsu/hyhoo.cpp
-nichibutsu/jangou.cpp
 nichibutsu/magmax.cpp
 nichibutsu/nb1412m2.cpp  // [HELPER]
 nichibutsu/nb1413m3.cpp  // [HELPER]
@@ -1597,12 +1286,9 @@ nichibutsu/nbmj8991_v.cpp  // [HELPER]
 nichibutsu/nbmj9195.cpp
 nichibutsu/nbmj9195_v.cpp  // [HELPER]
 nichibutsu/nbmjctrl.cpp  // [HELPER]
-nichibutsu/nichild.cpp
 nichibutsu/nichisnd.cpp  // [HELPER]
-nichibutsu/nightgal.cpp
 nichibutsu/nyanpai.cpp
 nichibutsu/nyanpai_v.cpp  // [HELPER]
-nichibutsu/pastelg.cpp
 nichibutsu/seicross.cpp
 nichibutsu/shettle.cpp
 nichibutsu/terracre.cpp
@@ -1662,7 +1348,6 @@ nintendo/vt_menu_protection_lxcap.cpp  // [HELPER]
 nix/fitfight.cpp
 nix/fitfight_v.cpp  // [HELPER]
 nix/pirates.cpp
-nmk/cultures.cpp
 nmk/ddealer.cpp
 nmk/macrossp.cpp
 nmk/nmk004.cpp  // [HELPER]
@@ -1671,9 +1356,6 @@ nmk/nmk16_v.cpp  // [HELPER]
 nmk/nmk16spr.cpp  // [HELPER]
 nmk/nmk214.cpp  // [HELPER]
 nmk/nmk_irq.cpp  // [HELPER]
-nmk/nmkmedal.cpp
-nmk/quizdna.cpp
-nmk/quizpani.cpp
 novadesitec/novadesitec_fr002.cpp
 novadesitec/novadesitec_fr004.cpp
 novadesitec/novadesitec_fr009.cpp
@@ -1686,7 +1368,6 @@ omori/battlex.cpp
 omori/carjmbre.cpp
 omori/popper.cpp
 omori/spaceg.cpp
-omori/yakyuken.cpp
 orca/akazukin.cpp
 orca/espial.cpp
 orca/funkybee.cpp
@@ -1712,14 +1393,12 @@ pc/dawg.cpp
 pc/europc_kbd.cpp  // [HELPER]
 pc/filetto.cpp
 pc/fruitpc.cpp
-pc/mdartstr.cpp
 pc/pangofun.cpp
 pc/paokaipc.cpp
 pc/pc_t1t.cpp  // [HELPER]
 pc/pcat_dyn.cpp
 pc/pcat_nit.cpp
 pc/play4texash.cpp
-pc/przone.cpp
 pc/pulltrig.cpp
 pc/quakeat.cpp  // [MIXED]
 pc/queen.cpp
@@ -1747,108 +1426,6 @@ phoenix/phoenix_a.cpp  // [HELPER]
 phoenix/phoenix_v.cpp  // [HELPER]
 phoenix/pleiads.cpp  // [HELPER]
 phoenix/safarir.cpp
-pinball/allied.cpp
-pinball/alvg.cpp
-pinball/atari_4x4.cpp
-pinball/atari_s1.cpp
-pinball/atari_s2.cpp
-pinball/barni.cpp
-pinball/bingo.cpp
-pinball/by17.cpp
-pinball/by35.cpp
-pinball/by6803.cpp
-pinball/by68701.cpp
-pinball/byvid.cpp
-pinball/capcom.cpp
-pinball/criter75.cpp
-pinball/de_2.cpp
-pinball/de_3.cpp
-pinball/decodmd1.cpp  // [HELPER]
-pinball/decodmd2.cpp  // [HELPER]
-pinball/decodmd3.cpp  // [HELPER]
-pinball/decopincpu.cpp  // [HELPER]
-pinball/flicker.cpp
-pinball/g627.cpp
-pinball/genpin.cpp  // [HELPER]
-pinball/gp_1.cpp
-pinball/gp_2.cpp
-pinball/gts1.cpp
-pinball/gts3.cpp
-pinball/gts3a.cpp
-pinball/gts80.cpp
-pinball/gts80a.cpp
-pinball/gts80b.cpp
-pinball/hankin.cpp
-pinball/icecold.cpp
-pinball/idsa.cpp
-pinball/inder.cpp
-pinball/inderp.cpp
-pinball/jeutel.cpp
-pinball/joctronic.cpp
-pinball/jp.cpp
-pinball/jvh.cpp
-pinball/kissproto.cpp
-pinball/lancelot.cpp
-pinball/lckydraw.cpp
-pinball/ltd.cpp
-pinball/macp.cpp
-pinball/mephistp.cpp
-pinball/micropin.cpp
-pinball/missamer.cpp
-pinball/mrgame.cpp
-pinball/newcanasta.cpp
-pinball/nsm.cpp
-pinball/peyper.cpp
-pinball/pinsnd88.cpp  // [HELPER]
-pinball/play_1.cpp
-pinball/play_2.cpp
-pinball/play_3.cpp
-pinball/recel.cpp
-pinball/rowamet.cpp
-pinball/s11.cpp
-pinball/s11a.cpp
-pinball/s11b.cpp
-pinball/s11c.cpp
-pinball/s3.cpp
-pinball/s4.cpp
-pinball/s6.cpp
-pinball/s7.cpp
-pinball/s8.cpp
-pinball/s9.cpp
-pinball/sam.cpp
-pinball/sleic.cpp
-pinball/spectra.cpp
-pinball/spike.cpp  // [HELPER]
-pinball/spinb.cpp
-pinball/spirit76.cpp
-pinball/st_mp100.cpp
-pinball/st_mp200.cpp
-pinball/stargame.cpp
-pinball/supstarf.cpp
-pinball/taito.cpp
-pinball/techno.cpp
-pinball/vd.cpp
-pinball/whitestar.cpp
-pinball/wico.cpp
-pinball/wms_shuffle.cpp
-pinball/wpc.cpp  // [HELPER]
-pinball/wpc_95.cpp
-pinball/wpc_an.cpp
-pinball/wpc_dcs.cpp
-pinball/wpc_dmd.cpp  // [HELPER]
-pinball/wpc_dot.cpp
-pinball/wpc_flip1.cpp
-pinball/wpc_flip2.cpp
-pinball/wpc_lamp.cpp  // [HELPER]
-pinball/wpc_out.cpp  // [HELPER]
-pinball/wpc_pic.cpp  // [HELPER]
-pinball/wpc_s.cpp
-pinball/wpc_shift.cpp  // [HELPER]
-pinball/wpcsnd.cpp  // [HELPER]
-pinball/zac_1.cpp
-pinball/zac_2.cpp
-pinball/zac_proto.cpp
-pinball/zpinball.cpp
 playmark/drtomy.cpp
 playmark/playmark.cpp
 playmark/playmark_v.cpp  // [HELPER]
@@ -1875,23 +1452,12 @@ ramtek/starcrus.cpp
 rare/btoads.cpp
 rare/kinst.cpp
 rare/xtheball.cpp
-recfranco/rf51w14cg.cpp
-recfranco/rfjailbrk.cpp
-recfranco/rfslots8085.cpp
-recfranco/rfslotsmcs48.cpp
-recfranco/rfslotspcpent.cpp
 sanritsu/appoooh.cpp
 sanritsu/bankp.cpp
-sanritsu/chinsan.cpp
 sanritsu/drmicro.cpp
-sanritsu/jantotsu.cpp
-sanritsu/jongkyo.cpp
-sanritsu/koikoi.cpp
 sanritsu/mermaid.cpp
 sanritsu/mermaid_v.cpp  // [HELPER]
-sanritsu/mjkjidai.cpp
 sanritsu/mrjong.cpp
-sanritsu/ron.cpp
 sanritsu/sprcros2.cpp
 sealy/sealy_8031.cpp
 sealy/sealy_eagle.cpp
@@ -1909,9 +1475,7 @@ sega/9h0-0008_card.cpp  // [HELPER]
 sega/9h0-0008_card_reader.cpp  // [HELPER]
 sega/9h0-0008_iox.cpp  // [HELPER]
 sega/angelkds.cpp
-sega/anyworks.cpp
 sega/awboard.cpp  // [HELPER]
-sega/bingoc.cpp
 sega/bingoct.cpp  // [HELPER]
 sega/blockade.cpp
 sega/calcune.cpp
@@ -1924,11 +1488,9 @@ sega/dc_g2if.cpp  // [HELPER]
 sega/dccons.cpp  // [MIXED]
 sega/dccons_m.cpp  // [HELPER]
 sega/deniam.cpp
-sega/digamart.cpp
 sega/dotrikun.cpp
 sega/dsb2.cpp  // [HELPER]
 sega/dsbz80.cpp  // [HELPER]
-sega/eshockey.cpp
 sega/fd1089.cpp  // [HELPER]
 sega/fd1094.cpp  // [HELPER]
 sega/flashbeats.cpp
@@ -1938,7 +1500,6 @@ sega/gunsense.cpp  // [HELPER]
 sega/hikaru.cpp
 sega/hshavoc.cpp
 sega/jvs13551.cpp  // [HELPER]
-sega/kopunch.cpp
 sega/lindbergh.cpp
 sega/m1comm.cpp  // [HELPER]
 sega/m2comm.cpp  // [HELPER]
@@ -1996,9 +1557,7 @@ sega/segaatom.cpp
 sega/segabb.cpp  // [HELPER]
 sega/segabill.cpp  // [HELPER]
 sega/segac2.cpp
-sega/segacoin.cpp
 sega/segae.cpp
-sega/segafruit.cpp
 sega/segag80.cpp  // [HELPER]
 sega/segag80_m.cpp  // [HELPER]
 sega/segag80r.cpp
@@ -2011,7 +1570,6 @@ sega/segaic16.cpp  // [HELPER]
 sega/segaic16_m.cpp  // [HELPER]
 sega/segaic16_road.cpp  // [HELPER]
 sega/segaic24.cpp  // [HELPER]
-sega/segajw.cpp
 sega/segald.cpp
 sega/segaorun.cpp
 sega/segas16a.cpp
@@ -2030,8 +1588,6 @@ sega/segasm1.cpp
 sega/segasp.cpp
 sega/segaspeech.cpp  // [HELPER]
 sega/segattl.cpp
-sega/segaufo.cpp
-sega/segaufoh8.cpp
 sega/segausb.cpp  // [HELPER]
 sega/segaxbd.cpp
 sega/segaybd.cpp
@@ -2040,7 +1596,6 @@ sega/shtzone.cpp
 sega/smpc.cpp  // [HELPER]
 sega/sms_bootleg.cpp
 sega/sms_m.cpp  // [HELPER]
-sega/speedbsk.cpp
 sega/stactics.cpp
 sega/stv.cpp
 sega/suprloco.cpp
@@ -2053,7 +1608,6 @@ sega/triforce.cpp  // [HELPER]
 sega/turbo.cpp
 sega/turbo_a.cpp  // [HELPER]
 sega/turbo_v.cpp  // [HELPER]
-sega/unkhockey.cpp
 sega/vicdual-97269pb.cpp  // [HELPER]
 sega/vicdual-97271p.cpp  // [HELPER]
 sega/vicdual.cpp
@@ -2066,7 +1620,6 @@ sega/zaxxon_a.cpp  // [HELPER]
 sega/zaxxon_v.cpp  // [HELPER]
 seibu/airraid.cpp
 seibu/airraid_dev.cpp  // [HELPER]
-seibu/banprestoms.cpp
 seibu/banprestomsz80.cpp
 seibu/bloodbro.cpp
 seibu/bloodbro_ms.cpp
@@ -2076,9 +1629,7 @@ seibu/darkmist.cpp
 seibu/dcon.cpp
 seibu/deadang.cpp
 seibu/dynduke.cpp
-seibu/feversoc.cpp
 seibu/goal92.cpp
-seibu/goodejan.cpp
 seibu/kncljoe.cpp
 seibu/legionna.cpp
 seibu/legionna_v.cpp  // [HELPER]
@@ -2096,54 +1647,37 @@ seibu/sei25x_rise1x_spr.cpp  // [HELPER]
 seibu/sei80bu.cpp  // [HELPER]
 seibu/seibu_crtc.cpp  // [HELPER]
 seibu/seibu_helper.cpp  // [HELPER]
-seibu/seibucats.cpp  // [HELPER]
 seibu/seibucop.cpp  // [HELPER]
 seibu/seibuspi.cpp
 seibu/seibuspi_m.cpp  // [HELPER]
 seibu/seibuspi_v.cpp  // [HELPER]
 seibu/seicopbl.cpp  // [HELPER]
 seibu/seicupbl.cpp
-seibu/sengokmj.cpp
 seibu/stfight.cpp
 seibu/stfight_dev.cpp  // [HELPER]
 seibu/t5182.cpp  // [HELPER]
 seibu/toki.cpp
 seibu/toki_ms.cpp
 seibu/wiz.cpp
-seta/albazc.cpp
-seta/albazg.cpp
 seta/champbwl.cpp
 seta/downtown.cpp
-seta/hanaawas.cpp
-seta/hanadojo.cpp
 seta/iox_hle.cpp  // [HELPER]
 seta/jclub2.cpp
-seta/kiwame.cpp
 seta/macs.cpp
-seta/rmhaihai.cpp
 seta/seta.cpp
 seta/seta2.cpp
 seta/simple_st0016.cpp
 seta/speedatk.cpp
 seta/speglsht.cpp
-seta/srmp2.cpp
-seta/srmp5.cpp
-seta/srmp6.cpp
 seta/ssv.cpp
 seta/ssv_v.cpp  // [HELPER]
 seta/st0016.cpp  // [HELPER]
 seta/st0020.cpp  // [HELPER]
-seta/thedealr.cpp
-seta/vsmjtria.cpp
 seta/x1_012.cpp  // [HELPER]
 sigma/nyny.cpp
 sigma/r2dtank.cpp
-sigma/sammymdl.cpp
 sigma/sigma21.cpp
-sigma/sigmab31.cpp
-sigma/sigmab52.cpp
 sigma/sigmab88.cpp
-sigma/sigmab98.cpp
 sigma/spiders.cpp
 sigma/spiders_a.cpp  // [HELPER]
 skeleton/alfaskop_s41_kb.cpp  // [HELPER]
@@ -2152,66 +1686,38 @@ skeleton/banpresto_tomy_h8s.cpp
 skeleton/basf7100_kbd.cpp  // [HELPER]
 skeleton/biorhythm.cpp
 skeleton/biorhythm_fp.cpp
-skeleton/bolsaint.cpp
 skeleton/boo.cpp
-skeleton/bullion2.cpp
 skeleton/busicom_v.cpp  // [HELPER]
 skeleton/cadillacjack_mc68340.cpp
-skeleton/caramball.cpp
-skeleton/carnival37.cpp
-skeleton/cle68k.cpp
-skeleton/clownmgc.cpp
 skeleton/cubieboard4.cpp  // [MIXED]
 skeleton/design.cpp
-skeleton/dharma_z180.cpp
 skeleton/digilog_kbd.cpp  // [HELPER]
 skeleton/elcirculo.cpp
-skeleton/extrema_m27sv.cpp
-skeleton/fdek_h8s.cpp
-skeleton/flashgun.cpp
 skeleton/flashvga2.cpp
 skeleton/gamebox.cpp
-skeleton/ganbaremo.cpp
 skeleton/happyvideo.cpp
-skeleton/hkcastle.cpp
 skeleton/iam2.cpp
 skeleton/itt1700_kbd.cpp  // [HELPER]
 skeleton/jinhuang6.cpp
-skeleton/kkcount.cpp
-skeleton/lanmao.cpp
-skeleton/lgtz80.cpp
 skeleton/luckyjkr.cpp
-skeleton/madmoney2.cpp
-skeleton/megacrane.cpp
 skeleton/mgt_multigame.cpp
-skeleton/minihock.cpp
 skeleton/ngen_kb.cpp  // [HELPER]
 skeleton/nl_hazelvid.cpp  // [HELPER]
 skeleton/nl_palestra.cpp  // [HELPER]
 skeleton/nl_tp1983.cpp  // [HELPER]
 skeleton/nl_tp1985.cpp  // [HELPER]
 skeleton/paipaile.cpp
-skeleton/palsystems_sh2.cpp
 skeleton/probowl.cpp
 skeleton/ramstar.cpp
-skeleton/sammy_pachislo_z80.cpp
-skeleton/seoul88.cpp
 skeleton/sgm.cpp
-skeleton/shoken_md06.cpp
-skeleton/st25.cpp
-skeleton/sterz80.cpp
 skeleton/syvg.cpp
 skeleton/testlove.cpp
-skeleton/turnierdart.cpp
-skeleton/tvcobrasd.cpp
-skeleton/unkcrane8085.cpp
 skeleton/venteta.cpp
 skeleton/vgame.cpp
 skeleton/xinyun.cpp
 skeleton/zorbakbd.cpp  // [HELPER]
 snk/bbusters.cpp
 snk/dmndrby.cpp
-snk/drderby.cpp
 snk/hng64.cpp
 snk/hng64_a.cpp  // [HELPER]
 snk/hng64_v.cpp  // [HELPER]
@@ -2222,7 +1728,6 @@ snk/mechatt.cpp
 snk/miconkit.cpp
 snk/midas.cpp
 snk/munchmo.cpp
-snk/neocrnvl.cpp
 snk/neogeo.cpp  // [MIXED]
 snk/neogeo_spr.cpp  // [HELPER]
 snk/neogeo_v.cpp  // [HELPER]
@@ -2257,20 +1762,14 @@ stern/berzerk.cpp
 stern/cliffhgr.cpp
 stern/cliffhgr_a.cpp  // [HELPER]
 stern/mazerbla.cpp
-stern/supdrapo.cpp
 subsino/lastfght.cpp
 subsino/ss9904.cpp  // [HELPER]
-subsino/subsino.cpp
-subsino/subsino2.cpp
 subsino/subsino_crypt.cpp  // [HELPER]
 subsino/subsino_io.cpp  // [HELPER]
 subsino/subsino_kr_h8.cpp
-success/big10.cpp
-success/kurukuru.cpp
 success/othello.cpp
 success/skopro.cpp
 success/sothello.cpp
-success/tonton.cpp
 suna/go2000.cpp
 suna/goindol.cpp
 suna/suna16.cpp
@@ -2288,11 +1787,7 @@ sunelectronics/route16.cpp
 sunelectronics/shangha3.cpp
 sunelectronics/shanghai.cpp
 sunwise/anoworld.cpp
-sunwise/jankenmn.cpp
 sunwise/jankmg2.cpp
-tabaustria/royalpkr.cpp
-tabaustria/wildpkr.cpp
-taito/2mindril.cpp
 taito/40love.cpp
 taito/40love_v.cpp  // [HELPER]
 taito/arkanoid.cpp
@@ -2301,24 +1796,16 @@ taito/arkanoid_v.cpp  // [HELPER]
 taito/ashnojoe.cpp
 taito/asuka.cpp
 taito/bigevglf.cpp
-taito/bingowav.cpp
 taito/bking.cpp
 taito/bublbobl.cpp
 taito/bublbobl_m.cpp  // [HELPER]
 taito/bublbobl_v.cpp  // [HELPER]
 taito/buggychl.cpp
-taito/capr1.cpp
-taito/capr2.cpp
-taito/caprcyc.cpp
-taito/caprstar.cpp
-taito/cchance.cpp
 taito/chaknpop.cpp
 taito/changela.cpp
-taito/cpzodiac.cpp
 taito/crbaloon.cpp
 taito/crbaloon_a.cpp  // [HELPER]
 taito/crbaloon_v.cpp  // [HELPER]
-taito/cucaracha.cpp
 taito/cyclemb.cpp
 taito/darius.cpp
 taito/dinoking.cpp
@@ -2338,7 +1825,6 @@ taito/gunbustr.cpp
 taito/gunbustr_link.cpp  // [HELPER]
 taito/halleys.cpp
 taito/haplucky.cpp
-taito/heromem.cpp
 taito/invqix.cpp
 taito/jollyjgr.cpp
 taito/kikikai.cpp
@@ -2360,7 +1846,6 @@ taito/othunder_v.cpp  // [HELPER]
 taito/pc080sn.cpp  // [HELPER]
 taito/pc090oj.cpp  // [HELPER]
 taito/pitnrun.cpp
-taito/pkspirit.cpp
 taito/pres2k.cpp
 taito/qix.cpp
 taito/qix_a.cpp  // [HELPER]
@@ -2395,7 +1880,6 @@ taito/taito_h.cpp
 taito/taito_h_v.cpp  // [HELPER]
 taito/taito_helper.cpp  // [HELPER]
 taito/taito_l.cpp
-taito/taito_o.cpp
 taito/taito_x.cpp
 taito/taito_z.cpp
 taito/taito_z_v.cpp  // [HELPER]
@@ -2444,6 +1928,7 @@ tatsumi/kingdrby.cpp
 tatsumi/lockon.cpp
 tatsumi/lockon_v.cpp  // [HELPER]
 tatsumi/roundup5.cpp
+tatsumi/sbking.cpp
 tatsumi/tatsumi.cpp  // [HELPER]
 tatsumi/tx1.cpp
 tatsumi/tx1_a.cpp  // [HELPER]
@@ -2508,7 +1993,6 @@ toaplan/fixeight.cpp
 toaplan/ghox.cpp
 toaplan/gp9001.cpp  // [HELPER]
 toaplan/kbash.cpp
-toaplan/mjsister.cpp
 toaplan/pipibibi.cpp
 toaplan/raizing.cpp
 toaplan/raizing_batrider.cpp
@@ -2553,7 +2037,6 @@ universal/ladybug_video.cpp  // [HELPER]
 universal/mrdo.cpp
 universal/mrdo_v.cpp  // [HELPER]
 universal/nl_cheekyms.cpp  // [HELPER]
-universal/pachislo_z80.cpp
 universal/sraider.cpp
 universal/superdq.cpp
 universal/zerohour.cpp
@@ -2577,7 +2060,6 @@ ussr/partner_m.cpp  // [HELPER]
 ussr/pk8020_m.cpp  // [HELPER]
 ussr/pk8020_v.cpp  // [HELPER]
 ussr/radio86_m.cpp  // [HELPER]
-ussr/special_gambl.cpp
 ussr/special_m.cpp  // [HELPER]
 ussr/special_v.cpp  // [HELPER]
 ussr/specialsound.cpp  // [HELPER]
@@ -2592,7 +2074,6 @@ valadon/bagman_v.cpp  // [HELPER]
 valadon/tankbust.cpp
 videogames/looping.cpp
 videogames/supertnk.cpp
-videogames/video21.cpp
 virtual/ldplayer.cpp
 vsystem/aerofgt.cpp
 vsystem/crshrace.cpp
@@ -2604,7 +2085,6 @@ vsystem/fromance_v.cpp  // [HELPER]
 vsystem/gstriker.cpp
 vsystem/inufuku.cpp
 vsystem/mb60553.cpp  // [HELPER]
-vsystem/ojankohs.cpp
 vsystem/pipedrm.cpp
 vsystem/pspikes.cpp
 vsystem/pspikes_ms.cpp
@@ -2634,7 +2114,6 @@ williams/midyunit_m.cpp  // [HELPER]
 williams/midyunit_v.cpp  // [HELPER]
 williams/midzeus.cpp
 williams/midzeus_v.cpp  // [HELPER]
-williams/pinball2k.cpp
 williams/predators.cpp
 williams/seattle.cpp
 williams/starrider.cpp
@@ -2645,16 +2124,10 @@ williams/williams_m.cpp  // [HELPER]
 williams/williams_v.cpp  // [HELPER]
 williams/williamsblitter.cpp  // [HELPER]
 williams/wmg.cpp
-wing/eagle_9619b.cpp
-wing/eagle_9715a.cpp
-wing/luckgrln.cpp
 wing/lucky37.cpp
 wing/lucky74.cpp
 wing/lucky74_v.cpp  // [HELPER]
-wing/pinkiri8.cpp
-wing/slotcarn.cpp
 wing/superwng.cpp
-yachiyo/atamanot.cpp
 yachiyo/mole.cpp
 yachiyo/ssingles.cpp
 yachiyo/sstrangr.cpp
@@ -2672,3 +2145,1596 @@ zaccaria/seabattl.cpp
 zaccaria/zac1b1120.cpp
 zaccaria/zaccaria.cpp
 zaccaria/zaccaria_a.cpp  // [HELPER]
+
+-3do_fc1
+-3do_fc2
+-3do_fz1
+-3do_fz10
+-3do_fz10e
+-3do_fz10j
+-3do_fz1e
+-3do_fz1j
+-3do_gdo101
+-3do_hc21
+-3do_try
+-4psimasy
+-7jigen
+-7mezzo
+-7toitsu
+-a2600
+-a2600p
+-aadvent
+-abunai
+-acitya
+-adonis
+-adonisa
+-adonisce
+-adonisu
+-adpoker
+-aes
+-aimode
+-akiss
+-akissa
+-alchemst
+-alien
+-amazonsp
+-americna
+-americnaa
+-animpkr
+-anpanman
+-anpanmana
+-apparel
+-apple10
+-asuscubx
+-asuscusc
+-asuspolo
+-atrbonpk
+-av2mj1bb
+-av2mj2rg
+-avmjts
+-avmjyk
+-avtbingo
+-baddog
+-baile
+-bakatono
+-bakuhatu
+-ballch
+-bananadr
+-baoqingt
+-barline
+-bbbingo
+-bbbingot
+-bchance
+-bchancep
+-bchanceq
+-bigcsino
+-bigdeal
+-bigdealb
+-bijokkog
+-bijokkoy
+-bikiniko
+-bikkuri
+-bikkuric
+-biliard
+-bingo
+-bingo75
+-bingogal
+-bingogala
+-bingogalb
+-bingogalc
+-bingogals
+-bingopar
+-bingor1
+-bingor2
+-bingor3
+-bingor4
+-bingor5
+-bingor6
+-bingor7
+-bingor8
+-bingor9
+-bingplnt
+-bingpty
+-bkrtmaq
+-blackpnt
+-blackpntu
+-blicks
+-blkrose
+-bmanroul
+-bngotime
+-bnstars
+-boasorte
+-bonuscrd
+-bonuscrda
+-bonuspkr
+-bootsctn
+-bootsctnu
+-bootsctnua
+-bootsctnub
+-bootsctnuc
+-bootsctnud
+-bottl10b
+-bottle10
+-bowlgum
+-bparty
+-bpartya
+-bpartyb
+-brasil86
+-brasil87
+-brasil89
+-brasil89a
+-brasil93
+-bs94
+-bsuerte
+-bsuertea
+-bsuerteb
+-bsuertec
+-bsuerted
+-bsuertee
+-bsuertef
+-bsuerteg
+-bsuerteh
+-bsuertei
+-bsuertej
+-bsuertek
+-bsuertel
+-bsuertem
+-bsuerten
+-bsuerteo
+-bsuertep
+-bsuerteq
+-bsuerter
+-bsuertes
+-bsuertet
+-bsuerteu
+-bsuertev
+-bubbroul
+-bubbroul17
+-bumblbug
+-bumblbugq
+-bumblbugu
+-bumblbugua
+-bumblbugub
+-burgkids
+-buttdeli
+-bwcasino
+-canrose
+-cas21iwc
+-cashcat
+-cashcata
+-cashcatnz
+-cashcham
+-cashchama
+-cashchamnz
+-cashchamu
+-cashcra5
+-cashcra5a
+-cashquiz
+-caspoker
+-caspokera
+-caspokerb
+-ccly
+-cdi490a
+-cdi910
+-cdimono1
+-cdimono1n
+-cdimono2
+-cdsteljn
+-chariotc
+-chariotcpe
+-chariotcu
+-checkma5
+-chessc2
+-chicgum
+-chickna5
+-chickna5q
+-chickna5u
+-chickna5ua
+-chickna5v
+-chinatow
+-chinmoku
+-chkun
+-chmppool
+-citylove
+-cj3play
+-cjbj
+-cjbj122
+-cjffruit
+-cjplus
+-cjsxp
+-club90s
+-club90sa
+-clubcard
+-clubkprz
+-clubkpzb
+-clubkpzbp
+-cluckypo
+-cmehyou
+-cmkenosp
+-cmkenospa
+-cmrltv75
+-cocean1a
+-cocean6b
+-comg074
+-comg076
+-comg079
+-comg079b
+-comg080
+-comg094
+-comg107
+-comg123
+-comg125
+-comg127
+-comg128
+-comg134
+-comg145
+-comg157
+-comg159
+-comg164
+-comg168
+-comg170
+-comg172
+-comg175
+-comg176
+-comg181
+-comg183
+-comg184
+-comg185
+-comg186
+-comg187
+-comg204
+-comg208
+-comg214
+-comg227
+-comg230
+-comg236
+-comg239
+-comg240
+-comg246
+-comg272a
+-comg272b
+-comg5107
+-comg5108
+-comg5108a
+-comg5108b
+-comg6004
+-coralrc2
+-cots
+-cowrace
+-croupier
+-croupiera
+-croupierb
+-crownpkr
+-crystal
+-crystal2
+-crystalc
+-crystalca
+-crystalg
+-cs10_sps
+-cs11_sps
+-cs11_sps2
+-cs11_ssp
+-cs12_sps
+-cs1_spp
+-cs1_spp2
+-cs2_sps
+-cs3_qps
+-cs5_spp
+-cs5_ssp
+-cs6_sps
+-cs6_ssp
+-cs8_spp
+-cs8_sps
+-cs8_ssp
+-cs9_qps
+-cs9_spp
+-cspe_qps
+-csplayh1
+-csplayh5
+-csplayh6
+-csplayh7
+-csv1_qps
+-cubibrd4
+-cuckoo
+-cuckoou
+-cultname
+-cuoreuno
+-cuoreunoa
+-cuoreunob
+-cuoreunoc
+-cuoreunod
+-cuoreunoe
+-cuoreunof
+-cworld2j
+-cworld2ja
+-cworld2jb
+-daichuka
+-daichukaa
+-daifugo
+-daimyojn
+-daireach
+-daiyogen
+-dakkochn
+-danchih
+-danchiq
+-dardos
+-dash_a37
+-dash_a37b
+-dbc
+-dc
+-dcdev
+-dceu
+-dcjp
+-dcproto
+-dcrown
+-dcrowna
+-dctream
+-dealer
+-design6
+-designe
+-deucesw2
+-dfruit
+-dfruita
+-diamdest
+-diamdove
+-dimtouch
+-dmdfever
+-dmndrbybl
+-dodgecty
+-dodgectya
+-dokyusei
+-dokyusp
+-dolphntr
+-dolphntra
+-dolphntrb
+-dolphntrce
+-dolphntrcea
+-dolphntrceb
+-dolphntrq
+-dolphntru
+-dolphntrua
+-doraemon
+-doraemonp
+-dpoker
+-dquizgo
+-dquizgo2
+-dragnfly
+-dreamwv
+-drgneye
+-dstbloom
+-dstblooma
+-dtoyoken
+-dynajack
+-dynajacku
+-dynchance
+-dynchancf
+-dynobop
+-dynplus
+-eforsta5
+-eforsta5u
+-eforsta5ua
+-eforstce
+-eforstcea
+-ejanhs
+-ejsakura
+-ejsakura12
+-eldorda5
+-elephfam
+-elephfmb
+-elgrande
+-elsypokr
+-enchlamp
+-endrichs
+-endrichsa
+-endrichsb
+-excitbj
+-falcnwld
+-falcnwlda
+-falcnwldb
+-falcnwldc
+-falcnwldd
+-fanzonem
+-fastfort
+-finalbny
+-fortellr
+-fortfvr
+-froman2b
+-fromanc2
+-fromanc2o
+-fromanc4
+-fromance
+-fromancr
+-fruitpar
+-fruitpar206us
+-funcsino
+-funquiz
+-funquiza
+-funquizb
+-fuudol
+-fw_a0_1
+-fw_a7_11
+-fw_a7_11a
+-ga6la7
+-gakusai
+-gakusai2
+-gakusaia
+-gal10ren
+-galkaika
+-galkaikap
+-galkoku
+-galkokua
+-gamblra5
+-geisha
+-geishanz
+-gekisha
+-gekishap2
+-genie
+-geniea
+-genmagi
+-gepoker
+-gepoker1
+-gepoker2
+-gepoker3
+-gionbana
+-glizrdce
+-gnomeatw
+-goldenra
+-goldnpkb
+-goldnpkc
+-goldnpkd
+-goldnpke
+-goldnpkf
+-goldnpkg
+-goldnpkh
+-goldnpkr
+-goldpyr
+-goldpyru
+-goldpyrua
+-gonefsh
+-gonefsh2
+-goodluck
+-gostop
+-gp2quiz
+-gp_jpn22
+-gp_ped42_70
+-gp_ped42_80
+-gp_ped42_85
+-gp_ped42_90
+-gp_ped42_95
+-gp_ped42_95a
+-gp_turbo
+-gp_turboa
+-gp_turbob
+-gpi1200
+-gratispk
+-gratispka
+-gt103a1
+-gt103aa
+-gt103ab
+-gt103asx
+-gt103asxa
+-gt507uk
+-gtsers1
+-gtsers10
+-gtsers11
+-gtsers11a
+-gtsers11b
+-gtsers12
+-gtsers12a
+-gtsers14
+-gtsers14a
+-gtsers15
+-gtsers15a
+-gtsers18
+-gtsers2
+-gtsers3
+-gtsers4
+-gtsers5
+-gtsers7
+-gtsers7a
+-gtsers8
+-gtsers8a
+-gtsers9
+-gtsersa
+-gtsersb
+-gynotai
+-gypmagic
+-hana6bl
+-hanakanz
+-hanamai
+-hanamomb
+-hanamomo
+-hanaoji
+-hanaojia
+-hanaren
+-hanayara
+-harikiri
+-hatena
+-hayaosi1
+-hayaosi2
+-hayaosi3
+-hayaosi3a
+-hermit
+-hginga
+-hgingaa
+-hgkairak
+-hgly
+-hgokbang
+-hgokou
+-hgokoua
+-highroll
+-hipai
+-hipai2
+-hitpoker
+-hjingi
+-hjingia
+-hkagerou
+-hnageman
+-hnkochou
+-hnoridur
+-hnrose
+-hnxmasev
+-honeypot
+-honktonk
+-honooinv
+-hotdebut
+-hotgm4ev
+-hotgmck
+-hotgmck3
+-hotgmcki
+-hotminda
+-hotmindb
+-hourouki
+-housemn2
+-housemnq
+-hparadis
+-hrthouse
+-hrtthrob
+-htengoku
+-htsubaki
+-hyouban
+-hypreac2
+-hypreact
+-icescape
+-icp_etg
+-icpf40_01
+-icpf40_02
+-icpf40_03
+-icpf80_01
+-icpf80_02
+-icpf80_03
+-icpf80_04
+-icpf80_05
+-icpf80_06
+-icpf80_07
+-icpf80_08
+-icpf80_09
+-icpf80_10
+-icpf80_11
+-icpf80_12
+-icpf80_13
+-icpf80_14
+-icpf80_15
+-icpf80_16
+-icpf80_17
+-icpf80_18
+-icpf80_19
+-icpf80_20
+-icpf80_21
+-icproul
+-idhimitu
+-idolmj
+-iemoto
+-iemotom
+-igsm312
+-ilpag
+-imekura
+-incanp
+-incanpq
+-incasun
+-incasunnz
+-incasunsp
+-incasunu
+-incasunua
+-incasunv
+-indrema5
+-indrema5q
+-indrema5v
+-intrgmes
+-introdon
+-inufuku
+-jaguar
+-jaguarcd
+-janbari
+-janjans1
+-janjans2
+-janshin
+-janshinp
+-jantouki
+-janyuki
+-jestmagi
+-jinpaish
+-jituroku
+-jjpoker
+-jjpokerb
+-jking02
+-jkrbonus
+-jkrpkra5
+-jogakuen
+-jokcrdep
+-jokercar
+-jokercrd
+-jokercrdf
+-jokpoker
+-jokpokera
+-jokpokerb
+-jokpokerc
+-jollycrd
+-jollycrda
+-jolyc3x3
+-jolyc980
+-jolyccra
+-jolyccrb
+-jolycdab
+-jolycdcy
+-jolycdev
+-jolycdib
+-jolycdic
+-jolycdid
+-jolycdie
+-jolycdif
+-jolycdig
+-jolycdih
+-jolycdii
+-jolycdit
+-jolycdsp
+-jolycmzs
+-jolygame
+-jolyjokr
+-jolyjokra
+-jolyjokrb1
+-jolyjokrb2
+-jolyjokrc
+-jolyjokrm
+-jolyjokro
+-jolyjokrp
+-jolyjokrs
+-jolyjokrt
+-jongbou
+-jongbou2
+-jongoh
+-jongpute
+-jongtei
+-jongteia
+-jpcoin
+-jpcoin2
+-jpjcoin
+-jumpbean
+-jumpjoey
+-jumpjoeyu
+-junai
+-junai2
+-jungjuic
+-jungleani
+-k7_olym
+-k7_olym30
+-kaguya
+-kaguya2
+-kaguya2f
+-kaguyaa
+-kaiunqz
+-kanatuen
+-kazaaan
+-kazaaan2
+-kazaaan2c
+-kazaaan2o
+-kazaaana
+-keithlcy
+-kftgoal
+-kgalah
+-kgalaha
+-kgalahce
+-kgbirda5
+-kingdrbb
+-kingsran
+-kirarast
+-kirarasta
+-kisekaeh
+-kisekaem
+-kiwames
+-klxyj102cn
+-klxyj104cn
+-kmhpan
+-koalamnt
+-koikois
+-koikois2
+-koikoisa
+-koinomp
+-konhaji
+-konzero
+-kookabuk
+-korinai
+-korinaim
+-kotbinsp
+-kotbinyo
+-kotbinyosu
+-kyhaton
+-kyuhito
+-ladymakr
+-lastfortg
+-lemnangl
+-lfhouse
+-lfhouseb
+-lhb
+-lhb2
+-lhb2cpgs
+-lhb3
+-lhbv33c
+-lhdmg
+-lhdmgp
+-lhdmgp200c3m
+-lhzb3
+-lhzb3106c5m
+-lhzb3sjb
+-livegal
+-livequiz
+-lluck3x3
+-lluck4x1
+-lluckasd
+-locoloot
+-locoloota
+-locolootnz
+-locolootq
+-locolootu
+-lonewolf
+-lottof2
+-lottofun
+-lovehous
+-lsrquiz
+-lsrquiz2i
+-lsrquizg
+-lthyp
+-luckfoun
+-lucky74
+-lucky74a
+-lucky74b
+-lucky88w
+-luckyclo
+-luckyclrs
+-luckyrlt
+-lunapark
+-lunaparkb
+-lunaparkc
+-lvcards
+-lvcardsa
+-lvpoker
+-mag10
+-magicrd2
+-magicrd2a
+-magicrd2b
+-magicrd2c
+-magimask
+-magimaska
+-magimaskb
+-magimaskc
+-magkengo
+-magkengou
+-magslot
+-magtcha5
+-magtcha5a
+-magtree
+-mahjngoh
+-mahmajn
+-mahmajn2
+-mahretsu
+-maiko
+-majxtal7
+-mammothm
+-marmagic
+-marmagicu
+-marmagicua
+-marukin
+-marukina
+-marukodq
+-maverik
+-maxidbl
+-maxidpkr
+-mcitylov
+-mcnpshnt
+-mcontest
+-mdhorse
+-medalnt
+-medalnt2
+-medalnta
+-megacard
+-megacarda
+-megadble
+-megadblj
+-megadpkr
+-megadpkrb
+-megat
+-megata
+-meritjp
+-mfightc
+-mfightcc
+-mfunclub
+-mgakuen
+-mgakuen2
+-mgarden
+-mgardena
+-mgfx
+-mghammer
+-mgion
+-mgmen89
+-mgzz
+-mgzz100cn
+-mhgaiden
+-mhhonban
+-minemine
+-minemineu
+-minemineua
+-minemineub
+-mj1
+-mj1a
+-mj1b
+-mj1c
+-mj1d
+-mj1e
+-mj2
+-mj2c
+-mj2f
+-mj3
+-mj3c
+-mj3d
+-mj3evo
+-mj3evoa
+-mj3evoup
+-mj3up
+-mj4simai
+-mjanbari
+-mjangels
+-mjcamera
+-mjcameram
+-mjcamerao
+-mjchuuka
+-mjchuukac
+-mjclinic
+-mjclinica
+-mjcomv1
+-mjdchuka
+-mjdialq2
+-mjdialq2a
+-mjegolf
+-mjelct3
+-mjelct3a
+-mjelct3b
+-mjelct3bl
+-mjelct3bla
+-mjelct3blb
+-mjelctrb
+-mjelctrn
+-mjembase
+-mjempror
+-mjflove
+-mjfocus
+-mjfocusm
+-mjfriday
+-mjgaiden
+-mjgalpri
+-mjgnight
+-mjgottsu
+-mjgottub
+-mjgtaste
+-mjhokite
+-mjikaga
+-mjjoship
+-mjkinjas
+-mjkoiura
+-mjkojink
+-mjkokryu
+-mjlaman
+-mjlstory
+-mjmania
+-mjmyorn2
+-mjmyornt
+-mjmyorntr
+-mjmyster
+-mjmysterr
+-mjmyuniv
+-mjmyunivh
+-mjmywrld
+-mjmywrldt
+-mjnanpaa
+-mjnanpas
+-mjnanpau
+-mjnatsu
+-mjnigiri
+-mjnquest
+-mjnquestb
+-mjprivat
+-mjreach
+-mjreach1
+-mjreach1a
+-mjreacha
+-mjreachbl
+-mjreachp2
+-mjschuka
+-mjsikakb
+-mjsikakc
+-mjsikakd
+-mjsikaku
+-mjswacad
+-mjswacads
+-mjtenho
+-mjtkp2
+-mjtktrdx
+-mjuraden
+-mjwitomo
+-mjxy2
+-mjxysl
+-mjyougo
+-mjzb
+-mkeibaou
+-mkoiuraa
+-mladyhtr
+-mmaiko
+-mmehyou
+-mmmbanc
+-mmsikaku
+-mogitate
+-mohicans
+-momotaro
+-mongolnw
+-monmouse
+-monmousea
+-monomedal
+-monshow
+-montree
+-mountmon
+-mountmona
+-mountmonce
+-mountmonu
+-mountmonua
+-mpokerdx
+-mpokerdx109
+-mrokumei
+-msbingo
+-mscoutm
+-msjiken
+-mtjpoker
+-multidrw
+-multiwin
+-multiwina
+-multiwinb
+-musobana
+-myangel
+-myangel2
+-myangel3
+-myfairld
+-mystgard
+-natsuiro
+-nekkyoku
+-neruton
+-nerutona
+-nettoqc
+-nevadafw
+-ng_mv1
+-ng_mv1f
+-ng_mv1fz
+-ng_mv2f
+-ng_mv4f
+-ngold
+-ngolda
+-ngoldb
+-ngpgal
+-nichisel
+-nightlov
+-nkishusp
+-nkoulit
+-nmsengen
+-novoplay
+-novoplaya
+-novoplayb
+-nprobowl
+-ntopstar
+-nuretemi
+-nyanpai
+-oceanpar
+-oceanpar101us
+-ochaken
+-ojousan
+-ojousanm
+-olym65bj
+-olym65wc
+-omotesnd
+-one4all
+-op5cards
+-orangec
+-orangeci
+-orchidms
+-orchidmsa
+-orchidmsnz
+-oscara5
+-oscara5a
+-otatidai
+-otonano
+-ougonhai
+-ougonhaib1
+-ougonhaib2
+-ougonhaib3
+-p5txla
+-paccarn
+-paceight
+-pachiten
+-packyts
+-pacslot
+-pairsred
+-pantmag
+-pantmaga
+-partygrs
+-partygrsa
+-partygrsb
+-patimono
+-pbss330
+-pbss330a
+-pbss330ca
+-pbst30
+-pbst30a
+-peaflut
+-peafluta
+-peepshow
+-pengpay
+-pengpaya
+-pengpayb
+-pengpayc
+-pengpayce
+-pengpaycea
+-pengpayd
+-pengpaydx
+-pengpayu
+-pengpayua
+-pengpayub
+-pengpuck
+-penpir
+-penpir2
+-penpira
+-petshop
+-petshopa
+-phantpay
+-phantpyc
+-pitboss2
+-pitbossm
+-pitbossma
+-pitbossmb
+-pitbosss
+-pitbosssa
+-pitbosssac
+-pitbosssb
+-pitbosssc
+-pitbosssm
+-pkgnsh
+-pkgnshdx
+-pkladies
+-pkladiesbl
+-pkladiesbl2
+-pkladiesblu
+-pkladiesl
+-pkladiesla
+-play2000
+-play2000_40i
+-play2000_50i
+-pmpoker
+-poker41
+-poker52
+-poker91
+-pokerdub
+-pokeriwc
+-pokermon
+-pokeroul
+-pokersis
+-pokiwc162
+-pokoachu
+-pokrdice
+-pokrwild
+-pool10
+-pool10b
+-pool10c
+-pool10d
+-pool10e
+-pool10f
+-pool10g
+-pool10h
+-pool10i
+-pool10j
+-pool10k
+-popbingo
+-potgame
+-potnpkra
+-potnpkrb
+-potnpkrc
+-potnpkrd
+-potnpkre
+-potnpkrf
+-potnpkrg
+-potnpkrh
+-potnpkri
+-potnpkrj
+-potnpkrk
+-potnpkrl
+-potnpkrm
+-potnpkrn
+-potnpkro
+-potnpkrp
+-pottnpkr
+-powercrd
+-premline
+-probowl2
+-przfight
+-psailor1
+-psailor2
+-pss62
+-pstadium
+-puyomedal
+-pwrkick
+-pyutakun
+-qad
+-qadjr
+-qcash
+-qcrayon
+-qgakumon
+-qgh
+-qgundam
+-qiwang
+-qjinsei
+-qlgs
+-qmegamis
+-qmhayaku
+-qndream
+-qnile
+-qnilea
+-qnileb
+-qnilebr
+-qnilec
+-qnilece
+-qnilecea
+-qnileceb
+-qniled
+-qnilefl
+-qnilemax
+-qnilenl
+-qnilenz
+-qnilepe
+-qnileq
+-qnileu
+-qnileua
+-qrouka
+-qsangoku
+-qsww
+-qtbird
+-qtheater
+-qtono1
+-qtono2j
+-qtorimon
+-quaquiz2
+-quiz
+-quiz18k
+-quiz211
+-quiz211a
+-quiz365
+-quiz365t
+-quizard
+-quizard2
+-quizard2_22
+-quizard3
+-quizard3_32
+-quizard3a
+-quizard4
+-quizard4_40
+-quizard4_41
+-quizard4cz
+-quizard_10
+-quizard_12
+-quizard_17
+-quizardff
+-quizardi
+-quizardi_12
+-quizardi_17
+-quizchq
+-quizchqk
+-quizchql
+-quizdai2
+-quizdais
+-quizdaisk
+-quizf1
+-quizhq
+-quizhuhu
+-quizkof
+-quizkofk
+-quizmeku
+-quizmoon
+-quizmstr
+-quizqgd
+-quiztou
+-quiztvqq
+-quizvid
+-qyjdzjp
+-qzchikyu
+-qzkklgy2
+-qzkklogy
+-qzquest
+-qzshowby
+-rainwarr
+-rainwarrce
+-rapfire5
+-rcdino4
+-realbrod
+-realbroda
+-reelpwr
+-reelquak
+-reelrock
+-reelrockq
+-reflexcrd
+-renaiclb
+-renaimj
+-retrsam
+-retrsama
+-retrsamb
+-rockmanmdl
+-rocktrv2
+-romanl
+-royal
+-royal5p
+-royalcdfr
+-royalcrd
+-royalcrd_msx
+-royalcrd_nes
+-royalcrd_nesa
+-royalcrda
+-royalcrdb
+-royalcrdc
+-royalcrdd
+-royalcrde
+-royalcrdf
+-royalcrdg
+-royalcrdh
+-royalcrdp
+-royalcrdt
+-royale
+-royalea
+-royaljp
+-royalpk2
+-rselect
+-rushrst
+-ryorioh
+-ryouran
+-ryourano
+-ryukobou
+-ryuuha
+-safemon
+-safemonn
+-sailorwa
+-sailorwr
+-sailorws
+-saloon
+-sball2k1
+-sbmjb
+-sbuk2
+-sbuk2a
+-sbuk3
+-sbuk3a
+-sc2in1
+-scandal
+-scandalm
+-sdmg2641c
+-secolove
+-seiha
+-seiham
+-seljan2
+-seljan2a
+-sengomjk
+-setaroul
+-setaroula
+-setaroulm
+-sextriv1
+-sextriv2
+-sfach
+-sfzbch
+-sfzch
+-sglc
+-shangril
+-shinygld
+-shootpl
+-shootplm
+-shootplmp
+-showqn
+-shutms11
+-sidampkr
+-sidampkra
+-silverga
+-sjcd2kx3
+-sjms
+-sjryuko
+-sjryuko1
+-sldeluxe
+-slikshot
+-slikshot16
+-slikshot17
+-sloco93
+-sloco93a
+-slotbatt
+-slotouji
+-slotoujia
+-slqz3
+-slvrwolf
+-smartoss
+-smatch03
+-smf
+-smsjoker
+-smsjokera
+-snookr10
+-snowcat
+-soccernw
+-sonicpop
+-spacewin
+-spadarts
+-spiceup
+-spitboss
+-spotty
+-sprtdart
+-squizchs
+-srmp4
+-srmp4o
+-srmp7
+-srmvs
+-srmvsa
+-srockbwl
+-srollnd
+-sryudens
+-ssipkr24
+-ssipkr30
+-ssipkr40
+-sstrike
+-statusbj
+-steaser
+-strker
+-stvboy
+-sucasino
+-suchie2
+-suchie2o
+-suchie3
+-sukuinuf
+-sultanw
+-sumospin
+-sunaq
+-super21p
+-super555
+-super97
+-super98
+-superdbl
+-supertr
+-suprpokr
+-suprpokra
+-suprpokrb
+-surpr5
+-swhr2
+-swhr2a
+-swhr2q
+-swhr2u
+-swhr2v
+-swinggal
+-swisspkr
+-sxyreac2
+-sxyreact
+-taiwanmb
+-tarzan2
+-tbss
+-tct2p
+-tct2pa
+-tdpgal
+-tdpgala
+-techtrna
+-techtrnb
+-tekkenbs
+-tekkencw
+-telmahjn
+-telpacfl
+-tenballs
+-tenkai
+-tenkai2b
+-tenkaibb
+-tenkaicb
+-tenkaie
+-tenpindx
+-texasrls
+-thenanpa
+-thndh
+-thndha
+-thor
+-tinkerbl
+-tjumpman
+-tmspoker
+-tokimbsj
+-tokyogal
+-topbana
+-torarech
+-tortufam
+-tourpgum
+-touryuu
+-touryuua
+-toutango
+-toutangonl
+-tripdraw
+-triplew1
+-triplew2
+-tripool
+-tripoola
+-tripslot
+-tritreat
+-trivia
+-triviabb
+-triviaes
+-triviaes2
+-triviaes4
+-triviaes5
+-triviag1
+-triviag1a
+-triviag2
+-triviasp
+-triviayp
+-trivquiz
+-trojhors
+-tropfrt
+-trpdlght
+-trpdlghtu
+-trstrove
+-trvchlng
+-trvgns
+-trvhang
+-trvhanga
+-trvmstr
+-trvmstra
+-trvmstrb
+-trvmstrc
+-trvmstrd
+-tshs
+-tshs101
+-tsuwaku
+-tswx
+-tswxp
+-ttmahjng
+-tvboy
+-tvboyii
+-tvboyn
+-tvpoker
+-tygn
+-uchuuai
+-ultramhm
+-ultrchmp
+-ultrchmph
+-unicornd
+-unicornda
+-unicorndnz
+-unicorndu
+-unkbel
+-unkdep
+-unkicpf40
+-unkicpf80
+-unkitpkr
+-unomedal
+-usagi
+-usagiym
+-usg32
+-vanilla
+-vectrex
+-vegasfst
+-vegasfte
+-vegasmil
+-vegasslw
+-venicea5
+-videtrna
+-videtron
+-videtron2
+-vipclub
+-vitaminc
+-vmahjong
+-vscompmj
+-vscompmjh
+-vsmahjng
+-wafrica
+-wamazon
+-wamazona
+-wamazonv
+-warahana
+-wcatcher
+-wcougar
+-wcougaru
+-wcougarua
+-wcougarub
+-wcougaruc
+-wcougarud
+-wcoyote
+-whiterus
+-wikwin
+-wildbill
+-wing90pkr
+-witchcrd
+-witchcrda
+-witchcrdb
+-witchcrdc
+-witchcrdd
+-witchcrde
+-witchcrdf
+-witchcrdg
+-witchcrdh
+-witchcrdi
+-witchcrdj
+-witchgme
+-witchgmea
+-witchjol
+-witchryl
+-wizways
+-wizzquiz
+-wizzquiza
+-wlcc
+-wldangel
+-wldangelu
+-wldwitch
+-wldwitcha
+-wldwitchb
+-wldwitchc
+-wldwitchd
+-wldwitche
+-wldwitchf
+-wldwitchg
+-wldwitchh
+-wldwitchi
+-wldwitchj
+-wldwitchk
+-wldwitchl
+-wldwitchm
+-wldwitchn
+-wldwitcho
+-wldwitchp
+-wldwitchq
+-wldwitchr
+-wldwitchs
+-wldwitcht
+-wldwitchu
+-wldwitchv
+-wnpost
+-wofch
+-wpksoc
+-wstrike
+-wstrikea
+-wtchjack
+-wtchjacka
+-wtchjackb
+-wtchjackc
+-wtchjackd
+-wtchjacke
+-wtchjackf
+-wtchjackg
+-wtchjackh
+-wtchjacki
+-wtchjackj
+-wthing
+-wthinga
+-wtigerc
+-wupndown
+-wupndowna
+-wupndownb
+-wupndownc
+-wupndownd
+-xsedae
+-xymg
+-xymga
+-yarunara
+-yosimotm
+-yosimoto
+-yujan
+-yuka
+-yukongl5
+-yuyugogo
+-zhongguo
+-zidav630e
+-zokumahj
