@@ -2259,6 +2259,7 @@ stern/cliffhgr_a.cpp  // [HELPER]
 stern/mazerbla.cpp
 stern/supdrapo.cpp
 subsino/lastfght.cpp
+subsino/ss9904.cpp  // [HELPER]
 subsino/subsino.cpp
 subsino/subsino2.cpp
 subsino/subsino_crypt.cpp  // [HELPER]
