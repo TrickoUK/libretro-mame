@@ -521,6 +521,23 @@ static void Set_Default_Option(void)
       Add_Option(plugin);
    }
 
+   // debug aid: extra MAME options, space separated, e.g. MAME_EXTRA_OPTS="-oslog -debug" (logerror
+   // to stderr, and the debugger engine for Lua's debugger:command()/device.debug)
+   if (const char *extra = getenv("MAME_EXTRA_OPTS"))
+   {
+      std::string opts(extra);
+      size_t pos = 0;
+      while (pos < opts.size())
+      {
+         size_t end = opts.find(' ', pos);
+         if (end == std::string::npos)
+            end = opts.size();
+         if (end > pos)
+            Add_Option(opts.substr(pos, end - pos).c_str());
+         pos = end + 1;
+      }
+   }
+
    if (mame_4way_enable)
    {
       Add_Option("-joystick_map");

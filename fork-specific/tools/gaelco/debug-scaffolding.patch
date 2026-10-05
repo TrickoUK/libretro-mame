@@ -1,0 +1,504 @@
+--- a/src/mame/gaelco/atvtrack.cpp
++++ b/src/mame/gaelco/atvtrack.cpp
+@@ -109,6 +109,7 @@
+ #include "speaker.h"
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cmath>
+ #include <functional>
+ #include <map>
+@@ -116,6 +117,7 @@
+ #include <vector>
+ 
+ 
++extern std::function<void(const void *, offs_t)> g_sh4_debug_pc_hook; // TEMP, defined in sh4.cpp
+ 
+ DECLARE_DEVICE_TYPE(GAELCO_ATVTRACK_DAC, gaelco_atvtrack_dac_device)
+ 
+@@ -252,6 +254,27 @@
+ 
+ 	neon250_renderer()
+ 	{
++		if (const char *e = getenv("ATV_LODBIAS"))
++			m_lodbias = atoi(e);
++		m_dbgwhite = getenv("ATV_DBGWHITE") != nullptr;
++		m_texlog = getenv("ATV_TEXLOG") != nullptr;
++		if (const char *e = getenv("ATV_SAVEFRAME")) // TEMP: save the bitmap of render number N to ATV_SAVEPATH (PPM)
++			m_saveframe = m_probeframe = atoi(e);
++		if (const char *e = getenv("ATV_PROBE")) // TEMP: "x,y;x,y": log polygons that write these pixels
++		{
++			int x, y; const char *q = e;
++			while (sscanf(q, "%d,%d", &x, &y) == 2)
++			{
++				m_probes.push_back({ x, y });
++				q = strchr(q, ';');
++				if (!q) break;
++				q++;
++			}
++		}
++		if (const char *e = getenv("ATV_ONLYTEX")) // TEMP: only draw polygons with this texture control word
++			m_onlytex = strtoul(e, nullptr, 16);
++		if (const char *e = getenv("ATV_SKIPTEX")) // TEMP: skip polygons with this texture control word
++			m_skiptex = strtoul(e, nullptr, 16);
+ 		for (int i = 0; i < 1024; i++)
+ 		{
+ 			u32 r = 0;
+@@ -269,6 +292,17 @@
+ 	float rdf(u32 addr) const { u32 v = rd(addr); float f; memcpy(&f, &v, 4); return f; }
+ 
+ 	int m_tris = 0, m_lists = 0;
++	int m_lodbias = 0; // TEMP: ATV_LODBIAS
++	u32 m_onlytex = 0, m_skiptex = 0; // TEMP
++	bool m_dbgwhite = false;
++	struct whitestat { int n = 0, level = 0, lw = 0; float u = 0, v = 0; };
++	std::map<u32, whitestat> m_whitestat;
++	u32 tex_word_dbg = 0;
++	std::vector<std::pair<int,int>> m_probes;
++	int m_listdbg = 0;
++	bool m_texlog = false;
++	u32 m_saveframe = 0, m_probeframe = 0;
++	s64 m_prof_us = 0, m_prof_tris = 0;
+ 
+ private:
+ 	struct vtx { float x, y, z, u, v; u32 col; };
+@@ -523,6 +557,9 @@
+ 	const int clampuv = (tsp >> 15) & 3;
+ 	const int tsinst = (tsp >> 6) & 3;
+ 	const float inv_area = 1.0f / area;
++	if (m_dbgwhite && srcinst == 4 && fabsf(area) > 6000 && (m_frame % 45) == 0)
++		osd_printf_info("BIGTRANS f=%u tex=%08x tsp=%08x isp=%08x area=%.0f v0=(%.0f,%.0f z=%.3g uv=%.3f,%.3f c=%08x) v1=(%.0f,%.0f uv=%.3f,%.3f c=%08x) v2=(%.0f,%.0f uv=%.3f,%.3f c=%08x)\n",
++				m_frame, tex_word_dbg, tsp, isp, fabsf(area) / 2, v0.x, v0.y, v0.z, v0.u, v0.v, v0.col, v1.x, v1.y, v1.u, v1.v, v1.col, v2.x, v2.y, v2.u, v2.v, v2.col);
+ 	const bool opaque_blend = (srcinst == 1 && dstinst == 0);
+ 	const bool bilinear = ((tsp >> 13) & 3) != 0;
+ 	const int nlev = tex ? int(tex->lv.size()) : 0;
+@@ -604,7 +641,7 @@
+ 				const float vn = (w0 * v0.v + w1 * v1.v + w2 * v2.v) * inv;
+ 
+ 				// level of detail from the analytic screen space derivatives of u and v
+-				int level = 0;
++				int level = m_lodbias < nlev ? m_lodbias : nlev - 1;
+ 				if (nlev > 1)
+ 				{
+ 					const float dudx = (dUdx - un * dWdx) * inv, dvdx = (dVdx - vn * dWdx) * inv;
+@@ -619,7 +656,7 @@
+ 						u32 bits;
+ 						memcpy(&bits, &rho2, 4);
+ 						const int e = int((bits >> 23) & 255) - 127;
+-						level = std::min(nlev - 1, ((e + 1) >> 1));
++						level = std::min(nlev - 1, ((e + 1) >> 1) + m_lodbias);
+ 					}
+ 				}
+ 				const tex_level &lv = tex->lv[level];
+@@ -644,6 +681,11 @@
+ 					const int ty = addr_uv(vn * lv.h, lv.h, flipuv & 1, clampuv & 1);
+ 					t = lv.pix[ty * lv.w + tx];
+ 				}
++				if (m_dbgwhite && t == 0xffffffff)
++				{
++					auto &d = m_whitestat[tex_word_dbg];
++					d.n++; d.level = level; d.u = un; d.v = vn; d.lw = lv.w;
++				}
+ 				const int ta = ignore_texa ? 255 : (t >> 24);
+ 				const int tr = (t >> 16) & 255, tg = (t >> 8) & 255, tb = t & 255;
+ 				switch (tsinst)
+@@ -689,6 +731,10 @@
+ 			{
+ 				// opaque: source alpha 1, dest 0
+ 			}
++			if (!m_probes.empty() && m_frame == m_probeframe)
++				for (auto &pr : m_probes)
++					if (pr.first == x && pr.second == y)
++						osd_printf_info("PROBE f=%u list=%d (%d,%d) tex=%08x tsp=%08x isp=%08x z=%.3g src=%d dst=%d out=%d,%d,%d a=%d uvvtx0=%.3f,%.3f c=%08x\n", m_frame, m_listdbg, x, y, tex_word_dbg, tsp, isp, z, srcinst, dstinst, r, g, b, a, v0.u, v0.v, v0.col);
+ 			dst[x] = 0xff000000 | (std::clamp(r, 0, 255) << 16) | (std::clamp(g, 0, 255) << 8) | std::clamp(b, 0, 255);
+ 			if (zwrite)
+ 				zrow[x] = z;
+@@ -723,9 +769,13 @@
+ 				state[k] = list_word(i++);
+ 			have_state = true;
+ 			tex = (state[2] & 0x02000000) ? get_texture(state[4], state[3]) : nullptr;
++			if (m_texlog && (m_frame % 120) == 0 && (state[2] & 0x02000000))
++				osd_printf_info("TEXLOG f=%u list=%d tex=%08x tsp=%08x isp=%08x mip=%d vq=%d pf=%d scan=%d stride=%d size=%dx%d null=%d\n", m_frame, m_listdbg, state[4], state[3], state[2], (state[4] >> 31) & 1, (state[4] >> 30) & 1, (state[4] >> 27) & 7, (state[4] >> 26) & 1, (state[4] >> 25) & 1, 8 << ((state[3] >> 3) & 7), 8 << (state[3] & 7), tex ? 0 : 1);
+ 		}
+ 		if (!have_state)
+ 			continue;
++		if ((m_onlytex && state[4] != m_onlytex) || (m_skiptex && state[4] == m_skiptex))
++			continue;
+ 
+ 		const u32 mask = (ent >> 25) & 0x3f;
+ 		const u32 skip = (ent >> 21) & 7;
+@@ -745,6 +795,7 @@
+ 				continue;
+ 			vtx a, b, c;
+ 			fetch(k, a); fetch(k + 1, b); fetch(k + 2, c);
++			tex_word_dbg = state[4];
+ 			draw_triangle(a, b, c, state[2], state[3], textured ? tex : nullptr, bitmap);
+ 		}
+ 	}
+@@ -756,6 +807,11 @@
+ 	// Rows are dealt to the workers in groups of 16, so every pixel is still drawn by one thread in list order.
+ 	static const int nthreads = []
+ 	{
++		if (getenv("ATV_THREADS"))
++			return std::max(1, atoi(getenv("ATV_THREADS")));
++		// the debug aids keep global statistics, which the workers can't update safely
++		if (getenv("ATV_DBGWHITE") || getenv("ATV_PROBE"))
++			return 1;
+ 		const unsigned hc = std::thread::hardware_concurrency();
+ 		return int(std::clamp(hc > 2 ? hc - 2 : 1u, 1u, 8u));
+ 	}();
+@@ -781,6 +837,7 @@
+ 
+ void neon250_renderer::render(u32 ctx, bitmap_rgb32 &bitmap, u32 clear_color)
+ {
++	const auto t_start = std::chrono::steady_clock::now();
+ 	m_frame++;
+ 	m_tris = 0;
+ 	m_lists = 0;
+@@ -792,12 +849,74 @@
+ 	for (int l = 0; l < 3; l++)
+ 	{
+ 		const u32 d = ctx + 0x18 + 0x10 * l;
++		m_listdbg = l;
+ 		process_list(rd(d + 12), rd(d + 8), bitmap);
+ 	}
+ 	m_tris = int(m_queue.size());
+ 	rasterize(bitmap);
+ 
++	if (const char *dir = getenv("ATV_SAVEDIR")) // TEMP: save every Nth render as dir/fNNNNN.ppm
++	{
++		static int every = getenv("ATV_SAVEEVERY") ? atoi(getenv("ATV_SAVEEVERY")) : 100;
++		if (every > 0 && (m_frame % every) == 0)
++		{
++			char path[512];
++			snprintf(path, sizeof(path), "%s/f%05u.ppm", dir, m_frame);
++			if (FILE *f = fopen(path, "wb"))
++			{
++				fprintf(f, "P6\n%d %d\n255\n", WIDTH, HEIGHT);
++				for (int y = 0; y < HEIGHT; y++)
++					for (int x = 0; x < WIDTH; x++)
++					{
++						const u32 c = bitmap.pix(y, x);
++						fputc((c >> 16) & 255, f); fputc((c >> 8) & 255, f); fputc(c & 255, f);
++					}
++				fclose(f);
++			}
++		}
++	}
++	if (const char *dp = getenv("ATV_DUMPGPU")) // TEMP: dump all GPU RAM at render ATV_SAVEFRAME
++		if (m_saveframe && m_frame >= m_saveframe)
++			if (FILE *f = fopen(dp, "wb"))
++			{
++				fwrite(m_ram, 1, 0x2000000, f);
++				fclose(f);
++			}
++	if (m_saveframe && m_frame >= m_saveframe)
++	{
++		if (const char *path = getenv("ATV_SAVEPATH"))
++			if (FILE *f = fopen(path, "wb"))
++			{
++				fprintf(f, "P6\n%d %d\n255\n", WIDTH, HEIGHT);
++				for (int y = 0; y < HEIGHT; y++)
++					for (int x = 0; x < WIDTH; x++)
++					{
++						const u32 c = bitmap.pix(y, x);
++						fputc((c >> 16) & 255, f); fputc((c >> 8) & 255, f); fputc(c & 255, f);
++					}
++				fclose(f);
++			}
++		m_saveframe = 0;
++	}
++	if (m_dbgwhite && (m_frame % 90) == 0)
++	{
++		for (auto &e : m_whitestat)
++			if (e.second.n > 2000)
++				osd_printf_info("WHITE tex=%08x n=%d level=%d lw=%d uv=(%.3f,%.3f)\n", e.first, e.second.n, e.second.level, e.second.lw, e.second.u, e.second.v);
++		m_whitestat.clear();
++	}
+ 
++	if (getenv("ATV_RENDERPROF"))
++	{
++		m_prof_us += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t_start).count();
++		m_prof_tris += m_tris;
++		if ((m_frame % 120) == 0)
++		{
++			osd_printf_info("RENDERPROF %u renders: avg %.2f ms, %lld tris avg\n", m_frame, m_prof_us / 120000.0, (long long)(m_prof_tris / 120));
++			m_prof_us = 0;
++			m_prof_tris = 0;
++		}
++	}
+ 
+ 	// drop textures not used for a while
+ 	if ((m_frame & 255) == 0)
+@@ -868,6 +987,10 @@
+ 	u16 gpu_irq_mask = 0;
+ 	void gpu_irq_test();
+ 	void gpu_irq_set(int);
++	void install_debug_taps(); // TEMP: ATV_TAP debug aid
++	void install_pc_hook(); // TEMP: ATV_HOOK debug aid
++	std::map<u64, u64> m_tapcount; // TEMP
++	u32 m_kickcount = 0; // TEMP
+ 
+ 	void atvtrack_main_map(address_map &map) ATTR_COLD;
+ 	void atvtrack_main_port(address_map &map) ATTR_COLD;
+@@ -1057,6 +1180,7 @@
+ 
+ u32 atvtrack_state::gpu_r(offs_t offset)
+ {
++	if (getenv("ATV_REGLOG")) logerror("REG R %04x %s\n", offset * 4, machine().describe_context());
+ 	switch (offset)
+ 	{
+ 	case 0x70/4:
+@@ -1071,6 +1195,7 @@
+ 
+ void atvtrack_state::gpu_w(offs_t offset, u32 data)
+ {
++	if (getenv("ATV_REGLOG") && offset * 4 != 0xc0) logerror("REG W %04x = %08x %s\n", offset * 4, data, machine().describe_context());
+ 	switch (offset)
+ 	{
+ 	case 0x00/4:
+@@ -1104,6 +1229,7 @@
+ 
+ u64 atvtrack_state::ioport_r(offs_t offset)
+ {
++	if (getenv("ATV_IOLOG")) logerror("IO R %02x %s\n", u32(offset), machine().describe_context());
+ 	if (offset == SH4_IOPORT_16/8) {
+ 		// switches and the ADC data out are read through two banks selected by port A bits 15-11, active low
+ 		u16 v = 0xffff;
+@@ -1148,6 +1274,7 @@
+ 
+ void atvtrack_state::ioport_w(offs_t offset, u64 data)
+ {
++	if (getenv("ATV_IOLOG")) logerror("IO W %02x = %04x %s\n", u32(offset), u32(data), machine().describe_context());
+ 	// SH4 GPIO port A used in this way:
+ 	// bits 15-11  O - port select: F002 (In)  E802 (In)  F800 (Out)        7800 (Out)
+ 	//                              JP10 conn  JP8 conn   ADC/DAC control   System Control and/or diagnostics
+@@ -1243,6 +1370,13 @@
+ // the frame's context block.
+ void atvtrack_state::gpu_render_kick()
+ {
++	if (!m_tapcount.empty() && (++m_kickcount % 300) == 0)
++	{
++		for (auto &e : m_tapcount)
++			logerror("TAPCOUNT pc=%08x pr=%08x n=%llu\n", u32(e.first >> 32), u32(e.first), (unsigned long long)e.second);
++		logerror("TAPCOUNT --- kick %u\n", m_kickcount);
++		m_tapcount.clear();
++	}
+ 	const u32 wp = m_renderer.rd(0x18811020);
+ 	const u32 job = 0x18811f80 + (wp & 0x3fff) - 0x40;
+ 	if (m_renderer.rd(job) != 0x40)
+@@ -1256,7 +1390,8 @@
+ 		logerror("GPU: render job %08x has a bad context %08x\n", job, ctx);
+ 		return;
+ 	}
+-	m_renderer.render(ctx, m_screen_bitmap, 0xff000000);
++	if (!getenv("ATV_NORENDER"))
++		m_renderer.render(ctx, m_screen_bitmap, 0xff000000);
+ }
+ 
+ void get_altera10ke_eab(u8* dst, u8 *pof, int eab)
+@@ -1277,10 +1412,112 @@
+ 	}
+ }
+ 
++// TEMP debug aid: ATV_TAP="w:18047000-1804d000,r:14000000-140000ff,cpu=sub|main" logs accesses with context
++void atvtrack_state::install_debug_taps()
++{
++	const char *env = getenv("ATV_TAP");
++	if (!env)
++		return;
++	std::string spec(env);
++	size_t pos = 0;
++	while (pos < spec.size())
++	{
++		size_t end = spec.find(',', pos);
++		if (end == std::string::npos)
++			end = spec.size();
++		std::string item = spec.substr(pos, end - pos);
++		pos = end + 1;
++		bool sub = true;
++		if (item.rfind("m", 0) == 0) { sub = false; item.erase(0, 1); }
++		if (item.size() < 3 || item[1] != ':')
++			continue;
++		char kind = item[0];
++		unsigned lo = 0, hi = 0;
++		if (sscanf(item.c_str() + 2, "%x-%x", &lo, &hi) != 2)
++			continue;
++		address_space &space = (sub ? m_subcpu : m_maincpu)->space(AS_PROGRAM);
++		const char *who = sub ? "SUB" : "MAIN";
++		if (kind == 'w')
++			space.install_write_tap(lo, hi, "tapw", [this, who, sub](offs_t offset, u64 &data, u64 mem_mask)
++			{
++				u32 addr = offset; int lane = ACCESSING_BITS_0_31 ? 0 : 4;
++				u32 val = ACCESSING_BITS_0_31 ? u32(data) : u32(data >> 32);
++				logerror("TAP %s W %08x = %08x (mask %016x) %s pr=%08x\n", who, addr + lane, val, mem_mask, machine().describe_context(), u32((sub ? m_subcpu : m_maincpu)->state_int(SH4_PR)));
++			});
++		else if (kind == 'c')
++			space.install_write_tap(lo, hi, "tapc", [this, sub](offs_t offset, u64 &data, u64 mem_mask)
++			{
++				const u64 key = (u64((sub ? m_subcpu : m_maincpu)->pc()) << 32) | u32((sub ? m_subcpu : m_maincpu)->state_int(SH4_PR));
++				m_tapcount[key]++;
++			});
++		else if (kind == 'r')
++			space.install_read_tap(lo, hi, "tapr", [this, who, sub](offs_t offset, u64 &data, u64 mem_mask)
++			{
++				u32 addr = offset; int lane = ACCESSING_BITS_0_31 ? 0 : 4;
++				u32 val = ACCESSING_BITS_0_31 ? u32(data) : u32(data >> 32);
++				logerror("TAP %s R %08x = %08x (mask %016x) %s pr=%08x\n", who, addr + lane, val, mem_mask, machine().describe_context(), u32((sub ? m_subcpu : m_maincpu)->state_int(SH4_PR)));
++			});
++	}
++}
++
++void atvtrack_state::install_pc_hook()
++{
++	// TEMP debug aid: ATV_HOOK="8c008442,8c001e82" logs the sub CPU registers when it executes one of these PCs
++	const char *env = getenv("ATV_HOOK");
++	if (!env)
++		return;
++	std::vector<u32> pcs;
++	std::string spec(env);
++	size_t pos = 0;
++	while (pos < spec.size())
++	{
++		size_t end = spec.find(',', pos);
++		if (end == std::string::npos) end = spec.size();
++		pcs.push_back(strtoul(spec.substr(pos, end - pos).c_str(), nullptr, 16));
++		pos = end + 1;
++	}
++	g_sh4_debug_pc_hook = [this, pcs](const void *dev, offs_t curpc)
++	{
++		if (dev == static_cast<const device_t *>(m_maincpu.target()))
++		{
++			// main CPU: only a short log (ATV_HOOKMAIN=1)
++			if (getenv("ATV_HOOKMAIN"))
++				for (u32 p : pcs)
++					if (curpc == p)
++						logerror("HOOKM %08x fr4=%08x r4=%08x r5=%08x r6=%08x pr=%08x\n", curpc, u32(m_maincpu->state_int(SH4_FR4)), u32(m_maincpu->state_int(SH4_R4)), u32(m_maincpu->state_int(SH4_R5)), u32(m_maincpu->state_int(SH4_R6)), u32(m_maincpu->state_int(SH4_PR)));
++			return;
++		}
++		if (dev != static_cast<const device_t *>(m_subcpu.target()) || getenv("ATV_HOOKMAIN"))
++			return;
++		for (u32 p : pcs)
++			if (curpc == p)
++			{
++				auto R = [this](int r) { return u32(m_subcpu->state_int(r)); };
++				logerror("HOOK %08x r0=%08x r1=%08x r2=%08x r3=%08x r4=%08x r5=%08x r6=%08x r7=%08x r8=%08x r9=%08x r10=%08x r11=%08x r12=%08x r13=%08x r14=%08x r15=%08x pr=%08x\n", curpc,
++						R(SH4_R0), R(SH4_R1), R(SH4_R2), R(SH4_R3), R(SH4_R4), R(SH4_R5), R(SH4_R6), R(SH4_R7), R(SH4_R8), R(SH4_R9), R(SH4_R10), R(SH4_R11), R(SH4_R12), R(SH4_R13), R(SH4_R14), R(SH4_R15), R(SH4_PR));
++				if (getenv("ATV_HOOKMEM"))
++				{
++					// dump 16 words at r5 and at r14 (object pointers)
++					address_space &sp = m_subcpu->space(AS_PROGRAM);
++					for (int reg : { int(SH4_R5), int(SH4_R14) })
++					{
++						u32 a = R(reg) & 0x1fffffff;
++						if (a < 0x0c000000 || a >= 0x0d000000) continue;
++						logerror("HOOKMEM %08x [r%d=%08x]:", curpc, reg == int(SH4_R5) ? 5 : 14, a);
++						for (int i = 0; i < 16; i++) logerror(" %08x", sp.read_dword(a + i * 4));
++						logerror("\n");
++					}
++				}
++			}
++	};
++}
++
+ void atvtrack_state::machine_start()
+ {
++	install_pc_hook();
+ 	m_nandaddressstep = 0;
+ 	m_nandregion = memregion("nand");
++	install_debug_taps();
+ }
+ 
+ void atvtrack_state::machine_reset()
+@@ -1374,6 +1611,8 @@
+ 	save_pointer(NAME(m_prgflash), 0x400000);
+ 	save_item(NAME(m_flashstate));
+ 	m_volume_timer = timer_alloc(FUNC(smashdrv_state::default_volume), this);
++	install_pc_hook();
++	install_debug_taps();
+ }
+ 
+ TIMER_CALLBACK_MEMBER(smashdrv_state::default_volume)
+@@ -1524,6 +1763,16 @@
+ void atvtrack_state::atvtrack(machine_config &config)
+ {
+ 	/* basic machine hardware */
++	if (getenv("ATV_SUBFIRST")) // TEMP debug aid: makes the sub CPU the debugger's default CPU
++	{
++		SH7750S(config, m_subcpu, ATV_CPU_CLOCK);
++		m_subcpu->set_md(0, 1); m_subcpu->set_md(1, 1); m_subcpu->set_md(2, 0); m_subcpu->set_md(3, 0); m_subcpu->set_md(4, 0);
++		m_subcpu->set_md(5, 1); m_subcpu->set_md(6, 0); m_subcpu->set_md(7, 1); m_subcpu->set_md(8, 0);
++		m_subcpu->set_sh4_clock(ATV_CPU_CLOCK);
++		m_subcpu->set_addrmap(AS_PROGRAM, &atvtrack_state::atvtrack_sub_map);
++		m_subcpu->set_addrmap(AS_IO, &atvtrack_state::atvtrack_sub_port);
++		m_subcpu->set_force_no_drc(getenv("ATV_NODRC") != nullptr);
++	}
+ 	SH7750S(config, m_maincpu, ATV_CPU_CLOCK);
+ 	m_maincpu->set_md(0, 1);
+ 	m_maincpu->set_md(1, 1);
+@@ -1537,8 +1786,10 @@
+ 	m_maincpu->set_sh4_clock(ATV_CPU_CLOCK);
+ 	m_maincpu->set_addrmap(AS_PROGRAM, &atvtrack_state::atvtrack_main_map);
+ 	m_maincpu->set_addrmap(AS_IO, &atvtrack_state::atvtrack_main_port);
++	m_maincpu->set_force_no_drc(getenv("ATV_NODRC") != nullptr);
+ 
+-	SH7750S(config, m_subcpu, ATV_CPU_CLOCK);
++	if (!getenv("ATV_SUBFIRST"))
++		SH7750S(config, m_subcpu, ATV_CPU_CLOCK);
+ 	m_subcpu->set_md(0, 1);
+ 	m_subcpu->set_md(1, 1);
+ 	m_subcpu->set_md(2, 0);
+@@ -1551,6 +1802,7 @@
+ 	m_subcpu->set_sh4_clock(ATV_CPU_CLOCK);
+ 	m_subcpu->set_addrmap(AS_PROGRAM, &atvtrack_state::atvtrack_sub_map);
+ 	m_subcpu->set_addrmap(AS_IO, &atvtrack_state::atvtrack_sub_port);
++	m_subcpu->set_force_no_drc(getenv("ATV_NODRC") != nullptr);
+ 
+ 	/* video hardware */
+ 	screen_device &screen(SCREEN(config, "screen"));
+@@ -1699,11 +1951,11 @@
+ } // anonymous namespace
+ 
+ 
+-GAME( 2002, atvtrack,  0,        atvtrack, atvtrack, atvtrack_state, empty_init, ROT0, "Gaelco",           "ATV Track (set 1)", MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_CONTROLS )
+-GAME( 2002, atvtracka, atvtrack, atvtrack, atvtrack, atvtrack_state, empty_init, ROT0, "Gaelco",           "ATV Track (set 2)", MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_CONTROLS )
++GAME( 2002, atvtrack,  0,        atvtrack, atvtrack, atvtrack_state, empty_init, ROT0, "Gaelco",           "ATV Track (set 1)", MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
++GAME( 2002, atvtracka, atvtrack, atvtrack, atvtrack, atvtrack_state, empty_init, ROT0, "Gaelco",           "ATV Track (set 2)", MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
+ GAME( 2002, gfootbal,  0,        atvtrack, atvtrack, atvtrack_state, empty_init, ROT0, "Gaelco / Zigurat", "Gaelco Football",   MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
+ 
+ // almost identical PCB, FlashROM mapping and master registers addresses different
+-GAME( 2000, smashdrv,  0,        smashdrv, smashdrv, smashdrv_state, empty_init, ROT0, "Gaelco",                       "Smashing Drive (World)",           MACHINE_IMPERFECT_GRAPHICS )
+-GAME( 2000, smashdrvb, smashdrv, smashdrv, smashdrv, smashdrv_state, empty_init, ROT0, "Gaelco (Brent Sales license)", "Smashing Drive (UK)",              MACHINE_IMPERFECT_GRAPHICS )
+-GAME( 2000, smashdrvs, smashdrv, smashdrv, smashdrv, smashdrv_state, empty_init, ROT0, "Gaelco (Covielsa license)",    "Smashing Drive (Spain, Portugal)", MACHINE_IMPERFECT_GRAPHICS )
++GAME( 2000, smashdrv,  0,        smashdrv, smashdrv, smashdrv_state, empty_init, ROT0, "Gaelco",                       "Smashing Drive (World)",           MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
++GAME( 2000, smashdrvb, smashdrv, smashdrv, smashdrv, smashdrv_state, empty_init, ROT0, "Gaelco (Brent Sales license)", "Smashing Drive (UK)",              MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
++GAME( 2000, smashdrvs, smashdrv, smashdrv, smashdrv, smashdrv_state, empty_init, ROT0, "Gaelco (Covielsa license)",    "Smashing Drive (Spain, Portugal)", MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
+--- a/src/devices/cpu/sh/sh4.cpp
++++ b/src/devices/cpu/sh/sh4.cpp
+@@ -3064,10 +3064,13 @@ inline void sh34_base_device::execute_one_f000(const uint16_t opcode)
+ 	case 0x0e:  FMAC(opcode); break;
+ 	case 0x0f:  dbreak(opcode); break;
+ 	}
+ }
+ 
++// TEMP debug scaffolding (gaelco atvtrack investigation): per-instruction callback, null unless a driver sets it
++std::function<void(const void *, offs_t)> g_sh4_debug_pc_hook;
++
+ /* Execute cycles - returns number of cycles actually run */
+ void sh34_base_device::execute_run()
+ {
+ 	if (m_isdrc)
+ 	{
+@@ -3087,10 +3090,12 @@ void sh34_base_device::execute_run()
+ 
+ 	do
+ 	{
+ 		m_sh2_state->m_ppc = m_sh2_state->pc;
+ 		debugger_instruction_hook(m_sh2_state->pc);
++		if (g_sh4_debug_pc_hook)
++			g_sh4_debug_pc_hook(this, m_sh2_state->pc);
+ 
+ 		uint16_t opcode;
+ 
+ 		if (!m_sh4_mmu_enabled) opcode = m_pr16(m_sh2_state->pc & SH34_AM);
+ 		else opcode = read_word(m_sh2_state->pc); // should probably use a different function as this needs to go through the ITLB

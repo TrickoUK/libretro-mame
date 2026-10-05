@@ -238,6 +238,19 @@ builds get them straight from here.
   skipped.
 - After the check, steering is your input only: the in-game force feedback rumble doesn't move it.
 
+### Smashing Drive and ATV Track (Gaelco): now run
+- Smashing Drive (all three sets) boots, shows its attract mode in full 3D with textures, and
+  plays: steering, accelerator, brake, coin and start work, and there is sound. MAME's
+  driver had no video, inputs or sound at all.
+- The 3D is drawn by a new software renderer for the board's PowerVR "Neon 250" chip, using
+  several CPU threads. The game starts at volume 0 on a fresh machine, so it is set to 70 after
+  boot. The Volume Up/Down buttons still work.
+- ATV Track gets the same video, sound, coin and start. It still shows an "EMERGENCY STOP" overlay
+  and its test screen isn't right, so it stays marked imperfect. Gaelco Football still shows only a
+  black screen.
+- Known gaps: a few pale squares in menus, noise on motion-blur and loading screens, and fog and
+  some texture formats aren't drawn. Settings aren't saved between runs.
+
 ## 2026-10-04
 
 ### F-1 Super Battle: steering response and smoothing
