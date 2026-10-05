@@ -898,11 +898,22 @@ that it was an untracked root `arcade.flt`, with a separate copy in batocera).
 Batocera's `libretro-mame.mk` builds with this same file, so it's the only
 copy. Paths are relative to the repo root (genie joins them with `MAME_DIR`).
 
+**Video games only (2026-09-29)**: `fork-specific/tools/prune_arcade_filter.py` strips
+fruit machines, casino/video slots/poker/bingo/medal games, mahjong/hanafuda, quiz,
+pinball, mechanical games (cranes, pushers, redemption, `MACHINE_MECHANICAL`) and
+console/computer systems. It drops files whose games are all excluded, and adds
+`-name` lines for excluded games in files it keeps (they still compile but aren't in
+the driver list). It keeps any parent/BIOS a kept game needs. Wrongly caught video games
+go in its `KEEP_GAMES`, missed files in `EXCLUDE_FILES`/`EXCLUDE_DIRS`. The remaining
+romsets are listed in `fork-specific/arcade-games.txt`.
+
 **Regenerating** (needed after any upstream merge that renames, moves or splits
 `src/mame/` driver files. The 2026-09-26 mamedev sync needed it. Commit the
 regenerated file with the merge, because batocera builds use it too):
 ```sh
 python3 /var/home/bazzite/Projects/libretro/speed-mame/make_arcade_filter.py src/mame fork-specific/arcade.flt
+# then prune it to video games (also rewrites fork-specific/arcade-games.txt):
+python3 fork-specific/tools/prune_arcade_filter.py
 # then validate statically before trusting it:
 python3 scripts/build/makedep.py -r . filterproject -t mame_arcade -f fork-specific/arcade.flt src/mame/mame.lst > /dev/null
 # expect: exit 0, "N source file(s) found" on stderr, no errors.
