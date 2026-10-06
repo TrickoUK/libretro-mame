@@ -676,6 +676,7 @@ irem/m57.cpp
 irem/m58.cpp
 irem/m62.cpp
 irem/m62_bkungfu.cpp
+irem/m62_bkungfu_mcu.cpp  // [HELPER]
 irem/m62_v.cpp  // [HELPER]
 irem/m63.cpp
 irem/m72.cpp
