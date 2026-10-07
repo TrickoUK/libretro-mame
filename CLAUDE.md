@@ -38,7 +38,8 @@ mixed into history.
   `fork-specific/viper-investigation.md` Fix 5). `arcade.flt` unchanged. Checked with I/O CHECK
   (gticlub2, xtrial), frame-exact Voodoo snapshots (identical on 7 games) and smoke tests
   (`fork-specific/out/sync1243`).
-- Conflicts to expect again: `src/devices/cpu/powerpc` (our ICFI snapshots,
+- Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
+  compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
   handler, which we drop), `src/devices/video/psx.{cpp,h}` (GPU HLE path),
   `src/devices/cpu/dspp` (our idle-loop skip), `src/mame/konami/viper.cpp` (analog

@@ -245,3 +245,12 @@ builds get them straight from here.
   Blasters, from the shared helper (Machine Configuration menu). Default is arcade behaviour.
 - With Squared, half stick turns the wheel a quarter of the way instead of half, and full stick
   still reaches full lock. Heavy smoothing takes about 1 s from full left to full right.
+
+## 2026-10-07
+
+### San Francisco Rush: no freeze in attract mode
+- After the mame0289-1364 upstream sync, sfrush froze about 50 seconds after boot (picture stuck on
+  the "Fast Times" table, music still playing). The new MIPS CPU code started the CPU's internal
+  timer when the game set its clock counter, and the game hangs on that timer's interrupt.
+- The timer now only starts when a game sets it explicitly, as before the sync. sfrush runs normally;
+  gauntleg, calspeed and sfrushrk checked unaffected.
