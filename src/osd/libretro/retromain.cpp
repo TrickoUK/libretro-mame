@@ -377,6 +377,10 @@ void retro_osd_interface::init(running_machine &machine)
 
 	osd_common_t::init_subsystems();
 
+	// a new machine (also after a hard reset) loads its cfg, then needs the
+	// steering core options applied on top
+	steering_options_pending = true;
+
 	if (options().oslog())
 	{
 		using namespace std::placeholders;

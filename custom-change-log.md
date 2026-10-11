@@ -254,3 +254,13 @@ builds get them straight from here.
   timer when the game set its clock counter, and the game hangs on that timer's interrupt.
 - The timer now only starts when a game sets it explicitly, as before the sync. sfrush runs normally;
   gauntleg, calspeed and sfrushrk checked unaffected.
+
+## 2026-10-11
+
+### Wheel games: steering settings as core options (and Batocera ES)
+- The gamepad steering settings (**Steering Response**, **Steering Smoothing**, and Pole Position's
+  **Steering Input** / **Stick Steering Speed**) are now also RetroArch core options in the Input
+  category, so Batocera can show them in ES (Controls > Driving Games) per system or per game.
+- The default, **Game setting**, keeps what's set in MAME's Machine Configuration menu. Any other
+  value replaces it when the game starts or the option changes. Games without these settings are
+  unaffected.

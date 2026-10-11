@@ -86,6 +86,7 @@ int psx_gpu_filter_exclude_sprite_mode = 2;
 int psx_gpu_filter_exclude_2d_polygon_mode = 2;
 int voodoo_tex_supersample_max = 0;
 bool voodoo_edge_aa_enable = false;
+bool steering_options_pending = false;
 
 // emu flags
 static bool arcade = false;

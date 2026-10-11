@@ -152,6 +152,11 @@ extern int voodoo_tex_supersample_max;
 // mame_voodoo_edge_aa core option: smooth 3D geometry outlines in the Voodoo
 // renderer (see osdepend.h).
 extern bool voodoo_edge_aa_enable;
+// mame_steering_response/_smoothing/_input, mame_stick_steering_speed core
+// options: override the fork's gamepad steering Machine Configuration
+// settings (see apply_steering_options() in libretro.cpp). Set when a machine
+// starts or the options change; applied once the machine's cfg has loaded.
+extern bool steering_options_pending;
 
 extern int fb_width;
 extern int fb_height;

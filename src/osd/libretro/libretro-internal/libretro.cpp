@@ -380,9 +380,81 @@ static void update_runtime_variables(bool startup)
    }
 }
 
+// Core options that override the gamepad steering settings the fork added as
+// Machine Configuration settings (src/mame/shared/gamepad_steering.h,
+// namco/polepos.cpp), so frontends like Batocera's ES can set them. Each
+// option value after "game" picks the field's setting at that position, in
+// the order the driver declares them. "game" leaves the field alone (cfg/menu).
+struct steering_option
+{
+   const char *key;
+   const char *field_name;
+   const char *values[9];
+   int setting; // -1 = game setting
+};
+
+static steering_option steering_options[] =
+{
+   { CORE_NAME "_steering_response",    "Steering Response",    { "linear", "mild", "squared", "cubic", NULL }, -1 },
+   { CORE_NAME "_steering_smoothing",   "Steering Smoothing",   { "off", "light", "medium", "medium+", "firm", "firm+", "heavy", NULL }, -1 },
+   { CORE_NAME "_steering_input",       "Steering Input",       { "wheel", "stick", NULL }, -1 },
+   { CORE_NAME "_stick_steering_speed", "Stick Steering Speed", { "slow", "medium", "fast", "very fast", NULL }, -1 },
+};
+
+static void check_steering_options(void)
+{
+   for (steering_option &opt : steering_options)
+   {
+      struct retro_variable var = { opt.key, NULL };
+      int setting = -1;
+      if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      {
+         for (int i = 0; opt.values[i]; i++)
+            if (!strcmp(var.value, opt.values[i]))
+               setting = i;
+      }
+      if (setting != opt.setting)
+      {
+         opt.setting = setting;
+         steering_options_pending = true;
+      }
+   }
+}
+
+// Runs once the machine is running, i.e. after its cfg has been loaded, so the
+// core options win over the saved Machine Configuration.
+static void apply_steering_options(running_machine &machine)
+{
+   for (const steering_option &opt : steering_options)
+   {
+      if (opt.setting < 0)
+         continue;
+
+      for (auto &port : machine.ioport().ports())
+      {
+         for (ioport_field &field : port.second->fields())
+         {
+            if (field.type() != IPT_CONFIG || !field.specific_name() || strcmp(field.specific_name(), opt.field_name))
+               continue;
+            if (size_t(opt.setting) >= field.settings().size())
+               continue;
+
+            ioport_field::user_settings settings;
+            field.get_user_settings(settings);
+            settings.value = field.settings()[opt.setting].value();
+            field.set_user_settings(settings);
+            if (log_cb)
+               log_cb(RETRO_LOG_INFO, "[MAME] %s: %s = %s\n", port.first.c_str(), opt.field_name, field.settings()[opt.setting].name());
+         }
+      }
+   }
+}
+
 static void check_variables(void)
 {
    struct retro_variable var = {0};
+
+   check_steering_options();
 
    var.key   = CORE_NAME "_joystick_deadzone";
    var.value = NULL;
@@ -1023,6 +1095,16 @@ void retro_run(void)
    if (!retro_pause)
       retro_main_loop();
    RLOOP = 1;
+
+   if (steering_options_pending && mame_machine_manager::instance() && mame_machine_manager::instance()->machine())
+   {
+      running_machine &machine = *mame_machine_manager::instance()->machine();
+      if (machine.phase() == machine_phase::RUNNING)
+      {
+         steering_options_pending = false;
+         apply_steering_options(machine);
+      }
+   }
 
    /* Automatic loading fast-forward */
    if (autoloadfastforward)

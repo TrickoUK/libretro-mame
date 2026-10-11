@@ -448,6 +448,75 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "free"
    },
    {
+      CORE_NAME "_steering_response",
+      "Steering Response (Wheel Games)",
+      NULL,
+      "Overrides the 'Steering Response' Machine Configuration setting in wheel games with gamepad steering assists (GTI Club 2, Thrill Drive 2, Pole Position, Final Lap series, Road Blasters, Speed Racer, F-1 Super Battle and others). Curves shrink small stick movements around centre while still reaching full lock. 'Game setting' keeps whatever is set in MAME's menu. Other games are unaffected.",
+      NULL,
+      "input",
+      {
+         { "game",    "Game setting" },
+         { "linear",  "Linear (arcade)" },
+         { "mild",    "Mild curve" },
+         { "squared", "Squared curve" },
+         { "cubic",   "Cubic curve" },
+         { NULL, NULL },
+      },
+      "game"
+   },
+   {
+      CORE_NAME "_steering_smoothing",
+      "Steering Smoothing (Wheel Games)",
+      NULL,
+      "Overrides the 'Steering Smoothing' Machine Configuration setting in wheel games with gamepad steering assists. Limits how fast the wheel can turn, given as the time from full left to full right. 'Game setting' keeps whatever is set in MAME's menu. Pole Position has no smoothing setting. Other games are unaffected.",
+      NULL,
+      "input",
+      {
+         { "game",    "Game setting" },
+         { "off",     "Off (arcade)" },
+         { "light",   "Light (0.25 s lock to lock)" },
+         { "medium",  "Medium (0.5 s)" },
+         { "medium+", "Medium+ (0.625 s)" },
+         { "firm",    "Firm (0.75 s)" },
+         { "firm+",   "Firm+ (0.875 s)" },
+         { "heavy",   "Heavy (1 s)" },
+         { NULL, NULL },
+      },
+      "game"
+   },
+   {
+      CORE_NAME "_steering_input",
+      "Steering Input (Pole Position)",
+      NULL,
+      "Overrides the 'Steering Input' Machine Configuration setting in Pole Position / Pole Position II. The arcade wheel spins freely; 'Gamepad stick' lets the stick set how fast it turns instead. 'Game setting' keeps whatever is set in MAME's menu.",
+      NULL,
+      "input",
+      {
+         { "game",  "Game setting" },
+         { "wheel", "Wheel / spinner (arcade)" },
+         { "stick", "Gamepad stick" },
+         { NULL, NULL },
+      },
+      "game"
+   },
+   {
+      CORE_NAME "_stick_steering_speed",
+      "Stick Steering Speed (Pole Position)",
+      NULL,
+      "Overrides the 'Stick Steering Speed' Machine Configuration setting in Pole Position / Pole Position II: how fast the wheel turns at full stick when Steering Input is 'Gamepad stick'. 'Game setting' keeps whatever is set in MAME's menu.",
+      NULL,
+      "input",
+      {
+         { "game",      "Game setting" },
+         { "slow",      "Slow" },
+         { "medium",    "Medium" },
+         { "fast",      "Fast" },
+         { "very fast", "Very fast" },
+         { NULL, NULL },
+      },
+      "game"
+   },
+   {
       CORE_NAME "_rotation_mode",
       "Screen Rotation Mode",
       NULL,
