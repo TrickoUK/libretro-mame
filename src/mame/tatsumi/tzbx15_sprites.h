@@ -12,6 +12,7 @@ class tzbx15_device : public device_t, public device_gfx_interface
 {
 public:
 	void set_sprite_palette_base(int sprite_palette_base) { m_sprite_palette_base = sprite_palette_base; }
+	void set_rotation_enabled(bool enabled) { m_rotation_enabled = enabled; }
 	template <typename T> void set_basepalette(T &&tag) { m_palette_base.set_tag(std::forward<T>(tag)); }
 	template <typename T> void set_spriteram(T &&tag) { m_spriteram.set_tag(std::forward<T>(tag)); }
 
@@ -31,14 +32,8 @@ private:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
 
-	void mycopyrozbitmap_core(bitmap_ind8 &bitmap, const bitmap_rgb32 &srcbitmap,
-			int dstx, int dsty, int srcwidth, int srcheight, int incxx, int incxy, int incyx, int incyy,
-			const rectangle &clip, int transparent_color);
-	void mycopyrozbitmap_core(bitmap_rgb32 &bitmap, const bitmap_rgb32 &srcbitmap,
-			int dstx, int dsty, int srcwidth, int srcheight, int incxx, int incxy, int incyx, int incyy,
-			const rectangle &clip, int transparent_color);
-
 	template<class BitmapClass> void draw_sprites_main(BitmapClass &bitmap, const rectangle &cliprect, int write_priority_only, int rambank);
+	template<class BitmapClass> void draw_rotated(BitmapClass &bitmap, const rectangle &cliprect, int x, int y, int rotate, bool flip_y, int write_priority_only);
 	template<class BitmapClass> void roundupt_drawgfxzoomrotate(
 			BitmapClass &dest_bmp, const rectangle &clip,
 			gfx_element *gfx, uint32_t code, uint32_t color,
@@ -55,7 +50,12 @@ private:
 	required_region_ptr<uint8_t> m_sprites_h_rom;
 
 	std::unique_ptr<uint8_t[]> m_shadow_pen_array;
-	bitmap_rgb32 m_temp_bitmap;
+	// scratch buffer for rotated sprites, holds CLUT index + 1 (0 = transparent)
+	static constexpr int ROT_ORIGIN = 512;
+	bitmap_ind16 m_rot_bitmap;
+	static constexpr rectangle EMPTY_BOUNDS{INT32_MAX, INT32_MIN, INT32_MAX, INT32_MIN};
+	rectangle m_rot_bounds;
+	bool m_rotation_enabled = false;
 
 	// config
 	int m_rom_clut_size;
