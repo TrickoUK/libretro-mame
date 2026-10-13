@@ -11,7 +11,7 @@ ENVS=(); for kv in "$@"; do ENVS+=(--env "$kv"); done
 mkdir -p $SNAPDIR; BEFORE=$(ls $SNAPDIR)   # never touch snapshots that were already there
 FPS=58
 DUR=$(( LAST / FPS + 15 ))
-L="fs={} for f=$FIRST,$LAST,$STEP do fs[f]=true end sub=emu.add_machine_frame_notifier(function() local n=manager.machine.screens[':screen']:frame_number() if fs[n] then manager.machine.video:snapshot() end end)"
+L="fs={} for f=$FIRST,$LAST,$STEP do fs[f]=true end sub=emu.add_machine_frame_notifier(function() local scr=nil for _,s in pairs(manager.machine.screens) do scr=s break end local n=scr:frame_number() if fs[n] then manager.machine.video:snapshot() end end)"
 python3 $TOOLS/profile_run.py $ROM $TAG --warmup $DUR --duration 0 --shot-every $DUR --no-perf "${ENVS[@]}" --lua "3:$L" >/dev/null 2>&1
 mkdir -p $OUT/$TAG/snaps; rm -f $OUT/$TAG/snaps/*.png
 for f in $(ls $SNAPDIR); do
