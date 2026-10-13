@@ -878,7 +878,6 @@ bballs
 bballsa
 bbbxing
 bbchall
-bbddz
 bbh
 bbh2sp
 bbh2spa
@@ -2341,6 +2340,7 @@ dbz2
 dbz2bl
 dbza
 dbzbgck
+dbzbgck10
 dbzvrvs
 dcclub
 dcclubfd
@@ -2512,7 +2512,6 @@ dduxd
 dduxj
 dduxjd
 ddz
-ddz2
 deadang
 deadconx
 deadconxj
@@ -2687,7 +2686,6 @@ djboyj
 djboyja
 djboyu
 djboyua
-djddz
 djgirl
 dkbanana
 dkbanans
@@ -3633,6 +3631,7 @@ froggers
 froggers1
 froggers2
 froggers3
+froggers4
 froggert
 froggerv
 froggervd
@@ -5311,7 +5310,6 @@ jurassic99
 jxry
 jyangoku
 jzth
-jzuanshi
 kabukikl
 kabukiz
 kabukizj
@@ -5484,6 +5482,7 @@ knckheadj
 knckheadjp
 kncljoe
 kncljoea
+kncljoeb
 kngtmare
 knightar
 knightb
@@ -6561,6 +6560,7 @@ monsterb
 monsterb2
 monsterz
 monsterza
+monte
 montecar
 monymony
 monymony2
@@ -7064,6 +7064,7 @@ newfanta
 newpuc2
 newpuc2b
 newpuckx
+newpuckxb
 news
 newsa
 newsin7
@@ -7900,7 +7901,6 @@ plgirls
 plgirls2
 plgirls2b
 plgirls2j
-pljh
 plotting
 plottinga
 plottingb
@@ -7919,6 +7919,7 @@ plycntrchtrk
 plycntre3
 plygonet
 pmonster
+pmsgk
 pnchmn
 pnchmn2
 pnchmna
@@ -9532,6 +9533,7 @@ shaktam
 shaktamb
 shaktmsp
 shambros
+shamisen
 shangha2
 shangha2a
 shangha3
@@ -9650,7 +9652,6 @@ shtngmst
 shtrider
 shtridera
 shtriderb
-shtstar
 shtzone
 shuffle
 shufshot
@@ -12096,6 +12097,7 @@ weddingr
 welltris
 welltrisj
 westdrmg
+westerns
 westgun2
 weststry
 weststrya
@@ -12405,7 +12407,6 @@ xtrial
 xtrmhnt2
 xtrmhunt
 xxmissio
-xy168
 xybots
 xybots0
 xybots1

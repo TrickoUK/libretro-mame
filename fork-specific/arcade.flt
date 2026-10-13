@@ -633,6 +633,7 @@ ice/frenzyxprss.cpp
 ice/lethalj.cpp
 ice/skimaxx.cpp
 ice/vp101.cpp
+ice/vp50.cpp
 igs/igs011.cpp
 igs/igs011_video.cpp  // [HELPER]
 igs/igs012.cpp  // [HELPER]
@@ -1464,7 +1465,7 @@ sealy/sealy_8031.cpp
 sealy/sealy_eagle.cpp
 sealy/sealy_fr.cpp
 sealy/sealy_m16c.cpp
-sealy/sealy_z80.cpp
+sealy/sealy_z80_esam.cpp  // [HELPER]
 sega/315-5838_317-0229_comp.cpp  // [HELPER]
 sega/315-5881_crypt.cpp  // [HELPER]
 sega/315-6154.cpp  // [HELPER]
@@ -1472,6 +1473,7 @@ sega/315_5195.cpp  // [HELPER]
 sega/315_5296.cpp  // [HELPER]
 sega/315_5338a.cpp  // [HELPER]
 sega/315_5649.cpp  // [HELPER]
+sega/315_6289.cpp  // [HELPER]
 sega/9h0-0008_card.cpp  // [HELPER]
 sega/9h0-0008_card_reader.cpp  // [HELPER]
 sega/9h0-0008_iox.cpp  // [HELPER]
@@ -2904,6 +2906,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -luckyclo
 -luckyclrs
 -luckyrlt
+-luckyrlta
 -lunapark
 -lunaparkb
 -lunaparkc
@@ -3406,6 +3409,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -royaljp
 -royalpk2
 -rselect
+-rulamiky
 -rushrst
 -ryorioh
 -ryouran

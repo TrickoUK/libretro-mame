@@ -152,6 +152,12 @@ code and wheel ports, with two fork changes:
   8-bit path, which was already wrong before the merge. Checked in xtrial's I/O CHECK: MIN at rest,
   FFFF at full. code1d's boot "DEVICE ERROR: STEERING WHEEL" is a separate problem, see Fix 9.
 
+**Upstream pedal fix (mamedev `e02f3bc0029`, merged 2026-10-13).** Upstream's pedals and
+handbrake are now 9-bit signed ports (`PORT_MINMAX(0x101,0x0ff)`, PORT_REVERSE) on thrild2,
+gticlub2, xtrial and code1d, so they span the full 0x001-0x1ff range too: +255 at rest, -255 fully
+pressed, the same diff values as our 8-bit path. The merge takes upstream's ports and drops the
+fork's 8-bit pedal branch (`m_analog_8bit`). Only the gamepad steering helper stays on top.
+
 ## Fix 6: Thrill Drive 2 steering pinned full right
 
 thrild2's accelerator and brake worked after Fix 5, but its steering sat at full right lock. Its

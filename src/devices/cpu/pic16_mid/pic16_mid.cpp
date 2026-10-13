@@ -21,7 +21,7 @@
 ****************************************************************************/
 
 #include "emu.h"
-#include "pic16x8x.h"
+#include "pic16_mid.h"
 #include "16x8xdsm.h"
 
 
@@ -31,7 +31,7 @@
 
 // CONFIG register
 constexpr u8 WDTE_FLAG = 0x04; // watchdog enable
-constexpr u8 FOSC_FLAG = 0x03; // oscillator source select
+constexpr u8 FOSC_REG  = 0x03; // oscillator source select
 
 // STATUS register
 constexpr u8 IRP_FLAG = 0x80; // indirect register bank select
@@ -85,66 +85,113 @@ constexpr u16 PC_MASK = 0x1fff;
 //  TYPE DEFINITIONS
 //**************************************************************************
 
+DEFINE_DEVICE_TYPE(PIC16C620,  pic16c620_device,  "pic16c620",  "Microchip PIC16C620")
+DEFINE_DEVICE_TYPE(PIC16C620A, pic16c620a_device, "pic16c620a", "Microchip PIC16C620A")
+DEFINE_DEVICE_TYPE(PIC16C621,  pic16c621_device,  "pic16c621",  "Microchip PIC16C621")
+DEFINE_DEVICE_TYPE(PIC16C621A, pic16c621a_device, "pic16c621a", "Microchip PIC16C621A")
+DEFINE_DEVICE_TYPE(PIC16C622,  pic16c622_device,  "pic16c622",  "Microchip PIC16C622")
+DEFINE_DEVICE_TYPE(PIC16C622A, pic16c622a_device, "pic16c622a", "Microchip PIC16C622A")
 DEFINE_DEVICE_TYPE(PIC16CR83,  pic16cr83_device,  "pic16cr83",  "Microchip PIC16CR83")
 DEFINE_DEVICE_TYPE(PIC16CR84,  pic16cr84_device,  "pic16cr84",  "Microchip PIC16CR84")
+DEFINE_DEVICE_TYPE(PIC16F628A, pic16f628a_device, "pic16f628a", "Microchip PIC16F628A")
+DEFINE_DEVICE_TYPE(PIC16F648A, pic16f648a_device, "pic16f648a", "Microchip PIC16F648A")
 DEFINE_DEVICE_TYPE(PIC16F83,   pic16f83_device,   "pic16f83",   "Microchip PIC16F83")
 DEFINE_DEVICE_TYPE(PIC16F84,   pic16f84_device,   "pic16f84",   "Microchip PIC16F84")
 DEFINE_DEVICE_TYPE(PIC16F84A,  pic16f84a_device,  "pic16f84a",  "Microchip PIC16F84A")
-DEFINE_DEVICE_TYPE(PIC16F628A, pic16f628a_device, "pic16f628a", "Microchip PIC16F628A")
 
-pic16x8x_device::pic16x8x_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, int program_width, address_map_constructor program_map, address_map_constructor data_map, u16 eeprom_size, u8 status_mask, u8 porta_mask)
+pic16_mid_device::pic16_mid_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, int program_width, address_map_constructor data_map, u8 status_mask, u8 porta_mask)
 	: cpu_device(mconfig, type, tag, owner, clock)
-	, device_nvram_interface(mconfig, *this)
-	, m_program_width(program_width)
-	, m_program_config("program", ENDIANNESS_LITTLE, 16, program_width, -1, program_map)
-	, m_data_config("data", ENDIANNESS_LITTLE, 8, 9, 0, data_map)
 	, m_region(*this, DEVICE_SELF)
+	, m_program_width(program_width)
+	, m_program_config("program", ENDIANNESS_LITTLE, 16, program_width, -1, rom_map(program_width))
+	, m_data_config("data", ENDIANNESS_LITTLE, 8, 9, 0, data_map)
 	, m_CONFIG(0x3fff)
 	, m_porta_mask(porta_mask)
 	, m_status_mask(status_mask)
-	, m_internal_eeprom_size(eeprom_size)
 	, m_read_port(*this, 0)
 	, m_write_port(*this)
 {
 }
 
-pic16x83_device::pic16x83_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
-	: pic16x8x_device(mconfig, type, tag, owner, clock, 9, address_map_constructor(FUNC(pic16x8x_device::rom_9), this), address_map_constructor(FUNC(pic16x8x_device::ram_6), this), 64, 0x3f, 0x1f)
+pic16c62x_device::pic16c62x_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, int program_width, address_map_constructor data_map)
+	: pic16_mid_device(mconfig, type, tag, owner, clock, program_width, data_map, 0x3f, 0x1f)
 {
 }
 
-pic16x84_device::pic16x84_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
-	: pic16x8x_device(mconfig, type, tag, owner, clock, 10, address_map_constructor(FUNC(pic16x8x_device::rom_10), this), address_map_constructor(FUNC(pic16x8x_device::ram_7), this), 64, 0x3f, 0x1f)
+pic16c620_device::pic16c620_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: pic16c62x_device(mconfig, PIC16C620, tag, owner, clock, 9, address_map_constructor(FUNC(pic16c620_device::data_map), this))
+{
+}
+
+pic16c620a_device::pic16c620a_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: pic16c62x_device(mconfig, PIC16C620A, tag, owner, clock, 9, address_map_constructor(FUNC(pic16c620a_device::data_map), this))
+{
+}
+
+pic16c621_device::pic16c621_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: pic16c62x_device(mconfig, PIC16C621, tag, owner, clock, 10, address_map_constructor(FUNC(pic16c621_device::data_map), this))
+{
+}
+
+pic16c621a_device::pic16c621a_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: pic16c62x_device(mconfig, PIC16C621A, tag, owner, clock, 10, address_map_constructor(FUNC(pic16c621a_device::data_map), this))
+{
+}
+
+pic16c622_device::pic16c622_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: pic16c62x_device(mconfig, PIC16C622, tag, owner, clock, 11, address_map_constructor(FUNC(pic16c622_device::data_map), this))
+{
+}
+
+pic16c622a_device::pic16c622a_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: pic16c62x_device(mconfig, PIC16C622A, tag, owner, clock, 11, address_map_constructor(FUNC(pic16c622a_device::data_map), this))
+{
+}
+
+pic16_mid_eeprom_device::pic16_mid_eeprom_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, int program_width, address_map_constructor data_map, u16 eeprom_size, u8 status_mask, u8 porta_mask)
+	: pic16_mid_device(mconfig, type, tag, owner, clock, program_width, data_map, status_mask, porta_mask)
+	, device_nvram_interface(mconfig, *this)
+	, m_internal_eeprom_size(eeprom_size)
 {
 }
 
 pic16cr83_device::pic16cr83_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: pic16x83_device(mconfig, PIC16CR83, tag, owner, clock)
+	: pic16_mid_eeprom_device(mconfig, PIC16CR83, tag, owner, clock, 9, address_map_constructor(FUNC(pic16cr83_device::data_map), this), 64, 0x3f, 0x1f)
 {
 }
 
 pic16cr84_device::pic16cr84_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: pic16x84_device(mconfig, PIC16CR84, tag, owner, clock)
+	: pic16_mid_eeprom_device(mconfig, PIC16CR84, tag, owner, clock, 10, address_map_constructor(FUNC(pic16cr84_device::data_map), this), 64, 0x3f, 0x1f)
 {
 }
 
-pic16f83_device::pic16f83_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: pic16x83_device(mconfig, PIC16F83, tag, owner, clock)
-{
-}
-
-pic16f84_device::pic16f84_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: pic16x84_device(mconfig, PIC16F84, tag, owner, clock)
-{
-}
-
-pic16f84a_device::pic16f84a_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: pic16x84_device(mconfig, PIC16F84A, tag, owner, clock)
+pic16f6xxa_device::pic16f6xxa_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, int program_width, address_map_constructor data_map, u16 eeprom_size)
+	: pic16_mid_eeprom_device(mconfig, type, tag, owner, clock, program_width, data_map, eeprom_size, 0xff, 0xff)
 {
 }
 
 pic16f628a_device::pic16f628a_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: pic16x8x_device(mconfig, PIC16F628A, tag, owner, clock, 11, address_map_constructor(FUNC(pic16x8x_device::rom_11), this), address_map_constructor(FUNC(pic16f628a_device::data_map), this), 128, 0xff, 0xff)
+	: pic16f6xxa_device(mconfig, PIC16F628A, tag, owner, clock, 11, address_map_constructor(FUNC(pic16f628a_device::data_map), this), 128)
+{
+}
+
+pic16f648a_device::pic16f648a_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: pic16f6xxa_device(mconfig, PIC16F648A, tag, owner, clock, 12, address_map_constructor(FUNC(pic16f648a_device::data_map), this), 256)
+{
+}
+
+pic16f83_device::pic16f83_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: pic16_mid_eeprom_device(mconfig, PIC16F83, tag, owner, clock, 9, address_map_constructor(FUNC(pic16f83_device::data_map), this), 64, 0x3f, 0x1f)
+{
+}
+
+pic16f84_device::pic16f84_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: pic16_mid_eeprom_device(mconfig, PIC16F84, tag, owner, clock, 10, address_map_constructor(FUNC(pic16f84_device::data_map), this), 64, 0x3f, 0x1f)
+{
+}
+
+pic16f84a_device::pic16f84a_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: pic16_mid_eeprom_device(mconfig, PIC16F84A, tag, owner, clock, 10, address_map_constructor(FUNC(pic16f84a_device::data_map), this), 64, 0x3f, 0x1f)
 {
 }
 
@@ -153,68 +200,128 @@ pic16f628a_device::pic16f628a_device(const machine_config &mconfig, const char *
 //  INTERNAL MEMORY MAPS
 //**************************************************************************
 
-void pic16x8x_device::rom_9(address_map &map)
+address_map_constructor pic16_mid_device::rom_map(int program_width)
+{
+	switch (program_width)
+	{
+	case 9:  return address_map_constructor(FUNC(pic16_mid_device::rom_9), this);
+	case 10: return address_map_constructor(FUNC(pic16_mid_device::rom_10), this);
+	case 11: return address_map_constructor(FUNC(pic16_mid_device::rom_11), this);
+	case 12: return address_map_constructor(FUNC(pic16_mid_device::rom_12), this);
+	default: throw emu_fatalerror("Invalid PIC16 program width %d", program_width);
+	}
+}
+
+void pic16_mid_device::rom_9(address_map &map)
 {
 	map(0x0000, 0x01ff).rom();
 }
 
-void pic16x8x_device::rom_10(address_map &map)
+void pic16_mid_device::rom_10(address_map &map)
 {
 	map(0x0000, 0x03ff).rom();
 }
 
-void pic16x8x_device::rom_11(address_map &map)
+void pic16_mid_device::rom_11(address_map &map)
 {
 	map(0x0000, 0x07ff).rom();
 }
 
-void pic16x8x_device::rom_12(address_map &map)
+void pic16_mid_device::rom_12(address_map &map)
 {
 	map(0x0000, 0x0fff).rom();
 }
 
-void pic16x8x_device::core_regs(address_map &map, u8 mirror)
+void pic16_mid_device::base_map(address_map &map, u8 mirror)
 {
 	map(0x00, 0x00).noprw().mirror(mirror); // "indirect addr." - not a physical register
-	map(0x01, 0x01).rw(FUNC(pic16x8x_device::tmr0_r), FUNC(pic16x8x_device::tmr0_w));
-	map(0x02, 0x02).rw(FUNC(pic16x8x_device::pcl_r), FUNC(pic16x8x_device::pcl_w)).mirror(mirror);
-	map(0x03, 0x03).rw(FUNC(pic16x8x_device::status_r), FUNC(pic16x8x_device::status_w)).mirror(mirror);
-	map(0x04, 0x04).rw(FUNC(pic16x8x_device::fsr_r), FUNC(pic16x8x_device::fsr_w)).mirror(mirror);
-	map(0x05, 0x05).rw(FUNC(pic16x8x_device::porta_r), FUNC(pic16x8x_device::porta_w));
-	map(0x06, 0x06).rw(FUNC(pic16x8x_device::portb_r), FUNC(pic16x8x_device::portb_w));
+	map(0x01, 0x01).rw(FUNC(pic16_mid_device::tmr0_r), FUNC(pic16_mid_device::tmr0_w));
+	map(0x02, 0x02).rw(FUNC(pic16_mid_device::pcl_r), FUNC(pic16_mid_device::pcl_w)).mirror(mirror);
+	map(0x03, 0x03).rw(FUNC(pic16_mid_device::status_r), FUNC(pic16_mid_device::status_w)).mirror(mirror);
+	map(0x04, 0x04).rw(FUNC(pic16_mid_device::fsr_r), FUNC(pic16_mid_device::fsr_w)).mirror(mirror);
+	map(0x05, 0x05).rw(FUNC(pic16_mid_device::porta_r), FUNC(pic16_mid_device::porta_w));
+	map(0x06, 0x06).rw(FUNC(pic16_mid_device::portb_r), FUNC(pic16_mid_device::portb_w));
 	map(0x07, 0x07).noprw().mirror(mirror); // not a physical register, returns 0
-	map(0x08, 0x08).rw(FUNC(pic16x8x_device::eedata_r), FUNC(pic16x8x_device::eedata_w));
-	map(0x09, 0x09).rw(FUNC(pic16x8x_device::eeadr_r), FUNC(pic16x8x_device::eeadr_w));
-	map(0x0a, 0x0a).rw(FUNC(pic16x8x_device::pclath_r), FUNC(pic16x8x_device::pclath_w)).mirror(mirror);
-	map(0x0b, 0x0b).rw(FUNC(pic16x8x_device::intcon_r), FUNC(pic16x8x_device::intcon_w)).mirror(mirror);
-	map(0x81, 0x81).rw(FUNC(pic16x8x_device::option_r), FUNC(pic16x8x_device::option_w));
-	map(0x85, 0x85).rw(FUNC(pic16x8x_device::trisa_r), FUNC(pic16x8x_device::trisa_w));
-	map(0x86, 0x86).rw(FUNC(pic16x8x_device::trisb_r), FUNC(pic16x8x_device::trisb_w));
-	map(0x88, 0x88).rw(FUNC(pic16x8x_device::eecon1_r), FUNC(pic16x8x_device::eecon1_w));
-	map(0x89, 0x89).rw(FUNC(pic16x8x_device::eecon2_r), FUNC(pic16x8x_device::eecon2_w));
+	map(0x0a, 0x0a).rw(FUNC(pic16_mid_device::pclath_r), FUNC(pic16_mid_device::pclath_w)).mirror(mirror);
+	map(0x0b, 0x0b).rw(FUNC(pic16_mid_device::intcon_r), FUNC(pic16_mid_device::intcon_w)).mirror(mirror);
+	map(0x81, 0x81).rw(FUNC(pic16_mid_device::option_r), FUNC(pic16_mid_device::option_w));
+	map(0x85, 0x85).rw(FUNC(pic16_mid_device::trisa_r), FUNC(pic16_mid_device::trisa_w));
+	map(0x86, 0x86).rw(FUNC(pic16_mid_device::trisb_r), FUNC(pic16_mid_device::trisb_w));
 }
 
-void pic16x8x_device::ram_6(address_map &map)
+void pic16c62x_device::base_map(address_map &map)
 {
-	// 0x00 - 0x0b SFR's Bank 0
-	// 0x0c - 0x2f GPR's
-	// 0x80 - 0x8b SFR's Bank 1
-	// 0x8c - 0xaf GPR Mirrored to 0x0c - 0x2f
-	core_regs(map, 0x80);
+	pic16_mid_device::base_map(map, 0x80);
+	map(0x0c, 0x0c).rw(FUNC(pic16c62x_device::pir1_r), FUNC(pic16c62x_device::pir1_w));
+	map(0x1f, 0x1f).rw(FUNC(pic16c62x_device::cmcon_r), FUNC(pic16c62x_device::cmcon_w));
+	map(0x8c, 0x8c).rw(FUNC(pic16c62x_device::pie1_r), FUNC(pic16c62x_device::pie1_w));
+	map(0x8e, 0x8e).rw(FUNC(pic16c62x_device::pcon_r), FUNC(pic16c62x_device::pcon_w));
+	map(0x9f, 0x9f).rw(FUNC(pic16c62x_device::vrcon_r), FUNC(pic16c62x_device::vrcon_w));
+}
+
+void pic16c620_device::data_map(address_map &map)
+{
+	pic16c62x_device::base_map(map);
+	map(0x20, 0x6f).ram();
+}
+
+void pic16c620a_device::data_map(address_map &map)
+{
+	pic16c62x_device::base_map(map);
+	map(0x20, 0x6f).ram();
+	map(0x70, 0x7f).mirror(0x80).ram();
+}
+
+void pic16c621_device::data_map(address_map &map)
+{
+	pic16c62x_device::base_map(map);
+	map(0x20, 0x6f).ram();
+}
+
+void pic16c621a_device::data_map(address_map &map)
+{
+	pic16c62x_device::base_map(map);
+	map(0x20, 0x6f).ram();
+	map(0x70, 0x7f).mirror(0x80).ram();
+}
+
+void pic16c622_device::data_map(address_map &map)
+{
+	pic16c62x_device::base_map(map);
+	map(0x20, 0x7f).ram();
+	map(0xa0, 0xbf).ram();
+}
+
+void pic16c622a_device::data_map(address_map &map)
+{
+	pic16c62x_device::base_map(map);
+	map(0x20, 0x6f).ram();
+	map(0x70, 0x7f).mirror(0x80).ram();
+	map(0xa0, 0xbf).ram();
+}
+
+void pic16_mid_eeprom_device::base_map(address_map &map)
+{
+	pic16_mid_device::base_map(map, 0x80);
+	map(0x08, 0x08).rw(FUNC(pic16_mid_eeprom_device::eedata_r), FUNC(pic16_mid_eeprom_device::eedata_w));
+	map(0x09, 0x09).rw(FUNC(pic16_mid_eeprom_device::eeadr_r), FUNC(pic16_mid_eeprom_device::eeadr_w));
+	map(0x88, 0x88).rw(FUNC(pic16_mid_eeprom_device::eecon1_r), FUNC(pic16_mid_eeprom_device::eecon1_w));
+	map(0x89, 0x89).rw(FUNC(pic16_mid_eeprom_device::eecon2_r), FUNC(pic16_mid_eeprom_device::eecon2_w));
+}
+
+void pic16cr83_device::data_map(address_map &map)
+{
+	pic16_mid_eeprom_device::base_map(map);
 	map(0x0c, 0x2f).ram().mirror(0x80);
 }
 
-void pic16x8x_device::ram_7(address_map &map)
+void pic16cr84_device::data_map(address_map &map)
 {
-	// 0x00 - 0x0b SFR's Bank 0
-	// 0x0c - 0x4f GPR's
-	// 0x80 - 0x8b SFR's Bank 1
-	// 0x8c - 0xcf GPR Mirrored to 0x0c - 0x4f
-	core_regs(map, 0x80);
+	pic16_mid_eeprom_device::base_map(map);
 	map(0x0c, 0x4f).ram().mirror(0x80);
 }
 
-void pic16f628a_device::data_map(address_map &map)
+void pic16f6xxa_device::base_map(address_map &map)
 {
 	// bank 0
 	map(0x000, 0x000).mirror(0x180).noprw(); // "indirect addr." - not a physical register
@@ -278,13 +385,42 @@ void pic16f628a_device::data_map(address_map &map)
 	map(0x10e, 0x10e).mirror(0x080).noprw();
 	map(0x10f, 0x10f).mirror(0x080).noprw();
 	map(0x110, 0x11f).mirror(0x080).noprw();
-	map(0x120, 0x14f).ram();
 	map(0x150, 0x16f).mirror(0x080).noprw();
 	// bank 3
 	map(0x190, 0x1ef).noprw();
 }
 
-device_memory_interface::space_config_vector pic16x8x_device::memory_space_config() const
+void pic16f628a_device::data_map(address_map &map)
+{
+	pic16f6xxa_device::base_map(map);
+	map(0x120, 0x14f).ram();
+}
+
+void pic16f648a_device::data_map(address_map &map)
+{
+	pic16f6xxa_device::base_map(map);
+	map(0x120, 0x16f).ram();
+}
+
+void pic16f83_device::data_map(address_map &map)
+{
+	pic16_mid_eeprom_device::base_map(map);
+	map(0x0c, 0x2f).ram().mirror(0x80);
+}
+
+void pic16f84_device::data_map(address_map &map)
+{
+	pic16_mid_eeprom_device::base_map(map);
+	map(0x0c, 0x4f).ram().mirror(0x80);
+}
+
+void pic16f84a_device::data_map(address_map &map)
+{
+	pic16_mid_eeprom_device::base_map(map);
+	map(0x0c, 0x4f).ram().mirror(0x80);
+}
+
+device_memory_interface::space_config_vector pic16_mid_device::memory_space_config() const
 {
 	return space_config_vector
 	{
@@ -298,7 +434,7 @@ device_memory_interface::space_config_vector pic16x8x_device::memory_space_confi
 //  START/RESET
 //**************************************************************************
 
-void pic16x8x_device::device_start()
+void pic16_mid_device::device_start()
 {
 	space(AS_PROGRAM).cache(m_program);
 	space(AS_DATA).specific(m_data);
@@ -314,9 +450,6 @@ void pic16x8x_device::device_start()
 	m_FSR = 0;
 	m_PCLATH = 0;
 	m_INTCON = 0;
-	m_EEDATA = 0; // actually unknown state
-	m_EEADR = 0; // actually unknown state
-	m_EECON1 = 0;
 	std::fill(std::begin(m_port_data), std::end(m_port_data), 0);
 	std::fill(std::begin(m_port_tris), std::end(m_port_tris), 0);
 	std::fill(std::begin(m_STACK), std::end(m_STACK), 0);
@@ -328,21 +461,17 @@ void pic16x8x_device::device_start()
 	m_inst_cycles = 0;
 	m_status_write_protect = TO_FLAG | PD_FLAG;
 	m_stack_pointer = 0;
-	m_debugger_temp = 0;
 	m_portb_mismatch_detect = 0xff;
 	m_sleeping = false;
 
-	m_eeprom_data = std::make_unique<u8[]>(m_internal_eeprom_size);
-	m_eeprom_unlock_state = EEPROM_LOCKED;
-
 	// setup watchdog timer
-	m_wdt_timer = timer_alloc(FUNC(pic16x8x_device::wdt_timeout), this);
+	m_wdt_timer = timer_alloc(FUNC(pic16_mid_device::wdt_timeout), this);
 
 	// fetch configuration bits from firmware image if available
 	if (m_region.found() && m_region->bytewidth() == 2 && (m_region->length() > 0x2007))
 	{
 		m_CONFIG = m_region->as_u16(0x2007);
-		logerror("Writing %04x to the PIC16x8x configuration bits\n", m_CONFIG);
+		logerror("Writing %04x to the PIC16 configuration bits\n", m_CONFIG);
 		restart_wdt();
 	}
 
@@ -358,9 +487,6 @@ void pic16x8x_device::device_start()
 	save_item(NAME(m_FSR));
 	save_item(NAME(m_port_data));
 	save_item(NAME(m_port_tris));
-	save_item(NAME(m_EEDATA));
-	save_item(NAME(m_EEADR));
-	save_item(NAME(m_EECON1));
 	save_item(NAME(m_PCLATH));
 	save_item(NAME(m_INTCON));
 	save_item(NAME(m_STACK));
@@ -375,26 +501,81 @@ void pic16x8x_device::device_start()
 	save_item(NAME(m_rb0));
 	save_item(NAME(m_portb_mismatch_detect));
 	save_item(NAME(m_sleeping));
-	save_item(NAME(m_eeprom_unlock_state));
-	save_pointer(NAME(m_eeprom_data), m_internal_eeprom_size);
 
 	// debugger
-	state_add(PIC16X8x_PC,     "PC",   m_PC).mask(PC_MASK).formatstr("%04X");
-	state_add(PIC16X8x_W,      "W",    m_W).formatstr("%02X");
-	state_add(PIC16X8x_ALU,    "ALU",  m_ALU).formatstr("%02X");
-	state_add(PIC16X8x_CONFIG, "CNF",  m_CONFIG).formatstr("%04X");
-	state_add(PIC16X8x_PSCL,   "PSCL", m_debugger_temp).callimport().formatstr("%3s");
+	state_add(PIC16_MID_CONFIG, "CONFIG", m_CONFIG).formatstr("%04X").readonly();
+	state_add(PIC16_MID_PC,     "PC",     m_PC).mask(PC_MASK).formatstr("%04X");
+	state_add(PIC16_MID_FSR,    "FSR",    m_FSR).formatstr("%02X");
+	state_add(PIC16_MID_PCLATH, "PCLATH", m_PCLATH).mask(0x1f).formatstr("%02X");
 
-	state_add(STATE_GENPC,     "GENPC",    m_PC).noshow();
-	state_add(STATE_GENPCBASE, "CURPC",    m_PREVPC).noshow();
-	state_add(STATE_GENFLAGS,  "GENFLAGS", m_OPTION).formatstr("%13s").noshow();
+	state_add<u8>(PIC16_MID_BANK, "BANK",
+		[this]() -> u8 { return (m_STATUS >> 5) & 0x03; },
+		[this](u8 data) { m_STATUS = (m_STATUS & ~(RP1_FLAG | RP0_FLAG)) | (data << 5); }
+	).mask((m_status_mask >> 5) & 0x03).formatstr("%01X");
+
+	state_add(PIC16_MID_W, "W", m_W).formatstr("%02X");
+
+	state_add<u8>(PIC16_MID_PRESCALER, "PRESCALER",
+		[this]() -> u8 { return m_prescaler & 0xff; },
+		[this](u8 data) { m_prescaler = data; }
+	).formatstr("%2s");
+
+	state_add(PIC16_MID_LATCHA,   "LATCHA",   m_port_data[PORTA]).mask(m_porta_mask).formatstr("%02X").readonly();
+	state_add(PIC16_MID_LATCHB,   "LATCHB",   m_port_data[PORTB]).formatstr("%02X").readonly();
+	state_add(PIC16_MID_STACKPTR, "STACKPTR", m_stack_pointer).mask(0x07).formatstr("%01X");
+	state_add(PIC16_MID_STACK0,   "STACK0",   m_STACK[0]).mask(PC_MASK).formatstr("%04X");
+	state_add(PIC16_MID_STACK1,   "STACK1",   m_STACK[1]).mask(PC_MASK).formatstr("%04X");
+	state_add(PIC16_MID_STACK2,   "STACK2",   m_STACK[2]).mask(PC_MASK).formatstr("%04X");
+	state_add(PIC16_MID_STACK3,   "STACK3",   m_STACK[3]).mask(PC_MASK).formatstr("%04X");
+	state_add(PIC16_MID_STACK4,   "STACK4",   m_STACK[4]).mask(PC_MASK).formatstr("%04X");
+	state_add(PIC16_MID_STACK5,   "STACK5",   m_STACK[5]).mask(PC_MASK).formatstr("%04X");
+	state_add(PIC16_MID_STACK6,   "STACK6",   m_STACK[6]).mask(PC_MASK).formatstr("%04X");
+	state_add(PIC16_MID_STACK7,   "STACK7",   m_STACK[7]).mask(PC_MASK).formatstr("%04X");
+	state_add(PIC16_MID_SLEEP,    "SLEEP",    m_sleeping).formatstr("%01X").readonly();
+
+	state_add<u8>(PIC16_MID_WDT, "WDT", []() -> u8 { return 0; }).formatstr("%11s");
+
+	state_add(STATE_GENPC,        "GENPC",    m_PC).noshow();
+	state_add(STATE_GENPCBASE,    "CURPC",    m_PREVPC).noshow();
+	state_add(STATE_GENFLAGS,     "GENFLAGS", m_STATUS).mask(m_status_mask).formatstr("%8s").noshow();
 
 	set_icountptr(m_icount);
 }
 
-void pic16f628a_device::device_start()
+void pic16c62x_device::device_start()
 {
-	pic16x8x_device::device_start();
+	pic16_mid_device::device_start();
+
+	// register for save states
+	save_item(NAME(m_PIR1));
+	save_item(NAME(m_CMCON));
+	save_item(NAME(m_PIE1));
+	save_item(NAME(m_PCON));
+	save_item(NAME(m_VRCON));
+}
+
+void pic16_mid_eeprom_device::device_start()
+{
+	pic16_mid_device::device_start();
+
+	m_EEDATA = 0; // actually unknown state
+	m_EEADR = 0; // actually unknown state
+	m_EECON1 = 0;
+
+	m_eeprom_data = std::make_unique<u8[]>(m_internal_eeprom_size);
+	m_eeprom_unlock_state = EEPROM_LOCKED;
+
+	// register for save states
+	save_item(NAME(m_EEDATA));
+	save_item(NAME(m_EEADR));
+	save_item(NAME(m_EECON1));
+	save_item(NAME(m_eeprom_unlock_state));
+	save_pointer(NAME(m_eeprom_data), m_internal_eeprom_size);
+}
+
+void pic16f6xxa_device::device_start()
+{
+	pic16_mid_eeprom_device::device_start();
 
 	// register for save states
 	save_item(NAME(m_PIR1));
@@ -409,7 +590,7 @@ void pic16f628a_device::device_start()
 	save_item(NAME(m_VRCON));
 }
 
-void pic16x8x_device::device_reset()
+void pic16_mid_device::device_reset()
 {
 	set_pc(RESET_VECTOR);
 	m_PREVPC = m_PC;
@@ -420,7 +601,6 @@ void pic16x8x_device::device_reset()
 	m_STATUS = TO_FLAG | PD_FLAG;
 	m_PCLATH = 0;
 	m_INTCON = 0;
-	m_EECON1 = 0;
 
 	m_prescaler = 0;
 	m_delay_timer = 0;
@@ -432,14 +612,32 @@ void pic16x8x_device::device_reset()
 	m_rb0 = 0;
 
 	m_sleeping = false;
-	m_eeprom_unlock_state = EEPROM_LOCKED;
 
 	restart_wdt();
 }
 
-void pic16f628a_device::device_reset()
+void pic16c62x_device::device_reset()
 {
-	pic16x8x_device::device_reset();
+	pic16_mid_device::device_reset();
+
+	m_PIR1 = 0x00;
+	m_CMCON = 0x00;
+	m_PIE1 = 0x00;
+	m_PCON = 0x00;
+	m_VRCON = 0x00;
+}
+
+void pic16_mid_eeprom_device::device_reset()
+{
+	pic16_mid_device::device_reset();
+
+	m_EECON1 = 0;
+	m_eeprom_unlock_state = EEPROM_LOCKED;
+}
+
+void pic16f6xxa_device::device_reset()
+{
+	pic16_mid_eeprom_device::device_reset();
 
 	m_PIR1 = 0x00;
 	m_T1CON = 0x00;
@@ -458,49 +656,34 @@ void pic16f628a_device::device_reset()
 //  DEBUGGER
 //**************************************************************************
 
-void pic16x8x_device::state_import(const device_state_entry &entry)
+void pic16_mid_device::state_string_export(const device_state_entry &entry, std::string &str) const
 {
 	switch (entry.index())
 	{
-		case PIC16X8x_PSCL:
-			m_prescaler = m_debugger_temp;
-			break;
-	}
-}
-
-void pic16x8x_device::state_export(const device_state_entry &entry)
-{
-	switch (entry.index())
-	{
-	}
-}
-
-void pic16x8x_device::state_string_export(const device_state_entry &entry, std::string &str) const
-{
-	switch (entry.index())
-	{
-		case PIC16X8x_PSCL:
-			str = string_format("%c%02X", ((m_OPTION & 0x08) ? 'W' : 'T'), m_prescaler);
-			break;
-
 		case STATE_GENFLAGS:
-			str = string_format("%01x%c%c%c%c%c %c%c%c%03x",
-				(m_STATUS & 0xe0) >> 5,
-				m_STATUS & 0x10 ? '.':'O',      // WDT Overflow
-				m_STATUS & 0x08 ? 'P':'D',      // Power/Down
-				m_STATUS & 0x04 ? 'Z':'.',      // Zero
-				m_STATUS & 0x02 ? 'c':'b',      // Nibble Carry/Borrow
-				m_STATUS & 0x01 ? 'C':'B',      // Carry/Borrow
+			str = string_format("%c %c%c %c%c%c",
+				BIT(m_STATUS, 7) ? 'I' : '.',
+				BIT(m_STATUS, 4) ? 'T' : '.',
+				BIT(m_STATUS, 3) ? 'P' : '.',
+				BIT(m_STATUS, 2) ? 'Z' : '.',
+				BIT(m_STATUS, 1) ? 'D' : '.',
+				BIT(m_STATUS, 0) ? 'C' : '.');
+			break;
 
-				m_OPTION & 0x20 ? 'C':'T',    // Counter/Timer
-				m_OPTION & 0x10 ? 'N':'P',    // Negative/Positive
-				m_OPTION & 0x08 ? 'W':'T',    // WatchDog/Timer
-				m_OPTION & 0x08 ? (1<<(m_OPTION&7)) : (2<<(m_OPTION&7)));
+		case PIC16_MID_PRESCALER:
+			str = (m_OPTION & PSA_FLAG) ? "--" : string_format("%02X", m_prescaler & 0xff);
+			break;
+
+		case PIC16_MID_WDT:
+			{
+				const attotime remaining = m_wdt_timer->remaining();
+				str = remaining.is_never() ? "disabled" : string_format("%.3f ms", remaining.as_double() * 1000.0);
+			}
 			break;
 	}
 }
 
-std::unique_ptr<util::disasm_interface> pic16x8x_device::create_disassembler()
+std::unique_ptr<util::disasm_interface> pic16_mid_device::create_disassembler()
 {
 	return std::make_unique<pic16x8x_disassembler>();
 }
@@ -510,7 +693,7 @@ std::unique_ptr<util::disasm_interface> pic16x8x_device::create_disassembler()
 //  EXECUTION
 //**************************************************************************
 
-void pic16x8x_device::execute_run()
+void pic16_mid_device::execute_run()
 {
 	do
 	{
@@ -533,7 +716,7 @@ void pic16x8x_device::execute_run()
 			m_opcode.w = m_program.read_word(m_PC);
 			set_pc(m_PC + 1);
 
-			const pic16x8x_opcode *op;
+			const pic16_opcode *op;
 
 			if ((m_opcode.w & 0x3f80) != 0x0000)
 				op = &s_opcode_main[(m_opcode.w >> 7) & 0x7f];
@@ -559,12 +742,12 @@ void pic16x8x_device::execute_run()
 	} while (m_icount > 0);
 }
 
-void pic16x8x_device::execute_set_input(int line, int state)
+void pic16_mid_device::execute_set_input(int line, int state)
 {
 	switch (line)
 	{
 		// RTCC/RA4_T0CKI pin
-		case PIC16x8x_T0CKI:
+		case PIC16_MID_T0CKI:
 			if ((m_OPTION & T0CS_FLAG) && state != m_rtcc)
 			{ // Count mode, edge triggered
 				if (((m_OPTION & T0SE_FLAG) && !state) || (!(m_OPTION & T0SE_FLAG) && state))
@@ -573,7 +756,7 @@ void pic16x8x_device::execute_set_input(int line, int state)
 			m_rtcc = state;
 			break;
 
-		case PIC16x8x_RB0INT:
+		case PIC16_MID_RB0INT:
 		{
 			const u8 new_rb0 = (state != CLEAR_LINE) ? 1 : 0;
 			if (new_rb0 != m_rb0)
@@ -599,10 +782,18 @@ void pic16x8x_device::execute_set_input(int line, int state)
 //  INTERRUPTS
 //**************************************************************************
 
-bool pic16x8x_device::irq_active() const
+bool pic16_mid_device::irq_active() const
 {
 	// check T0I, INT and RBI
 	if ((m_INTCON >> 3) & m_INTCON & 0x07)
+		return true;
+
+	return false;
+}
+
+bool pic16_mid_eeprom_device::irq_active() const
+{
+	if (pic16_mid_device::irq_active())
 		return true;
 
 	// check EEI
@@ -612,10 +803,9 @@ bool pic16x8x_device::irq_active() const
 	return false;
 }
 
-bool pic16f628a_device::irq_active() const
+bool pic16f6xxa_device::irq_active() const
 {
-	// check T0I, INT, RBI
-	if ((m_INTCON >> 3) & m_INTCON & 0x07)
+	if (pic16_mid_device::irq_active())
 		return true;
 
 	// check PEI
@@ -625,7 +815,7 @@ bool pic16f628a_device::irq_active() const
 	return false;
 }
 
-void pic16x8x_device::check_irqs()
+void pic16_mid_device::check_irqs()
 {
 	// port b change detection
 	const u8 input_mask = m_port_tris[PORTB] & 0xf0;
@@ -665,7 +855,7 @@ void pic16x8x_device::check_irqs()
 //  TIMER
 //**************************************************************************
 
-void pic16x8x_device::update_timer(int counts)
+void pic16_mid_device::update_timer(int counts)
 {
 	if (m_delay_timer > 0)
 	{
@@ -714,7 +904,7 @@ void pic16x8x_device::update_timer(int counts)
 //  WATCHDOG
 //**************************************************************************
 
-TIMER_CALLBACK_MEMBER( pic16x8x_device::wdt_timeout )
+TIMER_CALLBACK_MEMBER( pic16_mid_device::wdt_timeout )
 {
 	if (m_sleeping)
 	{
@@ -731,21 +921,21 @@ TIMER_CALLBACK_MEMBER( pic16x8x_device::wdt_timeout )
 	restart_wdt();
 }
 
-void pic16x8x_device::wdt_reset()
+void pic16_mid_device::wdt_reset()
 {
 	const u8 status_unaffected = m_STATUS & (PD_FLAG | Z_FLAG | DC_FLAG | C_FLAG);
 	device_reset();
 	m_STATUS = (0 | status_unaffected);
 }
 
-void pic16f628a_device::wdt_reset()
+void pic16f6xxa_device::wdt_reset()
 {
 	const u8 pcon_unaffected = m_PCON & (POR_FLAG | BOR_FLAG);
-	pic16x8x_device::wdt_reset();
+	pic16_mid_device::wdt_reset();
 	m_PCON = (OSCF_FLAG | pcon_unaffected);
 }
 
-void pic16x8x_device::restart_wdt()
+void pic16_mid_device::restart_wdt()
 {
 	if (m_CONFIG & WDTE_FLAG)
 	{
@@ -765,7 +955,7 @@ void pic16x8x_device::restart_wdt()
 //  EEPROM
 //**************************************************************************
 
-void pic16x8x_device::nvram_default()
+void pic16_mid_eeprom_device::nvram_default()
 {
 	// populate from a memory region if present
 	if (m_region.found())
@@ -789,19 +979,19 @@ void pic16x8x_device::nvram_default()
 	}
 }
 
-bool pic16x8x_device::nvram_read(util::read_stream &file)
+bool pic16_mid_eeprom_device::nvram_read(util::read_stream &file)
 {
 	auto const [err, actual] = read(file, m_eeprom_data.get(), m_internal_eeprom_size);
 	return !err && (actual == m_internal_eeprom_size);
 }
 
-bool pic16x8x_device::nvram_write(util::write_stream &file)
+bool pic16_mid_eeprom_device::nvram_write(util::write_stream &file)
 {
 	auto const [err, actual] = write(file, m_eeprom_data.get(), m_internal_eeprom_size);
 	return !err && (actual == m_internal_eeprom_size);
 }
 
-u8 pic16x8x_device::eeprom_read(offs_t offs)
+u8 pic16_mid_eeprom_device::eeprom_read(offs_t offs)
 {
 	if (offs < m_internal_eeprom_size)
 		return m_eeprom_data[offs];
@@ -809,7 +999,7 @@ u8 pic16x8x_device::eeprom_read(offs_t offs)
 		return 0xff;
 }
 
-void pic16x8x_device::eeprom_write(offs_t offs, u8 data)
+void pic16_mid_eeprom_device::eeprom_write(offs_t offs, u8 data)
 {
 	if (offs < m_internal_eeprom_size)
 		m_eeprom_data[offs] = data;
@@ -820,7 +1010,7 @@ void pic16x8x_device::eeprom_write(offs_t offs, u8 data)
 //  SPECIAL FUNCTION REGISTER
 //**************************************************************************
 
-u8 pic16x8x_device::get_regfile(offs_t offset)
+u8 pic16_mid_device::get_regfile(offs_t offset)
 {
 	// indirect addressing
 	if ((offset & 0x7f) == 0)
@@ -829,7 +1019,7 @@ u8 pic16x8x_device::get_regfile(offs_t offset)
 	return m_data.read_byte(offset);
 }
 
-void pic16x8x_device::store_regfile(offs_t offset, u8 data)
+void pic16_mid_device::store_regfile(offs_t offset, u8 data)
 {
 	// indirect addressing
 	if ((offset & 0x7f) == 0)
@@ -838,12 +1028,12 @@ void pic16x8x_device::store_regfile(offs_t offset, u8 data)
 	m_data.write_byte(offset, data);
 }
 
-u8 pic16x8x_device::tmr0_r()
+u8 pic16_mid_device::tmr0_r()
 {
 	return m_TMR0;
 }
 
-void pic16x8x_device::tmr0_w(u8 data)
+void pic16_mid_device::tmr0_w(u8 data)
 {
 	// delay for this instruction and the following 2 cycles
 	m_delay_timer = m_inst_cycles + 2;
@@ -854,38 +1044,38 @@ void pic16x8x_device::tmr0_w(u8 data)
 	m_TMR0 = data;
 }
 
-u8 pic16x8x_device::pcl_r()
+u8 pic16_mid_device::pcl_r()
 {
 	return m_PC;
 }
 
-void pic16x8x_device::pcl_w(u8 data)
+void pic16_mid_device::pcl_w(u8 data)
 {
 	set_pc((m_PCLATH << 8) | data);
 	m_inst_cycles++;
 }
 
-u8 pic16x8x_device::status_r()
+u8 pic16_mid_device::status_r()
 {
 	return m_STATUS;
 }
 
-void pic16x8x_device::status_w(u8 data)
+void pic16_mid_device::status_w(u8 data)
 {
 	m_STATUS = ((m_STATUS & m_status_write_protect) | (data & u8(~m_status_write_protect))) & m_status_mask;
 }
 
-u8 pic16x8x_device::fsr_r()
+u8 pic16_mid_device::fsr_r()
 {
 	return m_FSR;
 }
 
-void pic16x8x_device::fsr_w(u8 data)
+void pic16_mid_device::fsr_w(u8 data)
 {
 	m_FSR = data;
 }
 
-u8 pic16x8x_device::porta_r()
+u8 pic16_mid_device::porta_r()
 {
 	u8 data = m_read_port[PORTA](PORTA, 0xff);
 	data &= m_port_tris[PORTA];
@@ -894,27 +1084,29 @@ u8 pic16x8x_device::porta_r()
 	return data & m_porta_mask;
 }
 
-void pic16x8x_device::porta_w(u8 data)
+void pic16_mid_device::porta_w(u8 data)
 {
 	data &= m_porta_mask;
 	const u8 mask = u8(~m_port_tris[PORTA]) & m_porta_mask;
 	m_port_data[PORTA] = data;
+
 	m_write_port[PORTA](PORTA, data & mask, mask);
 }
 
-u8 pic16x8x_device::portb_r()
+u8 pic16_mid_device::portb_r()
 {
 	u8 data = m_read_port[PORTB](PORTB, 0xff);
 	data &= m_port_tris[PORTB];
 	data |= (u8(~m_port_tris[PORTB]) & m_port_data[PORTB]);
 
 	// reading PORTB updates the change detection latch for RB7:RB4
-	m_portb_mismatch_detect = data & 0xf0;
+	if (!machine().side_effects_disabled())
+		m_portb_mismatch_detect = data & 0xf0;
 
 	return data;
 }
 
-void pic16x8x_device::portb_w(u8 data)
+void pic16_mid_device::portb_w(u8 data)
 {
 	// a write access to PORTB performs an internal read of the port
 	// we need to call it to update the mismatch detection
@@ -922,55 +1114,56 @@ void pic16x8x_device::portb_w(u8 data)
 
 	const u8 mask = u8(~m_port_tris[PORTB]);
 	m_port_data[PORTB] = data;
+
 	m_write_port[PORTB](PORTB, data & mask, mask);
 }
 
-u8 pic16x8x_device::eedata_r()
+u8 pic16_mid_eeprom_device::eedata_r()
 {
 	return m_EEDATA;
 }
 
-void pic16x8x_device::eedata_w(u8 data)
+void pic16_mid_eeprom_device::eedata_w(u8 data)
 {
 	m_EEDATA = data;
 }
 
-u8 pic16x8x_device::eeadr_r()
+u8 pic16_mid_eeprom_device::eeadr_r()
 {
 	return m_EEADR;
 }
 
-void pic16x8x_device::eeadr_w(u8 data)
+void pic16_mid_eeprom_device::eeadr_w(u8 data)
 {
 	m_EEADR = data;
 }
 
-u8 pic16x8x_device::pclath_r()
+u8 pic16_mid_device::pclath_r()
 {
 	return m_PCLATH;
 }
 
-void pic16x8x_device::pclath_w(u8 data)
+void pic16_mid_device::pclath_w(u8 data)
 {
 	m_PCLATH = data & 0x1f;
 }
 
-u8 pic16x8x_device::intcon_r()
+u8 pic16_mid_device::intcon_r()
 {
 	return m_INTCON;
 }
 
-void pic16x8x_device::intcon_w(u8 data)
+void pic16_mid_device::intcon_w(u8 data)
 {
 	m_INTCON = data;
 }
 
-u8 pic16x8x_device::trisa_r()
+u8 pic16_mid_device::trisa_r()
 {
 	return m_port_tris[PORTA];
 }
 
-void pic16x8x_device::trisa_w(u8 data)
+void pic16_mid_device::trisa_w(u8 data)
 {
 	data |= ~m_porta_mask; // unimplemented bits are forced to 1
 	if (m_port_tris[PORTA] != data)
@@ -981,12 +1174,12 @@ void pic16x8x_device::trisa_w(u8 data)
 	}
 }
 
-u8 pic16x8x_device::trisb_r()
+u8 pic16_mid_device::trisb_r()
 {
 	return m_port_tris[PORTB];
 }
 
-void pic16x8x_device::trisb_w(u8 data)
+void pic16_mid_device::trisb_w(u8 data)
 {
 	if (m_port_tris[PORTB] != data)
 	{
@@ -995,22 +1188,22 @@ void pic16x8x_device::trisb_w(u8 data)
 	}
 }
 
-void pic16x8x_device::set_eeif()
+void pic16_mid_eeprom_device::set_eeif()
 {
 	m_EECON1 |= EEIF_FLAG;
 }
 
-void pic16f628a_device::set_eeif()
+void pic16f6xxa_device::set_eeif()
 {
 	m_PIR1 |= 0x80;
 }
 
-u8 pic16x8x_device::eecon1_r()
+u8 pic16_mid_eeprom_device::eecon1_r()
 {
 	return m_EECON1;
 }
 
-void pic16x8x_device::eecon1_w(u8 data)
+void pic16_mid_eeprom_device::eecon1_w(u8 data)
 {
 	// WREN can be enabled/disabled
 	if (data & WREN_FLAG)
@@ -1038,12 +1231,12 @@ void pic16x8x_device::eecon1_w(u8 data)
 	m_eeprom_unlock_state = EEPROM_LOCKED;
 }
 
-u8 pic16x8x_device::eecon2_r()
+u8 pic16_mid_eeprom_device::eecon2_r()
 {
 	return 0; // not a physical register
 }
 
-void pic16x8x_device::eecon2_w(u8 data)
+void pic16_mid_eeprom_device::eecon2_w(u8 data)
 {
 	if (m_eeprom_unlock_state == EEPROM_LOCKED && data == 0x55)
 		m_eeprom_unlock_state = EEPROM_55_WRITTEN;
@@ -1053,12 +1246,12 @@ void pic16x8x_device::eecon2_w(u8 data)
 		m_eeprom_unlock_state = EEPROM_LOCKED;
 }
 
-u8 pic16x8x_device::option_r()
+u8 pic16_mid_device::option_r()
 {
 	return m_OPTION;
 }
 
-void pic16x8x_device::option_w(u8 data)
+void pic16_mid_device::option_w(u8 data)
 {
 	const u8 old = m_OPTION;
 	m_OPTION = data;
@@ -1071,192 +1264,242 @@ void pic16x8x_device::option_w(u8 data)
 	}
 }
 
-u8 pic16f628a_device::pir1_r()
+u8 pic16c62x_device::pir1_r()
 {
 	return m_PIR1;
 }
 
-void pic16f628a_device::pir1_w(u8 data)
+void pic16c62x_device::pir1_w(u8 data)
+{
+	m_PIR1 = data & 0x40; // only bit 6 is implemented, other bits read as 0
+}
+
+u8 pic16f6xxa_device::pir1_r()
+{
+	return m_PIR1;
+}
+
+void pic16f6xxa_device::pir1_w(u8 data)
 {
 	m_PIR1 = data & 0xf7; // bit 3 is unimplemented and reads as 0
 }
 
-u8 pic16f628a_device::tmr1l_r()
+u8 pic16f6xxa_device::tmr1l_r()
 {
 	return 0;
 }
 
-void pic16f628a_device::tmr1l_w(u8 data)
+void pic16f6xxa_device::tmr1l_w(u8 data)
 {
 	logerror("tmr1l_w %02x\n", data);
 }
 
-u8 pic16f628a_device::tmr1h_r()
+u8 pic16f6xxa_device::tmr1h_r()
 {
 	return 0;
 }
 
-void pic16f628a_device::tmr1h_w(u8 data)
+void pic16f6xxa_device::tmr1h_w(u8 data)
 {
 	logerror("tmr1h_w %02x\n", data);
 }
 
-u8 pic16f628a_device::t1con_r()
+u8 pic16f6xxa_device::t1con_r()
 {
 	return m_T1CON;
 }
 
-void pic16f628a_device::t1con_w(u8 data)
+void pic16f6xxa_device::t1con_w(u8 data)
 {
 	m_T1CON = data;
 }
 
-u8 pic16f628a_device::tmr2_r()
+u8 pic16f6xxa_device::tmr2_r()
 {
 	return 0;
 }
 
-void pic16f628a_device::tmr2_w(u8 data)
+void pic16f6xxa_device::tmr2_w(u8 data)
 {
 	logerror("tmr2_w %02x\n", data);
 }
 
-u8 pic16f628a_device::t2con_r()
+u8 pic16f6xxa_device::t2con_r()
 {
 	return m_T2CON;
 }
 
-void pic16f628a_device::t2con_w(u8 data)
+void pic16f6xxa_device::t2con_w(u8 data)
 {
 	m_T2CON = data;
 }
 
-u8 pic16f628a_device::ccpr1l_r()
+u8 pic16f6xxa_device::ccpr1l_r()
 {
 	return 0;
 }
 
-void pic16f628a_device::ccpr1l_w(u8 data)
+void pic16f6xxa_device::ccpr1l_w(u8 data)
 {
 	logerror("ccpr1l_w %02x\n", data);
 }
 
-u8 pic16f628a_device::ccpr1h_r()
+u8 pic16f6xxa_device::ccpr1h_r()
 {
 	return 0;
 }
 
-void pic16f628a_device::ccpr1h_w(u8 data)
+void pic16f6xxa_device::ccpr1h_w(u8 data)
 {
 	logerror("ccpr1h_w %02x\n", data);
 }
 
-u8 pic16f628a_device::ccp1con_r()
+u8 pic16f6xxa_device::ccp1con_r()
 {
 	return m_CCP1CON;
 }
 
-void pic16f628a_device::ccp1con_w(u8 data)
+void pic16f6xxa_device::ccp1con_w(u8 data)
 {
 	m_CCP1CON = data;
 }
 
-u8 pic16f628a_device::rcsta_r()
+u8 pic16f6xxa_device::rcsta_r()
 {
 	return m_RCSTA;
 }
 
-void pic16f628a_device::rcsta_w(u8 data)
+void pic16f6xxa_device::rcsta_w(u8 data)
 {
 	m_RCSTA = data;
 }
 
-u8 pic16f628a_device::txreg_r()
+u8 pic16f6xxa_device::txreg_r()
 {
 	return 0;
 }
 
-void pic16f628a_device::txreg_w(u8 data)
+void pic16f6xxa_device::txreg_w(u8 data)
 {
 	logerror("txreg_w %02x\n", data);
 }
 
-u8 pic16f628a_device::rcreg_r()
+u8 pic16f6xxa_device::rcreg_r()
 {
 	return 0;
 }
 
-void pic16f628a_device::rcreg_w(u8 data)
+void pic16f6xxa_device::rcreg_w(u8 data)
 {
 	logerror("rcreg_w %02x\n", data);
 }
 
-u8 pic16f628a_device::cmcon_r()
+u8 pic16c62x_device::cmcon_r()
 {
 	return m_CMCON;
 }
 
-void pic16f628a_device::cmcon_w(u8 data)
+void pic16c62x_device::cmcon_w(u8 data)
+{
+	m_CMCON = data & 0xcf; // bits 5-4 unimplemented and read as 0
+}
+
+u8 pic16f6xxa_device::cmcon_r()
+{
+	return m_CMCON;
+}
+
+void pic16f6xxa_device::cmcon_w(u8 data)
 {
 	m_CMCON = data;
 }
 
-u8 pic16f628a_device::pie1_r()
+u8 pic16c62x_device::pie1_r()
 {
 	return m_PIE1;
 }
 
-void pic16f628a_device::pie1_w(u8 data)
+void pic16c62x_device::pie1_w(u8 data)
 {
-	m_PIE1 = data & 0xf7; // bit 3 is unimplemented and reads as 0;
+	m_PIE1 = data & 0x40; // only bit 6 is implemented, other bits read as 0
 }
 
-u8 pic16f628a_device::pcon_r()
+u8 pic16f6xxa_device::pie1_r()
+{
+	return m_PIE1;
+}
+
+void pic16f6xxa_device::pie1_w(u8 data)
+{
+	m_PIE1 = data & 0xf7; // bit 3 is unimplemented and reads as 0
+}
+
+u8 pic16c62x_device::pcon_r()
 {
 	return m_PCON;
 }
 
-void pic16f628a_device::pcon_w(u8 data)
+void pic16c62x_device::pcon_w(u8 data)
 {
-	m_PCON = data;
+	m_PCON = data & 0x03; // bits 7-2 are unimplemented and read as 0
 }
 
-u8 pic16f628a_device::pr2_r()
+u8 pic16f6xxa_device::pcon_r()
+{
+	return m_PCON;
+}
+
+void pic16f6xxa_device::pcon_w(u8 data)
+{
+	m_PCON = data & 0x0b; // bits 2 and 7-4 are unimplemented and read as 0
+}
+
+u8 pic16f6xxa_device::pr2_r()
 {
 	return 0;
 }
 
-void pic16f628a_device::pr2_w(u8 data)
+void pic16f6xxa_device::pr2_w(u8 data)
 {
 	logerror("pr2_w %02x\n", data);
 }
 
-u8 pic16f628a_device::txsta_r()
+u8 pic16f6xxa_device::txsta_r()
 {
 	return m_TXSTA;
 }
 
-void pic16f628a_device::txsta_w(u8 data)
+void pic16f6xxa_device::txsta_w(u8 data)
 {
 	m_TXSTA = data;
 }
 
-u8 pic16f628a_device::spbrg_r()
+u8 pic16f6xxa_device::spbrg_r()
 {
 	return 0;
 }
 
-void pic16f628a_device::spbrg_w(u8 data)
+void pic16f6xxa_device::spbrg_w(u8 data)
 {
 	logerror("spbrg_w %02x\n", data);
 }
 
-u8 pic16f628a_device::vrcon_r()
+u8 pic16c62x_device::vrcon_r()
 {
 	return m_VRCON;
 }
 
-void pic16f628a_device::vrcon_w(u8 data)
+void pic16c62x_device::vrcon_w(u8 data)
+{
+	m_VRCON = data & 0xef; // bit 4 is unimplemented and reads as 0
+}
+
+u8 pic16f6xxa_device::vrcon_r()
+{
+	return m_VRCON;
+}
+
+void pic16f6xxa_device::vrcon_w(u8 data)
 {
 	m_VRCON = data;
 }
@@ -1266,12 +1509,12 @@ void pic16f628a_device::vrcon_w(u8 data)
 //  HELPER FUNCTIONS
 //**************************************************************************
 
-offs_t pic16x8x_device::addr() const
+offs_t pic16_mid_device::addr() const
 {
 	return ((m_STATUS & (RP1_FLAG | RP0_FLAG)) << 2) | (m_opcode.b.l & 0x7f);
 }
 
-void pic16x8x_device::calc_zero_flag()
+void pic16_mid_device::calc_zero_flag()
 {
 	if (m_ALU == 0)
 		m_STATUS |= Z_FLAG;
@@ -1279,7 +1522,7 @@ void pic16x8x_device::calc_zero_flag()
 		m_STATUS &= ~Z_FLAG;
 }
 
-void pic16x8x_device::calc_add_flags(u8 augend)
+void pic16_mid_device::calc_add_flags(u8 augend)
 {
 	calc_zero_flag();
 
@@ -1294,7 +1537,7 @@ void pic16x8x_device::calc_add_flags(u8 augend)
 		m_STATUS &= ~DC_FLAG;
 }
 
-void pic16x8x_device::calc_sub_flags(u8 minuend)
+void pic16_mid_device::calc_sub_flags(u8 minuend)
 {
 	calc_zero_flag();
 
@@ -1309,24 +1552,24 @@ void pic16x8x_device::calc_sub_flags(u8 minuend)
 		m_STATUS |= DC_FLAG;
 }
 
-void pic16x8x_device::set_pc(u16 addr)
+void pic16_mid_device::set_pc(u16 addr)
 {
 	m_PC = addr & PC_MASK;
 }
 
-u16 pic16x8x_device::pop_stack()
+u16 pic16_mid_device::pop_stack()
 {
 	m_stack_pointer = (m_stack_pointer - 1) & 0x07;
 	return m_STACK[m_stack_pointer] & PC_MASK;
 }
 
-void pic16x8x_device::push_stack(u16 data)
+void pic16_mid_device::push_stack(u16 data)
 {
 	m_STACK[m_stack_pointer] = data & PC_MASK;
 	m_stack_pointer = (m_stack_pointer + 1) & 0x07;
 }
 
-void pic16x8x_device::store_result(offs_t offset, u8 data)
+void pic16_mid_device::store_result(offs_t offset, u8 data)
 {
 	if (m_opcode.b.l & 0x80)
 		store_regfile(offset, data);
@@ -1339,12 +1582,12 @@ void pic16x8x_device::store_result(offs_t offset, u8 data)
 //  INSTRUCTIONS
 //**************************************************************************
 
-void pic16x8x_device::op_illegal()
+void pic16_mid_device::op_illegal()
 {
-	logerror("PIC16x8x: PC=%03x, Illegal opcode = %04x\n", m_PREVPC, m_opcode.w);
+	logerror("PIC16_MID: PC=%03x, Illegal opcode = %04x\n", m_PREVPC, m_opcode.w);
 }
 
-void pic16x8x_device::op_addlw()
+void pic16_mid_device::op_addlw()
 {
 	u8 k = m_opcode.b.l;
 	m_ALU = k + m_W;
@@ -1352,7 +1595,7 @@ void pic16x8x_device::op_addlw()
 	calc_add_flags(k);
 }
 
-void pic16x8x_device::op_addwf()
+void pic16_mid_device::op_addwf()
 {
 	u8 augend = get_regfile(addr());
 	m_ALU = augend + m_W;
@@ -1360,35 +1603,35 @@ void pic16x8x_device::op_addwf()
 	calc_add_flags(augend);
 }
 
-void pic16x8x_device::op_andlw()
+void pic16_mid_device::op_andlw()
 {
 	m_ALU = m_opcode.b.l & m_W;
 	m_W = m_ALU;
 	calc_zero_flag();
 }
 
-void pic16x8x_device::op_andwf()
+void pic16_mid_device::op_andwf()
 {
 	m_ALU = get_regfile(addr()) & m_W;
 	store_result(addr(), m_ALU);
 	calc_zero_flag();
 }
 
-void pic16x8x_device::op_bcf()
+void pic16_mid_device::op_bcf()
 {
 	m_ALU = get_regfile(addr());
 	m_ALU &= ~(1 << bit_pos());
 	store_regfile(addr(), m_ALU);
 }
 
-void pic16x8x_device::op_bsf()
+void pic16_mid_device::op_bsf()
 {
 	m_ALU = get_regfile(addr());
 	m_ALU |= 1 << bit_pos();
 	store_regfile(addr(), m_ALU);
 }
 
-void pic16x8x_device::op_btfss()
+void pic16_mid_device::op_btfss()
 {
 	if (BIT(get_regfile(addr()), bit_pos()))
 	{
@@ -1397,7 +1640,7 @@ void pic16x8x_device::op_btfss()
 	}
 }
 
-void pic16x8x_device::op_btfsc()
+void pic16_mid_device::op_btfsc()
 {
 	if (!BIT(get_regfile(addr()), bit_pos()))
 	{
@@ -1406,46 +1649,46 @@ void pic16x8x_device::op_btfsc()
 	}
 }
 
-void pic16x8x_device::op_call()
+void pic16_mid_device::op_call()
 {
 	push_stack(m_PC);
 	set_pc(((m_PCLATH & 0x18) << 8 ) | (m_opcode.w & 0x07ff));
 }
 
 
-void pic16x8x_device::op_clrw()
+void pic16_mid_device::op_clrw()
 {
 	m_W = 0;
 	m_STATUS |= Z_FLAG;
 }
 
-void pic16x8x_device::op_clrf()
+void pic16_mid_device::op_clrf()
 {
 	store_regfile(addr(), 0);
 	m_STATUS |= Z_FLAG;
 }
 
-void pic16x8x_device::op_clrwdt()
+void pic16_mid_device::op_clrwdt()
 {
 	m_STATUS |= (TO_FLAG | PD_FLAG);
 	restart_wdt();
 }
 
-void pic16x8x_device::op_comf()
+void pic16_mid_device::op_comf()
 {
 	m_ALU = u8(~(get_regfile(addr())));
 	store_result(addr(), m_ALU);
 	calc_zero_flag();
 }
 
-void pic16x8x_device::op_decf()
+void pic16_mid_device::op_decf()
 {
 	m_ALU = get_regfile(addr()) - 1;
 	store_result(addr(), m_ALU);
 	calc_zero_flag();
 }
 
-void pic16x8x_device::op_decfsz()
+void pic16_mid_device::op_decfsz()
 {
 	m_ALU = get_regfile(addr()) - 1;
 	store_result(addr(), m_ALU);
@@ -1456,19 +1699,19 @@ void pic16x8x_device::op_decfsz()
 	}
 }
 
-void pic16x8x_device::op_goto()
+void pic16_mid_device::op_goto()
 {
 	set_pc(((m_PCLATH & 0x18) << 8 ) | (m_opcode.w & 0x07ff));
 }
 
-void pic16x8x_device::op_incf()
+void pic16_mid_device::op_incf()
 {
 	m_ALU = get_regfile(addr()) + 1;
 	store_result(addr(), m_ALU);
 	calc_zero_flag();
 }
 
-void pic16x8x_device::op_incfsz()
+void pic16_mid_device::op_incfsz()
 {
 	m_ALU = get_regfile(addr()) + 1;
 	store_result(addr(), m_ALU);
@@ -1479,65 +1722,65 @@ void pic16x8x_device::op_incfsz()
 	}
 }
 
-void pic16x8x_device::op_iorlw()
+void pic16_mid_device::op_iorlw()
 {
 	m_ALU = m_opcode.b.l | m_W;
 	m_W = m_ALU;
 	calc_zero_flag();
 }
 
-void pic16x8x_device::op_iorwf()
+void pic16_mid_device::op_iorwf()
 {
 	m_ALU = get_regfile(addr()) | m_W;
 	store_result(addr(), m_ALU);
 	calc_zero_flag();
 }
 
-void pic16x8x_device::op_movf()
+void pic16_mid_device::op_movf()
 {
 	m_ALU = get_regfile(addr());
 	store_result(addr(), m_ALU);
 	calc_zero_flag();
 }
 
-void pic16x8x_device::op_movlw()
+void pic16_mid_device::op_movlw()
 {
 	m_W = m_opcode.b.l;
 }
 
-void pic16x8x_device::op_movwf()
+void pic16_mid_device::op_movwf()
 {
 	store_regfile(addr(), m_W);
 }
 
-void pic16x8x_device::op_nop()
+void pic16_mid_device::op_nop()
 {
 	// Do nothing
 }
 
-void pic16x8x_device::op_option()
+void pic16_mid_device::op_option()
 {
 	option_w(m_W);
 }
 
-void pic16x8x_device::op_retfie()
+void pic16_mid_device::op_retfie()
 {
 	set_pc(pop_stack());
 	m_INTCON |= GIE_FLAG;
 }
 
-void pic16x8x_device::op_retlw()
+void pic16_mid_device::op_retlw()
 {
 	m_W = m_opcode.b.l;
 	set_pc(pop_stack());
 }
 
-void pic16x8x_device::op_return()
+void pic16_mid_device::op_return()
 {
 	set_pc(pop_stack());
 }
 
-void pic16x8x_device::op_rlf()
+void pic16_mid_device::op_rlf()
 {
 	m_ALU = get_regfile(addr());
 	int carry = BIT(m_ALU, 7);
@@ -1551,7 +1794,7 @@ void pic16x8x_device::op_rlf()
 		m_STATUS &= ~C_FLAG;
 }
 
-void pic16x8x_device::op_rrf()
+void pic16_mid_device::op_rrf()
 {
 	m_ALU = get_regfile(addr());
 	int carry = BIT(m_ALU, 0);
@@ -1565,7 +1808,7 @@ void pic16x8x_device::op_rrf()
 		m_STATUS &= ~C_FLAG;
 }
 
-void pic16x8x_device::op_sleep()
+void pic16_mid_device::op_sleep()
 {
 	m_STATUS |= TO_FLAG;
 	m_STATUS &= ~PD_FLAG;
@@ -1573,7 +1816,7 @@ void pic16x8x_device::op_sleep()
 	restart_wdt();
 }
 
-void pic16x8x_device::op_sublw()
+void pic16_mid_device::op_sublw()
 {
 	u8 minuend = m_opcode.b.l;
 	m_ALU = minuend - m_W;
@@ -1581,7 +1824,7 @@ void pic16x8x_device::op_sublw()
 	calc_sub_flags(minuend);
 }
 
-void pic16x8x_device::op_subwf()
+void pic16_mid_device::op_subwf()
 {
 	u8 minuend = get_regfile(addr());
 	m_ALU = minuend - m_W;
@@ -1589,14 +1832,14 @@ void pic16x8x_device::op_subwf()
 	calc_sub_flags(minuend);
 }
 
-void pic16x8x_device::op_swapf()
+void pic16_mid_device::op_swapf()
 {
 	u8 reg = get_regfile(addr());
 	m_ALU = reg << 4 | reg >> 4;
 	store_result(addr(), m_ALU);
 }
 
-void pic16x8x_device::op_tris()
+void pic16_mid_device::op_tris()
 {
 	switch (m_opcode.b.l & 0x07)
 	{
@@ -1607,14 +1850,14 @@ void pic16x8x_device::op_tris()
 	op_illegal();
 }
 
-void pic16x8x_device::op_xorlw()
+void pic16_mid_device::op_xorlw()
 {
 	m_ALU = m_W ^ m_opcode.b.l;
 	m_W = m_ALU;
 	calc_zero_flag();
 }
 
-void pic16x8x_device::op_xorwf()
+void pic16_mid_device::op_xorwf()
 {
 	m_ALU = get_regfile(addr()) ^ m_W;
 	store_result(addr(), m_ALU);
@@ -1626,9 +1869,9 @@ void pic16x8x_device::op_xorwf()
 //  INSTRUCTION DECODE TABLE
 //**************************************************************************
 
-#define OP(name, cycles, status) { &pic16x8x_device::op_##name, cycles, status }
+#define OP(name, cycles, status) { &pic16_mid_device::op_##name, cycles, status }
 
-const pic16x8x_device::pic16x8x_opcode pic16x8x_device::s_opcode_main[128]=
+const pic16_mid_device::pic16_opcode pic16_mid_device::s_opcode_main[128]=
 {
 	OP(nop,   1, false), OP(movwf, 1, false), OP(clrw,   1, true ), OP(clrf,   1, true ), // 00
 	OP(subwf, 1, true ), OP(subwf, 1, true ), OP(decf,   1, true ), OP(decf,   1, true ), // 04
@@ -1664,7 +1907,7 @@ const pic16x8x_device::pic16x8x_opcode pic16x8x_device::s_opcode_main[128]=
 	OP(addlw, 1, true ), OP(addlw, 1, true ), OP(addlw,  1, true ), OP(addlw,  1, true )  // 7c
 };
 
-const pic16x8x_device::pic16x8x_opcode pic16x8x_device::s_opcode_00x[128]=
+const pic16_mid_device::pic16_opcode pic16_mid_device::s_opcode_00x[128]=
 {
 	OP(nop,     1, false), OP(illegal, 1, false), OP(illegal, 1, false), OP(illegal, 1, false), // 00
 	OP(illegal, 1, false), OP(illegal, 1, false), OP(illegal, 1, false), OP(illegal, 1, false), // 04

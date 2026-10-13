@@ -638,7 +638,6 @@ private:
 	required_shared_ptr<uint64_t> m_workram;
 	required_ioport_array<8> m_io_ports;
 	required_ioport_array<4> m_analog_input;
-	bool m_analog_8bit[4]{};
 	required_ioport_array<4> m_gun_input;
 	u16 gun_r(int which);
 	optional_ioport m_steering_config;
@@ -832,17 +831,7 @@ uint8_t viper_state::i2cdr_r(offs_t offset)
 						// rebuild the position as 0x100 + first - second.
 						// ANn holds CH(2n+1) - CH(2n) as a 9-bit signed value.
 						const unsigned channel = m_i2c.addr_latch & 0x3;
-						const u16 adc_value = m_analog_input[channel]->read();
-						s32 diff;
-						if (m_analog_8bit[channel])
-						{
-							// libretro-mame fork: 8-bit pedal ports (0x00 released, 0xff full) span the
-							// whole 9-bit range, position 0x001-0x1ff. The stored calibrations only reach
-							// full travel above position 0x100 (gticlub2's gas saturates near 0x13b).
-							diff = 0x100 - s32(((adc_value & 0xff) << 1) | BIT(adc_value, 7));
-						}
-						else
-							diff = util::sext(adc_value, 9);
+						s32 diff = util::sext(m_analog_input[channel]->read(), 9);
 
 						// the wheel turned by its motor during the boot device check
 						if (channel == 0 && m_wheel_motor_check)
@@ -2113,10 +2102,10 @@ INPUT_PORTS_START( thrild2 )
 	PORT_BIT( 0x1ff, 0x000, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN1")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
+	PORT_BIT( 0x1ff, 0x000, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN2")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
+	PORT_BIT( 0x1ff, 0x000, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	// not a hardware setting: eases steering with a gamepad stick
 	PORT_GAMEPAD_STEERING_CONFIG
@@ -2130,7 +2119,7 @@ INPUT_PORTS_START( gticlub2 )
 	PORT_BIT( 0x1ff, 0x000, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN3")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(100) PORT_KEYDELTA(25)
+	PORT_BIT( 0x1ff, 0x000, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(100) PORT_KEYDELTA(50) PORT_REVERSE
 INPUT_PORTS_END
 
 INPUT_PORTS_START( gticlub2ea )
@@ -2456,13 +2445,13 @@ INPUT_PORTS_START( xtrial )
 	PORT_BIT( 0x1ff, 0x000, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN1")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
+	PORT_BIT( 0x1ff, 0x000, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN2")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
+	PORT_BIT( 0x1ff, 0x000, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN3")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(100) PORT_KEYDELTA(25)
+	PORT_BIT( 0x1ff, 0x000, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(100) PORT_KEYDELTA(50) PORT_REVERSE
 INPUT_PORTS_END
 
 INPUT_PORTS_START( code1d )
@@ -2488,10 +2477,10 @@ INPUT_PORTS_START( code1d )
 	PORT_BIT( 0x1ff, 0x000, IPT_PADDLE ) PORT_NAME("Steering Wheel") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN1")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
+	PORT_BIT( 0x1ff, 0x000, IPT_PEDAL ) PORT_NAME("Gas Pedal") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 
 	PORT_MODIFY("AN2")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
+	PORT_BIT( 0x1ff, 0x000, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
 INPUT_PORTS_END
 
 /*****************************************************************************/
@@ -2551,16 +2540,6 @@ void viper_state::machine_start()
 	mpc8240_epic_init();
 
 	m_i2c.timer = timer_alloc(FUNC(viper_state::i2c_timer_callback), this);
-
-	// channels whose port defines only bits 0-7 are 8-bit pedals (see i2cdr_r)
-	for (int i = 0; i < 4; i++)
-	{
-		ioport_value used = 0;
-		for (ioport_field &field : m_analog_input[i]->fields())
-			if (field.type() != IPT_UNUSED && field.type() != IPT_UNKNOWN)
-				used |= field.mask();
-		m_analog_8bit[i] = used != 0 && !(used & ~ioport_value(0xff));
-	}
 
 	/* set conservative DRC options */
 	m_maincpu->ppcdrc_set_options(PPCDRC_COMPATIBLE_OPTIONS);
