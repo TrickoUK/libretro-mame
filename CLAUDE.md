@@ -52,6 +52,9 @@ mixed into history.
   ADC read and ports, gun reads), `scripts/genie.lua`,
   `scripts/src/main.lua` and `src/osd/modules/lib/osdobj_common.cpp` (libretro
   hooks).
+- Local fix on top of upstream: `src/mame/taito/tc0100scn.cpp` `tilemap_draw_fg` uses
+  `cliprect.left()` for the source x (upstream `1ddcb581da6` wrote `cliprect.right()`, which broke
+  Aqua Jack's backdrops and every TC0100SCN line-scroll layer). Drop it once upstream fixes it.
 - Upstream API changes in that sync that broke fork/libretro code:
   - `screen_device` is split per type (`screen_svg_device`, vector screens).
     Use `video_output_interface_enumerator`/`is_vector()` instead of
