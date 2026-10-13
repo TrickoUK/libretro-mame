@@ -455,7 +455,8 @@ void apache3_state::apache3(machine_config &config)
 
 	/* video hardware */
 	screen_device &screen(SCREEN(config, "screen"));
-	screen.set_raw(apache3_state::CLOCK_2 / 8, 400, 0, 320, 272, 0, 240); // TODO: Hook up CRTC
+	// The game programs the HD6445 for 50 x 35 characters of 8 x 8 (400 x 280), 40 x 30 visible
+	screen.set_raw(apache3_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240); // TODO: Hook up CRTC
 	screen.set_screen_update(FUNC(apache3_state::screen_update));
 	screen.screen_vblank().set_inputline(m_maincpu, 0);
 

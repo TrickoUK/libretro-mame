@@ -365,6 +365,13 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 		else
 			render_y += y_offset * scale;
 
+		// A Y-flipped sprite covers the mirror image of its box, ending at its origin like an
+		// X-flipped one; MAME has always drawn it one line lower. Apache 3's object tables put
+		// the attract rotor's hub at +/-112.9 in both cases, and the X+Y flipped exposure
+		// visibly dropped below the mast without this.
+		if (flip_y && m_rotation_enabled)
+			render_y -= scale * 8;
+
 		src1 += 4;
 		int h = 0;
 

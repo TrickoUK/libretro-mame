@@ -276,3 +276,5 @@ builds get them straight from here.
   solid blue and take-off shows dense vegetation.
 - Mountain ranges and tree lines stay on the ground while banking: no blue gap under them and no
   shrinking on big turns.
+- The attract rotor no longer jumps down for part of each turn, and the screen runs at the 55.8 Hz
+  the game programs (was 57.4 Hz).
