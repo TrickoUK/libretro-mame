@@ -13,6 +13,7 @@ class tzbx15_device : public device_t, public device_gfx_interface
 public:
 	void set_sprite_palette_base(int sprite_palette_base) { m_sprite_palette_base = sprite_palette_base; }
 	void set_rotation_enabled(bool enabled) { m_rotation_enabled = enabled; }
+	void set_line_repeat_enabled(bool enabled) { m_line_repeat_enabled = enabled; }
 	template <typename T> void set_basepalette(T &&tag) { m_palette_base.set_tag(std::forward<T>(tag)); }
 	template <typename T> void set_spriteram(T &&tag) { m_spriteram.set_tag(std::forward<T>(tag)); }
 
@@ -55,6 +56,10 @@ private:
 	bitmap_ind16 m_rot_bitmap;
 	static constexpr rectangle EMPTY_BOUNDS{INT32_MAX, INT32_MIN, INT32_MAX, INT32_MIN};
 	rectangle m_rot_bounds;
+	rectangle m_rot_base_bounds;
+	bool m_rot_base_tile = true;
+	bool m_line_repeat_enabled = false;
+	static constexpr int MAX_REPEAT_TILES = 2048;
 	bool m_rotation_enabled = false;
 
 	// config

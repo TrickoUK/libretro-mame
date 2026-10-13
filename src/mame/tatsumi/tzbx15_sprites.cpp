@@ -80,6 +80,7 @@ void tzbx15_device::device_start()
 	m_rot_bitmap.allocate(ROT_ORIGIN * 2, ROT_ORIGIN * 2);
 	m_rot_bitmap.fill(0);
 	m_rot_bounds = EMPTY_BOUNDS;
+	m_rot_base_bounds = EMPTY_BOUNDS;
 
 	decode_gfx(gfxinfo);
 	gfx(0)->set_colors(m_rom_clut_size / 8);
@@ -204,7 +205,11 @@ void tzbx15_device::roundupt_drawgfxzoomrotate(
 			if( ex > sx )
 			{
 				if constexpr (std::is_same_v<BitmapClass, bitmap_ind16>)
+				{
 					m_rot_bounds |= rectangle(sx, ex - 1, sy, ey - 1);
+					if (m_rot_base_tile)
+						m_rot_base_bounds |= rectangle(sx, ex - 1, sy, ey - 1);
+				}
 
 #if 0
 				int startx=0;
@@ -349,6 +354,9 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 
 		int lines = src1[2];
 		int y_offset = src1[0]&0xf8;
+		// Header bit 0x80 repeats each line's tiles on towards the screen edge (Apache 3: the
+		// splash backdrop strip, bush and tree rows that must cover the whole width)
+		bool const repeat = m_line_repeat_enabled && (src1[3] & 0x80);
 
 		lines -= y_offset;
 
@@ -391,8 +399,17 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 			else
 				x_pos = render_x + x_offs;
 
-			for (int w = 0; w < x_width; w++)
+			rectangle const &region = rotated ? m_rot_bitmap.cliprect() : cliprect;
+			int const base0 = base;
+			for (int w = 0; w < (repeat ? MAX_REPEAT_TILES : x_width); w++)
 			{
+				if (w >= x_width)
+				{
+					if (flip_x ? (((x_pos + scale * 8) >> 16) < region.left()) : ((x_pos >> 16) > region.right()))
+						break;
+					base = base0 + (w % x_width);
+				}
+				m_rot_base_tile = w < x_width;
 				if (rotated)
 					roundupt_drawgfxzoomrotate(
 							m_rot_bitmap,m_rot_bitmap.cliprect(),gfx(0 + (base & 1)),
@@ -440,9 +457,15 @@ void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect,
 {
 	// bounds of what was drawn into the scratch buffer
 	rectangle const src = m_rot_bounds;
+	rectangle const base = m_rot_base_bounds;
 	m_rot_bounds = EMPTY_BOUNDS;
-	if (src.empty())
+	m_rot_base_bounds = EMPTY_BOUNDS;
+	if (src.empty() || base.empty())
+	{
+		if (!src.empty())
+			m_rot_bitmap.fill(0, src);
 		return;
+	}
 
 	/*
 	    Behaviour derived from Apache 3, whose 68000 code (object tables at 0x92e4) pre-compensates
@@ -458,8 +481,9 @@ void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect,
 	    - The sprite also moves by (angle / 0x100) times its half-size turned by 90 degrees,
 	      mirrored along with the picture (checked unflipped and X+Y flipped).
 	*/
-	double const pcx = (src.left() + src.right() + 1) * 0.5;
-	double const pcy = (src.top() + src.bottom() + 1) * 0.5;
+	// geometry of the sprite itself, without repeated tiles
+	double const pcx = (base.left() + base.right() + 1) * 0.5;
+	double const pcy = (base.top() + base.bottom() + 1) * 0.5;
 	double const half_w = std::abs(pcx - ROT_ORIGIN);
 	double const half_h = std::abs(pcy - ROT_ORIGIN);
 	int const angle = util::sext(rotate, 9);
@@ -478,7 +502,9 @@ void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect,
 	double const s = flip_x ? -sin(theta) : sin(theta);
 
 	// screen bounding box: the rotated box always fits in the circle through its corners
-	double const radius = sqrt(half_w * half_w + half_h * half_h) + 1.0;
+	double const reach_x = std::max(pcx - src.left(), src.right() + 1 - pcx);
+	double const reach_y = std::max(pcy - src.top(), src.bottom() + 1 - pcy);
+	double const radius = sqrt(reach_x * reach_x + reach_y * reach_y) + 1.0;
 	rectangle dst(int(floor(scx - radius)), int(ceil(scx + radius)), int(floor(scy - radius)), int(ceil(scy + radius)));
 	dst &= cliprect;
 	dst &= bitmap.cliprect();
