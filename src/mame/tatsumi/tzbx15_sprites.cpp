@@ -80,7 +80,6 @@ void tzbx15_device::device_start()
 	m_rot_bitmap.allocate(ROT_ORIGIN * 2, ROT_ORIGIN * 2);
 	m_rot_bitmap.fill(0);
 	m_rot_bounds = EMPTY_BOUNDS;
-	m_rot_base_bounds = EMPTY_BOUNDS;
 
 	decode_gfx(gfxinfo);
 	gfx(0)->set_colors(m_rom_clut_size / 8);
@@ -205,11 +204,7 @@ void tzbx15_device::roundupt_drawgfxzoomrotate(
 			if( ex > sx )
 			{
 				if constexpr (std::is_same_v<BitmapClass, bitmap_ind16>)
-				{
 					m_rot_bounds |= rectangle(sx, ex - 1, sy, ey - 1);
-					if (m_rot_base_tile)
-						m_rot_base_bounds |= rectangle(sx, ex - 1, sy, ey - 1);
-				}
 
 #if 0
 				int startx=0;
@@ -334,8 +329,7 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 		int flip_x =    m_spriteram[offs+1] & 0x8000;
 		int flip_y =    m_spriteram[offs+1] & 0x4000;
 		int rotate =    m_spriteram[offs+5] & 0x1ff;
-		// flipped sprites follow the rotation rules too, even at angle 0 (see draw_rotated)
-		bool const rotated = m_rotation_enabled && (rotate || flip_x || flip_y);
+		bool const rotated = m_rotation_enabled && rotate;
 
 		int index = m_spriteram[offs];
 
@@ -355,7 +349,7 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 		int lines = src1[2];
 		int y_offset = src1[0]&0xf8;
 		// Header bit 0x80 repeats each line's tiles on towards the screen edge (Apache 3: the
-		// splash backdrop strip, bush and tree rows that must cover the whole width)
+		// splash backdrop strip, mountain ranges, bush and tree rows that cover the whole width)
 		bool const repeat = m_line_repeat_enabled && (src1[3] & 0x80);
 
 		lines -= y_offset;
@@ -409,7 +403,6 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 						break;
 					base = base0 + (w % x_width);
 				}
-				m_rot_base_tile = w < x_width;
 				if (rotated)
 					roundupt_drawgfxzoomrotate(
 							m_rot_bitmap,m_rot_bitmap.cliprect(),gfx(0 + (base & 1)),
@@ -444,7 +437,7 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 		}
 
 		if (rotated)
-			draw_rotated(bitmap, cliprect, int16_t(x), int16_t(y), rotate, flip_x, flip_y, write_priority_only);
+			draw_rotated(bitmap, cliprect, int16_t(x), int16_t(y), rotate, flip_x, write_priority_only);
 	}
 }
 
@@ -453,73 +446,55 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
     about the sprite origin, which lands on screen position (x, y).
 */
 template<class BitmapClass>
-void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect, int x, int y, int rotate, bool flip_x, bool flip_y, int write_priority_only)
+void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect, int x, int y, int rotate, bool flip_x, int write_priority_only)
 {
 	// bounds of what was drawn into the scratch buffer
 	rectangle const src = m_rot_bounds;
-	rectangle const base = m_rot_base_bounds;
 	m_rot_bounds = EMPTY_BOUNDS;
-	m_rot_base_bounds = EMPTY_BOUNDS;
-	if (src.empty() || base.empty())
-	{
-		if (!src.empty())
-			m_rot_bitmap.fill(0, src);
+	if (src.empty())
 		return;
-	}
 
 	/*
-	    Behaviour derived from Apache 3, whose 68000 code (object tables at 0x92e4) pre-compensates
-	    sprite positions for it; the attract rotor and title logo fit it to within a pixel:
-	    - The angle is a signed 9-bit value, 0x100 = 45 degrees: the game turns sprites further by
-	      switching to pre-rotated art and flips (the logo uses a 90 degree copy, 0x586), and
-	      ground objects carry +/-0xfd at a 45 degree bank.
-	    - The picture is rotated about the centre of the sprite's (flip-mirrored) box. Flip Y
-	      mirrors it vertically before the rotation and flip X mirrors it horizontally after it:
-	      X+Y flip shows the picture upside down and turning the other way (the logo spins on
-	      through those phases), and a mirrored ground object (flip X, -0xfd) leans with the
-	      bank like its unmirrored twin (+0xfd).
-	    - The sprite also moves by (angle / 0x100) times its half-size turned by 90 degrees,
-	      mirrored along with the picture (checked unflipped and X+Y flipped).
+	    The rotation value is a signed 9-bit slope t (0x100 = 1.0) and the chip maps the drawn
+	    (flipped) sprite through [1 -t; t 1] about its origin, which turns it by atan(t) and
+	    also enlarges it by sqrt(1 + t^2); flip X turns it the other way. Games shrink the scale
+	    to compensate. Derived from Apache 3:
+	    - ground objects carry t = tan(bank angle) (0xa9 at a 33 degree bank) and their scale
+	      shrinks by 1/sqrt(1 + t^2), and the mountain strip's origin stays at a fixed distance
+	      from the horizon, so the base of the strip stays on the ground plane;
+	    - its 68000 object tables (0x92e4) offset positions by exactly M * (sprite centre), for
+	      the attract rotor and the title logo, unflipped and X+Y flipped;
+	    - mirrored ground objects (flip X, -t) lean with the bank like their unmirrored twins,
+	      and the logo turns on continuously through its X+Y flipped phases.
 	*/
-	// geometry of the sprite itself, without repeated tiles
-	double const pcx = (base.left() + base.right() + 1) * 0.5;
-	double const pcy = (base.top() + base.bottom() + 1) * 0.5;
-	double const half_w = std::abs(pcx - ROT_ORIGIN);
-	double const half_h = std::abs(pcy - ROT_ORIGIN);
-	int const angle = util::sext(rotate, 9);
-	double const turn = angle / 256.0;
-	double shift_x = flip_y ? turn * half_h : -turn * half_h;
-	double const shift_y = turn * half_w;
-	if (flip_x)
-		shift_x = -shift_x;
-	double const scx = x - ROT_ORIGIN + pcx + shift_x;
-	double const scy = y - ROT_ORIGIN + pcy + shift_y;
+	double const t = util::sext(rotate, 9) / 256.0 * (flip_x ? -1.0 : 1.0);
+	auto const forward = [t] (double lx, double ly) { return std::make_pair(lx - t * ly, t * lx + ly); };
 
-	// The scratch buffer already holds the picture mirrored by both flips, so the screen maps
-	// back into it by a plain rotation: by -angle, or by +angle with flip X.
-	double const theta = angle * ((std::numbers::pi / 4.0) / 256.0);
-	double const c = cos(theta);
-	double const s = flip_x ? -sin(theta) : sin(theta);
-
-	// screen bounding box: the rotated box always fits in the circle through its corners
-	double const reach_x = std::max(pcx - src.left(), src.right() + 1 - pcx);
-	double const reach_y = std::max(pcy - src.top(), src.bottom() + 1 - pcy);
-	double const radius = sqrt(reach_x * reach_x + reach_y * reach_y) + 1.0;
-	rectangle dst(int(floor(scx - radius)), int(ceil(scx + radius)), int(floor(scy - radius)), int(ceil(scy + radius)));
+	// screen bounding box of the transformed scratch rectangle
+	double minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
+	for (int corner = 0; corner < 4; corner++)
+	{
+		auto const [dx, dy] = forward(
+				((corner & 1) ? src.right() + 1 : src.left()) - ROT_ORIGIN,
+				((corner & 2) ? src.bottom() + 1 : src.top()) - ROT_ORIGIN);
+		minx = std::min(minx, dx); maxx = std::max(maxx, dx);
+		miny = std::min(miny, dy); maxy = std::max(maxy, dy);
+	}
+	rectangle dst(x + int(floor(minx)) - 1, x + int(ceil(maxx)) + 1, y + int(floor(miny)) - 1, y + int(ceil(maxy)) + 1);
 	dst &= cliprect;
 	dst &= bitmap.cliprect();
 
+	// inverse: M^-1 = [1 t; -t 1] / (1 + t^2)
+	double const k = 1.0 / (1.0 + t * t);
 	for (int py = dst.top(); py <= dst.bottom(); py++)
 	{
 		typename BitmapClass::pixel_t *const dest = &bitmap.pix(py);
-		double const dy = py + 0.5 - scy;
+		double const dy = py + 0.5 - y;
 		for (int px = dst.left(); px <= dst.right(); px++)
 		{
-			double const dx = px + 0.5 - scx;
-			double const lx = dx * c + dy * s;
-			double const ly = dy * c - dx * s;
-			int const sx = int(floor(pcx + lx));
-			int const sy = int(floor(pcy + ly));
+			double const dx = px + 0.5 - x;
+			int const sx = int(floor((dx + t * dy) * k)) + ROT_ORIGIN;
+			int const sy = int(floor((dy - t * dx) * k)) + ROT_ORIGIN;
 			if (!src.contains(sx, sy))
 				continue;
 			uint16_t const v = m_rot_bitmap.pix(sy, sx);

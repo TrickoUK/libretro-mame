@@ -274,3 +274,5 @@ builds get them straight from here.
   mast, and trees and buildings lean with the bank on both sides of the screen.
 - Bush rows, tree lines and the splash backdrop span the full screen width, so the splash is
   solid blue and take-off shows dense vegetation.
+- Mountain ranges and tree lines stay on the ground while banking: no blue gap under them and no
+  shrinking on big turns.
