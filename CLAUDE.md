@@ -38,6 +38,12 @@ mixed into history.
   `fork-specific/viper-investigation.md` Fix 5). `arcade.flt` unchanged. Checked with I/O CHECK
   (gticlub2, xtrial), frame-exact Voodoo snapshots (identical on 7 games) and smoke tests
   (`fork-specific/out/sync1243`).
+- **Follow-up sync, 2026-10-13**: merge commit `6078a3eee1f` merged mamedev master
+  `mame0289-1494-g344d163580b` (130 commits). One conflict, `konami/viper.cpp`: upstream's
+  `e02f3bc0029` gives the driving games' pedals and handbrake full-range 9-bit ports, so the fork's
+  8-bit pedal read path was dropped (only the gamepad steering helper stays). `arcade.flt`
+  regenerated. Full `-j4` build clean. Smoke-tested gticlub2, xtrial and sfrush (90 s, no MIPS
+  compare hang) (`fork-specific/out/sync1494*`).
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
