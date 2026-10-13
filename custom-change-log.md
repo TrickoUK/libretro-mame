@@ -278,3 +278,7 @@ builds get them straight from here.
   shrinking on big turns.
 - The attract rotor no longer jumps down for part of each turn, and the screen runs at the 55.8 Hz
   the game programs (was 57.4 Hz).
+
+### Round Up 5: road visible in tunnels
+- Tunnels showed only the wall lights on a black screen. The road is now drawn there too, with its
+  lane markings and edges; the open road is unchanged.
