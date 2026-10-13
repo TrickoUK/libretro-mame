@@ -282,3 +282,8 @@ builds get them straight from here.
 ### Round Up 5: road visible in tunnels
 - Tunnels showed only the wall lights on a black screen. The road is now drawn there too, with its
   lane markings and edges; the open road is unchanged.
+
+### Taito TC0100SCN games (Aqua Jack, Chase H.Q. and others): background layer back in place
+- Since the 2026-10-13 upstream sync, the layer these boards draw with line scroll was shifted by
+  most of a screen: Aqua Jack's attract scenes were black behind the plane and the hovercraft, and
+  the mountain backdrop showed its wrap seam on screen. Fixed (an upstream typo, not yet fixed there).
