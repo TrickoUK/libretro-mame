@@ -264,3 +264,13 @@ builds get them straight from here.
 - The default, **Game setting**, keeps what's set in MAME's Machine Configuration menu. Any other
   value replaces it when the game starts or the option changes. Games without these settings are
   unaffected.
+
+## 2026-10-13
+
+### Apache 3: ground, rotating sprites and full-width scenery
+- The ground is now drawn: it banks with the helicopter, has the moving depth stripes, the city
+  road, and the snow stage's river beside the mountains. The sky uses the game's own gradient.
+- Sprites rotate: the splash logo spins and sweeps like the arcade, the rotor stays on the
+  mast, and trees and buildings lean with the bank on both sides of the screen.
+- Bush rows, tree lines and the splash backdrop span the full screen width, so the splash is
+  solid blue and take-off shows dense vegetation.
