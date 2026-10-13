@@ -427,7 +427,7 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 		}
 
 		if (rotated)
-			draw_rotated(bitmap, cliprect, int16_t(x), int16_t(y), rotate, flip_y, write_priority_only);
+			draw_rotated(bitmap, cliprect, int16_t(x), int16_t(y), rotate, flip_x, flip_y, write_priority_only);
 	}
 }
 
@@ -436,7 +436,7 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
     about the sprite origin, which lands on screen position (x, y).
 */
 template<class BitmapClass>
-void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect, int x, int y, int rotate, bool flip_y, int write_priority_only)
+void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect, int x, int y, int rotate, bool flip_x, bool flip_y, int write_priority_only)
 {
 	// bounds of what was drawn into the scratch buffer
 	rectangle const src = m_rot_bounds;
@@ -450,11 +450,13 @@ void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect,
 	    - The angle is a signed 9-bit value, 0x100 = 45 degrees: the game turns sprites further by
 	      switching to pre-rotated art and flips (the logo uses a 90 degree copy, 0x586), and
 	      ground objects carry +/-0xfd at a 45 degree bank.
-	    - The picture is rotated about the centre of the sprite's (flip-mirrored) box. Flip X
-	      mirrors it horizontally before the rotation, flip Y mirrors it vertically after it, so
-	      X+Y flip shows the picture upside down and turning the other way.
-	    - The sprite also moves by (angle / 0x100) times its unflipped half-size turned by
-	      90 degrees, whatever the flips.
+	    - The picture is rotated about the centre of the sprite's (flip-mirrored) box. Flip Y
+	      mirrors it vertically before the rotation and flip X mirrors it horizontally after it:
+	      X+Y flip shows the picture upside down and turning the other way (the logo spins on
+	      through those phases), and a mirrored ground object (flip X, -0xfd) leans with the
+	      bank like its unmirrored twin (+0xfd).
+	    - The sprite also moves by (angle / 0x100) times its half-size turned by 90 degrees,
+	      mirrored along with the picture (checked unflipped and X+Y flipped).
 	*/
 	double const pcx = (src.left() + src.right() + 1) * 0.5;
 	double const pcy = (src.top() + src.bottom() + 1) * 0.5;
@@ -462,14 +464,18 @@ void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect,
 	double const half_h = std::abs(pcy - ROT_ORIGIN);
 	int const angle = util::sext(rotate, 9);
 	double const turn = angle / 256.0;
-	double const scx = x - ROT_ORIGIN + pcx - turn * half_h;
-	double const scy = y - ROT_ORIGIN + pcy + turn * half_w;
+	double shift_x = flip_y ? turn * half_h : -turn * half_h;
+	double const shift_y = turn * half_w;
+	if (flip_x)
+		shift_x = -shift_x;
+	double const scx = x - ROT_ORIGIN + pcx + shift_x;
+	double const scy = y - ROT_ORIGIN + pcy + shift_y;
 
 	// The scratch buffer already holds the picture mirrored by both flips, so the screen maps
-	// back into it by a plain rotation: by -angle, or by +angle with flip Y.
+	// back into it by a plain rotation: by -angle, or by +angle with flip X.
 	double const theta = angle * ((std::numbers::pi / 4.0) / 256.0);
 	double const c = cos(theta);
-	double const s = flip_y ? -sin(theta) : sin(theta);
+	double const s = flip_x ? -sin(theta) : sin(theta);
 
 	// screen bounding box: the rotated box always fits in the circle through its corners
 	double const radius = sqrt(half_w * half_w + half_h * half_h) + 1.0;

@@ -33,7 +33,7 @@ private:
 	virtual void device_reset() override ATTR_COLD;
 
 	template<class BitmapClass> void draw_sprites_main(BitmapClass &bitmap, const rectangle &cliprect, int write_priority_only, int rambank);
-	template<class BitmapClass> void draw_rotated(BitmapClass &bitmap, const rectangle &cliprect, int x, int y, int rotate, bool flip_y, int write_priority_only);
+	template<class BitmapClass> void draw_rotated(BitmapClass &bitmap, const rectangle &cliprect, int x, int y, int rotate, bool flip_x, bool flip_y, int write_priority_only);
 	template<class BitmapClass> void roundupt_drawgfxzoomrotate(
 			BitmapClass &dest_bmp, const rectangle &clip,
 			gfx_element *gfx, uint32_t code, uint32_t color,
