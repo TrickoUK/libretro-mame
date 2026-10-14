@@ -6,7 +6,8 @@
 
     TODO:
 
-    - road layer, has twelve rotation registers!
+    - sky gradient mapping and ground start line timing are inferred from the game's code, not
+      verified against hardware
 
 ***************************************************************************/
 
@@ -78,10 +79,10 @@ private:
 
 	required_ioport m_vr1;
 
-	uint16_t m_apache3_rotate_ctrl[12];
+	uint16_t m_apache3_rotate_ctrl[12]{};
 	int m_apache3_rot_idx;
-	int16_t m_apache3_road_x_ram[256];
-	uint8_t m_apache3_road_z;
+	int16_t m_apache3_road_x_ram[256]{};
+	uint8_t m_apache3_road_z = 0;
 };
 
 
@@ -93,32 +94,35 @@ void apache3_state::apache3_road_z_w(uint16_t data)
 void apache3_state::apache3_road_x_w(offs_t offset, uint8_t data)
 {
 	// The Z80 puts the value on the address bus and the ground row on the data bus: a 12-bit
-	// signed horizontal offset per row of the ground pattern (bits 12-14 are its sign extension)
+	// signed horizontal offset per row of the ground pattern (address bits 12-14 look like its sign extension)
 	m_apache3_road_x_ram[data] = util::sext(offset, 12);
 }
 
 /*
     Ground and sky
 
-    The 68000 writes 12 words per frame to the TZ2213 accumulators (code at 0x8e06). They hold
-    three 24-bit accumulators with 8 fractional bits, each stepped per pixel and per line:
+    The 68000 writes 12 words per frame to the TZ2213 accumulators (code at 0x8e06). They appear
+    to form three 24-bit accumulators with 8 fractional bits, each stepped per pixel and per line
+    (rN is the Nth word written):
 
-      horizontal  start r0:r4 (bits 16-31 : 0-15), +r2 per pixel, +r6 per line
-      sky         start r1:r5 (bits 8-23 : 0-15),  +r3 per pixel, +r7 per line
-      ground      start r9:r10 (bits 8-23 : 0-15), +r8 per pixel, +r11 per line
+      horizontal  start r0:r4 (low byte of r0 = bits 16-23, r4 = bits 0-15), +r2 per pixel, +r6 per line
+      sky         start r1:r5 (r1 = bits 8-23, low byte of r5 = bits 0-7),   +r3 per pixel, +r7 per line
+      ground      start r9:r10 (r9 = bits 8-23, low byte of r10 = bits 0-7), +r8 per pixel, +r11 per line
 
-    The per-pixel/per-line steps are (cos, sin) of the bank angle, scaled 1.0 for the ground,
-    the game's sky scale for the sky, and with a shear term for the horizontal one. The ground
-    accumulator is the distance below the horizon, which picks a row of the ground pattern RAM
-    (512 pixels x 256 rows, 2 bits per pixel, pre-scaled for perspective and mirrored about the
-    centre); above the horizon the sky accumulator picks a colour of the sky gradient.
+    The per-pixel and per-line steps appear to be the cos and sin of the bank angle (scaled 1.0 for
+    the ground, by a game-set sky scale for the sky, and with an extra shear term for the horizontal
+    accumulator). The ground accumulator is the distance below the horizon, which picks a row of
+    the ground pattern RAM (512 pixels x 256 rows, 2 bits per pixel, pre-scaled for perspective and
+    mirrored about the centre); above the horizon the sky accumulator picks a colour of the sky
+    gradient.
 */
 void apache3_state::draw_ground(bitmap_rgb32 &dst, const rectangle &cliprect)
 {
-	auto const acc24 = [] (uint16_t hi, uint16_t lo, int shift) { return util::sext((uint32_t(hi) << shift) | (lo & ((1 << shift) - 1)), 24); };
-	int32_t const h0 = util::sext((uint32_t(m_apache3_rotate_ctrl[0]) << 16 | m_apache3_rotate_ctrl[4]) & 0xffffff, 24);
-	int32_t const s0 = acc24(m_apache3_rotate_ctrl[1], m_apache3_rotate_ctrl[5], 8);
-	int32_t const g0 = acc24(m_apache3_rotate_ctrl[9], m_apache3_rotate_ctrl[10], 8);
+	// 24-bit accumulator: a 16-bit word in bits 8-23 plus the low byte of another word in bits 0-7
+	auto const acc24 = [] (uint16_t hi, uint16_t lo) { return util::sext((uint32_t(hi) << 8) | (lo & 0xff), 24); };
+	int32_t const h0 = util::sext((uint32_t(m_apache3_rotate_ctrl[0] & 0xff) << 16) | m_apache3_rotate_ctrl[4], 24);
+	int32_t const s0 = acc24(m_apache3_rotate_ctrl[1], m_apache3_rotate_ctrl[5]);
+	int32_t const g0 = acc24(m_apache3_rotate_ctrl[9], m_apache3_rotate_ctrl[10]);
 	int32_t const h_dx = int16_t(m_apache3_rotate_ctrl[2]), h_dy = int16_t(m_apache3_rotate_ctrl[6]);
 	int32_t const s_dx = int16_t(m_apache3_rotate_ctrl[3]), s_dy = int16_t(m_apache3_rotate_ctrl[7]);
 	int32_t const g_dx = int16_t(m_apache3_rotate_ctrl[8]), g_dy = int16_t(m_apache3_rotate_ctrl[11]);
@@ -136,7 +140,7 @@ void apache3_state::draw_ground(bitmap_rgb32 &dst, const rectangle &cliprect)
 			int const row = g >> 8;
 			if (row < 0)
 			{
-				// sky: the gradient darkens with height above the horizon
+				// sky: the gradient index grows with height above the horizon
 				int const level = std::min(-(sky >> 8), 0x7f);
 				dest[x] = pens[0x100 + std::max(level, 0)];
 			}
@@ -646,9 +650,6 @@ void apache3_state::init_apache3()
 	init_tatsumi();
 
 	m_apache3_rot_idx = 0;
-	std::fill(std::begin(m_apache3_rotate_ctrl), std::end(m_apache3_rotate_ctrl), 0);
-	std::fill(std::begin(m_apache3_road_x_ram), std::end(m_apache3_road_x_ram), 0);
-	m_apache3_road_z = 0;
 
 	save_item(NAME(m_apache3_rot_idx));
 	save_item(NAME(m_apache3_rotate_ctrl));

@@ -52,15 +52,17 @@ private:
 
 	std::unique_ptr<uint8_t[]> m_shadow_pen_array;
 	// scratch buffer for rotated sprites, holds CLUT index + 1 (0 = transparent)
+	// the sprite origin sits in the middle of it, so a sprite can extend ROT_ORIGIN pixels either way
 	static constexpr int ROT_ORIGIN = 512;
-	bitmap_ind16 m_rot_bitmap;
 	static constexpr rectangle EMPTY_BOUNDS{INT32_MAX, INT32_MIN, INT32_MAX, INT32_MIN};
-	rectangle m_rot_bounds;
-	bool m_line_repeat_enabled = false;
+	// upper bound on the tiles drawn per line when repeating it (it normally stops at the edge of the region)
 	static constexpr int MAX_REPEAT_TILES = 2048;
-	bool m_rotation_enabled = false;
+	bitmap_ind16 m_rot_bitmap;
+	rectangle m_rot_bounds;
 
 	// config
+	bool m_rotation_enabled = false;
+	bool m_line_repeat_enabled = false;
 	int m_rom_clut_size;
 	int m_rom_clut_offset;
 	int m_sprite_palette_base;

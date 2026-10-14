@@ -5,6 +5,7 @@
 #include "tzbx15_sprites.h"
 #include "screen.h"
 
+#include <limits>
 #include <numbers>
 
 // TZB215 on Apache 3
@@ -365,10 +366,10 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 		else
 			render_y += y_offset * scale;
 
-		// A Y-flipped sprite covers the mirror image of its box, ending at its origin like an
-		// X-flipped one; MAME has always drawn it one line lower. Apache 3's object tables put
-		// the attract rotor's hub at +/-112.9 in both cases, and the X+Y flipped exposure
-		// visibly dropped below the mast without this.
+		// A Y-flipped sprite covers the mirror image of its box, so it ends at its origin like an
+		// X-flipped one. Without this offset it is drawn one tile row (8 x scale) too low. Apache 3's
+		// object tables place the attract rotor's hub identically for flipped and unflipped sprites,
+		// which only works out with this offset.
 		if (flip_y && m_rotation_enabled)
 			render_y -= scale * 8;
 
@@ -449,8 +450,9 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 }
 
 /*
-    Copy the scratch buffer onto the screen, rotated by 'rotate' (0x200 = full turn)
-    about the sprite origin, which lands on screen position (x, y).
+    Copy the scratch buffer onto the screen, transformed by the sprite's rotation value about
+    the sprite origin, which lands on screen position (x, y). Sprite pixels more than
+    ROT_ORIGIN away from the origin are clipped by the size of the scratch buffer.
 */
 template<class BitmapClass>
 void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect, int x, int y, int rotate, bool flip_x, int write_priority_only)
@@ -465,11 +467,11 @@ void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect,
 	    The rotation value is a signed 9-bit slope t (0x100 = 1.0) and the chip maps the drawn
 	    (flipped) sprite through [1 -t; t 1] about its origin, which turns it by atan(t) and
 	    also enlarges it by sqrt(1 + t^2); flip X turns it the other way. Games shrink the scale
-	    to compensate. Derived from Apache 3:
-	    - ground objects carry t = tan(bank angle) (0xa9 at a 33 degree bank) and their scale
-	      shrinks by 1/sqrt(1 + t^2), and the mountain strip's origin stays at a fixed distance
-	      from the horizon, so the base of the strip stays on the ground plane;
-	    - its 68000 object tables (0x92e4) offset positions by exactly M * (sprite centre), for
+	    to compensate. Worked out from Apache 3:
+	    - ground objects carry t = tan(bank angle) (0xa9 at a bank of about 33 degrees) and their
+	      scale shrinks by 1/sqrt(1 + t^2), and the mountain strip's origin stays at a fixed
+	      distance from the horizon, so the base of the strip stays on the ground plane;
+	    - its 68000 object tables (0x92e4) appear to offset positions by M * (sprite centre), for
 	      the attract rotor and the title logo, unflipped and X+Y flipped;
 	    - mirrored ground objects (flip X, -t) lean with the bank like their unmirrored twins,
 	      and the logo turns on continuously through its X+Y flipped phases.
@@ -478,7 +480,8 @@ void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect,
 	auto const forward = [t] (double lx, double ly) { return std::make_pair(lx - t * ly, t * lx + ly); };
 
 	// screen bounding box of the transformed scratch rectangle
-	double minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
+	double minx = std::numeric_limits<double>::max(), maxx = std::numeric_limits<double>::lowest();
+	double miny = std::numeric_limits<double>::max(), maxy = std::numeric_limits<double>::lowest();
 	for (int corner = 0; corner < 4; corner++)
 	{
 		auto const [dx, dy] = forward(
@@ -487,7 +490,7 @@ void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect,
 		minx = std::min(minx, dx); maxx = std::max(maxx, dx);
 		miny = std::min(miny, dy); maxy = std::max(maxy, dy);
 	}
-	rectangle dst(x + int(floor(minx)) - 1, x + int(ceil(maxx)) + 1, y + int(floor(miny)) - 1, y + int(ceil(maxy)) + 1);
+	rectangle dst(x + int(std::floor(minx)) - 1, x + int(std::ceil(maxx)) + 1, y + int(std::floor(miny)) - 1, y + int(std::ceil(maxy)) + 1);
 	dst &= cliprect;
 	dst &= bitmap.cliprect();
 
@@ -500,8 +503,8 @@ void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect,
 		for (int px = dst.left(); px <= dst.right(); px++)
 		{
 			double const dx = px + 0.5 - x;
-			int const sx = int(floor((dx + t * dy) * k)) + ROT_ORIGIN;
-			int const sy = int(floor((dy - t * dx) * k)) + ROT_ORIGIN;
+			int const sx = int(std::floor((dx + t * dy) * k)) + ROT_ORIGIN;
+			int const sy = int(std::floor((dy - t * dx) * k)) + ROT_ORIGIN;
 			if (!src.contains(sx, sy))
 				continue;
 			uint16_t const v = m_rot_bitmap.pix(sy, sx);
