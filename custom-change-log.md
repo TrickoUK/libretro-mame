@@ -301,3 +301,7 @@ builds get them straight from here.
 - Cycle Warriors (and Big Fight, which shares its machine config) now use the sprite rotation and
   line repeat that Apache 3 and Round Up 5 already had, so rotated sprites and strips flagged to
   repeat across the screen draw as intended. Big Fight looks the same either way.
+
+### Apache 3: tall city buildings no longer lose their bodies
+- In the city attract scene, big buildings close to the camera used to vanish apart from a thin strip of
+  roof left floating in the sky. They now draw in full, in all three sets.

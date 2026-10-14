@@ -118,7 +118,8 @@ void tzbx15_device::device_add_mconfig(machine_config &config)
     Byte 0: Y destination offset (in scanlines, unaffected by scale).
     Byte 1: Always 0?
     Byte 2: Number of source scanlines to render from (so unaffected by destination scale).
-    Byte 3: Bit 7 repeats each line's tiles on towards the screen edge
+    Byte 3: Bit 0 is bit 8 of the scanline count (tall buildings in Apache 3 need more than 255 lines).
+            Bit 7 repeats each line's tiles on towards the screen edge
 
     Other banks:
     Byte 0: Width of line in tiles (-1)
@@ -191,13 +192,14 @@ void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cli
 	uint8_t const *const src2 = m_sprites_h_rom + (index * 4);
 
 	int const top = src1[0] & 0xf8;
-	int const rows = (src1[2] - top + 7) / 8;
+	int const lines = src1[2] | ((src1[3] & 0x01) << 8);
+	int const rows = (lines - top + 7) / 8;
 	if (!scale || rows <= 0)
 		return;
 	int const bottom = top + rows * 8;
 
 	// One run of tiles per row of 8 lines, taken from alternate banks
-	int run_left[32], run_right[32], run_base[32];
+	int run_left[64], run_right[64], run_base[64];
 	int width = 0;
 	for (int h = 0; h < rows; h++)
 	{
