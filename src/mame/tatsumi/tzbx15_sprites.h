@@ -35,12 +35,6 @@ private:
 	template<class BitmapClass> void draw_rotated_lines(BitmapClass &bitmap, const rectangle &cliprect,
 			int index, int color, int x, int y, int scale, int rotate, bool flip_x, bool flip_y,
 			bool repeat, int write_priority_only);
-	template<class BitmapClass> void roundupt_drawgfxzoomrotate(
-			BitmapClass &dest_bmp, const rectangle &clip,
-			gfx_element *gfx, uint32_t code, uint32_t color,
-			int flipx, int flipy, uint32_t ssx, uint32_t ssy,
-			int scalex, int scaley, int rotate,
-			int write_priority_only);
 
 	DECLARE_GFXDECODE_MEMBER(gfxinfo);
 
@@ -51,8 +45,6 @@ private:
 	required_region_ptr<uint8_t> m_sprites_h_rom;
 
 	std::unique_ptr<uint8_t[]> m_shadow_pen_array;
-	// upper bound on the tiles drawn per line when repeating it (it normally stops at the edge of the region)
-	static constexpr int MAX_REPEAT_TILES = 2048;
 
 	// config
 	int m_rom_clut_size;

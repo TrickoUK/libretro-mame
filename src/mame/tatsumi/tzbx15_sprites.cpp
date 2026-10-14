@@ -6,7 +6,6 @@
 #include "screen.h"
 
 #include <limits>
-#include <numbers>
 
 // TZB215 on Apache 3
 // TZB315 on Round Up 5, Big Fight, Cycle Warriors
@@ -95,187 +94,6 @@ void tzbx15_device::device_add_mconfig(machine_config &config)
 }
 
 
-template<class BitmapClass>
-void tzbx15_device::roundupt_drawgfxzoomrotate(
-		BitmapClass &dest_bmp, const rectangle &clip,
-		gfx_element *gfx, uint32_t code, uint32_t color,
-		int flipx, int flipy, uint32_t ssx, uint32_t ssy,
-		int scalex, int scaley, int rotate,
-		int write_priority_only)
-{
-	if (!scalex || !scaley) return;
-
-	/*
-	scalex and scaley are 16.16 fixed point numbers
-	1<<15 : shrink to 50%
-	1<<16 : uniform scale
-	1<<17 : double to 200%
-	*/
-
-	// force clip to bitmap boundary
-	rectangle myclip = clip;
-	myclip &= dest_bmp.cliprect();
-
-	if (gfx)
-	{
-		const pen_t *pal = &m_palette_clut->pen(gfx->colorbase() + gfx->granularity() * (color % gfx->colors()));
-		const uint8_t *shadow_pens = m_shadow_pen_array.get() + (gfx->granularity() * (color % gfx->colors()));
-		const uint8_t *code_base = gfx->get_data(code % gfx->elements());
-
-		int block_size = 8 * scalex;
-		int sprite_screen_height = ((ssy&0xffff)+block_size)>>16;
-		int sprite_screen_width = ((ssx&0xffff)+block_size)>>16;
-
-		if (sprite_screen_width && sprite_screen_height)
-		{
-			// compute sprite increment per screen pixel
-			int dx = (gfx->width()<<16)/sprite_screen_width;
-			int dy = (gfx->height()<<16)/sprite_screen_height;
-
-			int sx;//=ssx>>16;
-			int sy;//=ssy>>16;
-
-//          int ex = sx+sprite_screen_width;
-//          int ey = sy+sprite_screen_height;
-
-			int incxx=0x10000;//(int)((float)dx * cos(theta));
-//          int incxy=0x0;//(int)((float)dy * -sin(theta));
-			int incyx=0x0;//(int)((float)dx * sin(theta));
-//          int incyy=0x10000;//(int)((float)dy * cos(theta));
-
-			if (ssx&0x80000000) sx=0-(0x10000 - (ssx>>16)); else sx=ssx>>16;
-			if (ssy&0x80000000) sy=0-(0x10000 - (ssy>>16)); else sy=ssy>>16;
-			int ex = sx+sprite_screen_width;
-			int ey = sy+sprite_screen_height;
-			int x_index_base;
-			if( flipx )
-			{
-				x_index_base = (sprite_screen_width-1)*dx;
-				dx = -dx;
-				incxx=-incxx;
-				incyx=-incyx;
-			}
-			else
-			{
-				x_index_base = 0;
-			}
-
-			int y_index;
-			if( flipy )
-			{
-				y_index = (sprite_screen_height-1)*dy;
-				dy = -dy;
-			}
-			else
-			{
-				y_index = 0;
-			}
-
-			if( sx < myclip.left())
-			{
-				// clip left
-				int pixels = myclip.left()-sx;
-				sx += pixels;
-				x_index_base += pixels*dx;
-			}
-			if( sy < myclip.top() )
-			{
-				// clip top
-				int pixels = myclip.top()-sy;
-				sy += pixels;
-				y_index += pixels*dy;
-			}
-			if( ex > myclip.right()+1 )
-			{
-				// clip right
-				int pixels = ex-myclip.right()-1;
-				ex -= pixels;
-			}
-			if( ey > myclip.bottom()+1 )
-			{
-				// clip bottom
-				int pixels = ey-myclip.bottom()-1;
-				ey -= pixels;
-			}
-
-			// skip if inner loop doesn't draw anything
-			if( ex > sx )
-			{
-#if 0
-				int startx=0;
-				int starty=0;
-
-				//int incxx=0x10000;
-				//int incxy=0;
-				//int incyx=0;
-				//int incyy=0x10000;
-				double theta=rotate * ((2.0 * std::numbers::pi)/512.0);
-				double c=cos(theta);
-				double s=sin(theta);
-
-				//if (ey-sy > 0) dy=dy / (ey-sy);
-				{
-					float angleAsRadians=(float)rotate * (7.28f / 512.0f);
-					//float ccx = cosf(angleAsRadians);
-					//float ccy = sinf(angleAsRadians);
-					float a=0;
-
-				}
-
-				for( int y=sy; y<ey; y++ )
-				{
-					uint32_t *const dest = &dest_bmp.pix(y);
-					int cx = startx;
-					int cy = starty;
-
-					int x_index = x_index_base;
-					for( int x=sx; x<ex; x++ )
-					{
-						const uint8_t *source = code_base + (cy>>16) * gfx->rowbytes();
-						int c = source[(cx >> 16)];
-						if( c != transparent_color )
-						{
-							if (write_priority_only)
-								dest[x]=shadow_pens[c];
-							else
-								dest[x]=pal[c];
-						}
-						cx += incxx;
-						cy += incxy;
-					}
-					startx += incyx;
-					starty += incyy;
-				}
-#endif
-#if 1 // old
-				for( int y=sy; y<ey; y++ )
-				{
-					uint8_t const *const source = code_base + (y_index>>16) * gfx->rowbytes();
-					typename BitmapClass::pixel_t *const dest = &dest_bmp.pix(y);
-
-					int x_index = x_index_base;
-					for( int x=sx; x<ex; x++ )
-					{
-						int c = source[x_index>>16];
-						if( c )
-						{
-							// Only draw shadow pens if writing priority buffer
-							if (write_priority_only)
-								dest[x]=shadow_pens[c];
-							else if (!shadow_pens[c])
-								dest[x]=pal[c];
-						}
-						x_index += dx;
-					}
-
-					y_index += dy;
-				}
-#endif
-			}
-		}
-	}
-}
-
 /*
     Sprite RAM itself uses an index into two ROM tables to actually draw the object.
 
@@ -300,7 +118,7 @@ void tzbx15_device::roundupt_drawgfxzoomrotate(
     Byte 0: Y destination offset (in scanlines, unaffected by scale).
     Byte 1: Always 0?
     Byte 2: Number of source scanlines to render from (so unaffected by destination scale).
-    Byte 3: Usually 0, sometimes 0x80??
+    Byte 3: Bit 7 repeats each line's tiles on towards the screen edge
 
     Other banks:
     Byte 0: Width of line in tiles (-1)
@@ -335,106 +153,18 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 			continue;
 
 		uint8_t const *src1 = m_sprites_l_rom + (index * 4);
-		uint8_t const *src2 = m_sprites_h_rom + (index * 4);
 
 		// Header bit 0x80 repeats each line's tiles on towards the screen edge (Apache 3: the
 		// splash backdrop strip, mountain ranges, bush and tree rows that cover the whole width)
 		bool const repeat = BIT(src1[3], 7);
-
-		if (rotate)
-		{
-			draw_rotated_lines(bitmap, cliprect, index, color, int16_t(x), int16_t(y),
-					scale, rotate, flip_x, flip_y, repeat, write_priority_only);
-			continue;
-		}
-
-		int lines = src1[2];
-		int y_offset = src1[0]&0xf8;
-
-		lines -= y_offset;
-
-		int render_x = x << 16;
-		int render_y = y << 16;
-		scale = scale << 9; /* 0x80 becomes 0x10000 */
-
-		if (flip_y)
-			render_y -= y_offset * scale;
-		else
-			render_y += y_offset * scale;
-
-		// A Y-flipped sprite covers the mirror image of its box, so it ends at its origin like an
-		// X-flipped one, as it does when drawn rotated
-		if (flip_y)
-			render_y -= scale * 8;
-
-		src1 += 4;
-		int h = 0;
-
-		while (lines > 0)
-		{
-			int base, x_offs, x_width, x_pos;
-
-			/* Odd and even lines come from different banks */
-			if (h & 1)
-			{
-				x_width = src1[0] + 1;
-				x_offs = src1[1] * scale * 8;
-				base = src1[2] | (src1[3] << 8);
-			}
-			else
-			{
-				x_width = src2[0] + 1;
-				x_offs = src2[1] * scale * 8;
-				base = src2[2] | (src2[3] << 8);
-			}
-
-			base *= 2;
-
-			if (flip_x)
-				x_pos = render_x - x_offs - scale * 8;
-			else
-				x_pos = render_x + x_offs;
-
-			int const base0 = base;
-			for (int w = 0; w < (repeat ? MAX_REPEAT_TILES : x_width); w++)
-			{
-				if (w >= x_width)
-				{
-					if (flip_x ? (((x_pos + scale * 8) >> 16) < cliprect.left()) : ((x_pos >> 16) > cliprect.right()))
-						break;
-					base = base0 + (w % x_width);
-				}
-				roundupt_drawgfxzoomrotate(
-						bitmap,cliprect,gfx(0 + (base & 1)),
-						base >> 1,
-						color,flip_x,flip_y,x_pos,render_y,
-						scale,scale,0,write_priority_only);
-				base++;
-
-				if (flip_x)
-					x_pos -= scale * 8;
-				else
-					x_pos += scale * 8;
-			}
-			if (h & 1)
-				src1 += 4;
-			else
-				src2 += 4;
-
-			if (flip_y)
-				render_y -= 8 * scale;
-			else
-				render_y += 8 * scale;
-
-			h++;
-			lines -= 8;
-		}
+		draw_rotated_lines(bitmap, cliprect, index, color, int16_t(x), int16_t(y),
+				scale, rotate, flip_x, flip_y, repeat, write_priority_only);
 	}
 }
 
 /*
-    Rotated sprites are drawn a scanline at a time, with no bitmap to hold the sprite while it
-    is rotated.
+    Sprites are drawn a scanline at a time, with no bitmap to hold the sprite while it is scaled
+    and rotated. An unrotated sprite is just the case where the slope is zero.
 
     The rotation value is a signed 9-bit slope t (0x100 = 1.0) and the chip maps the drawn
     (flipped and scaled) sprite through [1 -t; t 1] about its origin, which lands on screen
