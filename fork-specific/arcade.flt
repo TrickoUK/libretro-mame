@@ -1699,6 +1699,7 @@ skeleton/elcirculo.cpp
 skeleton/flashvga2.cpp
 skeleton/gamebox.cpp
 skeleton/happyvideo.cpp
+skeleton/highway_m68k.cpp
 skeleton/iam2.cpp
 skeleton/itt1700_kbd.cpp  // [HELPER]
 skeleton/jinhuang6.cpp
