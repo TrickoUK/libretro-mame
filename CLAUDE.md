@@ -44,6 +44,11 @@ mixed into history.
   8-bit pedal read path was dropped (only the gamepad steering helper stays). `arcade.flt`
   regenerated. Full `-j4` build clean. Smoke-tested gticlub2, xtrial and sfrush (90 s, no MIPS
   compare hang) (`fork-specific/out/sync1494*`).
+- **Follow-up sync, 2026-10-14**: merge commit `7a66a604ff6` merged mamedev master
+  `mame0289-1520-gc51cea1d897` (26 commits), after merging libretro/mame master (4 commits,
+  `0ff56bfdbdc`: scheduler-safe state save/restore, option reset between sessions). No conflicts;
+  `arcade.flt` gained `skeleton/highway_m68k.cpp`. Full `-j4` build clean. Booted roundup5 and
+  brvblade only (`fork-specific/out/sync1520*`).
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
