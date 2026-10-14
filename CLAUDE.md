@@ -1084,6 +1084,19 @@ MAME's own `video:snapshot()` (the emulated frame at native resolution).
 
 ## Working conventions for this project
 
+- **Fix games the way the real hardware works (upstream-PR-able work).** When improving a game
+  or getting a system working, first try a hardware-appropriate solution that keeps to the
+  spirit of the original design. Example: Apache 3's sprite rotation first worked with a large
+  off-screen buffer, but real hardware never did that; the scanline-at-a-time rotation
+  (`tatsumi/tzbx15_sprites.cpp`) matches the chip and is the version fit for an upstream PR.
+  Taking a hack that works and reworking it to model the hardware is the preferred path.
+  Making an imperfect or broken game correct (like Apache 3) is PR-able, so write it to
+  upstream standards: hardware-accurate, no libretro/fork-only hooks in shared code, and keep
+  it separable from fork-only changes.
+  **Exception**: fork-only features that upstream would never take (the PS1 GPU HLE/PGXP path,
+  Voodoo supersampling/edge AA, gamepad steering and similar enhancements) don't need to follow
+  the hardware. There, make it work and make it as efficient as possible.
+
 - Treat `src/mame/<manufacturer>/*_v.cpp` rasterizer rewrites as the highest-risk
   changes in this codebase — they must still produce output through the existing
   `bitmap_rgb32`/render-primitive path for any driver you *haven't* converted,
