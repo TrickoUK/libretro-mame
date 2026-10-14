@@ -339,9 +339,9 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 
 		// Header bit 0x80 repeats each line's tiles on towards the screen edge (Apache 3: the
 		// splash backdrop strip, mountain ranges, bush and tree rows that cover the whole width)
-		bool const repeat = m_line_repeat_enabled && (src1[3] & 0x80);
+		bool const repeat = BIT(src1[3], 7);
 
-		if (m_rotation_enabled && rotate)
+		if (rotate)
 		{
 			draw_rotated_lines(bitmap, cliprect, index, color, int16_t(x), int16_t(y),
 					scale, rotate, flip_x, flip_y, repeat, write_priority_only);
@@ -364,7 +364,7 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 
 		// A Y-flipped sprite covers the mirror image of its box, so it ends at its origin like an
 		// X-flipped one, as it does when drawn rotated
-		if (flip_y && m_rotation_enabled)
+		if (flip_y)
 			render_y -= scale * 8;
 
 		src1 += 4;
@@ -450,7 +450,7 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 
     Each screen pixel is traced back through the rotation to a pixel of the scaled sprite, then
     through the scaling to a pixel of the sprite ROM tiles. The first step advances by a fixed
-    amount per pixel along a scanline, so it is stepped in 16.16 fixed point.
+    amount per pixel along a scanline, so it is stepped in fixed point. Everything is integer maths.
 */
 template<class BitmapClass>
 void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cliprect,
@@ -478,12 +478,16 @@ void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cli
 		width = std::max(width, run_right[h]);
 	}
 
-	double const t = util::sext(rotate, 9) / 256.0 * (flip_x ? -1.0 : 1.0);
-	double const k = 1.0 / (1.0 + t * t);
+	// Slope t in 8 fractional bits, and 1 / (1 + t^2) in 24 fractional bits
+	int const slope = util::sext(rotate, 9) * (flip_x ? -1 : 1);
+	int64_t const shrink = (int64_t(1) << 40) / (65536 + slope * slope);
 
-	// Screen position relative to the origin -> position in the scaled sprite (before flipping)
-	auto const unrotate = [t, k] (double px, double py) { return std::make_pair((px + t * py) * k, (py - t * px) * k); };
-	auto const rotate_point = [t] (double lx, double ly) { return std::make_pair(lx - t * ly, t * lx + ly); };
+	// Screen position relative to the origin (16 fractional bits) -> position in the scaled
+	// sprite (40 fractional bits), before flipping
+	auto const unrotate = [slope, shrink] (int64_t px, int64_t py)
+	{
+		return std::make_pair((px + ((slope * py) >> 8)) * shrink, (py - ((slope * px) >> 8)) * shrink);
+	};
 
 	// Size of the scaled sprite. Scale 0x80 is 1:1
 	int const scaled_top = (top * scale) >> 7;
@@ -496,24 +500,27 @@ void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cli
 		for (int cx : { cliprect.left(), cliprect.right() + 1 })
 			for (int cy : { cliprect.top(), cliprect.bottom() + 1 })
 			{
-				double const zx = unrotate(cx - x, cy - y).first;
-				scaled_right = std::max(scaled_right, int(std::ceil(flip_x ? -zx : zx)) + 1);
+				int64_t const zx = unrotate(int64_t(cx - x) << 16, int64_t(cy - y) << 16).first;
+				scaled_right = std::max(scaled_right, int(-((flip_x ? zx : -zx) >> 40)) + 1);
 			}
 	}
 
-	// Screen bounds: rotate the corners of the scaled sprite
-	double minx = std::numeric_limits<double>::max(), maxx = std::numeric_limits<double>::lowest();
-	double miny = std::numeric_limits<double>::max(), maxy = std::numeric_limits<double>::lowest();
+	// Screen bounds: rotate the corners of the scaled sprite (8 fractional bits)
+	int64_t minx = std::numeric_limits<int64_t>::max(), maxx = std::numeric_limits<int64_t>::min();
+	int64_t miny = std::numeric_limits<int64_t>::max(), maxy = std::numeric_limits<int64_t>::min();
 	for (int corner = 0; corner < 4; corner++)
 	{
 		int const cx = (corner & 1) ? scaled_right : scaled_left;
 		int const cy = (corner & 2) ? scaled_bottom : scaled_top;
-		auto const [rx, ry] = rotate_point(flip_x ? -cx : cx, flip_y ? -cy : cy);
+		int const lx = flip_x ? -cx : cx;
+		int const ly = flip_y ? -cy : cy;
+		int64_t const rx = (int64_t(lx) << 8) - int64_t(slope) * ly;
+		int64_t const ry = int64_t(slope) * lx + (int64_t(ly) << 8);
 		minx = std::min(minx, rx); maxx = std::max(maxx, rx);
 		miny = std::min(miny, ry); maxy = std::max(maxy, ry);
 	}
-	rectangle bounds(x + int(std::floor(minx)) - 1, x + int(std::ceil(maxx)) + 1,
-			y + int(std::floor(miny)) - 1, y + int(std::ceil(maxy)) + 1);
+	rectangle bounds(x + int(minx >> 8) - 1, x + int(-((-maxx) >> 8)) + 1,
+			y + int(miny >> 8) - 1, y + int(-((-maxy) >> 8)) + 1);
 	bounds &= cliprect;
 	bounds &= bitmap.cliprect();
 	if (bounds.empty())
@@ -523,22 +530,25 @@ void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cli
 	pen_t const *const pens = &m_palette_clut->pen(palette);
 	uint8_t const *const shadows = m_shadow_pen_array.get() + palette;
 
-	auto const to_fixed = [] (double value) { return int64_t(std::floor(value * 65536.0 + 0.5)); };
-	int64_t const step_x = to_fixed(k);
-	int64_t const step_y = to_fixed(-t * k);
+	// Moving one pixel along a scanline moves the same amount through the scaled sprite each time
+	int64_t const step_x = int64_t(shrink) << 16;
+	int64_t const step_y = -(int64_t(slope) << 8) * shrink;
 
 	for (int py = bounds.top(); py <= bounds.bottom(); py++)
 	{
-		auto const [start_x, start_y] = unrotate(bounds.left() + 0.5 - x, py + 0.5 - y);
-		int64_t sprite_x = to_fixed(start_x);
-		int64_t sprite_y = to_fixed(start_y);
+		// Pixel centres
+		auto const [start_x, start_y] = unrotate(
+				(int64_t(bounds.left() - x) << 16) + 0x8000,
+				(int64_t(py - y) << 16) + 0x8000);
+		int64_t sprite_x = start_x;
+		int64_t sprite_y = start_y;
 		typename BitmapClass::pixel_t *const dest = &bitmap.pix(py);
 
 		for (int px = bounds.left(); px <= bounds.right(); px++, sprite_x += step_x, sprite_y += step_y)
 		{
 			// Distance from the origin in the scaled sprite, which grows away from it whichever way it is flipped
-			int const dist_x = flip_x ? int(-(sprite_x >> 16)) - 1 : int(sprite_x >> 16);
-			int const dist_y = flip_y ? int(-(sprite_y >> 16)) - 1 : int(sprite_y >> 16);
+			int const dist_x = flip_x ? int(-(sprite_x >> 40)) - 1 : int(sprite_x >> 40);
+			int const dist_y = flip_y ? int(-(sprite_y >> 40)) - 1 : int(sprite_y >> 40);
 			if (dist_x < 0 || dist_y < 0)
 				continue;
 

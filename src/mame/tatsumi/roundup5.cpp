@@ -649,8 +649,6 @@ void roundup5_state::roundup5(machine_config &config)
 
 	TZB315_SPRITES(config, m_sprites, 0, 0x800); // confirmed TZB315, even if it has the smaller CLUT like Apache 3 / TZB215
 	m_sprites->set_sprite_palette_base(512);
-	m_sprites->set_rotation_enabled(true);
-	m_sprites->set_line_repeat_enabled(true);
 	m_sprites->set_palette("sprites:palette_clut");
 	m_sprites->set_basepalette(m_palette);
 	m_sprites->set_spriteram(m_spriteram);
