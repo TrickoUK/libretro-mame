@@ -970,6 +970,8 @@ void cyclwarr_state::cyclwarr(machine_config &config)
 
 	TZB315_SPRITES(config, m_sprites, 0, 0x1000);
 	m_sprites->set_sprite_palette_base(4096);
+	m_sprites->set_rotation_enabled(true);
+	m_sprites->set_line_repeat_enabled(true);
 	m_sprites->set_palette("sprites:palette_clut");
 	m_sprites->set_basepalette(m_palette);
 	m_sprites->set_spriteram(m_spriteram);

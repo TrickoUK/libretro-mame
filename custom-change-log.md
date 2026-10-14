@@ -296,3 +296,8 @@ builds get them straight from here.
 - In-game, the motorbike riders lean into the bends rather than showing as dark upright blobs.
 - Strips flagged to repeat across the screen (the sea beside the road) now run to the screen edge with
   their ripples, instead of stopping as a flat blue block.
+
+### Cycle Warriors, Big Fight: sprites rotate, repeated strips run to the screen edge
+- Cycle Warriors (and Big Fight, which shares its machine config) now use the sprite rotation and
+  line repeat that Apache 3 and Round Up 5 already had, so rotated sprites and strips flagged to
+  repeat across the screen draw as intended. Big Fight looks the same either way.
