@@ -78,9 +78,6 @@ void tzbx15_device::device_start()
 	m_rom_clut_offset = memregion("sprites_l")->bytes() - m_rom_clut_size;
 
 	m_shadow_pen_array = make_unique_clear<uint8_t[]>(m_rom_clut_size * 2);
-	m_rot_bitmap.allocate(ROT_ORIGIN * 2, ROT_ORIGIN * 2);
-	m_rot_bitmap.fill(0);
-	m_rot_bounds = EMPTY_BOUNDS;
 
 	decode_gfx(gfxinfo);
 	gfx(0)->set_colors(m_rom_clut_size / 8);
@@ -96,6 +93,7 @@ void tzbx15_device::device_add_mconfig(machine_config &config)
 	// 4096 or 8192 arranged as series of CLUTs
 	PALETTE(config, m_palette_clut).set_format(palette_device::xRGB_555, m_rom_clut_size * 2);
 }
+
 
 template<class BitmapClass>
 void tzbx15_device::roundupt_drawgfxzoomrotate(
@@ -123,7 +121,6 @@ void tzbx15_device::roundupt_drawgfxzoomrotate(
 		const pen_t *pal = &m_palette_clut->pen(gfx->colorbase() + gfx->granularity() * (color % gfx->colors()));
 		const uint8_t *shadow_pens = m_shadow_pen_array.get() + (gfx->granularity() * (color % gfx->colors()));
 		const uint8_t *code_base = gfx->get_data(code % gfx->elements());
-		const int clut_offset = gfx->granularity() * (color % gfx->colors());
 
 		int block_size = 8 * scalex;
 		int sprite_screen_height = ((ssy&0xffff)+block_size)>>16;
@@ -204,9 +201,6 @@ void tzbx15_device::roundupt_drawgfxzoomrotate(
 			// skip if inner loop doesn't draw anything
 			if( ex > sx )
 			{
-				if constexpr (std::is_same_v<BitmapClass, bitmap_ind16>)
-					m_rot_bounds |= rectangle(sx, ex - 1, sy, ey - 1);
-
 #if 0
 				int startx=0;
 				int starty=0;
@@ -265,11 +259,8 @@ void tzbx15_device::roundupt_drawgfxzoomrotate(
 						int c = source[x_index>>16];
 						if( c )
 						{
-							// Rotation scratch buffer: keep the CLUT index, resolved when the sprite is rotated onto the screen
-							if constexpr (std::is_same_v<BitmapClass, bitmap_ind16>)
-								dest[x]=clut_offset + c + 1;
 							// Only draw shadow pens if writing priority buffer
-							else if (write_priority_only)
+							if (write_priority_only)
 								dest[x]=shadow_pens[c];
 							else if (!shadow_pens[c])
 								dest[x]=pal[c];
@@ -330,7 +321,6 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 		int flip_x =    m_spriteram[offs+1] & 0x8000;
 		int flip_y =    m_spriteram[offs+1] & 0x4000;
 		int rotate =    m_spriteram[offs+5] & 0x1ff;
-		bool const rotated = m_rotation_enabled && rotate;
 
 		int index = m_spriteram[offs];
 
@@ -347,18 +337,24 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 		uint8_t const *src1 = m_sprites_l_rom + (index * 4);
 		uint8_t const *src2 = m_sprites_h_rom + (index * 4);
 
-		int lines = src1[2];
-		int y_offset = src1[0]&0xf8;
 		// Header bit 0x80 repeats each line's tiles on towards the screen edge (Apache 3: the
 		// splash backdrop strip, mountain ranges, bush and tree rows that cover the whole width)
 		bool const repeat = m_line_repeat_enabled && (src1[3] & 0x80);
 
+		if (m_rotation_enabled && rotate)
+		{
+			draw_rotated_lines(bitmap, cliprect, index, color, int16_t(x), int16_t(y),
+					scale, rotate, flip_x, flip_y, repeat, write_priority_only);
+			continue;
+		}
+
+		int lines = src1[2];
+		int y_offset = src1[0]&0xf8;
+
 		lines -= y_offset;
 
-		// A rotated sprite is first drawn unrotated into a scratch buffer with its
-		// origin at ROT_ORIGIN, then rotated onto the screen by draw_rotated()
-		int render_x = (rotated ? ROT_ORIGIN : x) << 16;
-		int render_y = (rotated ? ROT_ORIGIN : y) << 16;
+		int render_x = x << 16;
+		int render_y = y << 16;
 		scale = scale << 9; /* 0x80 becomes 0x10000 */
 
 		if (flip_y)
@@ -367,9 +363,7 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 			render_y += y_offset * scale;
 
 		// A Y-flipped sprite covers the mirror image of its box, so it ends at its origin like an
-		// X-flipped one. Without this offset it is drawn one tile row (8 x scale) too low. Apache 3's
-		// object tables place the attract rotor's hub identically for flipped and unflipped sprites,
-		// which only works out with this offset.
+		// X-flipped one, as it does when drawn rotated
 		if (flip_y && m_rotation_enabled)
 			render_y -= scale * 8;
 
@@ -401,28 +395,20 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 			else
 				x_pos = render_x + x_offs;
 
-			rectangle const &region = rotated ? m_rot_bitmap.cliprect() : cliprect;
 			int const base0 = base;
 			for (int w = 0; w < (repeat ? MAX_REPEAT_TILES : x_width); w++)
 			{
 				if (w >= x_width)
 				{
-					if (flip_x ? (((x_pos + scale * 8) >> 16) < region.left()) : ((x_pos >> 16) > region.right()))
+					if (flip_x ? (((x_pos + scale * 8) >> 16) < cliprect.left()) : ((x_pos >> 16) > cliprect.right()))
 						break;
 					base = base0 + (w % x_width);
 				}
-				if (rotated)
-					roundupt_drawgfxzoomrotate(
-							m_rot_bitmap,m_rot_bitmap.cliprect(),gfx(0 + (base & 1)),
-							base >> 1,
-							color,flip_x,flip_y,x_pos,render_y,
-							scale,scale,0,write_priority_only);
-				else
-					roundupt_drawgfxzoomrotate(
-							bitmap,cliprect,gfx(0 + (base & 1)),
-							base >> 1,
-							color,flip_x,flip_y,x_pos,render_y,
-							scale,scale,0,write_priority_only);
+				roundupt_drawgfxzoomrotate(
+						bitmap,cliprect,gfx(0 + (base & 1)),
+						base >> 1,
+						color,flip_x,flip_y,x_pos,render_y,
+						scale,scale,0,write_priority_only);
 				base++;
 
 				if (flip_x)
@@ -443,84 +429,148 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 			h++;
 			lines -= 8;
 		}
-
-		if (rotated)
-			draw_rotated(bitmap, cliprect, int16_t(x), int16_t(y), rotate, flip_x, write_priority_only);
 	}
 }
 
 /*
-    Copy the scratch buffer onto the screen, transformed by the sprite's rotation value about
-    the sprite origin, which lands on screen position (x, y). Sprite pixels more than
-    ROT_ORIGIN away from the origin are clipped by the size of the scratch buffer.
+    Rotated sprites are drawn a scanline at a time, with no bitmap to hold the sprite while it
+    is rotated.
+
+    The rotation value is a signed 9-bit slope t (0x100 = 1.0) and the chip maps the drawn
+    (flipped and scaled) sprite through [1 -t; t 1] about its origin, which lands on screen
+    position (x, y). That turns it by atan(t) and also enlarges it by sqrt(1 + t^2); flip X
+    turns it the other way. Games shrink the scale to compensate. Worked out from Apache 3:
+    - ground objects carry t = tan(bank angle) (0xa9 at a bank of about 33 degrees) and their
+      scale shrinks by 1/sqrt(1 + t^2), and the mountain strip's origin stays at a fixed
+      distance from the horizon, so the base of the strip stays on the ground plane;
+    - its 68000 object tables (0x92e4) appear to offset positions by M * (sprite centre), for
+      the attract rotor and the title logo, unflipped and X+Y flipped;
+    - mirrored ground objects (flip X, -t) lean with the bank like their unmirrored twins,
+      and the logo turns on continuously through its X+Y flipped phases.
+
+    Each screen pixel is traced back through the rotation to a pixel of the scaled sprite, then
+    through the scaling to a pixel of the sprite ROM tiles. The first step advances by a fixed
+    amount per pixel along a scanline, so it is stepped in 16.16 fixed point.
 */
 template<class BitmapClass>
-void tzbx15_device::draw_rotated(BitmapClass &bitmap, const rectangle &cliprect, int x, int y, int rotate, bool flip_x, int write_priority_only)
+void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cliprect,
+		int index, int color, int x, int y, int scale, int rotate, bool flip_x, bool flip_y,
+		bool repeat, int write_priority_only)
 {
-	// bounds of what was drawn into the scratch buffer
-	rectangle const src = m_rot_bounds;
-	m_rot_bounds = EMPTY_BOUNDS;
-	if (src.empty())
+	uint8_t const *const src1 = m_sprites_l_rom + (index * 4);
+	uint8_t const *const src2 = m_sprites_h_rom + (index * 4);
+
+	int const top = src1[0] & 0xf8;
+	int const rows = (src1[2] - top + 7) / 8;
+	if (!scale || rows <= 0)
 		return;
+	int const bottom = top + rows * 8;
 
-	/*
-	    The rotation value is a signed 9-bit slope t (0x100 = 1.0) and the chip maps the drawn
-	    (flipped) sprite through [1 -t; t 1] about its origin, which turns it by atan(t) and
-	    also enlarges it by sqrt(1 + t^2); flip X turns it the other way. Games shrink the scale
-	    to compensate. Worked out from Apache 3:
-	    - ground objects carry t = tan(bank angle) (0xa9 at a bank of about 33 degrees) and their
-	      scale shrinks by 1/sqrt(1 + t^2), and the mountain strip's origin stays at a fixed
-	      distance from the horizon, so the base of the strip stays on the ground plane;
-	    - its 68000 object tables (0x92e4) appear to offset positions by M * (sprite centre), for
-	      the attract rotor and the title logo, unflipped and X+Y flipped;
-	    - mirrored ground objects (flip X, -t) lean with the bank like their unmirrored twins,
-	      and the logo turns on continuously through its X+Y flipped phases.
-	*/
+	// One run of tiles per row of 8 lines, taken from alternate banks
+	int run_left[32], run_right[32], run_base[32];
+	int width = 0;
+	for (int h = 0; h < rows; h++)
+	{
+		uint8_t const *const entry = (h & 1) ? (src1 + 4 + (h / 2) * 4) : (src2 + (h / 2) * 4);
+		run_left[h] = entry[1] * 8;
+		run_right[h] = run_left[h] + (entry[0] + 1) * 8;
+		run_base[h] = (entry[2] | (entry[3] << 8)) * 2;
+		width = std::max(width, run_right[h]);
+	}
+
 	double const t = util::sext(rotate, 9) / 256.0 * (flip_x ? -1.0 : 1.0);
-	auto const forward = [t] (double lx, double ly) { return std::make_pair(lx - t * ly, t * lx + ly); };
+	double const k = 1.0 / (1.0 + t * t);
 
-	// screen bounding box of the transformed scratch rectangle
+	// Screen position relative to the origin -> position in the scaled sprite (before flipping)
+	auto const unrotate = [t, k] (double px, double py) { return std::make_pair((px + t * py) * k, (py - t * px) * k); };
+	auto const rotate_point = [t] (double lx, double ly) { return std::make_pair(lx - t * ly, t * lx + ly); };
+
+	// Size of the scaled sprite. Scale 0x80 is 1:1
+	int const scaled_top = (top * scale) >> 7;
+	int const scaled_bottom = (bottom * scale + 127) >> 7;
+	int const scaled_left = 0;
+	int scaled_right = (width * scale + 127) >> 7;
+	if (repeat)
+	{
+		// Repeated lines run on to the edge of the screen, so find how far that is in the sprite
+		for (int cx : { cliprect.left(), cliprect.right() + 1 })
+			for (int cy : { cliprect.top(), cliprect.bottom() + 1 })
+			{
+				double const zx = unrotate(cx - x, cy - y).first;
+				scaled_right = std::max(scaled_right, int(std::ceil(flip_x ? -zx : zx)) + 1);
+			}
+	}
+
+	// Screen bounds: rotate the corners of the scaled sprite
 	double minx = std::numeric_limits<double>::max(), maxx = std::numeric_limits<double>::lowest();
 	double miny = std::numeric_limits<double>::max(), maxy = std::numeric_limits<double>::lowest();
 	for (int corner = 0; corner < 4; corner++)
 	{
-		auto const [dx, dy] = forward(
-				((corner & 1) ? src.right() + 1 : src.left()) - ROT_ORIGIN,
-				((corner & 2) ? src.bottom() + 1 : src.top()) - ROT_ORIGIN);
-		minx = std::min(minx, dx); maxx = std::max(maxx, dx);
-		miny = std::min(miny, dy); maxy = std::max(maxy, dy);
+		int const cx = (corner & 1) ? scaled_right : scaled_left;
+		int const cy = (corner & 2) ? scaled_bottom : scaled_top;
+		auto const [rx, ry] = rotate_point(flip_x ? -cx : cx, flip_y ? -cy : cy);
+		minx = std::min(minx, rx); maxx = std::max(maxx, rx);
+		miny = std::min(miny, ry); maxy = std::max(maxy, ry);
 	}
-	rectangle dst(x + int(std::floor(minx)) - 1, x + int(std::ceil(maxx)) + 1, y + int(std::floor(miny)) - 1, y + int(std::ceil(maxy)) + 1);
-	dst &= cliprect;
-	dst &= bitmap.cliprect();
+	rectangle bounds(x + int(std::floor(minx)) - 1, x + int(std::ceil(maxx)) + 1,
+			y + int(std::floor(miny)) - 1, y + int(std::ceil(maxy)) + 1);
+	bounds &= cliprect;
+	bounds &= bitmap.cliprect();
+	if (bounds.empty())
+		return;
 
-	// inverse: M^-1 = [1 t; -t 1] / (1 + t^2)
-	double const k = 1.0 / (1.0 + t * t);
-	for (int py = dst.top(); py <= dst.bottom(); py++)
+	unsigned const palette = 16 * (color % gfx(0)->colors());
+	pen_t const *const pens = &m_palette_clut->pen(palette);
+	uint8_t const *const shadows = m_shadow_pen_array.get() + palette;
+
+	auto const to_fixed = [] (double value) { return int64_t(std::floor(value * 65536.0 + 0.5)); };
+	int64_t const step_x = to_fixed(k);
+	int64_t const step_y = to_fixed(-t * k);
+
+	for (int py = bounds.top(); py <= bounds.bottom(); py++)
 	{
+		auto const [start_x, start_y] = unrotate(bounds.left() + 0.5 - x, py + 0.5 - y);
+		int64_t sprite_x = to_fixed(start_x);
+		int64_t sprite_y = to_fixed(start_y);
 		typename BitmapClass::pixel_t *const dest = &bitmap.pix(py);
-		double const dy = py + 0.5 - y;
-		for (int px = dst.left(); px <= dst.right(); px++)
+
+		for (int px = bounds.left(); px <= bounds.right(); px++, sprite_x += step_x, sprite_y += step_y)
 		{
-			double const dx = px + 0.5 - x;
-			int const sx = int(std::floor((dx + t * dy) * k)) + ROT_ORIGIN;
-			int const sy = int(std::floor((dy - t * dx) * k)) + ROT_ORIGIN;
-			if (!src.contains(sx, sy))
+			// Distance from the origin in the scaled sprite, which grows away from it whichever way it is flipped
+			int const dist_x = flip_x ? int(-(sprite_x >> 16)) - 1 : int(sprite_x >> 16);
+			int const dist_y = flip_y ? int(-(sprite_y >> 16)) - 1 : int(sprite_y >> 16);
+			if (dist_x < 0 || dist_y < 0)
 				continue;
-			uint16_t const v = m_rot_bitmap.pix(sy, sx);
-			if (!v)
+
+			// Back through the scaling to the tile pixel
+			int const line = (dist_y << 7) / scale;
+			if (line < top || line >= bottom)
 				continue;
-			int const pen = v - 1;
-			if (write_priority_only)
-				dest[px] = m_shadow_pen_array[pen];
-			else if (!m_shadow_pen_array[pen])
-				dest[px] = m_palette_clut->pen(pen);
+			int const h = (line - top) >> 3;
+			int col = (dist_x << 7) / scale;
+			if (col < run_left[h])
+				continue;
+			if (col >= run_right[h])
+			{
+				if (!repeat)
+					continue;
+				col = run_left[h] + (col - run_left[h]) % (run_right[h] - run_left[h]);
+			}
+
+			int const tile = run_base[h] + ((col - run_left[h]) >> 3);
+			gfx_element *const tiles = gfx(tile & 1);
+			uint8_t const pixel = tiles->get_data((tile >> 1) % tiles->elements())[(line & 7) * tiles->rowbytes() + (col & 7)];
+			if (pixel)
+			{
+				// Only draw shadow pens if writing priority buffer
+				if (write_priority_only)
+					dest[px] = shadows[pixel];
+				else if (!shadows[pixel])
+					dest[px] = pens[pixel];
+			}
 		}
 	}
-
-	m_rot_bitmap.fill(0, src);
 }
-
 
 void tzbx15_device::draw_sprites(bitmap_rgb32 &bitmap, const rectangle &cliprect, int write_priority_only, int rambank)
 {

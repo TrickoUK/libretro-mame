@@ -34,7 +34,9 @@ private:
 	virtual void device_reset() override ATTR_COLD;
 
 	template<class BitmapClass> void draw_sprites_main(BitmapClass &bitmap, const rectangle &cliprect, int write_priority_only, int rambank);
-	template<class BitmapClass> void draw_rotated(BitmapClass &bitmap, const rectangle &cliprect, int x, int y, int rotate, bool flip_x, int write_priority_only);
+	template<class BitmapClass> void draw_rotated_lines(BitmapClass &bitmap, const rectangle &cliprect,
+			int index, int color, int x, int y, int scale, int rotate, bool flip_x, bool flip_y,
+			bool repeat, int write_priority_only);
 	template<class BitmapClass> void roundupt_drawgfxzoomrotate(
 			BitmapClass &dest_bmp, const rectangle &clip,
 			gfx_element *gfx, uint32_t code, uint32_t color,
@@ -51,14 +53,8 @@ private:
 	required_region_ptr<uint8_t> m_sprites_h_rom;
 
 	std::unique_ptr<uint8_t[]> m_shadow_pen_array;
-	// scratch buffer for rotated sprites, holds CLUT index + 1 (0 = transparent)
-	// the sprite origin sits in the middle of it, so a sprite can extend ROT_ORIGIN pixels either way
-	static constexpr int ROT_ORIGIN = 512;
-	static constexpr rectangle EMPTY_BOUNDS{INT32_MAX, INT32_MIN, INT32_MAX, INT32_MIN};
 	// upper bound on the tiles drawn per line when repeating it (it normally stops at the edge of the region)
 	static constexpr int MAX_REPEAT_TILES = 2048;
-	bitmap_ind16 m_rot_bitmap;
-	rectangle m_rot_bounds;
 
 	// config
 	bool m_rotation_enabled = false;
