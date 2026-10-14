@@ -287,3 +287,12 @@ builds get them straight from here.
 - Since the 2026-10-13 upstream sync, the layer these boards draw with line scroll was shifted by
   most of a screen: Aqua Jack's attract scenes were black behind the plane and the hovercraft, and
   the mountain backdrop showed its wrap seam on screen. Fixed (an upstream typo, not yet fixed there).
+
+## 2026-10-14
+
+### Round Up 5: sprites rotate and zoom, sea strips repeat
+- The course-map intro now spins and zooms the "Round Up 5" logos out from the track locations, instead of
+  flipping them through flat 90 degree turns.
+- In-game, the motorbike riders lean into the bends rather than showing as dark upright blobs.
+- Strips flagged to repeat across the screen (the sea beside the road) now run to the screen edge with
+  their ripples, instead of stopping as a flat blue block.
