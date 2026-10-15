@@ -5,7 +5,9 @@
 #include "tzbx15_sprites.h"
 #include "screen.h"
 
+#include <algorithm>
 #include <limits>
+#include <utility>
 
 // TZB215 on Apache 3
 // TZB315 on Round Up 5, Big Fight, Cycle Warriors
@@ -153,43 +155,30 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 		if (index >= 0x4000)
 			continue;
 
-		uint8_t const *src1 = m_sprites_l_rom + (index * 4);
-
-		// Header bit 0x80 repeats each line's tiles on towards the screen edge (Apache 3: the
-		// splash backdrop strip, mountain ranges, bush and tree rows that cover the whole width)
-		bool const repeat = BIT(src1[3], 7);
-		draw_rotated_lines(bitmap, cliprect, index, color, int16_t(x), int16_t(y),
-				scale, rotate, flip_x, flip_y, repeat, write_priority_only);
+		draw_sprite(bitmap, cliprect, index, color, int16_t(x), int16_t(y),
+				scale, rotate, flip_x, flip_y, write_priority_only);
 	}
 }
 
 /*
-    Sprites are drawn a scanline at a time, with no bitmap to hold the sprite while it is scaled
-    and rotated. An unrotated sprite is just the case where the slope is zero.
+    The rotation value is a signed 9-bit slope t (0x100 = 1.0). The chip maps the drawn (flipped
+    and scaled) sprite through [1 -t; t 1] about its origin, which lands on screen position
+    (x, y). That turns the sprite by atan(t) and enlarges it by sqrt(1 + t^2); flipping X
+    negates the turn. Games compensate for the enlargement by reducing the scale.
 
-    The rotation value is a signed 9-bit slope t (0x100 = 1.0) and the chip maps the drawn
-    (flipped and scaled) sprite through [1 -t; t 1] about its origin, which lands on screen
-    position (x, y). That turns it by atan(t) and also enlarges it by sqrt(1 + t^2); flip X
-    turns it the other way. Games shrink the scale to compensate. Worked out from Apache 3:
-    - ground objects carry t = tan(bank angle) (0xa9 at a bank of about 33 degrees) and their
-      scale shrinks by 1/sqrt(1 + t^2), and the mountain strip's origin stays at a fixed
-      distance from the horizon, so the base of the strip stays on the ground plane;
-    - its 68000 object tables (0x92e4) appear to offset positions by M * (sprite centre), for
-      the attract rotor and the title logo, unflipped and X+Y flipped;
-    - mirrored ground objects (flip X, -t) lean with the bank like their unmirrored twins,
-      and the logo turns on continuously through its X+Y flipped phases.
-
-    Each screen pixel is traced back through the rotation to a pixel of the scaled sprite, then
-    through the scaling to a pixel of the sprite ROM tiles. The first step advances by a fixed
-    amount per pixel along a scanline, so it is stepped in fixed point. Everything is integer maths.
+    Sprites are drawn a scanline at a time: each screen pixel is traced back through the
+    rotation to a pixel of the scaled sprite, then through the scaling to a pixel of the sprite
+    ROM tiles. The rotation step advances by a fixed amount per pixel, so it is stepped in
+    fixed point.
 */
 template<class BitmapClass>
-void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cliprect,
+void tzbx15_device::draw_sprite(BitmapClass &bitmap, const rectangle &cliprect,
 		int index, int color, int x, int y, int scale, int rotate, bool flip_x, bool flip_y,
-		bool repeat, int write_priority_only)
+		int write_priority_only)
 {
 	uint8_t const *const src1 = m_sprites_l_rom + (index * 4);
 	uint8_t const *const src2 = m_sprites_h_rom + (index * 4);
+	bool const repeat = BIT(src1[3], 7);
 
 	int const top = src1[0] & 0xf8;
 	int const lines = src1[2] | ((src1[3] & 0x01) << 8);
@@ -266,6 +255,8 @@ void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cli
 	int64_t const step_x = int64_t(shrink) << 16;
 	int64_t const step_y = -(int64_t(slope) << 8) * shrink;
 
+	gfx_element *const tile_gfx[2] = { gfx(0), gfx(1) };
+
 	for (int py = bounds.top(); py <= bounds.bottom(); py++)
 	{
 		// Pixel centres
@@ -275,6 +266,8 @@ void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cli
 		int64_t sprite_x = start_x;
 		int64_t sprite_y = start_y;
 		typename BitmapClass::pixel_t *const dest = &bitmap.pix(py);
+		int last_dist_y = -1, line = 0, h = 0;
+		bool line_ok = false;
 
 		for (int px = bounds.left(); px <= bounds.right(); px++, sprite_x += step_x, sprite_y += step_y)
 		{
@@ -285,10 +278,15 @@ void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cli
 				continue;
 
 			// Back through the scaling to the tile pixel
-			int const line = (dist_y << 7) / scale;
-			if (line < top || line >= bottom)
+			if (dist_y != last_dist_y)
+			{
+				last_dist_y = dist_y;
+				line = (dist_y << 7) / scale;
+				line_ok = line >= top && line < bottom;
+				h = (line - top) >> 3;
+			}
+			if (!line_ok)
 				continue;
-			int const h = (line - top) >> 3;
 			int col = (dist_x << 7) / scale;
 			if (col < run_left[h])
 				continue;
@@ -300,7 +298,7 @@ void tzbx15_device::draw_rotated_lines(BitmapClass &bitmap, const rectangle &cli
 			}
 
 			int const tile = run_base[h] + ((col - run_left[h]) >> 3);
-			gfx_element *const tiles = gfx(tile & 1);
+			gfx_element *const tiles = tile_gfx[tile & 1];
 			uint8_t const pixel = tiles->get_data((tile >> 1) % tiles->elements())[(line & 7) * tiles->rowbytes() + (col & 7)];
 			if (pixel)
 			{

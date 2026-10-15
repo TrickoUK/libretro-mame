@@ -23,6 +23,8 @@
 #include "screen.h"
 #include "speaker.h"
 
+#include <algorithm>
+
 namespace {
 
 class apache3_state : public tatsumi_state
@@ -148,7 +150,7 @@ void apache3_state::draw_ground(bitmap_rgb32 &dst, const rectangle &cliprect)
 			{
 				int const r = std::min(row, 0xff);
 				int hval = util::sext((h >> 8) + m_apache3_road_x_ram[r], 12);
-				int const side = hval < 0 ? 1 : 0;
+				bool const side = (hval < 0);
 				if (side)
 					hval = ~hval;
 				int pix = 0;
@@ -158,7 +160,7 @@ void apache3_state::draw_ground(bitmap_rgb32 &dst, const rectangle &cliprect)
 					pix = (pixels >> ((hval & 3) << 1)) & 3;
 				}
 				int const ln = ((m_apache3_prom[r] + m_apache3_road_z) >> 5) & 3;
-				dest[x] = pens[0x200 + ((side << 4) | (pix << 2) | ln)];
+				dest[x] = pens[0x200 + (side ? 0x10 : 0) + (pix << 2) + ln];
 			}
 			h += h_dx;
 			sky += s_dx;

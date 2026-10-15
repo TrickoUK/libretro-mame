@@ -210,7 +210,6 @@ pos is 11.5 fixed point
 
 	for ( ; y <= cliprect.bottom(); y++)
 	{
-		// tunnels set bit 15 of word 3 (word 3 is otherwise unknown)
 		uint16_t const shift=data[0];
 		uint16_t const shift2=data[2];
 		int pal = 4; //(data[3]>>8)&0xf;
@@ -230,7 +229,7 @@ pos is 11.5 fixed point
 		    Word 0: Line shift for 1st set - 13.3 signed fixed point value.
 		    Word 1: Line scale - 5.11 fixed point value.  So 0x800 is 1:1, 0x400 is 1:2, etc
 		    Word 2: Line shift for 2nd set - 13.3 signed fixed point value.
-		    Word 3: ?
+		    Word 3: ? (bit 15 is set on every line in tunnels)
 
 		    The scale is shared between both pixel sets.  The 2nd set is used when the road
 		    forks into two between stages, and for the road in tunnels.  The 2nd line shift is
@@ -254,6 +253,7 @@ pos is 11.5 fixed point
 		int const start1 = step ? ((-int16_t(shift) * 256) + 0x80) / step : 0x10000;
 		int const start2 = step ? ((-int16_t(uint16_t(shift + shift2)) * 256) + 0x80) / step : 0x10000;
 
+		uint32_t *const dest = &bitmap.pix(y);
 		for (int x = cliprect.left(); x <= cliprect.right(); x++)
 		{
 			int col;
@@ -279,7 +279,7 @@ pos is 11.5 fixed point
 				col = linedata[0x80] & 0xf;                  // between the sets
 				bank = 32;
 			}
-			bitmap.pix(y, x) = m_palette->pen(256 + pal*16 + col + bank);
+			dest[x] = m_palette->pen(256 + pal*16 + col + bank);
 		}
 		data+=4;
 	}

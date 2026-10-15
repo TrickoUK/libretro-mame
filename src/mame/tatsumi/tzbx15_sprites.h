@@ -32,9 +32,9 @@ private:
 	virtual void device_reset() override ATTR_COLD;
 
 	template<class BitmapClass> void draw_sprites_main(BitmapClass &bitmap, const rectangle &cliprect, int write_priority_only, int rambank);
-	template<class BitmapClass> void draw_rotated_lines(BitmapClass &bitmap, const rectangle &cliprect,
+	template<class BitmapClass> void draw_sprite(BitmapClass &bitmap, const rectangle &cliprect,
 			int index, int color, int x, int y, int scale, int rotate, bool flip_x, bool flip_y,
-			bool repeat, int write_priority_only);
+			int write_priority_only);
 
 	DECLARE_GFXDECODE_MEMBER(gfxinfo);
 
