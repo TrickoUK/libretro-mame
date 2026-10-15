@@ -305,3 +305,10 @@ builds get them straight from here.
 ### Apache 3: tall city buildings no longer lose their bodies
 - In the city attract scene, big buildings close to the camera used to vanish apart from a thin strip of
   roof left floating in the sky. They now draw in full, in all three sets.
+
+## 2026-10-15
+
+### Apache 3: service switch toggles, throttle and coin-disable switches
+- The service switch now toggles service mode on a single press instead of needing F2 held down.
+- Two more SW2 switches are identified: "Use Throttle" (on by default; off makes speed automatic and
+  the throttle shows as XX in service mode) and "Disable Coins" (only the service coin works).
