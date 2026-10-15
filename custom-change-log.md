@@ -312,3 +312,11 @@ builds get them straight from here.
 - The service switch now toggles service mode on a single press instead of needing F2 held down.
 - Two more SW2 switches are identified: "Use Throttle" (on by default; off makes speed automatic and
   the throttle shows as XX in service mode) and "Disable Coins" (only the service coin works).
+
+### Round Up 5: tunnel exit opens onto the scenery
+- Coming out of a tunnel, the far end now opens as a growing arch showing the houses, trees and then the
+  sky, as on the real machine, instead of staying solid black until the car is out and then popping in.
+  The tunnel mouth is a "shadow" sprite and the game keeps the scenery colours in the shadow half of the
+  palette while it is in the tunnel; MAME used to just dim the normal colours under it.
+- The gate and tunnel interior at the start of a game are now black behind the gate rather than a dimmed
+  view of the sky and scenery (still shows a little grass on the left for a few frames, work in progress).
