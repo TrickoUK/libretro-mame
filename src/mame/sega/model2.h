@@ -658,12 +658,13 @@ struct m2_poly_extra_data
 	u8       luma;
 };
 
-// destmap/fillmap are rendered at MODEL2_SUPERSAMPLE times the linear
+// destmap/fillmap are rendered at the supersampling factor times the linear
 // resolution of the real screen and box-filtered back down when composited
 // (see render_polygons()), to give the software 3D rasterizer some
 // antialiasing on polygon edges that real Model 2 hardware had via a
-// dedicated AA circuit this driver doesn't otherwise emulate.
-constexpr int MODEL2_SUPERSAMPLE = 2;
+// dedicated AA circuit this driver doesn't otherwise emulate. The factor
+// comes from the OSD's 3D supersampling setting (1 = native resolution).
+int model2_supersample_factor(running_machine &machine);
 
 // 0x10000 = size of the poly_sorted_list array
 class model2_renderer : public poly_manager<float, m2_poly_extra_data, 4>
@@ -679,13 +680,15 @@ public:
 				{ &model2_renderer::draw_scanline_tex<false>, this },
 				{ &model2_renderer::draw_scanline_tex<true>, this } },
 		m_state(state),
-		m_destmap(512 * MODEL2_SUPERSAMPLE, 512 * MODEL2_SUPERSAMPLE),
-		m_fillmap(512 * MODEL2_SUPERSAMPLE, 512 * MODEL2_SUPERSAMPLE),
+		m_ss(model2_supersample_factor(state.machine())),
+		m_destmap(512 * m_ss, 512 * m_ss),
+		m_fillmap(512 * m_ss, 512 * m_ss),
 		m_xoffs(90),
 		m_yoffs(-8)
 	{
 	}
 
+	int supersample() const { return m_ss; }
 	bitmap_rgb32 &destmap() { return m_destmap; }
 	bitmap_ind8 &fillmap() { return m_fillmap; }
 
@@ -703,6 +706,7 @@ private:
 	render_delegate m_render_callbacks[4];
 
 	model2_state &m_state;
+	int m_ss;
 	bitmap_rgb32 m_destmap;
 	bitmap_ind8 m_fillmap;
 	int16_t m_xoffs, m_yoffs;

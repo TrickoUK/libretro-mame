@@ -86,8 +86,8 @@ and `002-batocera-ini`. Keep these fixes through upstream merges, and check whet
 upstream has fixed the same thing before re-porting one:
 - `plugins/offscreenreload/init.lua`: batocera's lightgun reload auto-bind, which
   skips the bind when BUTTON2 is already used by gameplay.
-- `src/mame/sega/model2*`: 2x supersample antialiasing of the 3D layer
-  (`MODEL2_SUPERSAMPLE`); `hotd` has no trigger flash (`init_hotd` ROM patch,
+- `src/mame/sega/model2*`: supersample antialiasing of the 3D layer
+  (the generic `mame_3d_supersample` core option, off by default); `hotd` has no trigger flash (`init_hotd` ROM patch,
   Revision A only); `gunblade` gun Y gets `PORT_REVERSE` under `__LIBRETRO__`.
 - `src/mame/taito/opwolf.cpp`: no trigger flash on `opwolf` only. It's a runtime ROM
   patch about 900 frames in, because the C-chip ROM check rejects a static patch.

@@ -344,5 +344,7 @@ builds get them straight from here.
 - Cost grows with the square of the factor. On the dev machine GTI Club held full speed in a race at 3x
   and 4x (the attract demo dipped to 0.9x at 4x). On Voodoo games it still averages NxN texture
   samples as before.
+- Sega Model 2 now uses 3D Supersampling too. Its 3D layer used to be always rendered at 2x; now it is
+  native by default and the option picks 2x, 3x or 4x.
 - Save states made with it on, on GTI Club hardware, load only with it on, since the big buffers
   aren't saved.

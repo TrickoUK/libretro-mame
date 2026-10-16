@@ -92,6 +92,8 @@
 #include "model2.h"
 #include "model2rd.ipp"
 
+#include "osdepend.h"
+
 #include "corefloat.h"
 
 #include <cmath>
@@ -100,6 +102,17 @@
 #define pz      p[0]
 #define pu      p[1]
 #define pv      p[2]
+
+
+// Supersampling factor of the 3D layer (1 = native), from the OSD's 3D supersampling setting. The
+// MAME_MODEL2_SS environment variable overrides it for testing.
+int model2_supersample_factor(running_machine &machine)
+{
+	int ss = machine.osd().supersample();
+	if (char const *env = getenv("MAME_MODEL2_SS"))
+		ss = atoi(env);
+	return std::clamp(ss, 1, 4);
+}
 
 
 
@@ -567,9 +580,9 @@ void model2_renderer::model2_3d_render(polygon *poly, const rectangle &cliprect)
 	/* select renderer based on attributes (bit14 = textured, bit13 = transparent) */
 	u8 renderer = (poly->texheader[0] >> 13) & 3;
 
-	/* calculate and clip to viewport (destmap-space, i.e. already scaled by MODEL2_SUPERSAMPLE) */
-	rectangle vp(MODEL2_SUPERSAMPLE * (poly->viewport[0] + m_xoffs), MODEL2_SUPERSAMPLE * (poly->viewport[2] + m_xoffs),
-	             MODEL2_SUPERSAMPLE * ((384-poly->viewport[3]) + m_yoffs), MODEL2_SUPERSAMPLE * ((384-poly->viewport[1]) + m_yoffs));
+	/* calculate and clip to viewport (destmap-space, i.e. already scaled by the supersampling factor) */
+	rectangle vp(m_ss * (poly->viewport[0] + m_xoffs), m_ss * (poly->viewport[2] + m_xoffs),
+	             m_ss * ((384-poly->viewport[3]) + m_yoffs), m_ss * ((384-poly->viewport[1]) + m_yoffs));
 	vp &= cliprect;
 
 	extra.state = &m_state;
@@ -656,11 +669,13 @@ void model2_state::vertical_sync_w(u16 data)
 /* 3D Rasterizer projection: projects a polygon into screen coordinates */
 inline void model2_state::model2_3d_project(polygon *poly)
 {
+	int const ss = m_renderer->supersample();
+
 	for (int i = 0; i < poly->num_vertices; i++)
 	{
-		/* project the vertices into destmap space (scaled by MODEL2_SUPERSAMPLE) */
-		poly->v[i].x = MODEL2_SUPERSAMPLE * (m_crtc_xoffset + poly->center[0] + (poly->v[i].x / (poly->v[i].pz + std::numeric_limits<float>::min())));
-		poly->v[i].y = MODEL2_SUPERSAMPLE * (((384 - poly->center[1])+m_crtc_yoffset) - (poly->v[i].y / (poly->v[i].pz + std::numeric_limits<float>::min())));
+		/* project the vertices into destmap space (scaled by the supersampling factor) */
+		poly->v[i].x = ss * (m_crtc_xoffset + poly->center[0] + (poly->v[i].x / (poly->v[i].pz + std::numeric_limits<float>::min())));
+		poly->v[i].y = ss * (((384 - poly->center[1])+m_crtc_yoffset) - (poly->v[i].y / (poly->v[i].pz + std::numeric_limits<float>::min())));
 	}
 }
 
@@ -694,10 +709,11 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	raster_state *raster = m_raster.get();
 	int32_t z;
 
-	// destmap/fillmap are rendered at MODEL2_SUPERSAMPLE times cliprect's resolution
+	// destmap/fillmap are rendered at the supersampling factor times cliprect's resolution
+	int const ss = m_renderer->supersample();
 	rectangle const ss_cliprect(
-			cliprect.min_x * MODEL2_SUPERSAMPLE, (cliprect.max_x + 1) * MODEL2_SUPERSAMPLE - 1,
-			cliprect.min_y * MODEL2_SUPERSAMPLE, (cliprect.max_y + 1) * MODEL2_SUPERSAMPLE - 1);
+			cliprect.min_x * ss, (cliprect.max_x + 1) * ss - 1,
+			cliprect.min_y * ss, (cliprect.max_y + 1) * ss - 1);
 
 	// if the geometrizer hasn't presented a new frame, just copy the previous frame and bail
 	if (m_render_done)
@@ -755,23 +771,24 @@ void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cl
 {
 	bitmap_rgb32 &src = m_renderer->destmap();
 	bitmap_ind8 &srcfill = m_renderer->fillmap();
+	int const ss = m_renderer->supersample();
 
 	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
 	{
-		int const sy0 = y * MODEL2_SUPERSAMPLE;
+		int const sy0 = y * ss;
 		u32 *const dest = &bitmap.pix(y);
 
 		for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
 		{
-			int const sx0 = x * MODEL2_SUPERSAMPLE;
+			int const sx0 = x * ss;
 			u32 r = 0, g = 0, b = 0, count = 0;
 
-			for (int sy = 0; sy < MODEL2_SUPERSAMPLE; sy++)
+			for (int sy = 0; sy < ss; sy++)
 			{
 				u8 const *const fillrow = &srcfill.pix(sy0 + sy);
 				u32 const *const srcrow = &src.pix(sy0 + sy);
 
-				for (int sx = 0; sx < MODEL2_SUPERSAMPLE; sx++)
+				for (int sx = 0; sx < ss; sx++)
 				{
 					if (fillrow[sx0 + sx])
 					{
