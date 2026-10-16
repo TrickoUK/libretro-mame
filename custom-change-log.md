@@ -348,3 +348,11 @@ builds get them straight from here.
   native by default and the option picks 2x, 3x or 4x.
 - Save states made with it on, on GTI Club hardware, load only with it on, since the big buffers
   aren't saved.
+
+### Operation Thunder Hurricane: light gun aiming
+- Player 1 can now aim with a light gun (tested path: the lightgun X/Y inputs a Sinden drives). The game
+  was already firing from the trigger, but its aim point never moved. The gun position is now written
+  into the aim point the game normally moves with the stick, so shots land where the gun points.
+- Fork-only shortcut: the real I/O board reads two cameras and reports over a network chip that isn't
+  emulated. The stick still works too. Player 2 is not done yet.
+

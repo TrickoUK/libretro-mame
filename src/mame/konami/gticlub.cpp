@@ -372,16 +372,32 @@ public:
 	thunderh_state(const machine_config &mconfig, device_type type, const char *tag)
 		: gticlub_state(mconfig, type, tag)
 		, m_gn680(*this, "gn680")
+		, m_gun_x(*this, "GUN1_X")
+		, m_gun_y(*this, "GUN1_Y")
 	{ }
 
 	void thunderh(machine_config &config) ATTR_COLD;
 
+protected:
+	virtual void machine_start() override ATTR_COLD;
+
 private:
+	// Work RAM words holding player 1's aim point, in screen pixels from the top left. The game moves
+	// them with the stick when the GN680 gun board isn't answering, and the shots land where they point
+	static constexpr offs_t AIM_X_ADDR = 0x361c; // 0 to 511, 256 is the centre
+	static constexpr offs_t AIM_Y_ADDR = 0x3620; // 0 to 383, 192 is the centre
+
+	void vblank_gun(int state);
+
 	void gn680_sysctrl_w(uint16_t data);
 
 	void gn680_memmap(address_map &map) ATTR_COLD;
 
 	required_device<cpu_device> m_gn680;
+	optional_ioport m_gun_x;
+	optional_ioport m_gun_y;
+
+	uint32_t m_gun_last = ~uint32_t(0);
 };
 
 // with Voodoo based video board
@@ -584,6 +600,38 @@ void gticlub_base_state::sound_memmap(address_map &map)
 
 /*****************************************************************************/
 
+void thunderh_state::machine_start()
+{
+	gticlub_base_state::machine_start();
+
+	save_item(NAME(m_gun_last));
+}
+
+// Not a hardware accurate light gun: the real gun board reads two CCD cameras and reports the aim
+// to the main board over the network chip, which isn't emulated. Instead, write the gun position
+// into the aim point the game keeps for the stick. The stick still works while the gun is idle.
+void thunderh_state::vblank_gun(int state)
+{
+	if (!state || !m_gun_x.found() || !m_gun_y.found())
+		return;
+
+	// The words mean something else until the game has set the aim point up. Its marker values are
+	// there once it has, and writing earlier crashes the game
+	if (m_work_ram[0x3624 >> 2] != 1 || (m_work_ram[0x3618 >> 2] >> 16) != 1
+			|| m_work_ram[AIM_X_ADDR >> 2] >= 512 || m_work_ram[AIM_Y_ADDR >> 2] >= 384)
+		return;
+
+	uint32_t const x = m_gun_x->read() & 0x3ff;
+	uint32_t const y = m_gun_y->read() & 0x3ff;
+	uint32_t const pos = (y << 16) | x;
+	if (pos == m_gun_last)
+		return;
+
+	m_gun_last = pos;
+	m_work_ram[AIM_X_ADDR >> 2] = x;
+	m_work_ram[AIM_Y_ADDR >> 2] = y;
+}
+
 void thunderh_state::gn680_sysctrl_w(uint16_t data)
 {
 	// bit 15 = watchdog toggle
@@ -760,6 +808,13 @@ static INPUT_PORTS_START( thunderh )
 	PORT_DIPNAME( 0x08, 0x08, "DIP4" ) PORT_DIPLOCATION("SW:4")
 	PORT_DIPSETTING( 0x08, DEF_STR( Off ) )
 	PORT_DIPSETTING( 0x00, DEF_STR( On ) )
+
+	// Not a hardware setting: lets a light gun aim player 1 (see thunderh_state::vblank_gun)
+	PORT_START("GUN1_X")
+	PORT_BIT( 0x3ff, 0x100, IPT_LIGHTGUN_X ) PORT_MINMAX(0x000, 0x1ff) PORT_SENSITIVITY(35) PORT_KEYDELTA(1) PORT_PLAYER(1)
+
+	PORT_START("GUN1_Y")
+	PORT_BIT( 0x3ff, 0x0c0, IPT_LIGHTGUN_Y ) PORT_MINMAX(0x000, 0x17f) PORT_SENSITIVITY(35) PORT_KEYDELTA(1) PORT_PLAYER(1)
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( hangplt )
@@ -1009,6 +1064,8 @@ void thunderh_state::thunderh(machine_config &config)
 
 	M68000(config, m_gn680, 32_MHz_XTAL / 2); // 16MHz
 	m_gn680->set_addrmap(AS_PROGRAM, &thunderh_state::gn680_memmap);
+
+	subdevice<screen_device>("screen")->screen_vblank().set(FUNC(thunderh_state::vblank_gun));
 }
 
 void gticlub_state::slrasslt(machine_config &config)
