@@ -2,6 +2,8 @@
 // copyright-holders:David Haywood
 #include "emu.h"
 #include "k001005.h"
+
+#include "osdepend.h"
 #include "screen.h"
 
 #include "corefloat.h"
@@ -27,8 +29,14 @@ k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, devi
 {
 	m_k001006 = k001006;
 
-	int const width = 512;
-	int const height = 384;
+	// Not a hardware setting: render at a multiple of the native size and average down
+	int ss = screen.machine().osd().supersample();
+	if (char const *env = getenv("MAME_K001005_SS"))
+		ss = atoi(env);
+	m_ss = std::clamp(ss, 1, 4);
+
+	int const width = NATIVE_WIDTH * m_ss;
+	int const height = NATIVE_HEIGHT * m_ss;
 
 	m_fb[0].allocate(width, height);
 	m_fb[1].allocate(width, height);
@@ -77,9 +85,13 @@ k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, devi
 	// save state
 	parent.save_pointer(NAME(m_3dfifo), 0x10000);
 	parent.save_item(NAME(m_3dfifo_ptr));
-	parent.save_item(NAME(m_fb[0]));
-	parent.save_item(NAME(m_fb[1]));
-	parent.save_item(NAME(m_zb));
+	// The supersampled buffers are big, and the next frame redraws them anyway
+	if (m_ss == 1)
+	{
+		parent.save_item(NAME(m_fb[0]));
+		parent.save_item(NAME(m_fb[1]));
+		parent.save_item(NAME(m_zb));
+	}
 	parent.save_item(NAME(m_fb_page));
 	parent.save_item(NAME(m_light_r));
 	parent.save_item(NAME(m_light_g));
@@ -401,12 +413,13 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 	render_delegate rd_scan_vertex_color_tex = render_delegate(&k001005_renderer::draw_scanline_generic<true, true>, this);
 	render_delegate rd_scan_color = render_delegate(&k001005_renderer::draw_scanline_generic<false, false>, this);
 
-	int const viewport_min_x = std::clamp(256 + m_viewport_min_x + m_viewport_center_x, m_cliprect.min_x, m_cliprect.max_x);
-	int const viewport_max_x = std::clamp(256 + m_viewport_max_x + m_viewport_center_x + 1, m_cliprect.min_x, m_cliprect.max_x);
-	int const viewport_min_y = std::clamp(200 + m_viewport_min_y - m_viewport_center_y, m_cliprect.min_y, m_cliprect.max_y);
-	int const viewport_max_y = std::clamp(200 + m_viewport_max_y - m_viewport_center_y + 1, m_cliprect.min_y, m_cliprect.max_y);
+	int const viewport_min_x = std::clamp(256 + m_viewport_min_x + m_viewport_center_x, 0, NATIVE_WIDTH - 1);
+	int const viewport_max_x = std::clamp(256 + m_viewport_max_x + m_viewport_center_x + 1, 0, NATIVE_WIDTH - 1);
+	int const viewport_min_y = std::clamp(200 + m_viewport_min_y - m_viewport_center_y, 0, NATIVE_HEIGHT - 1);
+	int const viewport_max_y = std::clamp(200 + m_viewport_max_y - m_viewport_center_y + 1, 0, NATIVE_HEIGHT - 1);
 
-	rectangle cliprect(viewport_min_x, viewport_max_x, viewport_min_y, viewport_max_y);
+	// The clip rectangle is inclusive, so the last native pixel covers up to the last sample
+	rectangle cliprect(viewport_min_x * m_ss, (viewport_max_x + 1) * m_ss - 1, viewport_min_y * m_ss, (viewport_max_y + 1) * m_ss - 1);
 
 	int const start_index = index;
 
@@ -464,8 +477,8 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 			int y = (fifo[index] >> 16) & 0x1fff;
 			y |= ((y & 0x1000) ? 0xffffe000 : 0);
 
-			m_vertexb[m_vertexb_ptr].x = ((float)(x) / 16.0f) + 256.0f;
-			m_vertexb[m_vertexb_ptr].y = ((float)(-y) / 16.0f) + 200.0f;
+			m_vertexb[m_vertexb_ptr].x = (((float)(x) / 16.0f) + 256.0f) * m_ss;
+			m_vertexb[m_vertexb_ptr].y = (((float)(-y) / 16.0f) + 200.0f) * m_ss;
 
 			is_quad = BIT(fifo[index], 14);
 			last_vertex = BIT(fifo[index], 15);
@@ -689,17 +702,70 @@ void k001005_renderer::render_polygons()
 
 void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
+	int const ss = m_ss;
+	int const samples = ss * ss;
+
 	for (int j = cliprect.min_y; j <= cliprect.max_y; j++)
 	{
 		uint32_t *const bmp = &bitmap.pix(j);
-		uint32_t const *const src = &m_fb[m_fb_page ^ 1].pix(j - cliprect.min_y);
+		int const src_y = (j - cliprect.min_y) * ss;
 
 		for (int i = cliprect.min_x; i <= cliprect.max_x; i++)
 		{
-			if (src[i - cliprect.min_x] & 0xff000000)
+			int const src_x = (i - cliprect.min_x) * ss;
+
+			if (ss == 1)
 			{
-				bmp[i] = src[i - cliprect.min_x];
+				uint32_t const src = m_fb[m_fb_page ^ 1].pix(src_y, src_x);
+				if (src & 0xff000000)
+					bmp[i] = src;
+				continue;
 			}
+
+			// Average the samples the 3D layer drew. Where only some were drawn (a polygon edge
+			// or a cut-out in a texture), the average is blended over what is behind the layer
+			// by that share, which anti-aliases the edge.
+			int covered = 0;
+			uint32_t a = 0, r = 0, g = 0, b = 0;
+			for (int sy = 0; sy < ss; sy++)
+			{
+				uint32_t const *const src = &m_fb[m_fb_page ^ 1].pix(src_y + sy, src_x);
+				for (int sx = 0; sx < ss; sx++)
+				{
+					uint32_t const p = src[sx];
+					if (p & 0xff000000)
+					{
+						covered++;
+						a += p >> 24;
+						r += (p >> 16) & 0xff;
+						g += (p >> 8) & 0xff;
+						b += p & 0xff;
+					}
+				}
+			}
+
+			if (covered == 0)
+				continue;
+
+			if (covered < samples)
+			{
+				// Colour is the average of the drawn samples, weighted by how many were drawn
+				uint32_t const back = bmp[i];
+				uint32_t const clear = samples - covered;
+				a = (a + (back >> 24) * clear) / samples;
+				r = (r + ((back >> 16) & 0xff) * clear) / samples;
+				g = (g + ((back >> 8) & 0xff) * clear) / samples;
+				b = (b + (back & 0xff) * clear) / samples;
+			}
+			else
+			{
+				a /= samples;
+				r /= samples;
+				g /= samples;
+				b /= samples;
+			}
+
+			bmp[i] = (a << 24) | (r << 16) | (g << 8) | b;
 		}
 	}
 }

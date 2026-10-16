@@ -331,3 +331,18 @@ builds get them straight from here.
 - Only the boot check moves the wheel, so racing is unaffected.
 - The Steering Response and Steering Smoothing options now work in GTI Club, for steering with a
   gamepad stick.
+
+### 3D Supersampling and 3D Edge Anti-Aliasing: one generic option each
+- The Voodoo options are now generic core options that any 3D renderer with fork support can use,
+  instead of one option per hardware. **`mame_3d_supersample`** (Disabled/2x/3x/4x) replaces
+  `mame_voodoo_tex_supersample` and **`mame_3d_edge_aa`** (Disabled/Enabled) replaces
+  `mame_voodoo_edge_aa`. The old option names are gone with no fallback, so set the new ones.
+- GTI Club, Operation Thunder Hurricane, Solar Assault and the ZR107 games now use 3D Supersampling.
+  Their 3D layer is rendered at 2x, 3x or 4x the native size and averaged down, which smooths polygon
+  edges and the blocky texture shimmer. The HUD and text layers are untouched, and edge pixels blend
+  over the background, never over the HUD. Takes effect when content is restarted.
+- Cost grows with the square of the factor. On the dev machine GTI Club held full speed in a race at 3x
+  and 4x (the attract demo dipped to 0.9x at 4x). On Voodoo games it still averages NxN texture
+  samples as before.
+- Save states made with it on, on GTI Club hardware, load only with it on, since the big buffers
+  aren't saved.

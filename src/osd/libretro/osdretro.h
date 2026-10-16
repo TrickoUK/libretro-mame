@@ -181,8 +181,8 @@ public:
 		return 0;
 #endif
 	}
-	virtual int voodoo_tex_supersample() const override { return voodoo_tex_supersample_max; }
-	virtual bool voodoo_edge_aa() const override { return voodoo_edge_aa_enable; }
+	virtual int supersample() const override { return supersample_factor; }
+	virtual bool edge_aa() const override { return edge_aa_enable; }
 	virtual osd::gpu_render_target *get_gpu_render_target() override;
 
 private:

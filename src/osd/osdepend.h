@@ -198,15 +198,19 @@ public:
 	virtual int gpu_render_filter_exclude_sprite() const { return 0; }
 	virtual int gpu_render_filter_exclude_2d_polygon() const { return 0; }
 
-	// Voodoo texture supersampling enhancement (see the retro OSD's
-	// mame_voodoo_tex_supersample core option): maximum NxN grid of texture
-	// samples averaged per minified pixel; 0 = off (hardware-accurate).
-	virtual int voodoo_tex_supersample() const { return 0; }
+	// 3D supersampling enhancement (see the retro OSD's mame_3d_supersample
+	// core option), for every 3D renderer that supports it: 1 = off
+	// (hardware-accurate), N >= 2 = supersample by N in each direction. The
+	// Voodoo averages up to an NxN grid of texture samples per minified
+	// pixel; the Konami K001005 renders the whole 3D layer at N times the
+	// native size and averages it down.
+	virtual int supersample() const { return 1; }
 
-	// Voodoo edge anti-aliasing enhancement (see the retro OSD's
-	// mame_voodoo_edge_aa core option): smooths the outlines of 3D geometry
-	// at scan-out; false = off (hardware-accurate).
-	virtual bool voodoo_edge_aa() const { return false; }
+	// 3D edge anti-aliasing enhancement (see the retro OSD's mame_3d_edge_aa
+	// core option), for every 3D renderer that supports it (the Voodoo
+	// today): smooths the outlines of 3D geometry at scan-out; false = off
+	// (hardware-accurate).
+	virtual bool edge_aa() const { return false; }
 
 protected:
 	virtual ~osd_interface() { }

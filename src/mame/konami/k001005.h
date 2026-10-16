@@ -59,6 +59,12 @@ public:
 	static constexpr int POLY_A = 9;
 
 private:
+	// The 3D layer is 512x384. m_ss is the supersampling factor (1 = native): the framebuffers,
+	// depth buffer and polygon coordinates are m_ss times bigger and draw() averages them down.
+	static constexpr int NATIVE_WIDTH = 512;
+	static constexpr int NATIVE_HEIGHT = 384;
+	int m_ss;
+
 	bitmap_rgb32 m_fb[2];
 	bitmap_ind32 m_zb;
 	rectangle m_cliprect;

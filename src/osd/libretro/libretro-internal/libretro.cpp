@@ -615,24 +615,24 @@ static void check_variables(void)
          psx_gpu_filter_exclude_2d_polygon_mode = 2;
    }
 
-   var.key   = CORE_NAME "_voodoo_tex_supersample";
+   var.key   = CORE_NAME "_3d_supersample";
    var.value = NULL;
-   voodoo_tex_supersample_max = 0;
+   supersample_factor = 1;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
-      if (!strcmp(var.value, "2x2"))
-         voodoo_tex_supersample_max = 2;
-      if (!strcmp(var.value, "3x3"))
-         voodoo_tex_supersample_max = 3;
-      if (!strcmp(var.value, "4x4"))
-         voodoo_tex_supersample_max = 4;
+      if (!strcmp(var.value, "2x"))
+         supersample_factor = 2;
+      if (!strcmp(var.value, "3x"))
+         supersample_factor = 3;
+      if (!strcmp(var.value, "4x"))
+         supersample_factor = 4;
    }
 
-   var.key   = CORE_NAME "_voodoo_edge_aa";
+   var.key   = CORE_NAME "_3d_edge_aa";
    var.value = NULL;
-   voodoo_edge_aa_enable = false;
+   edge_aa_enable = false;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
-      voodoo_edge_aa_enable = !strcmp(var.value, "enabled");
+      edge_aa_enable = !strcmp(var.value, "enabled");
 
    var.key   = CORE_NAME "_lightgun_mode";
    var.value = NULL;

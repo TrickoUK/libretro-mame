@@ -706,26 +706,26 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "all"
    },
    {
-      CORE_NAME "_voodoo_tex_supersample",
-      "Voodoo Texture Supersampling (Enhancement)",
+      CORE_NAME "_3d_supersample",
+      "3D Supersampling",
       NULL,
-      "3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others). Reduces shimmering on detailed textures seen at a distance, such as foliage and terrain, by averaging several texture samples across each pixel wherever a texture is shrunk. Only texture colour is smoothed; transparency, polygon edges and resolution are unchanged. Each step costs more CPU: 3x3 is a good balance, 4x4 can slow heavy scenes on slower machines. Requires restarting content to take effect.",
+      "3D games with enhanced rendering: 3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others) and Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games). On Voodoo games it reduces shimmering on detailed textures seen at a distance, such as foliage and terrain, by averaging several texture samples across each pixel wherever a texture is shrunk; only texture colour is smoothed. On GTI Club hardware the whole 3D layer is rendered at 2x, 3x or 4x the native size and averaged down, which also smooths polygon edges; the HUD and text layers are unchanged. Each step costs more CPU: 3x is a good balance, 4x can slow heavy scenes on slower machines. Save states made with it on, on GTI Club hardware, can only be loaded with it on. Requires restarting content to take effect.",
       NULL,
       "video",
       {
          { "disabled", "Disabled" },
-         { "2x2",      "2x2" },
-         { "3x3",      "3x3" },
-         { "4x4",      "4x4" },
+         { "2x",       "2x" },
+         { "3x",       "3x" },
+         { "4x",       "4x" },
          { NULL, NULL },
       },
       "disabled"
    },
    {
-      CORE_NAME "_voodoo_edge_aa",
-      "Voodoo Edge Anti-Aliasing (Enhancement)",
+      CORE_NAME "_3d_edge_aa",
+      "3D Edge Anti-Aliasing",
       NULL,
-      "3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others). Smooths the stair-stepped outlines of 3D objects. Only edges of depth-tested 3D geometry are touched; textures, HUD and text stay sharp, and emulation is unaffected. Low CPU cost. Requires restarting content to take effect.",
+      "3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others). Smooths the stair-stepped outlines of 3D objects. Only edges of depth-tested 3D geometry are touched; textures, HUD and text stay sharp, and emulation is unaffected. Low CPU cost. Other 3D hardware is unaffected (3D Supersampling already smooths edges on GTI Club hardware). Requires restarting content to take effect.",
       NULL,
       "video",
       {

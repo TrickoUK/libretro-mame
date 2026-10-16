@@ -146,12 +146,13 @@ extern int psx_gpu_texfilter_mode;
 // semi-transparent draws. Only meaningful when psx_gpu_texfilter_mode > 0.
 extern int psx_gpu_filter_exclude_sprite_mode;
 extern int psx_gpu_filter_exclude_2d_polygon_mode;
-// mame_voodoo_tex_supersample core option: max NxN texture supersamples per
-// minified pixel in the Voodoo renderer, 0 = off (see osdepend.h).
-extern int voodoo_tex_supersample_max;
-// mame_voodoo_edge_aa core option: smooth 3D geometry outlines in the Voodoo
-// renderer (see osdepend.h).
-extern bool voodoo_edge_aa_enable;
+// mame_3d_supersample core option: supersampling factor for the 3D renderers
+// that support it (Voodoo texture samples, Konami K001005 render scale),
+// 1 = off (see osdepend.h).
+extern int supersample_factor;
+// mame_3d_edge_aa core option: smooth 3D geometry outlines in the renderers
+// that support it (the Voodoo today, see osdepend.h).
+extern bool edge_aa_enable;
 // mame_steering_response/_smoothing/_input, mame_stick_steering_speed core
 // options: override the fork's gamepad steering Machine Configuration
 // settings (see apply_steering_options() in libretro.cpp). Set when a machine

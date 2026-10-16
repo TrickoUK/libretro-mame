@@ -1013,14 +1013,14 @@ void voodoo_1_device::device_start()
 	// texture supersampling enhancement (max NxN per minified pixel, 0 = off),
 	// from the OSD; the MAME_VOODOO_TEXSS environment variable overrides it
 	// for testing
-	int texss = machine().osd().voodoo_tex_supersample();
+	int texss = machine().osd().supersample();
 	if (char const *env = getenv("MAME_VOODOO_TEXSS"))
 		texss = atoi(env);
 	m_renderer->set_tex_supersample(std::clamp(texss, 0, 4));
 
 	// edge anti-aliasing enhancement (1 = on, 2 = debug view: smoothed pixels
 	// in red), from the OSD; MAME_VOODOO_EDGEAA overrides it for testing
-	m_edge_aa = machine().osd().voodoo_edge_aa() ? 1 : 0;
+	m_edge_aa = machine().osd().edge_aa() ? 1 : 0;
 	if (char const *env = getenv("MAME_VOODOO_EDGEAA"))
 		m_edge_aa = std::clamp(atoi(env), 0, 2);
 	m_aa_map_offs = ~0;
