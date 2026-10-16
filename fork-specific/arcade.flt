@@ -442,7 +442,6 @@ dataeast/decrmc3.cpp  // [HELPER]
 dataeast/deshoros.cpp
 dataeast/dietgo.cpp
 dataeast/dragngun.cpp
-dataeast/dvi.cpp  // [HELPER]
 dataeast/exprraid.cpp
 dataeast/ffantasy_ms.cpp
 dataeast/fghthist.cpp
@@ -987,7 +986,6 @@ misc/cwheel.cpp
 misc/cybertnk.cpp
 misc/dcheese.cpp
 misc/dcheese_v.cpp  // [HELPER]
-misc/ddz.cpp
 misc/dfruit.cpp
 misc/dgpix.cpp
 misc/discoboy.cpp
@@ -1066,6 +1064,7 @@ misc/micro3d_v.cpp  // [HELPER]
 misc/minivideo.cpp
 misc/mirax.cpp
 misc/mosaic.cpp
+misc/mpu2000.cpp
 misc/musclem.cpp
 misc/nabupc_kbd.cpp  // [HELPER]
 misc/neomania.cpp
@@ -3410,7 +3409,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -royaljp
 -royalpk2
 -rselect
--rulamiky
+-rula
 -rushrst
 -ryorioh
 -ryouran
