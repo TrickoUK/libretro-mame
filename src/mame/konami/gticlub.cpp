@@ -1383,8 +1383,10 @@ ROM_START( slrasslt ) // USA version UAA
 	ROM_LOAD64_WORD( "792a15.9d",  0x000004, 0x200000, CRC(1c5531cb) SHA1(1b514f181c92e16d07bfe4719604f1e4caf15377) )
 	ROM_LOAD64_WORD( "792a16.4d",  0x000006, 0x200000, CRC(df89e392) SHA1(af37c5460d43bf8d8a1ab4213c4528083a7363c2) )
 
-	ROM_REGION16_BE(0x100, "eeprom", 0) // default eeprom with magic number
-	ROM_LOAD16_WORD( "eeprom-slrasslt.bin", 0x0000, 0x0100, CRC(51eb4d93) SHA1(bc1359daccad80b0e16eb144a0bae715a4fb2e8d) )
+	// The game rejects the EEPROM with "24G BAD : EEPROM PARAMETER IS ILLIGAL" if only the magic number is
+	// set up (the old default, eeprom-slrasslt.bin CRC 51eb4d93 here), so use the populated Japanese dump
+	ROM_REGION16_BE(0x100, "eeprom", 0)
+	ROM_LOAD16_WORD( "eeprom-slrassltj.bin", 0x0000, 0x0100, CRC(407871d6) SHA1(17a311c412f450edb206750bf7d1055bd16a2135) )
 ROM_END
 
 ROM_START( slrassltj ) // Japan version JAA

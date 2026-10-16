@@ -356,3 +356,8 @@ builds get them straight from here.
 - Fork-only shortcut: the real I/O board reads two cameras and reports over a network chip that isn't
   emulated. The stick still works too. Player 2 is not done yet.
 
+### Solar Assault (US): boots instead of "EEPROM PARAMETER IS ILLIGAL"
+- The US set stopped at "24G BAD : EEPROM PARAMETER IS ILLIGAL" on a fresh boot, because its default
+  EEPROM held only the magic number. It now starts from the populated default the Japanese set ships,
+  so the machine initialises, the attract mode runs and a game starts.
+
