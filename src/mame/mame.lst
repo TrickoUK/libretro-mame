@@ -30783,7 +30783,7 @@ re800ea
 re800v1
 re800v1a
 re800v3
-rulamiky
+rula
 winner81
 winner81b
 winner81c
@@ -30925,7 +30925,7 @@ baibians
 btlfront
 cjmx
 crzclass
-ddz
+kxddz
 
 @source:misc/deecoseal.cpp
 deecoseal
@@ -32724,6 +32724,15 @@ fruitstbh
 fruitstbi
 goldnjkr
 goldnjkra
+
+@source:misc/mpu2000.cpp
+gw606
+gw603
+gw562
+gw558
+gw557
+gw552
+gw545
 
 @source:misc/mtu130.cpp
 mtu130
@@ -37761,6 +37770,7 @@ paranoia
 
 @source:pce/tourvis.cpp
 tourvis
+tourvisv1
 
 @source:pce/uapce.cpp
 aliencr
@@ -40468,6 +40478,10 @@ d550
 @source:roland/roland_d70.cpp
 d70
 
+@source:roland/roland_dep5.cpp
+dep5
+re3
+
 @source:roland/roland_jd800.cpp
 jd800
 
@@ -40824,6 +40838,7 @@ fkddzz80
 jzuanshi
 lucky168
 pljh
+wakenz80
 
 @source:seequa/chameleon.cpp
 chameleon
