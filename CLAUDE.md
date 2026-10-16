@@ -343,10 +343,10 @@ independent of this feature and likely to bite future work too:
   `.cpp`'s own mtime changed. If you change a `.lua` script's `defines`/
   flags without touching the affected `.cpp` files, `rm` the specific
   stale `.o` file(s) before rebuilding or the change silently won't apply.
-- Also: `-j16`/`-j8` full-ish rebuilds twice hit this harness's low-memory
-  guard and got killed mid-build during this session (not a real OOM — RAM
-  was free again immediately after); `-j4` was reliable. Prefer `-j4` for
-  this project's builds.
+- Also: `-j16`/`-j8` full-ish rebuilds twice got killed mid-build during this
+  session (not a real OOM — RAM was free again immediately after), probably by
+  systemd-oomd. Use `-j8` inside the `systemd-run` scope described under
+  "Building"; `-j4` is the fallback without it.
 
 ### Phase 2 status: working, correctness/stability solid, performance acceptable but host-limited (2026-09-16)
 
@@ -849,14 +849,22 @@ codebase, not a matter of flipping on a hidden fast path.
 ## Building
 
 ```sh
-make -f Makefile.libretro -j4          # full build (see -j note below)
-make -f Makefile.libretro -j4 PREMAKE=0  # faster incremental rebuild after the first build
+# Preferred (2026-10-16): -j8 in a scope that systemd-oomd leaves alone
+systemd-run --user --scope -p ManagedOOMPreference=omit -- \
+  env MAME_DYNAMIC_LIBSTDCXX=1 make -f Makefile.libretro -j8 PREMAKE=0 SOURCEFILTER=fork-specific/arcade.flt
+make -f Makefile.libretro -j4          # fallback without the scope (see -j note below)
 ```
 
-- **Prefer `-j4` over `-j16`/`-j8`**: full-ish rebuilds at higher parallelism
-  twice triggered this harness's low-memory guard and got killed mid-build
-  (not a real host OOM — 16 cores are available and plenty of RAM is free
-  again immediately after); `-j4` completed reliably every time.
+- **Use `-j8` inside the `systemd-run` scope above.** Earlier `-j8`/`-j16` full-ish
+  rebuilds were killed mid-build with RAM free again immediately afterwards (no kernel
+  OOM). `oomctl` shows systemd-oomd monitors the user session at 80% memory pressure for
+  20 s (60% for the Konsole scope), so it is the likely culprit, but the original kills
+  predate a reboot and weren't confirmed. The scope's
+  `ManagedOOMPreference=omit` exempts the build from oomd. A small `-j8` rebuild of 8
+  heavy objects was fine (peak pressure 0.5%); **the next upstream sync is the real
+  test**. If a build still dies with the exemption, oomd wasn't the cause: check
+  `journalctl -u systemd-oomd` and `journalctl -k | grep -i oom`, then go back to `-j4`.
+  Without the scope, stay on `-j4`.
 
 - Output: `mame_libretro.so` at the repo root (GENie appends the
   `_libretro` target suffix; see `scripts/src/main.lua`).
