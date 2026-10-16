@@ -320,3 +320,14 @@ builds get them straight from here.
   palette while it is in the tunnel; MAME used to just dim the normal colours under it.
 - The gate and tunnel interior at the start of a game are now black behind the gate rather than a dimmed
   view of the sky and scenery (still shows a little grass on the left for a few frames, work in progress).
+
+## 2026-10-16
+
+### GTI Club: no more "DEVICE ERROR (STEERING WHEEL)" at boot
+- The machine init checks the force feedback wheel by driving its motor against each stop and reading
+  the position back. The emulated wheel never moved, so every boot ended on the steering error and
+  needed the test switch to skip it. The wheel now reaches the stop when the motor is held on for half
+  a second, so the init completes and the game goes straight to its title screen.
+- Only the boot check moves the wheel, so racing is unaffected.
+- The Steering Response and Steering Smoothing options now work in GTI Club, for steering with a
+  gamepad stick.

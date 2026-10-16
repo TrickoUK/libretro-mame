@@ -230,6 +230,8 @@ Hang Pilot (uses an unknown but similar video board)                12W         
 #include "k001604.h"
 #include "konppc.h"
 
+#include "gamepad_steering.h"
+
 #include "cpu/m68000/m68000.h"
 #include "cpu/powerpc/ppc.h"
 #include "cpu/sharc/sharc.h"
@@ -280,6 +282,7 @@ protected:
 		, m_cgboard_bank(*this, "cgboard_%u_bank", 0U)
 		, m_analog(*this, "AN%u", 0U)
 		, m_ports(*this, "IN%u", 0)
+		, m_steering_config(*this, "STEERING")
 		, m_pcb_digit(*this, "pcbdigit%u", 0U)
 		, m_wheel_motor(*this, "wheel_motor")
 		, m_cg_view(*this, "cg_view")
@@ -296,6 +299,7 @@ protected:
 	INTERRUPT_GEN_MEMBER(sound_irq);
 
 	int adc1038_input_callback(int input);
+	int wheel_position();
 
 	void sound_memmap(address_map &map) ATTR_COLD;
 
@@ -314,11 +318,22 @@ protected:
 	optional_memory_bank_array<2> m_cgboard_bank;
 	optional_ioport_array<4> m_analog;
 	required_ioport_array<4> m_ports;
+	optional_ioport m_steering_config;
 	output_finder<2> m_pcb_digit;
 	output_finder<> m_wheel_motor;
 	memory_view m_cg_view;
 
 	bool m_sound_irq_enabled = false;
+
+	// Force feedback wheel (GTI Club): the machine init drives the wheel motor against each
+	// stop in turn and reads the wheel position back, so the motor command has to move it.
+	bool m_wheel_motor_drives_wheel = false;
+	bool m_wheel_motor_check = false;
+	uint8_t m_wheel_motor_cmd = 0;
+	attotime m_wheel_motor_time;
+	attotime m_wheel_motor_deadline;
+
+	gamepad_steering m_gamepad_steering;
 };
 
 // with GN678 Video board
@@ -440,6 +455,14 @@ void gticlub_base_state::sysreg_w(offs_t offset, uint8_t data)
 
 		case 2:
 			// GTI club drive commands
+			if (data != m_wheel_motor_cmd)
+			{
+				// The check is over once the motor is released after being driven
+				if (BIT(m_wheel_motor_cmd, 7) && !BIT(data, 7))
+					m_wheel_motor_check = false;
+				m_wheel_motor_cmd = data;
+				m_wheel_motor_time = machine().time();
+			}
 			m_wheel_motor = data;
 			break;
 
@@ -497,6 +520,10 @@ void gticlub_base_state::machine_start()
 	m_maincpu->ppcdrc_add_fastram(0x00000000, 0x000fffff, false, m_work_ram);
 
 	save_item(NAME(m_sound_irq_enabled));
+	save_item(NAME(m_wheel_motor_check));
+	save_item(NAME(m_wheel_motor_cmd));
+	save_item(NAME(m_wheel_motor_time));
+	save_item(NAME(m_wheel_motor_deadline));
 }
 
 void gticlub_state::gticlub_map(address_map &map)
@@ -643,6 +670,9 @@ static INPUT_PORTS_START( gticlub )
 
 	PORT_START("AN3")
 	PORT_BIT( 0x3ff, 0x000, IPT_PEDAL3 ) PORT_NAME("Handbrake Lever") PORT_MINMAX(0x000,0x25f) PORT_SENSITIVITY(50) PORT_KEYDELTA(25)
+
+	// Not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( slrasslt )
@@ -763,11 +793,41 @@ static INPUT_PORTS_START( hangplt )
 	PORT_BIT( 0x3ff, 0x200, IPT_AD_STICK_Y ) PORT_NAME("Control Bar") PORT_MINMAX(0x100,0x2ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(20) PORT_REVERSE
 INPUT_PORTS_END
 
+// The wheel motor command is bit 7 = drive on, bit 4 = direction and the low nibble = power.
+// The machine init holds each power step for a second and expects the wheel to have reached
+// the stop by the time it reads it back, then drives it back to the centre and releases the
+// motor. Only that check moves the wheel. In play the game rewrites the command every couple
+// of frames for road feel, which must not move a gamepad player's steering.
+int gticlub_base_state::wheel_position()
+{
+	// The check runs within the first minute or so of the init, never leave it on for longer
+	if (m_wheel_motor_check && machine().time() > m_wheel_motor_deadline)
+		m_wheel_motor_check = false;
+
+	if (m_wheel_motor_check && BIT(m_wheel_motor_cmd, 7))
+	{
+		// NOTE: The breakaway power and the travel time are estimates, not measured values.
+		constexpr uint8_t BREAKAWAY_POWER = 6;
+		constexpr attotime TRAVEL_TIME = attotime::from_msec(500);
+
+		if ((m_wheel_motor_cmd & 0x0f) >= BREAKAWAY_POWER && (machine().time() - m_wheel_motor_time) >= TRAVEL_TIME)
+			return BIT(m_wheel_motor_cmd, 4) ? 0x3fb : 0x004;
+	}
+
+	int position = m_analog[0]->read();
+
+	// Optional gamepad steering assists (see gamepad_steering.h)
+	if (m_steering_config)
+		position = m_gamepad_steering.apply(position, 0x004, 0x200, 0x3fb, m_steering_config->read(), machine().time());
+
+	return position;
+}
+
 int gticlub_base_state::adc1038_input_callback(int input)
 {
 	switch (input)
 	{
-	case 0:  return m_analog[0]->read();
+	case 0:  return wheel_position();
 	case 1:  return m_analog[1]->read();
 	case 2:  return m_analog[2]->read();
 	case 3:  return m_analog[3]->read();
@@ -782,6 +842,10 @@ void gticlub_base_state::machine_reset()
 		m_dsp[1]->set_input_line(INPUT_LINE_RESET, ASSERT_LINE);
 
 	m_sound_irq_enabled = false;
+	m_wheel_motor_check = m_wheel_motor_drives_wheel;
+	m_wheel_motor_cmd = 0;
+	m_wheel_motor_time = attotime::zero;
+	m_wheel_motor_deadline = machine().time() + attotime::from_seconds(120);
 }
 
 uint32_t gticlub_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
@@ -892,6 +956,7 @@ void gticlub_state::gticlub(machine_config &config)
 	ADC1038(config, m_adc1038);
 	m_adc1038->set_input_callback(FUNC(gticlub_state::adc1038_input_callback));
 	m_adc1038->set_gti_club_hack(true);
+	m_wheel_motor_drives_wheel = true;
 
 	K056230(config, m_k056230);
 	m_k056230->irq_cb().set_inputline(m_maincpu, INPUT_LINE_IRQ2);
@@ -938,6 +1003,7 @@ void thunderh_state::thunderh(machine_config &config)
 	gticlub(config);
 
 	m_adc1038->set_gti_club_hack(false);
+	m_wheel_motor_drives_wheel = false;
 
 	// TODO: replace K056230 from main gticlub config with a LANC tied to gn680 I/O board
 
@@ -950,6 +1016,7 @@ void gticlub_state::slrasslt(machine_config &config)
 	gticlub(config);
 
 	m_adc1038->set_gti_club_hack(false);
+	m_wheel_motor_drives_wheel = false;
 }
 
 void hangplt_state::hangplt(machine_config &config)
