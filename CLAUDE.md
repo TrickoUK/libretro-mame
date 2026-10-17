@@ -64,7 +64,12 @@ mixed into history.
   hooks).
 - Local fix on top of upstream: `src/mame/taito/tc0100scn.cpp` `tilemap_draw_fg` uses
   `cliprect.left()` for the source x (upstream `1ddcb581da6` wrote `cliprect.right()`, which broke
-  Aqua Jack's backdrops and every TC0100SCN line-scroll layer). Drop it once upstream fixes it.
+  Aqua Jack's backdrops and every TC0100SCN line-scroll layer). Drop it once upstream fixes it
+  (upstream PR mamedev/mame#16482).
+- Local fix on top of upstream: `src/mame/sega/segas32_v.cpp` `draw_one_sprite` compares `xtarget`
+  with `clipin.left()` for X-flipped sprites (the same upstream commit wrote `clipin.right()`, so
+  flipped sprites repeated across the line in most System 32 games). Drop it once upstream fixes it
+  (PR branch `segas32-flipped-sprite-repeat`).
 - Upstream API changes in that sync that broke fork/libretro code:
   - `screen_device` is split per type (`screen_svg_device`, vector screens).
     Use `video_output_interface_enumerator`/`is_vector()` instead of

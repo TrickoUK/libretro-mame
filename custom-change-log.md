@@ -361,3 +361,9 @@ builds get them straight from here.
   EEPROM held only the magic number. It now starts from the populated default the Japanese set ships,
   so the machine initialises, the attract mode runs and a game starts.
 
+## 2026-10-17
+
+### Sega System 32 games (Dark Edge, Golden Axe 2, Title Fight, SegaSonic, Slip Stream, Hard Dunk and others): sprites no longer repeat
+- Since the 2026-10-13 upstream sync, sprites that face the other way were drawn over and over across the
+  line: rows of the same fighter in Dark Edge, Golden Axe: Death Adder and Title Fight, three Tails in
+  SegaSonic, two cars in Slip Stream. They draw once again. Fixed (an upstream typo, not yet fixed there).
