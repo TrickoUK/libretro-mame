@@ -20,7 +20,7 @@ on the same hardware, so the work applies to them, but they have not been looked
 |---|---|---|---|
 | **PS1-GPU boards**: Sony ZN, Taito G-NET, Namco System 11/12 (and 10), Konami GQ/GV | The PS1 GPU's polygons are drawn on the host GPU at 1x/2x/4x, with PGXP geometry/texture correction, MSAA and texture filtering | **Custom**: eight `mame_psx_gpu_*` options | Working, experimental, off by default |
 | **3dfx Voodoo 1/2/3 boards**: Midway Seattle and Vegas, Konami Viper (GTI Club 2, Thrill Drive 2, Jurassic Park 3 and more), Hornet, NWK-TR, Hang Pilot, ITEagle | Voodoo 3 fixes (second texture unit, multi-base textures, 2D blit), PowerPC recompiler speed-ups, texture supersampling and depth-guided edge anti-aliasing | **Generic**: `mame_3d_supersample`, `mame_3d_edge_aa` | Working; options off by default |
-| **Konami K001005 boards**: GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games | The software 3D renderer draws at 2x/3x/4x and averages down | **Generic**: `mame_3d_supersample` (edge AA does not apply) | Working; option off by default |
+| **Konami K001005 boards**: GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games | The software 3D renderer draws at 2x/3x/4x and averages down, with optional bilinear texture filtering | **Generic**: `mame_3d_supersample` and `mame_3d_texfilter` (edge AA does not apply) | Working; option off by default |
 | **Sega Model 2** | The 3D layer's supersampling moved onto the generic option (it used to be fixed at 2x) | **Generic**: `mame_3d_supersample` | Working; native by default |
 | **Konami M2** (Polystars, Total Vice, Evil Night, Heat of Eleven, Battle Tryst) | Triangle Engine rasterizer speed-up and threading, PowerPC recompiler and DSP fixes: playable at about full speed | None, always on | Working |
 | **Tatsumi TZB215/315** (Apache 3, Round Up 5, Cycle Warriors, Big Fight) | Hardware-accurate ground, sky and sprite rotation/zoom for the pseudo-3D scenes | None, always on | Working; merged upstream |
@@ -34,6 +34,7 @@ restarted.
 |---|---|---|---|
 | `mame_3d_supersample` | disabled, 2x, 3x, 4x | disabled | Voodoo boards (texture supersampling), K001005 boards, Sega Model 2 |
 | `mame_3d_edge_aa` | disabled, enabled | disabled | Voodoo boards only |
+| `mame_3d_texfilter` | disabled, bilinear | disabled | K001005 boards only (Voodoo boards already filter in hardware) |
 | `mame_psx_gpu_hle` | disabled, 1x, 2x, 4x | disabled | PS1-GPU boards (master switch; the other PS1 options only matter when this is on) |
 | `mame_psx_gpu_pgxp` | disabled, enabled | disabled | PS1-GPU boards: PGXP geometry and texture correction |
 | `mame_psx_gpu_pgxp_tol` | legacy, disabled, 0px to 8px | 1px | PS1-GPU boards: how far a vertex without PGXP data may move before it is reverted |
@@ -43,7 +44,7 @@ restarted.
 | `mame_psx_gpu_filter_exclude_sprite` | disabled, opaque, all | all | PS1-GPU boards: keep sprites unfiltered |
 | `mame_psx_gpu_filter_exclude_2d_polygon` | disabled, opaque, all | all | PS1-GPU boards: keep 2D polygons unfiltered |
 
-The 3D options are **generic** on purpose: any 3D renderer with fork support reads the same two settings.
+The 3D options are **generic** on purpose: any 3D renderer with fork support reads the same three settings.
 The PS1 GPU has its own set because it is a separate host-GPU renderer with PS1-specific behaviour.
 
 ## PS1-GPU boards (custom `mame_psx_gpu_*` options)
@@ -167,17 +168,20 @@ Virtual Pool (`virtpool`), Big Buck Hunter (`bbh`), Golden Tee Fore! (`gtfore01`
 Also Voodoo-based: Hang Pilot (`hangplt`, in `gticlub.cpp`) and the PC-based arcade boards (Pump It Up and others).
 Not listed: ParaParaParadise 2nd Mix (a Viper music game).
 
-## Konami K001005 boards (generic `mame_3d_supersample`)
+## Konami K001005 boards (generic `mame_3d_supersample`, `mame_3d_texfilter`)
 
 - **Device**: `k001005.cpp`, the software 3D renderer in GTI Club, Operation Thunder Hurricane, Solar Assault and
   the ZR107 games. With `mame_3d_supersample` on, the 3D layer is rendered at 2x/3x/4x the native size and
   averaged down. The HUD and text layers are untouched, and edge pixels blend over the background, never over the HUD.
-- **Cost**: grows with the square of the factor. GTI Club held full speed in a race at 3x and 4x on the dev
+- **Texture filtering**: `mame_3d_texfilter = bilinear` forces the renderer's own bilinear path (Operation Thunder Hurricane
+  and Solar Assault already enable it on the hardware). On GTI Club it smooths walls, rock and road, and thin
+  objects like overhead wires appear that unfiltered sampling skips. No speed cost measured yet.
+- **Cost** of supersampling: grows with the square of the factor. GTI Club held full speed in a race at 3x and 4x on the dev
   machine; the attract demo dipped to 0.9x at 4x.
 - **Save states** made with it on load only with it on, since the big buffers aren't saved.
 - **Also made to work here**: GTI Club's boot steering check, Solar Assault's default EEPROM, Operation Thunder
   Hurricane player 1 light gun aim (see `custom-change-log.md`).
-- **Checked here**: GTI Club (speed at 3x/4x).
+- **Checked here**: GTI Club (speed at 3x/4x; texture filtering at 1x and 3x, frame-exact snapshots).
 
 <details>
 <summary>Konami GTI Club hardware (gticlub.cpp, excluding Hang Pilot) (3 parent sets)</summary>

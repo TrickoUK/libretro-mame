@@ -153,6 +153,9 @@ extern int supersample_factor;
 // mame_3d_edge_aa core option: smooth 3D geometry outlines in the renderers
 // that support it (the Voodoo today, see osdepend.h).
 extern bool edge_aa_enable;
+// mame_3d_texfilter core option: bilinear filter textures in the renderers
+// that support it (the Konami K001005 today, see osdepend.h).
+extern bool texfilter_enable;
 // mame_steering_response/_smoothing/_input, mame_stick_steering_speed core
 // options: override the fork's gamepad steering Machine Configuration
 // settings (see apply_steering_options() in libretro.cpp). Set when a machine

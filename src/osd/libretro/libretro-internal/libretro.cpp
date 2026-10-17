@@ -634,6 +634,12 @@ static void check_variables(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
       edge_aa_enable = !strcmp(var.value, "enabled");
 
+   var.key   = CORE_NAME "_3d_texfilter";
+   var.value = NULL;
+   texfilter_enable = false;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      texfilter_enable = !strcmp(var.value, "bilinear");
+
    var.key   = CORE_NAME "_lightgun_mode";
    var.value = NULL;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)

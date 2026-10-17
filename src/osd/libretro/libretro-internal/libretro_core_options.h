@@ -736,6 +736,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
+      CORE_NAME "_3d_texfilter",
+      "3D Texture Filtering",
+      NULL,
+      "Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games). Smooths blocky magnified textures with bilinear filtering. Operation Thunder Hurricane and Solar Assault already filter on the real hardware; this turns it on for the other games. Other 3D hardware is unaffected. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "bilinear", "Bilinear" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
       CORE_NAME "_cpu_overclock",
       "Main CPU Overclock %",
       NULL,

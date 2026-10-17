@@ -212,6 +212,12 @@ public:
 	// (hardware-accurate).
 	virtual bool edge_aa() const { return false; }
 
+	// 3D texture filtering enhancement (see the retro OSD's mame_3d_texfilter
+	// core option), for every 3D renderer that supports it (the Konami
+	// K001005 today): true = bilinear filter textures in games that don't ask
+	// for it themselves; false = off (hardware-accurate).
+	virtual bool texture_filter() const { return false; }
+
 protected:
 	virtual ~osd_interface() { }
 };

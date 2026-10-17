@@ -367,3 +367,10 @@ builds get them straight from here.
 - Since the 2026-10-13 upstream sync, sprites that face the other way were drawn over and over across the
   line: rows of the same fighter in Dark Edge, Golden Axe: Death Adder and Title Fight, three Tails in
   SegaSonic, two cars in Slip Stream. They draw once again. Fixed (an upstream typo, not yet fixed there).
+
+### GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games): 3D Texture Filtering option
+- New core option **3D Texture Filtering** (Disabled/Bilinear, default Disabled). Bilinear smooths blocky
+  magnified textures in GTI Club (walls, rock faces and road look much less pixelated) and lets very thin
+  objects such as overhead wires show up, where plain sampling skips over them. Operation Thunder
+  Hurricane and Solar Assault already filter on the real hardware, so for them it changes nothing.
+- Works together with 3D Supersampling. Takes effect when content is restarted.

@@ -35,6 +35,10 @@ k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, devi
 		ss = atoi(env);
 	m_ss = std::clamp(ss, 1, 4);
 
+	m_force_bilinear = screen.machine().osd().texture_filter();
+	if (char const *env = getenv("MAME_K001005_TEXFILTER"))
+		m_force_bilinear = atoi(env) != 0;
+
 	int const width = NATIVE_WIDTH * m_ss;
 	int const height = NATIVE_HEIGHT * m_ss;
 
@@ -211,7 +215,7 @@ void k001005_renderer::draw_scanline_generic(int32_t scanline, const extent_t& e
 	bool const UseFog = extradata.fog_enable;
 
 	bool const WriteZ = true;
-	bool const UseBilinear = k001006->bilinear_enabled();
+	bool const UseBilinear = m_force_bilinear || k001006->bilinear_enabled();
 
 	uint32_t texel = 0;
 	uint32_t texel_alpha = 0;

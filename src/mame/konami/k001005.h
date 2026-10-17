@@ -64,6 +64,8 @@ private:
 	static constexpr int NATIVE_WIDTH = 512;
 	static constexpr int NATIVE_HEIGHT = 384;
 	int m_ss;
+	// Not a hardware setting: bilinear filter textures even where the game doesn't ask for it
+	bool m_force_bilinear;
 
 	bitmap_rgb32 m_fb[2];
 	bitmap_ind32 m_zb;
