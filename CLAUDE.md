@@ -869,13 +869,13 @@ codebase, not a matter of flipping on a hidden fast path.
 ## Building
 
 ```sh
-# Preferred (2026-10-16): -j8 in a scope that systemd-oomd leaves alone
+# Preferred (2026-10-16): -j10 in a scope that systemd-oomd leaves alone
 systemd-run --user --scope -p ManagedOOMPreference=omit -- \
-  env MAME_DYNAMIC_LIBSTDCXX=1 make -f Makefile.libretro -j8 PREMAKE=0 SOURCEFILTER=fork-specific/arcade.flt
+  env MAME_DYNAMIC_LIBSTDCXX=1 make -f Makefile.libretro -j10 PREMAKE=0 SOURCEFILTER=fork-specific/arcade.flt
 make -f Makefile.libretro -j4          # fallback without the scope (see -j note below)
 ```
 
-- **Use `-j8` inside the `systemd-run` scope above.** Earlier `-j8`/`-j16` full-ish
+- **Use `-j10` (the user approved it 2026-10-17; the large 2026-10-17 `-j8` rebuild after an `osdepend.h` edit finished clean) inside the `systemd-run` scope above.** Earlier `-j8`/`-j16` full-ish
   rebuilds were killed mid-build with RAM free again immediately afterwards (no kernel
   OOM). `oomctl` shows systemd-oomd monitors the user session at 80% memory pressure for
   20 s (60% for the Konsole scope), so it is the likely culprit, but the original kills
