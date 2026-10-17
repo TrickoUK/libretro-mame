@@ -14,6 +14,7 @@ ap.add_argument("--duration", type=int, default=60)
 ap.add_argument("--shot-every", type=int, default=5)
 ap.add_argument("--state"); ap.add_argument("--cg", action="store_true")
 ap.add_argument("--no-perf", action="store_true")
+ap.add_argument("--ff", type=float, default=0, help="hold fast-forward for this many seconds after launch (long boot/init); -1 = whole run")
 ap.add_argument("--lua", action="append", default=[], metavar="T:CMD",
                 help="send Lua console command CMD at T seconds after launch (repeatable)")
 ap.add_argument("--env", action="append", default=[], metavar="K=V",
@@ -41,13 +42,16 @@ def kill_ra():
 def udp(cmd):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.sendto(cmd.encode(), ("127.0.0.1", 55355)); s.close()
 
+def _term(*_): raise SystemExit  # lets the finally block restore MAME.opt and kill RetroArch
+signal.signal(signal.SIGTERM, _term)
+
 assert not ra_pids(), "retroarch already running"
 if a.state: shutil.copy(a.state, STATE_DST)
 opt_orig = open(OPT).read()
 open(OPT, "w").write(re.sub(r'mame_lua_console = "\w+"', 'mame_lua_console = "enabled"', opt_orig))
 cfg = os.path.join(OUT, "append.cfg")
 open(cfg, "w").write(f'video_vsync = "false"\nnetwork_cmd_enable = "true"\nscreenshot_directory = "{SHOTS}"\n'
-                     'auto_screenshot_filename = "true"\n')
+                     'auto_screenshot_filename = "true"\n' + ('fastforward_frameskip = "false"\n' if a.ff else ''))
 
 log = open(os.path.join(OUT, "ra.log"), "wb")
 args = ["distrobox", "enter", "mame-dev", "--", "env"] + a.env + ["retroarch", "-v"] + (["-e", "0"] if a.state else []) + \
@@ -59,10 +63,13 @@ if pid == 0:
 buf = b""
 t_launch = time.time()
 lua_sched = sorted((float(x.split(":", 1)[0]), x.split(":", 1)[1]) for x in a.lua)
+ff_sched = ([(2.0, "FAST_FORWARD")] + ([(2.0 + a.ff, "FAST_FORWARD")] if a.ff > 0 else [])) if a.ff else []
 def pump(t):
     global buf
     end = time.time() + t
     while time.time() < end:
+        while ff_sched and time.time() - t_launch >= ff_sched[0][0]:
+            udp(ff_sched.pop(0)[1])
         while lua_sched and time.time() - t_launch >= lua_sched[0][0]:
             os.write(fd, (lua_sched.pop(0)[1] + "\n").encode())
         r, _, _ = select.select([fd], [], [], 0.1)
