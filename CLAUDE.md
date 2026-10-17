@@ -130,6 +130,16 @@ work. Leave out upstream merges and cherry-picks unless fork work was needed to 
 and leave out investigations that shipped no code unless they reached a conclusion worth keeping
 (like the jpark3 60 fps entry).
 
+## 3D Enhanced Games doc (keep it updated)
+
+`fork-specific/3D-Enhanced-Games.md` is the living record of this fork's **major 3D work**: per system,
+what was done, whether it uses the generic `mame_3d_*` options or custom ones (like the `mame_psx_gpu_*`
+set), and which games benefit. **Whenever 3D rendering work lands on `arcade-focused`** (a new 3D system
+made to run, a host-GPU or supersampling feature, a speed-up that makes a 3D system playable, a new or
+changed 3D core option), update that doc in the same commit: the system's row in the summary table, its
+section, the settings table, and the game list (bold the games actually checked). Small fixes (sprite
+glitches, boot errors, controls, light guns) do not belong there; they go in `custom-change-log.md` only.
+
 ## Repo layout cheat sheet
 
 - `fork-specific/` — **home for this fork's investigation docs and test tools**

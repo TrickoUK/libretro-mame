@@ -6,6 +6,9 @@ to be tracked.
 
 ## Documents
 
+- `3D-Enhanced-Games.md`: the living table of every system with fork 3D rendering work: what was done,
+  generic vs custom settings, and the games that benefit. Update it with any 3D work (see CLAUDE.md).
+
 - `m2-fix-investigation.md`: Konami M2 (`konamim2.cpp`/`3dom2*.cpp`)
   performance investigation, covering every session's findings, measurements
   and what was tried and reverted.
