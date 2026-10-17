@@ -49,6 +49,11 @@ mixed into history.
   `0ff56bfdbdc`: scheduler-safe state save/restore, option reset between sessions). No conflicts;
   `arcade.flt` gained `skeleton/highway_m68k.cpp`. Full `-j4` build clean. Booted roundup5 and
   brvblade only (`fork-specific/out/sync1520*`).
+- **Follow-up sync, 2026-10-17**: merge commit `973b018190b` merged mamedev master
+  `mame0289-1607-gb099e27315d` (26 commits). No conflicts, `arcade.flt` unchanged (validated).
+  New `k056734` CPU device and a rewritten `konamigx.cpp`; genie regenerated directly, full `-j8`
+  build linked clean. Smoke-tested daytona2, scud, metamrph, mystwarr, hotd, jpark3, brvblade,
+  polystar, gticlub2 (45 s each, `fork-specific/out/sync1607`).
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
