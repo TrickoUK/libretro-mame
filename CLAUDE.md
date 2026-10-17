@@ -54,6 +54,10 @@ mixed into history.
   New `k056734` CPU device and a rewritten `konamigx.cpp`; genie regenerated directly, full `-j8`
   build linked clean. Smoke-tested daytona2, scud, metamrph, mystwarr, hotd, jpark3, brvblade,
   polystar, gticlub2 (45 s each, `fork-specific/out/sync1607`).
+- **Follow-up sync, 2026-10-17 (later)**: merged mamedev master `mame0289-1612-geb947cba9b9`
+  (5 commits). No conflicts, `arcade.flt` unchanged (validated). It brings in our two merged PRs
+  (#16482 `tc0100scn.cpp` FG line scroll, #16483 `segas32_v.cpp` flipped sprites), so the two local
+  fixes are gone; the merged code was already identical. Also a `tlcs900` CPU cleanup.
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
@@ -62,14 +66,6 @@ mixed into history.
   ADC read and ports, gun reads), `scripts/genie.lua`,
   `scripts/src/main.lua` and `src/osd/modules/lib/osdobj_common.cpp` (libretro
   hooks).
-- Local fix on top of upstream: `src/mame/taito/tc0100scn.cpp` `tilemap_draw_fg` uses
-  `cliprect.left()` for the source x (upstream `1ddcb581da6` wrote `cliprect.right()`, which broke
-  Aqua Jack's backdrops and every TC0100SCN line-scroll layer). Drop it once upstream fixes it
-  (upstream PR mamedev/mame#16482).
-- Local fix on top of upstream: `src/mame/sega/segas32_v.cpp` `draw_one_sprite` compares `xtarget`
-  with `clipin.left()` for X-flipped sprites (the same upstream commit wrote `clipin.right()`, so
-  flipped sprites repeated across the line in most System 32 games). Drop it once upstream fixes it
-  (PR branch `segas32-flipped-sprite-repeat`).
 - Upstream API changes in that sync that broke fork/libretro code:
   - `screen_device` is split per type (`screen_svg_device`, vector screens).
     Use `video_output_interface_enumerator`/`is_vector()` instead of
