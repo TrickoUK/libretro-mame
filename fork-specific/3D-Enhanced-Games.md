@@ -220,8 +220,8 @@ Daytona USA (`daytona`), Desert Tank (`desert`), Rail Chase 2 (`rchase2`), Virtu
   averaged. The 512 to 448 line squash becomes a box filter over the true span instead of picking one row, which also
   removes row-skip shimmer. Tilemaps, sprites and the HUD are drawn separately and stay sharp. With the option off the
   original path is untouched (frame-exact identical on 9 frames each of Fatal Fury and Xtreme Rally).
-- **Not done**: texture filtering. The buffer holds palette indices, which can't be blended, so it needs a parallel
-  RGB buffer filled at raster time. Planned as the second step.
+- **Texture filtering**: not implemented, and not planned. The buffer holds palette indices, which can't be blended, so it
+  would need a parallel RGB buffer filled at raster time. The textures already look good enough that it isn't worth it.
 - **Also fixed here**: the Xtreme Rally tunnel mist (see `custom-change-log.md`), which was drawing rolling bars.
 - **Speed**: unmeasured. A first run on a busy machine (a Batocera build was running) gave unusable numbers; 3x and 4x
   looked much slower than 2x. Re-measure on an idle machine before recommending a setting.
