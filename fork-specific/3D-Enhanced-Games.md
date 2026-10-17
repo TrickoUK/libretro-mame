@@ -175,7 +175,8 @@ Not listed: ParaParaParadise 2nd Mix (a Viper music game).
   averaged down. The HUD and text layers are untouched, and edge pixels blend over the background, never over the HUD.
 - **Texture filtering**: `mame_3d_texfilter = bilinear` forces the renderer's own bilinear path (Operation Thunder Hurricane
   and Solar Assault already enable it on the hardware). On GTI Club it smooths walls, rock and road, and thin
-  objects like overhead wires appear that unfiltered sampling skips. No speed cost measured yet.
+  objects like overhead wires appear that unfiltered sampling skips. Cut-out (transparent) textures keep their
+  unfiltered outline and never blend in the black of transparent texels, so they get no dark edge lines. No speed cost measured yet.
 - **Cost** of supersampling: grows with the square of the factor. GTI Club held full speed in a race at 3x and 4x on the dev
   machine; the attract demo dipped to 0.9x at 4x.
 - **Save states** made with it on load only with it on, since the big buffers aren't saved.

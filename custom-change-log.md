@@ -380,3 +380,9 @@ builds get them straight from here.
   were analog sticks, which a gun cannot drive; they are now light gun axes covering the whole screen.
 - Tested by driving the aim values from a script: coin, start and a full stage play through, shots land where
   aimed. Not yet tried with a physical gun. Game runs at full speed; still no sound (the sound CPU ROM is undumped).
+
+### GTI Club hardware: 3D Texture Filtering no longer draws dark lines on cut-out textures
+- With bilinear on, thin cut-out objects (the masts in the title-screen window, palm leaf edges, banner edges)
+  showed dark dashed lines. Transparent texels are black, and the filter blended them into the opaque ones.
+  Cut-outs now keep their unfiltered outline and the filter only blends real colour, so the lines are gone while
+  the textures stay smooth. Frames without cut-outs are unchanged.
