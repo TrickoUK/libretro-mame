@@ -21,7 +21,7 @@ on the same hardware, so the work applies to them, but they have not been looked
 | **PS1-GPU boards**: Sony ZN, Taito G-NET, Namco System 11/12 (and 10), Konami GQ/GV | The PS1 GPU's polygons are drawn on the host GPU at 1x/2x/4x, with PGXP geometry/texture correction, MSAA and texture filtering | **Custom**: eight `mame_psx_gpu_*` options | Working, experimental, off by default |
 | **3dfx Voodoo 1/2/3 boards**: Midway Seattle and Vegas, Konami Viper (GTI Club 2, Thrill Drive 2, Jurassic Park 3 and more), Hornet, NWK-TR, Hang Pilot, ITEagle | Voodoo 3 fixes (second texture unit, multi-base textures, 2D blit), PowerPC recompiler speed-ups, texture supersampling and depth-guided edge anti-aliasing | **Generic**: `mame_3d_supersample`, `mame_3d_edge_aa` | Working; options off by default |
 | **Konami K001005 boards**: GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games | The software 3D renderer draws at 2x/3x/4x and averages down, with optional bilinear texture filtering | **Generic**: `mame_3d_supersample` and `mame_3d_texfilter` (edge AA does not apply) | Working; option off by default |
-| **SNK Hyper Neo Geo 64** (Fatal Fury: Wild Ambition, Samurai Shodown 64 and Warriors Rage, Buriki One, Roads Edge, Xtreme Rally, Beast Busters 2) | The software 3D layer renders at 2x/3x/4x, every sample is resolved through the palette and averaged down (smooths polygon edges and shrunk textures); also fixed the Xtreme Rally tunnel mist | **Generic**: `mame_3d_supersample` | Working; off by default. Speed not yet measured on an idle machine |
+| **SNK Hyper Neo Geo 64** (Fatal Fury: Wild Ambition, Samurai Shodown 64 and Warriors Rage, Buriki One, Roads Edge, Xtreme Rally, Beast Busters 2) | The software 3D layer renders at 2x/3x/4x, every sample is resolved through the palette and averaged down (smooths polygon edges and shrunk textures); also fixed the Xtreme Rally tunnel mist | **Generic**: `mame_3d_supersample` | Working (2x confirmed in a playtest); off by default. Speed not yet measured on an idle machine |
 | **Sega Model 2** | The 3D layer's supersampling moved onto the generic option (it used to be fixed at 2x) | **Generic**: `mame_3d_supersample` | Working; native by default |
 | **Konami M2** (Polystars, Total Vice, Evil Night, Heat of Eleven, Battle Tryst) | Triangle Engine rasterizer speed-up and threading, PowerPC recompiler and DSP fixes: playable at about full speed | None, always on | Working |
 | **Tatsumi TZB215/315** (Apache 3, Round Up 5, Cycle Warriors, Big Fight) | Hardware-accurate ground, sky and sprite rotation/zoom for the pseudo-3D scenes | None, always on | Working; merged upstream |
@@ -225,7 +225,8 @@ Daytona USA (`daytona`), Desert Tank (`desert`), Rail Chase 2 (`rchase2`), Virtu
 - **Also fixed here**: the Xtreme Rally tunnel mist (see `custom-change-log.md`), which was drawing rolling bars.
 - **Speed**: unmeasured. A first run on a busy machine (a Batocera build was running) gave unusable numbers; 3x and 4x
   looked much slower than 2x. Re-measure on an idle machine before recommending a setting.
-- **Checked here**: **Fatal Fury: Wild Ambition**, **Xtreme Rally** (2x against native, frame-exact snapshots).
+- **Checked here**: **Fatal Fury: Wild Ambition**, **Xtreme Rally** (2x against native, frame-exact snapshots). 2x also
+  confirmed good in a playtest of Xtreme Rally by the user (2026-10-17); 3x and 4x not played.
 
 <details>
 <summary>SNK Hyper Neo Geo 64 (hng64.cpp) (7 parent sets)</summary>
