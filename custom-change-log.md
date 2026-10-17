@@ -386,3 +386,12 @@ builds get them straight from here.
   showed dark dashed lines. Transparent texels are black, and the filter blended them into the opaque ones.
   Cut-outs now keep their unfiltered outline and the filter only blends real colour, so the lines are gone while
   the textures stay smooth. Frames without cut-outs are unchanged.
+
+### Xtreme Rally (Hyper Neo Geo 64): tunnel mist no longer draws rolling bars over the screen
+- The mist that comes over the track after the tunnel was drawn as hard dark and grey bands across the whole
+  screen, rolling as the game moved. It is now the light white tint over the top half of the screen that fades out
+  towards the bottom and holds still, as on the real machine.
+- Cause: the mist's per-line scroll table holds small offsets, not absolute positions. Half the lines read a
+  negative row, wrapped to an empty row and drew nothing, and the rest sampled the same first rows. The offsets are
+  now added to the first line's position while the layer scrolls one row per line. The Fatal Fury and Buriki One
+  floors use absolute values and are unchanged (frame-exact checks identical).
