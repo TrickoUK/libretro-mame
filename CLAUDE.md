@@ -136,6 +136,14 @@ changed 3D core option), update that doc in the same commit: the system's row in
 section, the settings table, and the game list (bold the games actually checked). Small fixes (sprite
 glitches, boot errors, controls, light guns) do not belong there; they go in `custom-change-log.md` only.
 
+## Light Gun Improvements doc (keep it updated)
+
+`fork-specific/Lightgun-improvements.md` is the living record of every game or system where this fork
+made light guns work or work better (mainly for a Sinden on Batocera): per game, the problem, the fix and
+whether it was tested with a real gun or only by script. **Whenever light gun work lands on
+`arcade-focused`** (a gun port change, a trigger-flash patch, aim support, a libretro gun input change),
+update that doc in the same commit as the work and the matching `custom-change-log.md` entry.
+
 ## Repo layout cheat sheet
 
 - `fork-specific/` — **home for this fork's investigation docs and test tools**

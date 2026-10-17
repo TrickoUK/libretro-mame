@@ -374,3 +374,9 @@ builds get them straight from here.
   objects such as overhead wires show up, where plain sampling skips over them. Operation Thunder
   Hurricane and Solar Assault already filter on the real hardware, so for them it changes nothing.
 - Works together with 3D Supersampling. Takes effect when content is restarted.
+
+### Operation Tiger (Taito Power-JC): light gun aiming
+- Operation Tiger now aims with a light gun (a Sinden or any libretro light gun) for both players. The aim axes
+  were analog sticks, which a gun cannot drive; they are now light gun axes covering the whole screen.
+- Tested by driving the aim values from a script: coin, start and a full stage play through, shots land where
+  aimed. Not yet tried with a physical gun. Game runs at full speed; still no sound (the sound CPU ROM is undumped).
