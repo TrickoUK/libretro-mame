@@ -21,6 +21,7 @@ on the same hardware, so the work applies to them, but they have not been looked
 | **PS1-GPU boards**: Sony ZN, Taito G-NET, Namco System 11/12 (and 10), Konami GQ/GV | The PS1 GPU's polygons are drawn on the host GPU at 1x/2x/4x, with PGXP geometry/texture correction, MSAA and texture filtering | **Custom**: eight `mame_psx_gpu_*` options | Working, experimental, off by default |
 | **3dfx Voodoo 1/2/3 boards**: Midway Seattle and Vegas, Konami Viper (GTI Club 2, Thrill Drive 2, Jurassic Park 3 and more), Hornet, NWK-TR, Hang Pilot, ITEagle | Voodoo 3 fixes (second texture unit, multi-base textures, 2D blit), PowerPC recompiler speed-ups, texture supersampling and depth-guided edge anti-aliasing | **Generic**: `mame_3d_supersample`, `mame_3d_edge_aa` | Working; options off by default |
 | **Konami K001005 boards**: GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games | The software 3D renderer draws at 2x/3x/4x and averages down, with optional bilinear texture filtering | **Generic**: `mame_3d_supersample` and `mame_3d_texfilter` (edge AA does not apply) | Working; option off by default |
+| **SNK Hyper Neo Geo 64** (Fatal Fury: Wild Ambition, Samurai Shodown 64 and Warriors Rage, Buriki One, Roads Edge, Xtreme Rally, Beast Busters 2) | The software 3D layer renders at 2x/3x/4x, every sample is resolved through the palette and averaged down (smooths polygon edges and shrunk textures); also fixed the Xtreme Rally tunnel mist | **Generic**: `mame_3d_supersample` | Working; off by default. Speed not yet measured on an idle machine |
 | **Sega Model 2** | The 3D layer's supersampling moved onto the generic option (it used to be fixed at 2x) | **Generic**: `mame_3d_supersample` | Working; native by default |
 | **Konami M2** (Polystars, Total Vice, Evil Night, Heat of Eleven, Battle Tryst) | Triangle Engine rasterizer speed-up and threading, PowerPC recompiler and DSP fixes: playable at about full speed | None, always on | Working |
 | **Tatsumi TZB215/315** (Apache 3, Round Up 5, Cycle Warriors, Big Fight) | Hardware-accurate ground, sky and sprite rotation/zoom for the pseudo-3D scenes | None, always on | Working; merged upstream |
@@ -32,7 +33,7 @@ restarted.
 
 | Option | Values | Default | Used by |
 |---|---|---|---|
-| `mame_3d_supersample` | disabled, 2x, 3x, 4x | disabled | Voodoo boards (texture supersampling), K001005 boards, Sega Model 2 |
+| `mame_3d_supersample` | disabled, 2x, 3x, 4x | disabled | Voodoo boards (texture supersampling), K001005 boards, Sega Model 2, SNK Hyper Neo Geo 64 |
 | `mame_3d_edge_aa` | disabled, enabled | disabled | Voodoo boards only |
 | `mame_3d_texfilter` | disabled, bilinear | disabled | K001005 boards only (Voodoo boards already filter in hardware) |
 | `mame_psx_gpu_hle` | disabled, 1x, 2x, 4x | disabled | PS1-GPU boards (master switch; the other PS1 options only matter when this is on) |
@@ -206,6 +207,30 @@ Midnight Run: Road Fighter 2 (`midnrun`), Jet Wave (`jetwave`), Winding Heat (`w
 <summary>Sega Model 2 (model2.cpp) (36 parent sets)</summary>
 
 Daytona USA (`daytona`), Desert Tank (`desert`), Rail Chase 2 (`rchase2`), Virtua Cop (`vcop`), Virtua Fighter 2 (`vf2`), Virtua Striker (`vstriker`), Fighting Vipers (`fvipers`), Gunblade NY (`gunblade`), INDY 500 Twin (`indy500`), Manx TT Superbike - DX/Twin (`manxtt`), Sky Target (`skytargt`), Sega Rally Championship - Twin/DX (`srallyc`), Virtua Cop 2 (`vcop2`), Cyber Troopers Virtual-On - Twin (`von`), Dead or Alive (`doa`), Dynamite Baseball (`dynabb`), Last Bronx (`lastbrnx`), Power Sled (`powsled`), Sonic Championship (`schamp`), Super GT 24h (`sgt24h`), Sega Ski Super G (`skisuprg`), Sega Touring Car Championship (`stcc`), Wave Runner (`waverunr`), Air Walkers (`airwlkrs`), Behind Enemy Lines (`bel`), Dynamite Baseball 97 (`dynabb97`), The House of the Dead (`hotd`), Motor Raid - Twin (`motoraid`), Over Rev (`overrev`), Royal Ascot II (`rascot2`), Sega Water Ski (`segawski`), Top Skater (`topskatr`), Zero Gunner (`zerogun`), Dynamite Cop (`dynamcop`), Hanguk Pro Yagu 98 (`hpyagu98`), Pilot Kids (`pltkids`)
+</details>
+
+## SNK Hyper Neo Geo 64 (generic `mame_3d_supersample`)
+
+- **Device**: `hng64_3d.ipp` / `hng64_v.cpp`, a software rasterizer that draws palette indices (11-bit palette index, 4-bit
+  light, blend flag) into a 512x512 buffer. The compositor resolves them through a palette that holds 16 brightness
+  copies and stretches the buffer to the 448-line screen.
+- **Supersampling**: with `mame_3d_supersample` on, the colour and depth buffers are N times bigger in each direction and
+  the polygon coordinates are scaled to match. When the layer is composited, every sample under an output pixel is
+  looked up through the palette (so the blend flag and transparent texels are handled per sample) and the results are
+  averaged. The 512 to 448 line squash becomes a box filter over the true span instead of picking one row, which also
+  removes row-skip shimmer. Tilemaps, sprites and the HUD are drawn separately and stay sharp. With the option off the
+  original path is untouched (frame-exact identical on 9 frames each of Fatal Fury and Xtreme Rally).
+- **Not done**: texture filtering. The buffer holds palette indices, which can't be blended, so it needs a parallel
+  RGB buffer filled at raster time. Planned as the second step.
+- **Also fixed here**: the Xtreme Rally tunnel mist (see `custom-change-log.md`), which was drawing rolling bars.
+- **Speed**: unmeasured. A first run on a busy machine (a Batocera build was running) gave unusable numbers; 3x and 4x
+  looked much slower than 2x. Re-measure on an idle machine before recommending a setting.
+- **Checked here**: **Fatal Fury: Wild Ambition**, **Xtreme Rally** (2x against native, frame-exact snapshots).
+
+<details>
+<summary>SNK Hyper Neo Geo 64 (hng64.cpp) (7 parent sets)</summary>
+
+Roads Edge / Round Trip RV (`roadedge`), Samurai Shodown 64 (`sams64`), **Xtreme Rally** (`xrally`), Beast Busters: Second Nightmare (`bbust2`), Samurai Shodown 64: Warriors Rage (`sams64_2`), **Fatal Fury: Wild Ambition** (`fatfurwa`), Buriki One (`buriki`)
 </details>
 
 ## Konami M2 (no setting, always on)

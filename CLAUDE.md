@@ -65,7 +65,8 @@ mixed into history.
   `src/devices/cpu/dspp` (our idle-loop skip), `src/mame/konami/viper.cpp` (analog
   ADC read and ports, gun reads), `scripts/genie.lua`,
   `scripts/src/main.lua` and `src/osd/modules/lib/osdobj_common.cpp` (libretro
-  hooks).
+  hooks), `src/mame/snk/hng64_3d.ipp` and `hng64_v.cpp` (3D supersampling: bigger buffers,
+  scaled vertices and the palette-resolve composite; fork-only, not for upstream).
 - Upstream API changes in that sync that broke fork/libretro code:
   - `screen_device` is split per type (`screen_svg_device`, vector screens).
     Use `video_output_interface_enumerator`/`is_vector()` instead of

@@ -9,8 +9,9 @@
 hng64_poly_renderer::hng64_poly_renderer(hng64_state& state)
 	: poly_manager<float, hng64_poly_data, 7>(state.machine())
 	, m_state(state)
+	, m_ss(std::clamp(state.machine().osd().supersample(), 1, 4))
 {
-	const s32 bufferSize = 512 * 512;
+	const s32 bufferSize = this->bufferSize() * this->bufferSize();
 	m_depthBuffer3d = std::make_unique<float[]>(bufferSize);
 	m_colorBuffer3d = std::make_unique<u16[]>(bufferSize);
 
@@ -394,6 +395,8 @@ void hng64_state::recoverStandardVerts(polygon& currentPoly, int m, const u16* c
 // Polygon rasterization.
 void hng64_state::recoverPolygonBlock(const u16* packet, int& numPolys)
 {
+	const int ss = m_poly_renderer->supersample();
+
 	//printPacket(packet, 1);
 
 	/*//////////////
@@ -935,6 +938,10 @@ void hng64_state::recoverPolygonBlock(const u16* packet, int& numPolys)
 						// Flip Y
 						windowCoords[1] = 512.0f - windowCoords[1];
 
+						// Supersampling renders into bigger buffers
+						windowCoords[0] *= ss;
+						windowCoords[1] *= ss;
+
 						// Store the points in a list for later use...
 						currentPoly.vert[m].clipCoords[0] = windowCoords[0];
 						currentPoly.vert[m].clipCoords[1] = windowCoords[1];
@@ -1053,7 +1060,8 @@ void hng64_state::clear3d()
 {
 	// Reset the buffers...
 	//const rectangle& visarea = m_screen->visible_area();
-	for (int i = 0; i < 512*512; i++)
+	const int size = m_poly_renderer->bufferSize();
+	for (int i = 0; i < size * size; i++)
 	{
 		m_poly_renderer->depthBuffer3d()[i] = 100.0f;
 		m_poly_renderer->colorBuffer3d()[i] = 0;
@@ -1311,7 +1319,11 @@ void hng64_state::normalize(float* x)
 
 void hng64_poly_renderer::render_texture_scanline(s32 scanline, const extent_t& extent, const hng64_poly_data& renderData, int threadid)
 {
-	if ((scanline > 511) | (scanline < 0))
+	const int size = bufferSize();
+	// The hardware wraps x at the buffer width, which the rasterizer can hit once at x = 512
+	const int xmask = (m_ss == 1) ? (NATIVE_SIZE - 1) : -1;
+
+	if ((scanline >= size) | (scanline < 0))
 		return;
 
 	// Pull the parameters out of the extent structure
@@ -1328,15 +1340,15 @@ void hng64_poly_renderer::render_texture_scanline(s32 scanline, const extent_t& 
 	const float dt = extent.param[6].dpdx;
 
 	// Pointers to the pixel buffers
-	u16* colorBuffer = &m_colorBuffer3d[(scanline * 512)];
-	float* depthBuffer = &m_depthBuffer3d[(scanline * 512)];
+	u16* colorBuffer = &m_colorBuffer3d[(scanline * size)];
+	float* depthBuffer = &m_depthBuffer3d[(scanline * size)];
 
 	const u8 *textureOffset = &m_state.m_texturerom[renderData.texIndex * 1024 * 1024];
 
 	// Step over each pixel in the horizontal span
 	for (int x = extent.startx; x < extent.stopx; x++)
 	{
-		if (z < depthBuffer[x & 511])
+		if (z < depthBuffer[x & xmask])
 		{
 			// Multiply back through by w for everything that was interpolated perspective-correctly
 			const float sCorrect = s / w;
@@ -1397,8 +1409,8 @@ void hng64_poly_renderer::render_texture_scanline(s32 scanline, const extent_t& 
 					if (renderData.blend)
 						color |= 0x800;
 
-					colorBuffer[x & 511] = color;
-					depthBuffer[x & 511] = z;
+					colorBuffer[x & xmask] = color;
+					depthBuffer[x & xmask] = z;
 				}
 			}
 		}
@@ -1413,7 +1425,10 @@ void hng64_poly_renderer::render_texture_scanline(s32 scanline, const extent_t& 
 
 void hng64_poly_renderer::render_flat_scanline(s32 scanline, const extent_t& extent, const hng64_poly_data& renderData, int threadid)
 {
-	if ((scanline > 511) | (scanline < 0))
+	const int size = bufferSize();
+	const int xmask = (m_ss == 1) ? (NATIVE_SIZE - 1) : -1;
+
+	if ((scanline >= size) | (scanline < 0))
 		return;
 
 	// Pull the parameters out of the extent structure
@@ -1421,16 +1436,16 @@ void hng64_poly_renderer::render_flat_scanline(s32 scanline, const extent_t& ext
 	const float dz = extent.param[0].dpdx;
 
 	// Pointers to the pixel buffers
-	float* depthBuffer = &m_depthBuffer3d[(scanline * 512)];
-	u16* colorBuffer = &m_colorBuffer3d[(scanline * 512)];
+	float* depthBuffer = &m_depthBuffer3d[(scanline * size)];
+	u16* colorBuffer = &m_colorBuffer3d[(scanline * size)];
 
 	// Step over each pixel in the horizontal span
 	for (int x = extent.startx; x < extent.stopx; x++)
 	{
-		if (z < depthBuffer[x & 511])
+		if (z < depthBuffer[x & xmask])
 		{
-			colorBuffer[x & 511] = renderData.palOffset + renderData.colorIndex;
-			depthBuffer[x & 511] = z;
+			colorBuffer[x & xmask] = renderData.palOffset + renderData.colorIndex;
+			depthBuffer[x & xmask] = z;
 		}
 
 		z += dz;
@@ -1456,8 +1471,12 @@ void hng64_poly_renderer::drawShaded(polygon *p)
 	hng64_poly_data& renderData = object_data().next();
 	renderData = rOptions;
 
+	// Without supersampling the hardware's rectangle runs one past the last pixel (see the x wrap in the scanline code)
 	rectangle visibleArea;
-	visibleArea.set(0, 512, 0, 512);
+	if (m_ss == 1)
+		visibleArea.set(0, NATIVE_SIZE, 0, NATIVE_SIZE);
+	else
+		visibleArea.set(0, bufferSize() - 1, 0, bufferSize() - 1);
 
 	if (p->flatShade)
 	{

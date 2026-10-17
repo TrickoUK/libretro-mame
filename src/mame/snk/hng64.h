@@ -111,8 +111,16 @@ public:
 	float *depthBuffer3d() { return m_depthBuffer3d.get(); }
 	u16 *colorBuffer3d() { return m_colorBuffer3d.get(); }
 
+	// The 3D buffers are 512x512 on the hardware.  With supersampling they are m_ss times bigger in
+	// each direction, and the polygon coordinates are scaled to match.
+	int supersample() const { return m_ss; }
+	int bufferSize() const { return NATIVE_SIZE * m_ss; }
+
+	static constexpr int NATIVE_SIZE = 512;
+
 private:
 	hng64_state &m_state;
+	int m_ss;
 
 	// (Temporarily class members - someday they will live in the memory map)
 	std::unique_ptr<float[]> m_depthBuffer3d;

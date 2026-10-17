@@ -395,3 +395,9 @@ builds get them straight from here.
   negative row, wrapped to an empty row and drew nothing, and the rest sampled the same first rows. The offsets are
   now added to the first line's position while the layer scrolls one row per line. The Fatal Fury and Buriki One
   floors use absolute values and are unchanged (frame-exact checks identical).
+
+### Hyper Neo Geo 64 (Fatal Fury, Samurai Shodown 64, Buriki One, Roads Edge, Xtreme Rally, Beast Busters 2): 3D Supersampling
+- **3D Supersampling** (2x/3x/4x) now works on Hyper Neo Geo 64. The 3D layer (characters, cars, scenery) is
+  drawn at the bigger size and averaged down, which smooths polygon edges and shrunk textures. The 2D layers, HUD and
+  text are unchanged. Off by default and takes effect when content is restarted.
+- Speed has not been measured on an idle machine yet: expect 2x to be the practical setting until it is.
