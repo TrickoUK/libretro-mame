@@ -401,3 +401,13 @@ builds get them straight from here.
   drawn at the bigger size and averaged down, which smooths polygon edges and shrunk textures. The 2D layers, HUD and
   text are unchanged. Off by default and takes effect when content is restarted.
 - Speed has not been measured on an idle machine yet: expect 2x to be the practical setting until it is.
+
+## 2026-10-18
+
+### Round Up 5: no green grass inside the start gate
+- Inside the start-gate tunnel the left verge of the road showed bright green grass while the right side was
+  black. Both sides are now black from the first frame, as in the tunnel itself.
+- Cause: in tunnels the road is drawn with its second pixel set while the first set sits off to the right. The
+  fill left of the road still used the first set's colours, which under the shadow sprite are the outdoor grass.
+  Each side's fill now comes from the set that is really on that side. The open road is unchanged (frame-exact
+  check); the one-frame flash on entering the tunnel is a separate issue and still there.
