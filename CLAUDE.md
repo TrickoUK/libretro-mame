@@ -30,30 +30,30 @@ mixed into history.
   `mame0289-1217-g67129e77425` (49 commits). No conflicts, `arcade.flt` unchanged (the new
   driver files are a bingo skeleton and a calculator). Genie regenerated directly, full `-j4`
   build linked clean; smoke-tested daytona2, scud, metamrph, mystwarr, hotd, jpark3, brvblade,
-  polystar (`fork-specific/out/sync1217`).
+  polystar (`my-docs/out/sync1217`).
 - **Follow-up sync, 2026-10-01**: merged mamedev master `mame0289-1243-g6743eb674d0`
   (26 commits). Conflicts in `voodoo_render.cpp` (upstream's multibase LOD fix replaces ours,
   identical on Banshee/Voodoo 3) and `konami/viper.cpp` (upstream's differential ADC0838 read;
   we keep full-range 8-bit pedals and the gamepad steering helper on top, see
-  `fork-specific/viper-investigation.md` Fix 5). `arcade.flt` unchanged. Checked with I/O CHECK
+  `my-docs/viper-investigation.md` Fix 5). `arcade.flt` unchanged. Checked with I/O CHECK
   (gticlub2, xtrial), frame-exact Voodoo snapshots (identical on 7 games) and smoke tests
-  (`fork-specific/out/sync1243`).
+  (`my-docs/out/sync1243`).
 - **Follow-up sync, 2026-10-13**: merge commit `6078a3eee1f` merged mamedev master
   `mame0289-1494-g344d163580b` (130 commits). One conflict, `konami/viper.cpp`: upstream's
   `e02f3bc0029` gives the driving games' pedals and handbrake full-range 9-bit ports, so the fork's
   8-bit pedal read path was dropped (only the gamepad steering helper stays). `arcade.flt`
   regenerated. Full `-j4` build clean. Smoke-tested gticlub2, xtrial and sfrush (90 s, no MIPS
-  compare hang) (`fork-specific/out/sync1494*`).
+  compare hang) (`my-docs/out/sync1494*`).
 - **Follow-up sync, 2026-10-14**: merge commit `7a66a604ff6` merged mamedev master
   `mame0289-1520-gc51cea1d897` (26 commits), after merging libretro/mame master (4 commits,
   `0ff56bfdbdc`: scheduler-safe state save/restore, option reset between sessions). No conflicts;
   `arcade.flt` gained `skeleton/highway_m68k.cpp`. Full `-j4` build clean. Booted roundup5 and
-  brvblade only (`fork-specific/out/sync1520*`).
+  brvblade only (`my-docs/out/sync1520*`).
 - **Follow-up sync, 2026-10-17**: merge commit `973b018190b` merged mamedev master
   `mame0289-1607-gb099e27315d` (26 commits). No conflicts, `arcade.flt` unchanged (validated).
   New `k056734` CPU device and a rewritten `konamigx.cpp`; genie regenerated directly, full `-j8`
   build linked clean. Smoke-tested daytona2, scud, metamrph, mystwarr, hotd, jpark3, brvblade,
-  polystar, gticlub2 (45 s each, `fork-specific/out/sync1607`).
+  polystar, gticlub2 (45 s each, `my-docs/out/sync1607`).
 - **Follow-up sync, 2026-10-17 (later)**: merged mamedev master `mame0289-1612-geb947cba9b9`
   (5 commits). No conflicts, `arcade.flt` unchanged (validated). It brings in our two merged PRs
   (#16482 `tc0100scn.cpp` FG line scroll, #16483 `segas32_v.cpp` flipped sprites), so the two local
@@ -103,7 +103,7 @@ upstream has fixed the same thing before re-porting one:
 
 - The core side is `src/osd/modules/input/input_retro.cpp` (`d8f3c392f0f`). In "free" offscreen mode
   the reload button shoots off screen, and gun Start/Select also press pad Start/Select. jpark3's
-  port fix is `c79b34ab13b` (`fork-specific/viper-investigation.md` Fix 8).
+  port fix is `c79b34ab13b` (`my-docs/viper-investigation.md` Fix 8).
 - It also needs Batocera's RetroArch to use its `udev` input driver. Batocera patch
   `019-disable-wayland-events-by-wayland.patch` must cover `wayland_vk_ctx.c` (the box runs Vulkan),
   otherwise every gun shares the same buttons and gun Start/Coin fail. **If gun buttons break
@@ -129,31 +129,37 @@ and leave out investigations that shipped no code unless they reached a conclusi
 
 ## 3D Enhanced Games doc (keep it updated)
 
-`fork-specific/3D-Enhanced-Games.md` is the living record of this fork's **major 3D work**: per system,
+`my-docs/3D-Enhanced-Games.md` (in the nested my-docs repo) is the living record of this fork's **major 3D work**: per system,
 what was done, whether it uses the generic `mame_3d_*` options or custom ones (like the `mame_psx_gpu_*`
 set), and which games benefit. **Whenever 3D rendering work lands on `arcade-focused`** (a new 3D system
 made to run, a host-GPU or supersampling feature, a speed-up that makes a 3D system playable, a new or
-changed 3D core option), update that doc in the same commit: the system's row in the summary table, its
+changed 3D core option), update that doc (committed in the my-docs repo, at the same time as the work): the system's row in the summary table, its
 section, the settings table, and the game list (bold the games actually checked). Small fixes (sprite
 glitches, boot errors, controls, light guns) do not belong there; they go in `custom-change-log.md` only.
 
 ## Light Gun Improvements doc (keep it updated)
 
-`fork-specific/Lightgun-improvements.md` is the living record of every game or system where this fork
+`my-docs/Lightgun-improvements.md` (in the nested my-docs repo) is the living record of every game or system where this fork
 made light guns work or work better (mainly for a Sinden on Batocera): per game, the problem, the fix and
 whether it was tested with a real gun or only by script. **Whenever light gun work lands on
 `arcade-focused`** (a gun port change, a trigger-flash patch, aim support, a libretro gun input change),
-update that doc in the same commit as the work and the matching `custom-change-log.md` entry.
+update that doc and commit it in the my-docs repo alongside the work and the matching `custom-change-log.md` entry.
 
 ## Repo layout cheat sheet
 
-- `fork-specific/` — **home for this fork's investigation docs and test tools**
-  (under the blanket `/*/` ignore rule, so new files need `git add -f`). Put new
-  write-ups and reusable profiling/test scripts here, not
-  in the repo root. See `fork-specific/README.md`; e.g.
-  `fork-specific/m2-fix-investigation.md` (Konami M2 performance work) and
-  `fork-specific/tools/` (save-state profiling, boot smoke tests, bit-exact
-  per-frame render checks).
+- `my-docs/` — **home for this fork's investigation docs and test tools. It is its own private git
+  repo** (`git@github.com:TrickoUK/mame-working-docs.git`, branch `main`), nested here and hidden from
+  this repo by `/my-docs/` in `.git/info/exclude` (local-only, the same pattern as batocera's `my-docs`).
+  **Commit docs inside it (`cd my-docs && git ...`), never into this repo; ask before pushing.**
+  Documents plus the scripts and tool source worth reusing (those are committed too). Never generated output (comparison screenshots, video, binaries, run results) or scratch files (its `.gitignore` and
+  pre-commit hook enforce that), and no secrets or session info. `my-docs/out/` holds tool results
+  (ignored). Put new write-ups and reusable profiling/test scripts there, not in the repo root. See
+  `my-docs/README.md`; e.g. `my-docs/m2-fix-investigation.md` (Konami M2 performance work) and
+  `my-docs/tools/` (save-state profiling, boot smoke tests, bit-exact per-frame render checks).
+  Run the tools from this repo's root.
+- `fork-specific/` — **only the files the build needs**: `arcade.flt`, `arcade-games.txt` and
+  `tools/prune_arcade_filter.py` (tracked here; batocera's `libretro-mame.mk` uses `arcade.flt`).
+  Docs and other tools do not go here.
 - `src/mame/<manufacturer>/*.cpp` — per-driver code, organized by manufacturer
   (e.g. `sega/`, `namco/`, `nintendo/`, `konami/`, `williams/`), not by game
   name. A driver's video/rasterizer code is usually `<name>_v.cpp` or `<name>_video.cpp`.
@@ -1099,7 +1105,7 @@ changes needed, since `-plugin <name>` resolution is generic.
 `network_cmd_enable = "true"` and `screenshot_directory` in an `--appendconfig` file;
 `profile_run.py --shot-every` and `smoke.py` do this). **Never use a desktop capture tool**
 (`spectacle`, grim, etc.): it grabs whatever window is active, and has captured the user's
-terminal instead of the game. For frame-exact captures, `fork-specific/tools/snap_run.sh` uses
+terminal instead of the game. For frame-exact captures, `my-docs/tools/snap_run.sh` uses
 MAME's own `video:snapshot()` (the emulated frame at native resolution).
 
 ### Other monitoring options

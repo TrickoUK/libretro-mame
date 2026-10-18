@@ -2,7 +2,7 @@
 
 A dated record of this fork's own work on games and systems. Upstream MAME merges and
 cherry-picks are left out unless we changed something to make them work. Each entry says what
-changed and what you get from it. The technical detail is in `CLAUDE.md` and `fork-specific/*.md`.
+changed and what you get from it. The technical detail is in `CLAUDE.md` and `my-docs/*.md`.
 
 Entries are oldest first. Add new work at the bottom, under its date.
 
