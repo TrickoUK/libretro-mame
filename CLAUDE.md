@@ -1130,6 +1130,15 @@ MAME's own `video:snapshot()` (the emulated frame at native resolution).
   Voodoo supersampling/edge AA, gamepad steering and similar enhancements) don't need to follow
   the hardware. There, make it work and make it as efficient as possible.
 
+- **Code comments describe how the hardware works (or is assumed to work), never the edit.** This applies to
+  all work, fork-only or upstream-bound. Write comments about what the chip, board or code does, as if it had always
+  been written that way. No change-describing wording ("now", "no longer", "previously", "instead of", "fixes",
+  "was wrong", "not a ... any more"). Mark inferred hardware behaviour as such ("appears to", "assumed"). What
+  changed and why belongs in the commit message, not the comment. Also, from upstream review (mamedev PR #16437):
+  capitalise `TODO`/`FIXME`/`NOTE`; write TODO items as actions ("verify X against hardware"); yes/no feature DIPs use
+  `DEF_STR( No )`/`DEF_STR( Yes )`; use `auto *const` for obvious pointer types; parenthesise conditional-operator
+  operands that contain binary operators.
+
 - Treat `src/mame/<manufacturer>/*_v.cpp` rasterizer rewrites as the highest-risk
   changes in this codebase — they must still produce output through the existing
   `bitmap_rgb32`/render-primitive path for any driver you *haven't* converted,
