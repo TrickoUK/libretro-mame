@@ -424,3 +424,7 @@ builds get them straight from here.
   hardware does, instead of fixed values. They run at 55.8 Hz (400 x 280 total) instead of 57.4 Hz, the same
   as Apache 3, which already matched. Picture, text and HUD are unchanged.
 - The one-frame flash at the first tunnel entry in Round Up 5 is still there: it is not caused by the screen timing.
+
+### Round Up 5: leaving the service menu restarts the game
+- Pressing the service key a second time used to leave the game stuck on the test screen. The board's watchdog is
+  now emulated, so the game resets itself a few seconds after the test screen is closed, as the cabinet does.
