@@ -339,15 +339,12 @@ void roundup5_state::draw_landscape(bitmap_rgb32 &bitmap, const rectangle &clipr
 
 uint32_t roundup5_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	int tx_start_addr;
-
-	tx_start_addr = (m_hd6445_reg[0xc] << 8) | (m_hd6445_reg[0xd]);
-	tx_start_addr &= 0x3fff;
+	int const tx_start_addr = m_crtc->screen1_start_addr();
 
 	m_sprites->update_cluts();
 
 	m_tx_layer->set_scrollx(0,24);
-	m_tx_layer->set_scrolly(0,(tx_start_addr >> 4) | m_hd6445_reg[0x1d]);
+	m_tx_layer->set_scrolly(0,(tx_start_addr >> 4) | m_crtc->smooth_scroll_ras());
 
 	screen.priority().fill(0, cliprect);
 	m_sprites->draw_sprites(screen.priority(),cliprect,1,(m_sprite_control_ram[0xe0]&0x1000) ? 0x1000 : 0); // Alpha pass only
@@ -509,7 +506,8 @@ void roundup5_state::roundup5_v30_map(address_map &map)
 {
 	map(0x00000, 0x07fff).ram();
 	map(0x08000, 0x0bfff).ram().w(FUNC(roundup5_state::text_w)).share("videoram");
-	map(0x0c000, 0x0c003).w(FUNC(roundup5_state::hd6445_crt_w)).umask16(0x00ff);
+	map(0x0c000, 0x0c001).w(m_crtc, FUNC(hd6345_device::address_w)).umask16(0x00ff);
+	map(0x0c002, 0x0c003).w(m_crtc, FUNC(hd6345_device::register_w)).umask16(0x00ff);
 	map(0x0d000, 0x0d001).portr("DSW");
 	map(0x0d400, 0x0d40f).ram().share("vregs");
 	map(0x0d800, 0x0d801).writeonly().share("bg_scrollx");
@@ -668,9 +666,15 @@ void roundup5_state::roundup5(machine_config &config)
 
 	/* video hardware */
 	screen_device &screen(SCREEN(config, "screen"));
-	screen.set_raw(roundup5_state::CLOCK_2 / 8, 400, 0, 320, 272, 0, 240); // TODO: Hook up CRTC
+	screen.set_raw(roundup5_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240); // reconfigured by the CRTC
 	screen.set_screen_update(FUNC(roundup5_state::screen_update));
 	screen.screen_vblank().set_inputline(m_maincpu, 0);
+
+	// The 50 MHz clock / 8 is the pixel clock; the CRTC counts characters of 8 pixels
+	HD6345(config, m_crtc, tatsumi_state::CLOCK_2 / 8 / 8);
+	m_crtc->set_screen("screen");
+	m_crtc->set_show_border_area(false);
+	m_crtc->set_char_width(8);
 
 	TZB315_SPRITES(config, m_sprites, 0, 0x800); // confirmed TZB315, even if it has the smaller CLUT like Apache 3 / TZB215
 	m_sprites->set_sprite_palette_base(512);

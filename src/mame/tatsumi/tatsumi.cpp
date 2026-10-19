@@ -35,35 +35,6 @@
 #include "endianness.h"
 
 
-void tatsumi_state::hd6445_crt_w(offs_t offset, uint8_t data)
-{
-	if (offset==0)
-		m_hd6445_address = data & 0x3f;
-	if (offset==1)
-	{
-		m_hd6445_reg[m_hd6445_address] = data;
-
-		static char const *const regnames[40] =
-		{
-			"Horizontal Total Characters", "Horizontal Displayed Characters", "Horizontal Sync Position",   "Sync Width",
-			"Vertical Total Rows",         "Vertical Total Adjust",           "Vertical Displayed Rows",    "Vertical Sync Position",
-			"Interlace Mode and Skew",     "Max Raster Address",              "Cursor 1 Start",             "Cursor 1 End",
-			"Screen 1 Start Address (H)",  "Screen 1 Start Address (L)",      "Cursor 1 Address (H)",       "Cursor 1 Address (L)",
-			"Light Pen (H) (RO)",          "Light Pen (L) (RO)",              "Screen 2 Start Position",    "Screen 2 Start Address (H)",
-			"Screen 2 Start Address (L)",  "Screen 3 Start Position",         "Screen 3 Start Address (H)", "Screen 3 Start Address (L)",
-			"Screen 4 Start Position",     "Screen 4 Start Address (H)",      "Screen 4 Start Address (L)", "Vertical Sync Position Adjust",
-			"Light Pen Raster (RO)",       "Smooth Scrolling",                "Control 1",                  "Control 2",
-			"Control 3",                   "Memory Width Offset",             "Cursor 2 Start",             "Cursor 2 End",
-			"Cursor 2 Address (H)",        "Cursor 2 Address (L)",            "Cursor 1 Width",             "Cursor 2 Width"
-		};
-
-		if(m_hd6445_address < 40)
-			logerror("HD6445: register %s [%02x R%d] set %02x\n",regnames[m_hd6445_address],m_hd6445_address,m_hd6445_address,data);
-		else
-			logerror("HD6445: illegal register access [%02x R%d] set %02x\n",m_hd6445_address,m_hd6445_address,data);
-	}
-}
-
 uint16_t tatsumi_state::tatsumi_sprite_control_r(offs_t offset)
 {
 	return m_sprite_control_ram[offset];
