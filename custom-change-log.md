@@ -411,3 +411,10 @@ builds get them straight from here.
   fill left of the road still used the first set's colours, which under the shadow sprite are the outdoor grass.
   Each side's fill now comes from the set that is really on that side. The open road is unchanged (frame-exact
   check); the one-frame flash on entering the tunnel is a separate issue and still there.
+
+## 2026-10-19
+
+### Round Up 5: service menu no longer freezes
+- Tapping the service key opened the service/test screen, but its live input readout (accelerator, brake, turbo,
+  shift, coins) then stopped responding. The service switch is now a latching test switch, like the cabinet's, so one
+  press keeps it on and the readout updates; press it again to leave.
