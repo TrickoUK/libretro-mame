@@ -592,8 +592,7 @@ void cyclwarr_state::common_map(address_map &map)
 	map(0x0a2000, 0x0a2007).w(FUNC(cyclwarr_state::video_config_w));
 	map(0x0a4000, 0x0a4001).w(FUNC(cyclwarr_state::bigfight_a40000_w));
 	map(0x0a6000, 0x0a6001).w(FUNC(cyclwarr_state::mixing_control_w));
-	map(0x0ac000, 0x0ac001).w(m_crtc, FUNC(hd6345_device::address_w)).umask16(0x00ff);
-	map(0x0ac002, 0x0ac003).w(m_crtc, FUNC(hd6345_device::register_w)).umask16(0x00ff);
+	map(0x0ac000, 0x0ac003).w(FUNC(cyclwarr_state::hd6445_crt_w)).umask16(0x00ff);
 
 	map(0x0b8000, 0x0b8001).w(FUNC(cyclwarr_state::cyclwarr_sound_w)).umask16(0xff00);
 	map(0x0b9000, 0x0b900f).rw("io1", FUNC(cxd1095_device::read), FUNC(cxd1095_device::write)).umask16(0x00ff).cswidth(16);
@@ -966,14 +965,8 @@ void cyclwarr_state::cyclwarr(machine_config &config)
 
 	/* video hardware */
 	screen_device &screen(SCREEN(config, "screen"));
-	screen.set_raw(cyclwarr_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240); // reconfigured by the CRTC
+	screen.set_raw(cyclwarr_state::CLOCK_2 / 8, 400, 0, 320, 272, 0, 240); // TODO: Hook up CRTC
 	screen.set_screen_update(FUNC(cyclwarr_state::screen_update));
-
-	// The 50 MHz clock / 8 is the pixel clock; the CRTC counts characters of 8 pixels
-	HD6345(config, m_crtc, tatsumi_state::CLOCK_2 / 8 / 8);
-	m_crtc->set_screen("screen");
-	m_crtc->set_show_border_area(false);
-	m_crtc->set_char_width(8);
 
 	TZB315_SPRITES(config, m_sprites, 0, 0x1000);
 	m_sprites->set_sprite_palette_base(4096);

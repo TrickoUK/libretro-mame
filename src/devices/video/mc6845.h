@@ -390,11 +390,6 @@ public:
 	virtual uint8_t register_r() override;
 	virtual void register_w(uint8_t data) override;
 
-	// R12/R13: start address of screen 1
-	uint16_t screen1_start_addr() const { return m_disp_start_addr; }
-	// R29: smooth scrolling raster offset
-	uint8_t smooth_scroll_ras() const { return m_smooth_scroll_ras; }
-
 protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;

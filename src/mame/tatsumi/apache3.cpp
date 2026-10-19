@@ -295,8 +295,7 @@ void apache3_state::apache3_v30_map(address_map &map)
 	map(0x04000, 0x07fff).ram().share("nvram");
 	map(0x08000, 0x08fff).ram().w(m_palette, FUNC(palette_device::write16)).share("palette");
 	map(0x0c000, 0x0dfff).ram().w(FUNC(apache3_state::text_w)).share("videoram");
-	map(0x0e800, 0x0e801).w(m_crtc, FUNC(hd6345_device::address_w)).umask16(0x00ff);
-	map(0x0e802, 0x0e803).w(m_crtc, FUNC(hd6345_device::register_w)).umask16(0x00ff);
+	map(0x0e800, 0x0e803).w(FUNC(apache3_state::hd6445_crt_w)).umask16(0x00ff);
 	map(0x0f000, 0x0f001).portr("DSW");
 	map(0x0f000, 0x0f001).nopw(); // todo
 	map(0x0f800, 0x0f801).rw(FUNC(apache3_state::apache3_bank_r), FUNC(apache3_state::apache3_bank_w));
@@ -459,15 +458,10 @@ void apache3_state::apache3(machine_config &config)
 
 	/* video hardware */
 	screen_device &screen(SCREEN(config, "screen"));
-	screen.set_raw(apache3_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240); // reconfigured by the CRTC
+	// The game programs the HD6445 for 50 x 35 characters of 8 x 8 (400 x 280), 40 x 30 visible
+	screen.set_raw(apache3_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240); // TODO: Hook up CRTC
 	screen.set_screen_update(FUNC(apache3_state::screen_update));
 	screen.screen_vblank().set_inputline(m_maincpu, 0);
-
-	// The 50 MHz clock / 8 is the pixel clock; the CRTC counts characters of 8 pixels
-	HD6345(config, m_crtc, tatsumi_state::CLOCK_2 / 8 / 8);
-	m_crtc->set_screen("screen");
-	m_crtc->set_show_border_area(false);
-	m_crtc->set_char_width(8);
 
 	TZB215_SPRITES(config, m_sprites, 0, 0x800);
 	m_sprites->set_sprite_palette_base(0);
