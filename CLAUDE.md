@@ -1145,6 +1145,49 @@ MAME's own `video:snapshot()` (the emulated frame at native resolution).
   `DEF_STR( No )`/`DEF_STR( Yes )`; use `auto *const` for obvious pointer types; parenthesise conditional-operator
   operands that contain binary operators.
 
+- **Follow the MAME C++ coding standards** (https://docs.mamedev.org/contributing/cxx.html) in all new or
+  changed code, fork-only or upstream-bound. Summary of the published rules:
+  - **Existing style wins**: in an existing file, match the style already there. The guide applies to new files
+    and to code with no established style.
+  - **Format**: UTF-8, files end with a newline, printable ASCII only outside comments and strings. Indent with
+    tabs (one per scope, tab stops of 4; continuation lines of a split statement get two tabs; spaces only for
+    alignment within a line). K&R or Allman bracing, consistent within an `if`/`else` chain, no stray blank lines
+    between `if`/`else if`/`else` blocks. A space between a control keyword and its `(`, single spacing around
+    binary operators. `case` labels may align with `switch` or be indented one level (indented is more common).
+    Run `srcclean` on modified files before a PR.
+  - **Naming**: macros, constants (globals, data members, enumerators), device types and enumerators are
+    `SCREAMING_SNAKE_CASE`. Functions, classes, enum type names and public members are `snake_case`. Template
+    parameters are `LlamaCase`. Abstract base classes end in `_base`; concrete `driver_device`s end in `_state`;
+    other concrete devices end in `_device`; device interfaces are `device_..._interface`. Include guards are
+    `MAME_` plus the capitalised path with separators as underscores. Data members may use `m_` (instance) and `s_`
+    (static) prefixes, not on nested classes/structs. Avoid double underscores, `_` + capital, leading underscores
+    and `_t` suffixes in the global namespace (`device_t` is legacy, don't copy it). Device type names live in the
+    global namespace, so make them explicit and unambiguous.
+  - **Literals and variables**: avoid octal; lowercase hex (`0xbadc0de`); binary literals are fine; suffix 64-bit
+    literals with uppercase `LL`; group digits (decimal in threes, hex in fours) where it reads better. Save-state
+    members need a fixed-size type, never plain `int`.
+  - **Scope and const**: declare variables at first use in the narrowest scope. Use `const` for locals and member
+    functions where possible. Constant arrays are `constexpr` in screaming snake case; C-string arrays are `const`
+    arrays of `const` pointers to `const` chars. Enums, structs and classes used by one device go inside its class.
+    Use explicitly sized enums in the class or `#define`s in the source file for device/driver constants, and keep
+    macros out of headers.
+  - **Comments**: English; `//` preferred. No commented-out code in a PR (use `if (false)` for code kept for
+    later, not `#if 0`).
+  - **Helpers**: use `BIT(value, bit)` / `BIT(value, bit, width)` (and the other bit helpers and `eminline.h`
+    functions) instead of hand-written masks and shifts.
+  - **Logging**: `logerror` for developer messages, `osd_printf_verbose` for user-diagnostic messages. Use
+    `logmacro.h` (`VERBOSE`, `LOG`, `LOGMASKED` with `LOG_*` masks starting at bit 1; bit 0 is `LOG_GENERAL`).
+    Set `VERBOSE` to 0 and drop any `LOG_OUTPUT_FUNC` override before a PR.
+  - **File structure**: start with `// license:` (SPDX id) and `// copyright-holders:` comments. `emu.h` is the
+    first include; then same-directory headers, `src/devices`, `src/emu`, `src/lib/formats`, `src/lib/util`, OSD,
+    C++ standard library, C standard library, OS-specific, layout (`.lh`) headers, then task headers such as
+    `logmacro.h` last; alphabetical within each group. Driver classes are declared in the source file inside an
+    anonymous namespace, with only the `GAME`/`COMP`/`CONS` macros outside it.
+  - **Class layout**: one `public`, `protected` and `private` section each where practical, using the least access
+    needed; overrides keep the base class's access. Within a section group constants, types, data members, instance
+    functions, then static functions; in devices separate configuration functions from live signal functions, and
+    group overrides by base class. Use constructor delegation instead of repeating initializer lists.
+
 - Treat `src/mame/<manufacturer>/*_v.cpp` rasterizer rewrites as the highest-risk
   changes in this codebase — they must still produce output through the existing
   `bitmap_rgb32`/render-primitive path for any driver you *haven't* converted,
