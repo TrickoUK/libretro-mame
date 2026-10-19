@@ -350,7 +350,7 @@ uint32_t roundup5_state::screen_update(screen_device &screen, bitmap_rgb32 &bitm
 	m_tx_layer->set_scrolly(0,(tx_start_addr >> 4) | m_crtc->smooth_scroll_ras());
 
 	screen.priority().fill(0, cliprect);
-	m_sprites->draw_sprites(screen.priority(),cliprect,1,(m_sprite_control_ram->buffer()[0xe0]&0x1000) ? 0x1000 : 0); // Alpha pass only
+	m_sprites->draw_sprites(screen.priority(),cliprect,1,(m_sprite_control_ram[0xe0]&0x1000) ? 0x1000 : 0); // Alpha pass only
 
 	// Pixels under a shadow sprite take their colour from the shadow half of the palette. While in
 	// a tunnel the game fills that half with the scenery colours (and blacks out the normal half),
@@ -371,11 +371,11 @@ uint32_t roundup5_state::screen_update(screen_device &screen, bitmap_rgb32 &bitm
 	if(m_control_word & 0x80) // enabled on map screen after a play
 	{
 		m_tx_layer->draw(screen, bitmap, cliprect, 0,0);
-		m_sprites->draw_sprites(bitmap,cliprect,0,(m_sprite_control_ram->buffer()[0xe0]&0x1000) ? 0x1000 : 0); // Full pass
+		m_sprites->draw_sprites(bitmap,cliprect,0,(m_sprite_control_ram[0xe0]&0x1000) ? 0x1000 : 0); // Full pass
 	}
 	else
 	{
-		m_sprites->draw_sprites(bitmap,cliprect,0,(m_sprite_control_ram->buffer()[0xe0]&0x1000) ? 0x1000 : 0); // Full pass
+		m_sprites->draw_sprites(bitmap,cliprect,0,(m_sprite_control_ram[0xe0]&0x1000) ? 0x1000 : 0); // Full pass
 		m_tx_layer->draw(screen, bitmap, cliprect, 0,0);
 	}
 	return 0;
@@ -672,10 +672,15 @@ void roundup5_state::roundup5(machine_config &config)
 
 	/* video hardware */
 	screen_device &screen(SCREEN(config, "screen"));
-	screen.set_raw(roundup5_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240);
+	screen.set_raw(roundup5_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240); // reconfigured by the CRTC
 	screen.set_screen_update(FUNC(roundup5_state::screen_update));
 	screen.screen_vblank().set_inputline(m_maincpu, 0);
-	tatsumi_video(config, screen);
+
+	// The 50 MHz clock / 8 is the pixel clock; the CRTC counts characters of 8 pixels
+	HD6345(config, m_crtc, tatsumi_state::CLOCK_2 / 8 / 8);
+	m_crtc->set_screen("screen");
+	m_crtc->set_show_border_area(false);
+	m_crtc->set_char_width(8);
 
 	TZB315_SPRITES(config, m_sprites, 0, 0x800); // confirmed TZB315, even if it has the smaller CLUT like Apache 3 / TZB215
 	m_sprites->set_sprite_palette_base(512);

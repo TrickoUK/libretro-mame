@@ -6,8 +6,6 @@
 
 #pragma once
 
-#include "video/bufsprite.h"
-
 #include "emupal.h"
 
 class tzbx15_device : public device_t, public device_gfx_interface
@@ -42,7 +40,7 @@ private:
 
 	required_device<palette_device> m_palette_clut;
 	required_device<palette_device> m_palette_base;
-	required_device<buffered_spriteram16_device> m_spriteram;
+	required_shared_ptr<uint16_t> m_spriteram;
 	required_region_ptr<uint8_t> m_sprites_l_rom;
 	required_region_ptr<uint8_t> m_sprites_h_rom;
 

@@ -133,24 +133,23 @@ template<class BitmapClass>
 void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &cliprect, int write_priority_only, int rambank)
 {
 	// Sprite data is double buffered
-	uint16_t const *const spriteram = m_spriteram->buffer();
 	for (int offs = rambank;offs < rambank + 0x800;offs += 6)
 	{
-		int y =         spriteram[offs+3];
-		int x =         spriteram[offs+2];
-		int scale =     spriteram[offs+4] & 0x1ff;
-		int color =     spriteram[offs+1] >> 3 & 0x1ff;
-		int flip_x =    spriteram[offs+1] & 0x8000;
-		int flip_y =    spriteram[offs+1] & 0x4000;
-		int rotate =    spriteram[offs+5] & 0x1ff;
+		int y =         m_spriteram[offs+3];
+		int x =         m_spriteram[offs+2];
+		int scale =     m_spriteram[offs+4] & 0x1ff;
+		int color =     m_spriteram[offs+1] >> 3 & 0x1ff;
+		int flip_x =    m_spriteram[offs+1] & 0x8000;
+		int flip_y =    m_spriteram[offs+1] & 0x4000;
+		int rotate =    m_spriteram[offs+5] & 0x1ff;
 
-		int index = spriteram[offs];
+		int index = m_spriteram[offs];
 
-//      if (spriteram[offs+1]&0x7)
+//      if (m_spriteram[offs+1]&0x7)
 //          color=machine().rand()%0xff;
 
 		/* End of sprite list marker */
-		if (index == 0xffff || spriteram[offs + 4] == 0xffff) // todo
+		if (index == 0xffff || m_spriteram[offs + 4] == 0xffff) // todo
 			return;
 
 		if (index >= 0x4000)

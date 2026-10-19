@@ -35,32 +35,14 @@
 #include "endianness.h"
 
 
-// The games program the HD6445 for 50 x 35 characters of 8 x 8 pixels (400 x 280 total) with 40 x 30
-// displayed (320 x 240), so the screen is reconfigured by the CRTC to match. The pixel clock is the
-// 50 MHz clock divided by 8, and the CRTC counts characters of 8 pixels. The sprite chip appears to draw
-// from a copy of sprite RAM and its control registers taken at the start of vblank.
-void tatsumi_state::tatsumi_video(machine_config &config, screen_device &screen)
-{
-	screen.screen_vblank().append(m_spriteram, FUNC(buffered_spriteram16_device::vblank_copy_rising));
-	screen.screen_vblank().append(m_sprite_control_ram, FUNC(buffered_spriteram16_device::vblank_copy_rising));
-
-	HD6345(config, m_crtc, CLOCK_2 / 8 / 8);
-	m_crtc->set_screen(screen.tag());
-	m_crtc->set_show_border_area(false);
-	m_crtc->set_char_width(8);
-
-	BUFFERED_SPRITERAM16(config, m_spriteram);
-	BUFFERED_SPRITERAM16(config, m_sprite_control_ram);
-}
-
 uint16_t tatsumi_state::tatsumi_sprite_control_r(offs_t offset)
 {
-	return m_sprite_control_ram->live()[offset];
+	return m_sprite_control_ram[offset];
 }
 
 void tatsumi_state::tatsumi_sprite_control_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 {
-	COMBINE_DATA(&m_sprite_control_ram->live()[offset]);
+	COMBINE_DATA(&m_sprite_control_ram[offset]);
 
 	/* 0xe0 is bank switch, others unknown */
 //  if ((offset==0xe0 && data&0xefff) || offset!=0xe0)
