@@ -419,19 +419,6 @@ builds get them straight from here.
   shift, coins) then stopped responding. The service switch is now a latching test switch, like the cabinet's, so one
   press keeps it on and the readout updates; press it again to leave.
 
-### Round Up 5, Cyclone Warriors (Tatsumi): screen timing from the video chip
-- Both games now take their screen size and refresh rate from the video timing chip (HD6445) the way the
-  hardware does, instead of fixed values. They run at 55.8 Hz (400 x 280 total) instead of 57.4 Hz, the same
-  as Apache 3, which already matched. Picture, text and HUD are unchanged.
-- The one-frame flash at the first tunnel entry in Round Up 5 is still there: it is not caused by the screen timing.
-
 ### Round Up 5: leaving the service menu restarts the game
 - Pressing the service key a second time used to leave the game stuck on the test screen. The board's watchdog is
   now emulated, so the game resets itself a few seconds after the test screen is closed, as the cabinet does.
-
-### Round Up 5, Apache 3, Cyclone Warriors, Big Fight (Tatsumi): sprites show one frame later
-- The sprite chip now draws from a copy of its sprite list taken at the start of vblank, so a new list shows from the
-  following frame. In Round Up 5 this removes the one-frame flash of sky and scenery when the car drives into the first
-  tunnel (the game's palette change and its sprite change now land on the same frame).
-- Apache 3, Cyclone Warriors and Big Fight use the same chip and get the same one-frame delay; they look unchanged
-  in attract mode. Old save states of these games may show one stale sprite frame after loading.
