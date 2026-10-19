@@ -60,6 +60,8 @@ protected:
 	IRQ_CALLBACK_MEMBER(v30_vector_r);
 	TILE_GET_INFO_MEMBER(get_text_tile_info);
 
+	void tatsumi_video(machine_config &config, screen_device &screen);
+
 	void text_w(offs_t offset, uint16_t data, uint16_t mem_mask = ~0);
 	uint16_t tatsumi_v30_68000_r(offs_t offset);
 	void tatsumi_v30_68000_w(offs_t offset, uint16_t data, uint16_t mem_mask = ~0);

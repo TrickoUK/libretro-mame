@@ -666,20 +666,10 @@ void roundup5_state::roundup5(machine_config &config)
 
 	/* video hardware */
 	screen_device &screen(SCREEN(config, "screen"));
-	screen.set_raw(roundup5_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240); // reconfigured by the CRTC
+	screen.set_raw(roundup5_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240);
 	screen.set_screen_update(FUNC(roundup5_state::screen_update));
 	screen.screen_vblank().set_inputline(m_maincpu, 0);
-	screen.screen_vblank().append(m_spriteram, FUNC(buffered_spriteram16_device::vblank_copy_rising));
-	screen.screen_vblank().append(m_sprite_control_ram, FUNC(buffered_spriteram16_device::vblank_copy_rising));
-
-	// The 50 MHz clock / 8 is the pixel clock; the CRTC counts characters of 8 pixels
-	HD6345(config, m_crtc, tatsumi_state::CLOCK_2 / 8 / 8);
-	m_crtc->set_screen("screen");
-	m_crtc->set_show_border_area(false);
-	m_crtc->set_char_width(8);
-
-	BUFFERED_SPRITERAM16(config, m_spriteram);
-	BUFFERED_SPRITERAM16(config, m_sprite_control_ram);
+	tatsumi_video(config, screen);
 
 	TZB315_SPRITES(config, m_sprites, 0, 0x800); // confirmed TZB315, even if it has the smaller CLUT like Apache 3 / TZB215
 	m_sprites->set_sprite_palette_base(512);

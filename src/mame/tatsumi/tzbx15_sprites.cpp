@@ -146,9 +146,6 @@ void tzbx15_device::draw_sprites_main(BitmapClass &bitmap, const rectangle &clip
 
 		int index = spriteram[offs];
 
-//      if (spriteram[offs+1]&0x7)
-//          color=machine().rand()%0xff;
-
 		/* End of sprite list marker */
 		if (index == 0xffff || spriteram[offs + 4] == 0xffff) // todo
 			return;
