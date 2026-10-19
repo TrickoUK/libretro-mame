@@ -428,3 +428,10 @@ builds get them straight from here.
 ### Round Up 5: leaving the service menu restarts the game
 - Pressing the service key a second time used to leave the game stuck on the test screen. The board's watchdog is
   now emulated, so the game resets itself a few seconds after the test screen is closed, as the cabinet does.
+
+### Round Up 5, Apache 3, Cyclone Warriors, Big Fight (Tatsumi): sprites show one frame later
+- The sprite chip now draws from a copy of its sprite list taken at the start of vblank, so a new list shows from the
+  following frame. In Round Up 5 this removes the one-frame flash of sky and scenery when the car drives into the first
+  tunnel (the game's palette change and its sprite change now land on the same frame).
+- Apache 3, Cyclone Warriors and Big Fight use the same chip and get the same one-frame delay; they look unchanged
+  in attract mode. Old save states of these games may show one stale sprite frame after loading.
