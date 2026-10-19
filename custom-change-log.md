@@ -422,3 +422,8 @@ builds get them straight from here.
 ### Round Up 5: leaving the service menu restarts the game
 - Pressing the service key a second time used to leave the game stuck on the test screen. The board's watchdog is
   now emulated, so the game resets itself a few seconds after the test screen is closed, as the cabinet does.
+
+### Round Up 5: the two roads merge at a road fork
+- Where the road forks, the two road halves now blend into one road widening into two, as on the real board,
+  instead of the left road being drawn in full with its right red and white kerb and the right road appearing
+  beside it. Checked against stills from a real cabinet; other road sections are unchanged.
