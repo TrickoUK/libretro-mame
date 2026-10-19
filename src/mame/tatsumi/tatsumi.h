@@ -8,9 +8,9 @@
 #include "tzbx15_sprites.h"
 
 #include "sound/okim6295.h"
+#include "sound/ymopm.h"
 #include "video/bufsprite.h"
 #include "video/mc6845.h"
-#include "sound/ymopm.h"
 #include "emupal.h"
 #include "tilemap.h"
 
