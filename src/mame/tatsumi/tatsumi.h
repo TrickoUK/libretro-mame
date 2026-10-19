@@ -8,8 +8,9 @@
 #include "tzbx15_sprites.h"
 
 #include "sound/okim6295.h"
-#include "video/mc6845.h"
 #include "sound/ymopm.h"
+#include "video/bufsprite.h"
+#include "video/mc6845.h"
 #include "emupal.h"
 #include "tilemap.h"
 
@@ -48,8 +49,8 @@ protected:
 
 	optional_shared_ptr<uint16_t> m_videoram;
 	optional_shared_ptr<uint16_t> m_sharedram;
-	required_shared_ptr<uint16_t> m_sprite_control_ram;
-	required_shared_ptr<uint16_t> m_spriteram;
+	required_device<buffered_spriteram16_device> m_sprite_control_ram;
+	required_device<buffered_spriteram16_device> m_spriteram;
 	required_region_ptr<uint16_t> m_mainregion;
 	required_region_ptr<uint16_t> m_subregion;
 
@@ -58,6 +59,8 @@ protected:
 
 	IRQ_CALLBACK_MEMBER(v30_vector_r);
 	TILE_GET_INFO_MEMBER(get_text_tile_info);
+
+	void tatsumi_video(machine_config &config, screen_device &screen);
 
 	void text_w(offs_t offset, uint16_t data, uint16_t mem_mask = ~0);
 	uint16_t tatsumi_v30_68000_r(offs_t offset);

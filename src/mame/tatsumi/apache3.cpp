@@ -181,10 +181,10 @@ uint32_t apache3_state::screen_update(screen_device &screen, bitmap_rgb32 &bitma
 
 	bitmap.fill(m_palette->pen(0), cliprect);
 	screen.priority().fill(0, cliprect);
-	m_sprites->draw_sprites(screen.priority(),cliprect,1,(m_sprite_control_ram[0xe0]&0x1000) ? 0x1000 : 0); // Alpha pass only
+	m_sprites->draw_sprites(screen.priority(),cliprect,1,(m_sprite_control_ram->buffer()[0xe0]&0x1000) ? 0x1000 : 0); // Alpha pass only
 	draw_ground(bitmap, cliprect);
 	apply_shadow_bitmap(bitmap,cliprect,screen.priority(), 0);
-	m_sprites->draw_sprites(bitmap,cliprect,0, (m_sprite_control_ram[0x20]&0x1000) ? 0x1000 : 0);
+	m_sprites->draw_sprites(bitmap,cliprect,0, (m_sprite_control_ram->buffer()[0x20]&0x1000) ? 0x1000 : 0);
 	m_tx_layer->draw(screen, bitmap, cliprect, 0,0);
 	return 0;
 }
@@ -459,15 +459,10 @@ void apache3_state::apache3(machine_config &config)
 
 	/* video hardware */
 	screen_device &screen(SCREEN(config, "screen"));
-	screen.set_raw(apache3_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240); // reconfigured by the CRTC
+	screen.set_raw(apache3_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240);
 	screen.set_screen_update(FUNC(apache3_state::screen_update));
 	screen.screen_vblank().set_inputline(m_maincpu, 0);
-
-	// The 50 MHz clock / 8 is the pixel clock; the CRTC counts characters of 8 pixels
-	HD6345(config, m_crtc, tatsumi_state::CLOCK_2 / 8 / 8);
-	m_crtc->set_screen("screen");
-	m_crtc->set_show_border_area(false);
-	m_crtc->set_char_width(8);
+	tatsumi_video(config, screen);
 
 	TZB215_SPRITES(config, m_sprites, 0, 0x800);
 	m_sprites->set_sprite_palette_base(0);
