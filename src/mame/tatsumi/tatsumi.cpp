@@ -37,12 +37,12 @@
 
 uint16_t tatsumi_state::tatsumi_sprite_control_r(offs_t offset)
 {
-	return m_sprite_control_ram[offset];
+	return m_sprite_control_ram->live()[offset];
 }
 
 void tatsumi_state::tatsumi_sprite_control_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 {
-	COMBINE_DATA(&m_sprite_control_ram[offset]);
+	COMBINE_DATA(&m_sprite_control_ram->live()[offset]);
 
 	/* 0xe0 is bank switch, others unknown */
 //  if ((offset==0xe0 && data&0xefff) || offset!=0xe0)

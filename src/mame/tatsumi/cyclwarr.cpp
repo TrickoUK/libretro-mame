@@ -472,10 +472,10 @@ uint32_t cyclwarr_state::screen_update(screen_device &screen, bitmap_rgb32 &bitm
 	//popmessage("%04x %04x %04x %04x",m_video_config[0],m_video_config[1],m_video_config[2],m_video_config[3]);
 
 	screen.priority().fill(0, cliprect);
-	m_sprites->draw_sprites(screen.priority(),cliprect,1,(m_sprite_control_ram[0xe0]&0x1000) ? 0x1000 : 0); // Alpha pass only
+	m_sprites->draw_sprites(screen.priority(),cliprect,1,(m_sprite_control_ram->buffer()[0xe0]&0x1000) ? 0x1000 : 0); // Alpha pass only
 	draw_bg_layers(screen, bitmap, cliprect, 0);
 	apply_shadow_bitmap(bitmap,cliprect,screen.priority(), m_mixing_control & 1);
-	m_sprites->draw_sprites(bitmap,cliprect,0,(m_sprite_control_ram[0xe0]&0x1000) ? 0x1000 : 0);
+	m_sprites->draw_sprites(bitmap,cliprect,0,(m_sprite_control_ram->buffer()[0xe0]&0x1000) ? 0x1000 : 0);
 	draw_bg_layers(screen, bitmap, cliprect, 1);
 	return 0;
 }
@@ -548,12 +548,12 @@ void cyclwarr_state::cyclwarr_sound_w(uint8_t data)
 
 uint16_t cyclwarr_state::cyclwarr_sprite_r(offs_t offset)
 {
-	return m_spriteram[offset];
+	return m_spriteram->live()[offset];
 }
 
 void cyclwarr_state::cyclwarr_sprite_w(offs_t offset, uint16_t data, uint16_t mem_mask)
 {
-	COMBINE_DATA(&m_spriteram[offset]);
+	COMBINE_DATA(&m_spriteram->live()[offset]);
 }
 
 void cyclwarr_state::bigfight_a40000_w(offs_t offset, uint16_t data, uint16_t mem_mask)
@@ -968,12 +968,17 @@ void cyclwarr_state::cyclwarr(machine_config &config)
 	screen_device &screen(SCREEN(config, "screen"));
 	screen.set_raw(cyclwarr_state::CLOCK_2 / 8, 400, 0, 320, 280, 0, 240); // reconfigured by the CRTC
 	screen.set_screen_update(FUNC(cyclwarr_state::screen_update));
+	screen.screen_vblank().append(m_spriteram, FUNC(buffered_spriteram16_device::vblank_copy_rising));
+	screen.screen_vblank().append(m_sprite_control_ram, FUNC(buffered_spriteram16_device::vblank_copy_rising));
 
 	// The 50 MHz clock / 8 is the pixel clock; the CRTC counts characters of 8 pixels
 	HD6345(config, m_crtc, tatsumi_state::CLOCK_2 / 8 / 8);
 	m_crtc->set_screen("screen");
 	m_crtc->set_show_border_area(false);
 	m_crtc->set_char_width(8);
+
+	BUFFERED_SPRITERAM16(config, m_spriteram);
+	BUFFERED_SPRITERAM16(config, m_sprite_control_ram);
 
 	TZB315_SPRITES(config, m_sprites, 0, 0x1000);
 	m_sprites->set_sprite_palette_base(4096);

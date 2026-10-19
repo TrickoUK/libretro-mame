@@ -8,6 +8,7 @@
 #include "tzbx15_sprites.h"
 
 #include "sound/okim6295.h"
+#include "video/bufsprite.h"
 #include "video/mc6845.h"
 #include "sound/ymopm.h"
 #include "emupal.h"
@@ -48,8 +49,8 @@ protected:
 
 	optional_shared_ptr<uint16_t> m_videoram;
 	optional_shared_ptr<uint16_t> m_sharedram;
-	required_shared_ptr<uint16_t> m_sprite_control_ram;
-	required_shared_ptr<uint16_t> m_spriteram;
+	required_device<buffered_spriteram16_device> m_sprite_control_ram;
+	required_device<buffered_spriteram16_device> m_spriteram;
 	required_region_ptr<uint16_t> m_mainregion;
 	required_region_ptr<uint16_t> m_subregion;
 
