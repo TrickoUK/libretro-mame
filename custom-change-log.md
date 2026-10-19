@@ -418,3 +418,9 @@ builds get them straight from here.
 - Tapping the service key opened the service/test screen, but its live input readout (accelerator, brake, turbo,
   shift, coins) then stopped responding. The service switch is now a latching test switch, like the cabinet's, so one
   press keeps it on and the readout updates; press it again to leave.
+
+### Round Up 5, Cyclone Warriors (Tatsumi): screen timing from the video chip
+- Both games now take their screen size and refresh rate from the video timing chip (HD6445) the way the
+  hardware does, instead of fixed values. They run at 55.8 Hz (400 x 280 total) instead of 57.4 Hz, the same
+  as Apache 3, which already matched. Picture, text and HUD are unchanged.
+- The one-frame flash at the first tunnel entry in Round Up 5 is still there: it is not caused by the screen timing.
