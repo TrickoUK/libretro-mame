@@ -427,3 +427,8 @@ builds get them straight from here.
 - Where the road forks, the two road halves now blend into one road widening into two, as on the real board,
   instead of the left road being drawn in full with its right red and white kerb and the right road appearing
   beside it. Checked against stills from a real cabinet; other road sections are unchanged.
+
+## 2026-10-20
+
+### Round Up 5: no longer flagged as not working
+- The game starts without the "not working" warning screen. It is still marked as having imperfect graphics.
