@@ -21291,6 +21291,9 @@ sc116
 sc133
 sc203
 
+@source:homebrew/sbc6120.cpp
+sbc6120
+
 @source:homebrew/sbc6510.cpp
 sbc6510
 
@@ -33464,6 +33467,9 @@ quizoa
 quizpun
 quizpun2
 
+@source:misc/ramstar.cpp
+ramstar
+
 @source:misc/rawthrillspc.cpp
 doodljmp
 fnf
@@ -36313,6 +36319,7 @@ fatfurspb
 kinstsnes
 mk3snes
 snes4sl
+snes4sl94
 snes4sln
 
 @source:nintendo/spacefb.cpp
@@ -37505,6 +37512,9 @@ ecssi5pi
 @source:pc/champ2.cpp
 champ2
 
+@source:pc/cmltgame.cpp
+cmltgame
+
 @source:pc/compc.cpp
 compc10
 pc10iii
@@ -37572,6 +37582,9 @@ megapcpl
 
 @source:pc/nforcepc.cpp
 nforcepc
+
+@source:pc/octavian_g650.cpp
+sweetstr
 
 @source:pc/pangofun.cpp
 pangofun
@@ -44537,9 +44550,6 @@ qmsirius
 
 @source:skeleton/qtsbc.cpp
 qtsbc
-
-@source:skeleton/ramstar.cpp
-ramstar
 
 @source:skeleton/rd100.cpp
 rd100

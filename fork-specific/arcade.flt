@@ -353,6 +353,7 @@ capcom/tvcapcom.cpp
 capcom/vulgus.cpp
 cave/cavepc.cpp
 cave/cv1k.cpp
+cave/cv1k_touch.cpp  // [HELPER]
 cave/cv1k_v.cpp  // [HELPER]
 cave/cv1k_v_blit0.cpp  // [HELPER]
 cave/cv1k_v_blit1.cpp  // [HELPER]
@@ -1389,11 +1390,13 @@ pacman/pengo.cpp
 pacman/schick.cpp
 pc/agro.cpp
 pc/champ2.cpp
+pc/cmltgame.cpp
 pc/conliner.cpp
 pc/dawg.cpp
 pc/europc_kbd.cpp  // [HELPER]
 pc/filetto.cpp
 pc/fruitpc.cpp
+pc/octavian_g650.cpp
 pc/pangofun.cpp
 pc/paokaipc.cpp
 pc/pc_t1t.cpp  // [HELPER]
@@ -1711,7 +1714,6 @@ skeleton/nl_tp1983.cpp  // [HELPER]
 skeleton/nl_tp1985.cpp  // [HELPER]
 skeleton/paipaile.cpp
 skeleton/probowl.cpp
-skeleton/ramstar.cpp
 skeleton/sgm.cpp
 skeleton/syvg.cpp
 skeleton/testlove.cpp
@@ -2453,6 +2455,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -cworld2jb
 -daichuka
 -daichukaa
+-daichukab
 -daifugo
 -daimyojn
 -daireach
@@ -3477,6 +3480,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -smf
 -smsjoker
 -smsjokera
+-snes4sl94
 -snookr10
 -snowcat
 -soccernw

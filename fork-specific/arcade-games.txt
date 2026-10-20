@@ -1842,6 +1842,7 @@ cmagica
 cmanhat
 cmcwa
 cmissnx
+cmltgame
 cmmb103
 cmmb162
 cndypuzl
@@ -8511,7 +8512,6 @@ rampart
 rampart2p
 rampart2pa
 rampartj
-ramstar
 rangrmsn
 raphero
 rapheroa
@@ -10726,6 +10726,7 @@ swatpolc
 swcourt
 swcourtb
 swcourtj
+sweetstr
 swimmer
 swimmera
 swimmerb
