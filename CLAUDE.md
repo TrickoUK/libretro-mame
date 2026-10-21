@@ -58,6 +58,13 @@ mixed into history.
   (5 commits). No conflicts, `arcade.flt` unchanged (validated). It brings in our two merged PRs
   (#16482 `tc0100scn.cpp` FG line scroll, #16483 `segas32_v.cpp` flipped sprites), so the two local
   fixes are gone; the merged code was already identical. Also a `tlcs900` CPU cleanup.
+- **Follow-up sync, 2026-10-21**: merge commit `540a87351b5` merged mamedev master
+  `mame0289-1692-gfb2a5089622` (25 commits); libretro/mame master had nothing new. No conflicts,
+  `arcade.flt` unchanged (validated), `arcade-games.txt` gained `gunwarsj`. Upstream took our
+  `roundup5.cpp` MACHINE_NOT_WORKING removal (#16534, identical to the fork) and fixed PowerPC DRC
+  save state (`ppccom.cpp`, `mpc106`, `pci`). Genie regenerated directly (`bus.lua`/`formats.lua`
+  changed), full `-j10` build linked clean. Smoke-tested gticlub2 (black at 45 s, fine at 90 s: slow
+  Viper boot), xtrial, thrild2, polystar (`my-docs/out/sync1692*`).
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
