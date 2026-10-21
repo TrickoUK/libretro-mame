@@ -65,6 +65,11 @@ mixed into history.
   save state (`ppccom.cpp`, `mpc106`, `pci`). Genie regenerated directly (`bus.lua`/`formats.lua`
   changed), full `-j10` build linked clean. Smoke-tested gticlub2 (black at 45 s, fine at 90 s: slow
   Viper boot), xtrial, thrild2, polystar (`my-docs/out/sync1692*`).
+- **Follow-up sync, 2026-10-21 (later)**: merge commit `6e082e55191` merged mamedev master
+  `mame0289-1696-g006f4ade8d4` (4 commits). No conflicts, `arcade.flt` unchanged (validated). The one
+  overlap was `voodoo_render.cpp`: upstream's static rasterizers for thrild2/gticlub2 (pure added table
+  entries, `006f4ade8d4`). Full `-j10` build linked clean. Smoke-tested gticlub2, thrild2, xtrial, jpark3
+  (90 s each, `my-docs/out/sync1696`).
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
