@@ -452,3 +452,8 @@ builds get them straight from here.
 - New core option "3D GPU Rendering" (off by default). The 3D layer is drawn on the host GPU at the 3D Supersampling
   resolution and matches the software picture closely. It falls back to the software renderer if no GPU context can be
   created. Checked on Daytona USA, House of the Dead and Virtua Fighter 2 (attract mode).
+
+### Konami GTI Club hardware: GPU rendering option
+- "3D GPU Rendering" now also covers the K001005 boards (GTI Club, Thunder Hurricane, Hang Pilot, Winding Heat, Midnight Run).
+  The 3D layer is drawn on the host GPU at the 3D Supersampling resolution with the same lighting, fog, texture mirroring
+  and filtering as the software renderer. Checked on Thunder Hurricane (attract mode), where it looks the same as software.
