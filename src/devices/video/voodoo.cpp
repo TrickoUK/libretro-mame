@@ -2411,9 +2411,6 @@ u32 voodoo_1_device::reg_fastfill_w(u32 chipmask, u32 regnum, u32 data)
 	if (m_gpu && m_gpu->usable())
 	{
 		int const buffer = gpu_buffer_index(poly.destbase);
-		static int s_fill = 0;
-		if (getenv("MAME_VOODOO_GPU_TRACE") && s_fill++ < 20)
-			osd_printf_info("Voodoo fastfill buffer %d clip %d,%d-%d,%d\n", buffer, poly.clipleft, poly.cliptop, poly.clipright, poly.clipbottom);
 		if (buffer < 0)
 			gpu_latch("fast fill outside the colour buffers");
 		else
@@ -2982,14 +2979,15 @@ int voodoo_1_device::update_common(bitmap_rgb32 &bitmap, const rectangle &clipre
 	if (LOG_VBLANK_SWAP) logerror("--- update_common %d-%d @ %d from %08X\n", cliprect.min_y, cliprect.max_y, screen().vpos(), u32((u8 *)buffer_base - m_fbram));
 	bool const use_aa = m_edge_aa && m_aa_map_offs == m_rgboffs[drawbuf];
 	bool const gpu_shown = !DEBUG_BACKBUF && gpu_present(bitmap, cliprect);
+	s32 const os = m_output_scale;
 	for (s32 y = cliprect.min_y; y <= cliprect.max_y && !gpu_shown; y++)
 	{
-		if (y < m_yoffs)
+		if (y / os < m_yoffs)
 			continue;
-		u16 const *const src = buffer_base + (y - m_yoffs) * rowpixels - m_xoffs;
+		u16 const *const src = buffer_base + (y / os - m_yoffs) * rowpixels - m_xoffs;
 		u32 *dst = &bitmap.pix(y);
 		for (s32 x = cliprect.min_x; x <= cliprect.max_x; x++)
-			dst[x] = pens[src[x]];
+			dst[x] = pens[src[x / os]];
 
 		// edge AA enhancement: blend edge pixels toward the neighbour across
 		// the edge, as computed at swap time
@@ -3068,6 +3066,14 @@ void voodoo_1_device::recompute_video_timing(u32 hsyncon, u32 hsyncoff, u32 hvis
 
 	logerror("hSync=%d-%d, bp=%d, vis=%d  vSync=%d-%d, bp=%d, vis=%d\n", hsyncon, hsyncoff, hbp, hvis, vsyncon, vsyncoff, vbp, vvis);
 	logerror("Horiz: %d-%d (%d total)  Vert: %d-%d (%d total) -- ", visarea.min_x, visarea.max_x, htotal, visarea.min_y, visarea.max_y, vtotal);
+
+	// the host-GPU path can present the screen at the render scale (the mame_3d_output_scale option)
+	m_output_scale = (m_gpu && machine().osd().supersample_output()) ? std::clamp(machine().osd().supersample(), 1, 4) : 1;
+	int const os = m_output_scale;
+	rectangle const native_visarea = visarea;
+	visarea = rectangle(native_visarea.min_x * os, (native_visarea.max_x + 1) * os - 1, native_visarea.min_y * os, (native_visarea.max_y + 1) * os - 1);
+	htotal *= os;
+	vtotal *= os;
 
 	// configure the screen based on which one matches the closest
 	if (stddiff < meddiff && stddiff < vgadiff)
@@ -3207,8 +3213,6 @@ void voodoo_1_device::gpu_configure()
 	u32 const bytes = m_rgboffs[1] - m_rgboffs[0];
 	if (!m_gpu || rowpixels == 0 || bytes == 0)
 		return;
-	if (getenv("MAME_VOODOO_GPU_TRACE"))
-		osd_printf_info("Voodoo GPU configure: rowpixels %u bytes %u\n", rowpixels, bytes);
 	m_gpu->flush();
 	m_gpu->configure(rowpixels, std::clamp<u32>(bytes / (rowpixels * 2), 1, 1024), (m_rgboffs[2] != ~0U) ? 3 : 2);
 }
@@ -3339,11 +3343,7 @@ void voodoo_1_device::gpu_latch(char const *reason)
 bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprect)
 {
 	if (!m_gpu || !m_gpu->usable() || m_gpu->rows() == 0)
-	{
-		if (getenv("MAME_VOODOO_GPU_TRACE") && m_gpu)
-			osd_printf_info("Voodoo GPU present skipped: usable %d rows %u\n", m_gpu->usable(), m_gpu->rows());
 		return false;
-	}
 	int const scale = m_gpu->scale();
 	u32 const rowpixels = m_gpu->rowpixels();
 	u32 const rows = m_gpu->rows();
@@ -3351,21 +3351,14 @@ bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprec
 	{
 		m_gpu_image.resize(size_t(rowpixels) * scale * rows * scale);
 		if (!m_gpu->flush(m_frontbuf, m_gpu_image.data()))
-		{
-			if (getenv("MAME_VOODOO_GPU_TRACE"))
-				osd_printf_info("Voodoo GPU present: flush failed\n");
 			return false;
-		}
 		m_gpu_seen_serial = m_gpu->serial();
 		m_gpu_seen_front = m_frontbuf;
 	}
 
-	static u32 s_present = 0;
-	if (getenv("MAME_VOODOO_GPU_TRACE") && (s_present++ % 120) == 0)
-		osd_printf_info("Voodoo GPU present: serial %u, front %d, image %zu words, first pixel %08x, dirty %d%d%d\n", m_gpu->serial(), m_frontbuf, m_gpu_image.size(), m_gpu_image.empty() ? 0 : m_gpu_image[rowpixels * scale * 100 + 100], m_gpu_shadow_dirty[0], m_gpu_shadow_dirty[1], m_gpu_shadow_dirty[2]);
-
 	u32 const stride = rowpixels * scale;
-	u32 const area = scale * scale;
+	s32 const os = m_output_scale;
+	s32 const block = (scale % os == 0) ? scale / os : 1;
 	u64 error = 0, big = 0, count = 0;
 	u16 const *const soft = m_gpu_compare ? draw_buffer(m_frontbuf) : nullptr;
 	if (m_gpu_compare)
@@ -3373,30 +3366,41 @@ bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprec
 	for (s32 y = cliprect.min_y; y <= cliprect.max_y; y++)
 	{
 		u32 *dst = &bitmap.pix(y);
-		s32 const by = y - m_yoffs;
+
+		// image row of this bitmap row: the screen is presented at os times the native size
+		s32 const nat_y = y / os - m_yoffs;
+		s32 const img_y = (scale % os == 0) ? (nat_y * os + y % os) * block : nat_y * scale + ((y % os) * scale) / os;
 		for (s32 x = cliprect.min_x; x <= cliprect.max_x; x++)
 		{
-			s32 const bx = x - m_xoffs;
-			if (by < 0 || by >= s32(rows) || bx < 0 || bx >= s32(rowpixels))
+			s32 const nat_x = x / os - m_xoffs;
+			if (nat_y < 0 || nat_y >= s32(rows) || nat_x < 0 || nat_x >= s32(rowpixels))
 			{
 				dst[x] = 0xff000000;
 				continue;
 			}
-			u32 r = 0, g = 0, b = 0;
-			for (int sy = 0; sy < scale; sy++)
+			s32 const img_x = (scale % os == 0) ? (nat_x * os + x % os) * block : nat_x * scale + ((x % os) * scale) / os;
+			if (block == 1)
+				dst[x] = 0xff000000 | (m_gpu_image[size_t(img_y) * stride + img_x] & 0xffffff);
+			else
 			{
-				u32 const *src = &m_gpu_image[size_t(by * scale + sy) * stride + bx * scale];
-				for (int sx = 0; sx < scale; sx++)
+				// average the block of render pixels behind this output pixel
+				u32 r = 0, g = 0, b = 0;
+				for (s32 sy = 0; sy < block; sy++)
 				{
-					r += (src[sx] >> 16) & 0xff;
-					g += (src[sx] >> 8) & 0xff;
-					b += src[sx] & 0xff;
+					u32 const *src = &m_gpu_image[size_t(img_y + sy) * stride + img_x];
+					for (s32 sx = 0; sx < block; sx++)
+					{
+						r += (src[sx] >> 16) & 0xff;
+						g += (src[sx] >> 8) & 0xff;
+						b += src[sx] & 0xff;
+					}
 				}
+				u32 const area = block * block;
+				dst[x] = 0xff000000 | ((r / area) << 16) | ((g / area) << 8) | (b / area);
 			}
-			dst[x] = 0xff000000 | ((r / area) << 16) | ((g / area) << 8) | (b / area);
 			if (soft)
 			{
-				rgb_t const ref = m_shared->rgb565[soft[by * rowpixels + bx]];
+				rgb_t const ref = m_shared->rgb565[soft[nat_y * rowpixels + nat_x]];
 				u32 const e = std::abs(s32(ref.r()) - s32((dst[x] >> 16) & 0xff)) + std::abs(s32(ref.g()) - s32((dst[x] >> 8) & 0xff)) + std::abs(s32(ref.b()) - s32(dst[x] & 0xff));
 				error += e;
 				big += e > 24;

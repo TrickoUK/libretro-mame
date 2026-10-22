@@ -661,6 +661,7 @@ protected:
 	u32 m_gpu_seen_serial = ~0U;             // renderer submit serial of m_gpu_image
 	int m_gpu_seen_front = -1;               // front buffer index of m_gpu_image
 	bool m_gpu_compare = false;              // log the difference to the software picture
+	int m_output_scale = 1;                  // the screen is presented at this multiple of the native size
 	bool m_gpu_parallel = false;             // the software renderer still draws every triangle and fill
 	u32 m_gpu_swap_count = 0;
 	static constexpr u32 GPU_PARALLEL_SWAPS = 120;
