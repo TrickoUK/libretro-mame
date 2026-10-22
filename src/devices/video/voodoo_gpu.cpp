@@ -158,6 +158,22 @@ u32 gpu_batch::add_state(poly_data const &poly, u32 flags, int buffer)
 //  pixels
 //-------------------------------------------------
 
+char const *gpu_batch::check(poly_data const &poly)
+{
+	auto const fbzmode = poly.raster.fbzmode();
+	auto const alphamode = poly.raster.alphamode();
+	if (fbzmode.enable_alpha_planes())
+		return "alpha planes";
+	if (fbzmode.enable_depthbuf() && fbzmode.depth_source_compare())
+		return "depth source compare";
+	if (fbzmode.enable_stipple() && fbzmode.stipple_pattern() == 0)
+		return "rotating stipple";
+	if (alphamode.alphablend() && alphamode.dstrgbblend() == 15)
+		return "colour-before-fog blend";
+	return nullptr;
+}
+
+
 void gpu_batch::add_triangle(poly_data const &poly, int buffer, bool y_origin, s32 yorigin, float const *x, float const *y, globals const &g)
 {
 	close_stamp();
@@ -258,6 +274,7 @@ void gpu_batch::add_fastfill(poly_data const &poly, int buffer, bool y_origin, s
 		bottom = yorigin - poly.cliptop + 1;
 	}
 	s[S_CLIP_TB] = u32(std::max(top, 0)) | (u32(std::max(bottom, 0)) << 16);
+	s[S_CHROMARANGE] = yorigin;                 // fast fills dither by the unflipped row
 	m_commands.push_back({ gpu_command::type::FASTFILL, 0, prim });
 	m_fastfills++;
 }
@@ -545,7 +562,7 @@ void gpu_renderer::invalidate()
 //  the batch
 //-------------------------------------------------
 
-bool gpu_renderer::flush(int read_buffer, u32 *out)
+bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count)
 {
 	if (!usable() || m_rowpixels == 0)
 		return false;
@@ -758,9 +775,11 @@ bool gpu_renderer::flush(int read_buffer, u32 *out)
 	if (read_buffer >= 0 && out)
 	{
 		readback.x = 0;
-		readback.y = read_buffer * m_rows * scale;
+		if (row_count == 0)
+			row_count = m_rows;
+		readback.y = (read_buffer * m_rows + first_row) * scale;
 		readback.w = m_rowpixels * scale;
-		readback.h = m_rows * scale;
+		readback.h = row_count * scale;
 		readback.out = out;
 		readback.stride = readback.w;
 		frame.readbacks = &readback;

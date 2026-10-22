@@ -127,6 +127,9 @@ public:
 		u8 bilinear_mask;
 	};
 
+	// the reason a polygon cannot be drawn on the GPU, or nullptr
+	static char const *check(poly_data const &poly);
+
 	// capture; buffer is the colour buffer index, rows are native pixels
 	void add_triangle(poly_data const &poly, int buffer, bool y_origin, s32 yorigin, float const *x, float const *y, globals const &g);
 	void add_fastfill(poly_data const &poly, int buffer, bool y_origin, s32 yorigin);
@@ -223,9 +226,9 @@ public:
 	void texture_write(int tmu, u32 offs, u32 bytes);
 	void invalidate();
 
-	// submit the batch; with a buffer and output it also reads the whole
-	// buffer back as rgb32
-	bool flush(int read_buffer = -1, u32 *out = nullptr);
+	// submit the batch; with a buffer and output it also reads rows of that
+	// buffer back as rgb32 (row_count 0 = all rows)
+	bool flush(int read_buffer = -1, u32 *out = nullptr, u32 first_row = 0, u32 row_count = 0);
 
 private:
 	running_machine &m_machine;
