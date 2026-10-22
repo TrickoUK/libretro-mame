@@ -736,6 +736,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "native"
    },
    {
+      CORE_NAME "_3d_gpu",
+      "3D GPU Rendering",
+      NULL,
+      "Sega Model 2. Renders the 3D layer on the host GPU instead of the CPU. The picture matches the software renderer closely; 3D Supersampling sets the resolution. If no GPU context can be created the software renderer is used. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "enabled",  "Enabled" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
       CORE_NAME "_3d_edge_aa",
       "3D Edge Anti-Aliasing",
       NULL,
