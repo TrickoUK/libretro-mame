@@ -1456,6 +1456,33 @@ u32 voodoo_renderer::enqueue_triangle(poly_data &poly, vertex_t const *vert)
 
 
 //-------------------------------------------------
+//  count_fastfill - the pixel count of a fastfill
+//  operation without drawing it
+//-------------------------------------------------
+
+u32 voodoo_renderer::count_fastfill(poly_data &poly)
+{
+	auto const fbzmode = poly.raster.fbzmode();
+	if (!fbzmode.rgb_buffer_mask() && !fbzmode.aux_buffer_mask())
+		return 0;
+	vertex_t v1(poly.clipleft, poly.cliptop);
+	vertex_t v2(poly.clipright, poly.clipbottom);
+	return render_tile<0>(global_cliprect, render_delegate(&voodoo_renderer::rasterizer_null, this), v1, v2);
+}
+
+
+//-------------------------------------------------
+//  count_triangle - the pixel count of a triangle
+//  without drawing it
+//-------------------------------------------------
+
+u32 voodoo_renderer::count_triangle(vertex_t const *vert)
+{
+	return render_triangle<0>(global_cliprect, render_delegate(&voodoo_renderer::rasterizer_null, this), vert[0], vert[1], vert[2]);
+}
+
+
+//-------------------------------------------------
 //  stipple_test - test against the stipple
 //  pattern; the enable flag is not checked here,
 //  so must be checked by the caller

@@ -462,3 +462,13 @@ builds get them straight from here.
 - "3D GPU Rendering" now also covers Hyper Neo Geo 64 (Fatal Fury: Wild Ambition, Xtreme Rally, Beast Busters 2 and the rest).
   The 3D polygons are drawn on the host GPU at the 3D Supersampling resolution; the palette, fade and blend handling is unchanged.
   Checked on Fatal Fury: Wild Ambition, Xtreme Rally and Beast Busters 2 (attract mode). Off by default.
+
+### Midway Seattle and Vegas (3dfx Voodoo 1/2): GPU rendering option
+- "3D GPU Rendering" now also covers the Voodoo 1/2 boards (San Francisco Rush, California Speed, Gauntlet Legends,
+  Rush 2049 and the rest). Triangles are drawn on the host GPU at the 3D Supersampling resolution, with the texture
+  formats, fog, alpha blending and depth tests done in a shader. With 3D Output Scale on, the screen is presented at
+  that size instead of being averaged down. The software renderer runs alongside for the first seconds so the boot
+  self-tests pass, then stops; any feature the GPU path does not cover (alpha planes, rotating stipple, depth-tested
+  framebuffer writes) hands the game back to software without a glitch. Voodoo 3 / Banshee boards (Konami Viper) are
+  unchanged. Checked on San Francisco Rush and California Speed (attract mode); off by default.
+

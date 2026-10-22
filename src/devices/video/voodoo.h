@@ -44,6 +44,7 @@ static constexpr bool DEBUG_STATS = false;      // \ key to view stats
 
 // logging
 static constexpr bool LOG_VBLANK_SWAP = false;
+static constexpr bool LOG_GPU_BATCH = false;
 static constexpr bool LOG_FIFO = false;
 static constexpr bool LOG_FIFO_VERBOSE = false;
 static constexpr bool LOG_REGISTERS = false;
@@ -63,6 +64,7 @@ static constexpr bool LOG_CMDFIFO_VERBOSE = false;
 // include register and render classes
 #include "voodoo_regs.h"
 #include "voodoo_render.h"
+#include "voodoo_gpu.h"
 
 
 namespace voodoo
@@ -162,6 +164,7 @@ public:
 	// simple getters
 	voodoo_regs &regs() { return m_reg; }
 	bool dirty() const { return m_regdirty; }
+	u8 *ram() const { return m_ram; }
 
 	// simple setters
 	void mark_dirty() { m_regdirty = true; }
@@ -643,6 +646,26 @@ protected:
 	std::unique_ptr<u8[]> m_memory;          // allocated framebuffer/texture memory
 	std::unique_ptr<voodoo::shared_tables> m_shared; // shared tables
 	std::unique_ptr<voodoo::voodoo_renderer> m_renderer; // rendering helper
+	// host-GPU path (nullptr = software only)
+	int gpu_buffer_index(u16 const *buffer) const;
+	void gpu_sync_down(int buffer, u32 first_row = 0, u32 last_row = 1023);
+	void gpu_mark_rows(int buffer, s32 first_row, s32 last_row);
+	void gpu_sync_up();
+	void gpu_latch(char const *reason);
+	void gpu_configure();
+	bool gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprect);
+	std::unique_ptr<voodoo::gpu_renderer> m_gpu;
+	std::vector<u32> m_gpu_image;            // front buffer as read back, rgb32
+	bool m_gpu_shadow_dirty[3] = { };        // the GPU drew into the buffer since m_fbram was last updated from it
+	bool m_gpu_dirty_row[3][1024] = { };     // per row of each buffer, in 16-row groups checked together
+	u32 m_gpu_seen_serial = ~0U;             // renderer submit serial of m_gpu_image
+	int m_gpu_seen_front = -1;               // front buffer index of m_gpu_image
+	bool m_gpu_compare = false;              // log the difference to the software picture
+	int m_output_scale = 1;                  // the screen is presented at this multiple of the native size
+	bool m_gpu_parallel = false;             // the software renderer still draws every triangle and fill
+	u32 m_gpu_swap_count = 0;
+	static constexpr u32 GPU_PARALLEL_SWAPS = 120;
+	u32 m_gpu_compare_count = 0;
 
 	// edge anti-aliasing enhancement (see compute_edge_aa())
 	void compute_edge_aa();

@@ -117,7 +117,8 @@ enum class gpu_blend_op : uint8_t { ADD, SUBTRACT, REVERSE_SUBTRACT };
 
 enum class gpu_blend_factor : uint8_t
 {
-	ZERO, ONE, SRC_ALPHA, ONE_MINUS_SRC_ALPHA, CONSTANT_ALPHA, ONE_MINUS_CONSTANT_ALPHA
+	ZERO, ONE, SRC_ALPHA, ONE_MINUS_SRC_ALPHA, CONSTANT_ALPHA, ONE_MINUS_CONSTANT_ALPHA,
+	SRC_COLOR, ONE_MINUS_SRC_COLOR, DST_COLOR, ONE_MINUS_DST_COLOR, SRC_ALPHA_SATURATE
 };
 
 struct gpu_blend_state
@@ -136,6 +137,7 @@ struct gpu_blend_state
 //   - `int state(int k)`: word k of the current primitive's state record
 //   - `vec2 frag_pos()`: the fragment position in target pixels, top-left origin
 //   - `ivec2 target_size()`: the target size in pixels
+//   - with writes_depth, `float frag_depth`, written to the fragment depth
 //   - `VARIANT`: an integer macro, the draw's variant value
 //   - for each binding i, a sampler named binding_name[i] (usampler2D for the
 //     unsigned formats, isampler2D for RGBA32I, sampler2D for RGBA8) plus a
@@ -148,6 +150,7 @@ struct gpu_shader_module
 	int varying_count = 0;
 	gpu_varying_mode varying_mode[GPU_MAX_VARYINGS] = {};
 	int state_stride = 0;               // words per record the source reads
+	bool writes_depth = false;          // the source assigns `float frag_depth` (0..1) for the REAL depth mode
 	int binding_count = 0;
 	const char *binding_name[GPU_MAX_BINDINGS] = {};
 	gpu_texture_format binding_format[GPU_MAX_BINDINGS] = {};
@@ -185,6 +188,7 @@ struct gpu_command
 	gpu_blend_state blend;
 	gpu_depth_func depth_func = gpu_depth_func::ALWAYS;
 	bool depth_write = false;
+	bool color_write = true;
 	gpu_handle bindings[GPU_MAX_BINDINGS] = {};
 
 	// SET_CLIP, COPY_RECT
