@@ -5,7 +5,7 @@
     retro_gl_loader.h
 
     Runtime-loaded EGL/GL entry points shared by the libretro OSD's private
-    GPU backends (retro_gpu_target and retro_gpu_engine).
+    GPU backends (retro_gpu_engine).
 
     EGL and GL are loaded entirely via dlopen()/dlsym() rather than linked
     at build time: the build host has no EGL/GL -devel packages, and

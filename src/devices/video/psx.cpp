@@ -14,11 +14,14 @@
 
 #include "osdepend.h"
 #include "interface/gpurender.h"
+#include "interface/gpuengine.h"
+#include "psxgpu_shader.h"
 
 #include "screen.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 
 #define STOP_ON_ERROR ( 0 )
@@ -119,13 +122,35 @@ bool psxgpu_device::gpu_active()
 	if (!m_gpu_active_checked)
 	{
 		m_gpu_active_checked = true;
-		m_gpu_render_target = machine().osd().get_gpu_render_target();
+		m_gpu_engine = machine().osd().get_gpu_engine("ps1");
+		if (m_gpu_engine)
+		{
+			osd::gpu_shader_module module;
+			module.name = "ps1";
+			module.fragment_source = PSXGPU_FRAGMENT_SOURCE;
+			module.varying_count = PSXGPU_SHADER_VARYINGS;
+			module.state_stride = PSXGPU_SHADER_STATE_WORDS;
+			module.binding_count = 1;
+			module.binding_name[0] = "vram";
+			module.binding_format[0] = osd::gpu_texture_format::R16UI;
+			m_gpu_module = m_gpu_engine->create_shader_module(module);
+
+			osd::gpu_texture_desc vram;
+			vram.format = osd::gpu_texture_format::R16UI;
+			vram.width = 1024;
+			vram.height = m_vram_height;
+			m_gpu_vram_tex = m_gpu_engine->create_texture(vram);
+
+			if (!m_gpu_module || !m_gpu_vram_tex)
+				m_gpu_engine = nullptr;
+			m_gpu_texfilter_mode = std::clamp( machine().osd().gpu_render_texfilter(), 0, 3 );
+		}
 		// No context/frame priming here - all GPU work happens in one
-		// batched burst per frame in gpu_update_screen() (see the
+		// submitted frame per refresh in gpu_update_screen() (see the
 		// m_gpu_queue comment in psx.h), not incrementally as primitives
 		// are submitted.
 	}
-	return m_gpu_render_target != nullptr;
+	return m_gpu_engine != nullptr;
 }
 
 cxd8514q_device::cxd8514q_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
@@ -2226,7 +2251,7 @@ bool psxgpu_device::gpu_submit_image_stamp( int32_t n_x, int32_t n_y, int32_t n_
 // content (a polygon/rectangle/sprite drawn earlier this frame or a prior
 // one) that was never written back to the CPU-side p_vram buffer, so
 // sampling the raw VRAM texture would be wrong - queued as a real
-// GPU-side framebuffer-to-itself blit (osd::gpu_render_target::copy_rect())
+// GPU-side framebuffer-to-itself blit (a COPY_RECT engine command)
 // instead, replayed at the correct point in this frame's command order.
 bool psxgpu_device::gpu_queue_copy_rect( int32_t n_sx, int32_t n_sy, int32_t n_dx, int32_t n_dy, int32_t n_w, int32_t n_h )
 {
@@ -2387,17 +2412,232 @@ void psxgpu_device::gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int 
 	m_gpu_last_cluty = n_cluty;
 }
 
-// Replays this frame's queued set_texture_page()/set_clip_rect()/triangle
-// commands (see the m_gpu_queue comment in psx.h), reads the result back
-// into bitmap, then clears the queue for the next frame. Consecutive
-// TRIANGLE commands sharing the same textured/blend/filterable state are
-// merged into one osd::gpu_render_target::submit_triangles() call instead
-// of replayed one triangle (one GL draw call) at a time - a run only needs
-// to break on an actual state change (different textured/blend/filterable)
-// or an intervening
-// TEXTURE/CLIP command (which changes what subsequent triangles should
-// look like, so can't be reordered past). The GPU target itself is NOT
-// cleared here (see retro_gpu_target::resize_target()) - it models PS1
+namespace {
+
+osd::gpu_blend_state gpu_blend_state_for( osd::gpu_blend_mode mode )
+{
+	osd::gpu_blend_state b;
+	switch( mode )
+	{
+	case osd::gpu_blend_mode::HALF_ADD:
+		b.enable = true;
+		b.op = osd::gpu_blend_op::ADD;
+		b.src = b.dst = osd::gpu_blend_factor::CONSTANT_ALPHA;
+		b.constant_alpha = 0.5f;
+		break;
+	case osd::gpu_blend_mode::ADD:
+		b.enable = true;
+		b.op = osd::gpu_blend_op::ADD;
+		b.src = b.dst = osd::gpu_blend_factor::ONE;
+		break;
+	case osd::gpu_blend_mode::SUBTRACT:
+		b.enable = true;
+		b.op = osd::gpu_blend_op::REVERSE_SUBTRACT;
+		b.src = b.dst = osd::gpu_blend_factor::ONE;
+		break;
+	case osd::gpu_blend_mode::ADD_QUARTER:
+		b.enable = true;
+		b.op = osd::gpu_blend_op::ADD;
+		b.src = osd::gpu_blend_factor::CONSTANT_ALPHA;
+		b.dst = osd::gpu_blend_factor::ONE;
+		b.constant_alpha = 0.25f;
+		break;
+	default:
+		break;
+	}
+	return b;
+}
+
+} // anonymous namespace
+
+// Turns this frame's queued commands (see the m_gpu_queue comment in psx.h)
+// into the engine's frame description: one vertex and one primitive state
+// record per queued triangle, with the texture page, window and draw area
+// the commands leave behind carried in m_gpu_replay from frame to frame.
+// Consecutive TRIANGLE commands sharing the same textured/blend/filterable
+// state become one run; a run ends at an actual state change or at any
+// texture, clip or copy command, so overlapping primitives keep their
+// submission order across those. A semi-transparent textured run is drawn
+// twice: the texels with the STP bit set with the run's blend mode, then
+// the others opaque, because texels with STP clear are never blended.
+void psxgpu_device::gpu_build_frame()
+{
+	m_gpu_frame_vertices.clear();
+	m_gpu_frame_state.clear();
+	m_gpu_frame_commands.clear();
+	m_gpu_frame_vertex_count = 0;
+
+	const int target_w = n_screenwidth * gpu_scale();
+	const int target_h = m_vram_height * gpu_scale();
+	gpu_replay_state &rs = m_gpu_replay;
+
+	auto push_clip = [ this, &rs ]()
+	{
+		m_gpu_frame_commands.push_back( osd::gpu_command::make_clip( rs.clip_x1, rs.clip_y1, rs.clip_x2 - rs.clip_x1 + 1, rs.clip_y2 - rs.clip_y1 + 1 ) );
+	};
+	if( rs.clip_valid )
+	{
+		push_clip();
+	}
+
+	uint32_t run_first = 0;
+	uint32_t run_vertices = 0;
+	bool run_textured = false;
+	bool run_filterable = true;
+	osd::gpu_blend_mode run_blend = osd::gpu_blend_mode::NONE;
+
+	auto flush_run = [ this, &run_first, &run_vertices, &run_textured, &run_blend ]()
+	{
+		if( run_vertices == 0 )
+		{
+			return;
+		}
+		osd::gpu_command draw = osd::gpu_command::make_draw( m_gpu_module, run_first, run_vertices );
+		draw.bindings[ 0 ] = m_gpu_vram_tex;
+		if( run_textured && run_blend != osd::gpu_blend_mode::NONE )
+		{
+			draw.variant = 1;
+			draw.blend = gpu_blend_state_for( run_blend );
+			m_gpu_frame_commands.push_back( draw );
+			draw.variant = 2;
+			draw.blend = osd::gpu_blend_state();
+			m_gpu_frame_commands.push_back( draw );
+		}
+		else
+		{
+			draw.blend = gpu_blend_state_for( run_blend );
+			m_gpu_frame_commands.push_back( draw );
+		}
+		run_first += run_vertices;
+		run_vertices = 0;
+	};
+
+	for( auto &cmd : m_gpu_queue )
+	{
+		switch( cmd.kind )
+		{
+		case gpu_queued_cmd::kind_t::TRIANGLE:
+		{
+			if( run_vertices != 0 && ( cmd.textured != run_textured || cmd.blend != run_blend || cmd.filterable != run_filterable ) )
+			{
+				flush_run();
+			}
+			run_textured = cmd.textured;
+			run_filterable = cmd.filterable;
+			run_blend = cmd.blend;
+
+			const uint32_t prim = (uint32_t)( m_gpu_frame_state.size() / PSXGPU_SHADER_STATE_WORDS );
+			const uint32_t state[ PSXGPU_SHADER_STATE_WORDS ] = {
+				cmd.textured ? 1u : 0u,
+				(uint32_t)( cmd.filterable ? m_gpu_texfilter_mode : 0 ),
+				(uint32_t)rs.tp, (uint32_t)rs.tx, (uint32_t)rs.ty, (uint32_t)rs.clutx, (uint32_t)rs.cluty,
+				// the identity window leaves addressing alone, so filtered taps one texel past 255 are not wrapped
+				( rs.tw_and_u == 255 && rs.tw_and_v == 255 && rs.tw_off_u == 0 && rs.tw_off_v == 0 ) ? 0u : 1u,
+				(uint32_t)rs.tw_and_u, (uint32_t)rs.tw_and_v, (uint32_t)rs.tw_off_u, (uint32_t)rs.tw_off_v,
+				(uint32_t)rs.interleave };
+			m_gpu_frame_state.insert( m_gpu_frame_state.end(), std::begin( state ), std::end( state ) );
+
+			for( const osd::gpu_vertex &v : cmd.tri )
+			{
+				const float f[ 5 + PSXGPU_SHADER_VARYINGS ] = {
+					v.x, v.y, 0.0f, v.w, 0.0f,
+					v.r, v.g, v.b, v.a, v.u, v.v, v.u_min, v.v_min, v.u_max, v.v_max };
+				const size_t at = m_gpu_frame_vertices.size();
+				m_gpu_frame_vertices.insert( m_gpu_frame_vertices.end(), std::begin( f ), std::end( f ) );
+				std::memcpy( &m_gpu_frame_vertices[ at + 4 ], &prim, sizeof( prim ) );
+			}
+			run_vertices += 3;
+			m_gpu_frame_vertex_count += 3;
+			break;
+		}
+		case gpu_queued_cmd::kind_t::TEXPARAM:
+			flush_run();
+			rs.tx = cmd.tex_tx;
+			rs.ty = cmd.tex_ty;
+			rs.tp = cmd.tex_tp;
+			rs.clutx = cmd.tex_clutx;
+			rs.cluty = cmd.tex_cluty;
+			break;
+		case gpu_queued_cmd::kind_t::TEXWIN:
+			flush_run();
+			rs.tw_and_u = cmd.tw_and_u;
+			rs.tw_and_v = cmd.tw_and_v;
+			rs.tw_off_u = cmd.tw_off_u;
+			rs.tw_off_v = cmd.tw_off_v;
+			rs.interleave = cmd.tw_interleave;
+			break;
+		case gpu_queued_cmd::kind_t::CLIP:
+			flush_run();
+			rs.clip_valid = true;
+			rs.clip_x1 = cmd.clip_x1;
+			rs.clip_y1 = cmd.clip_y1;
+			rs.clip_x2 = cmd.clip_x2;
+			rs.clip_y2 = cmd.clip_y2;
+			push_clip();
+			break;
+		case gpu_queued_cmd::kind_t::COPY:
+		{
+			flush_run();
+			// a copy is limited to the part of both rectangles inside the target
+			const int w = std::min( { cmd.copy_w, target_w - cmd.copy_sx, target_w - cmd.copy_dx } );
+			const int h = std::min( { cmd.copy_h, target_h - cmd.copy_sy, target_h - cmd.copy_dy } );
+			if( w > 0 && h > 0 && cmd.copy_sx >= 0 && cmd.copy_sy >= 0 && cmd.copy_dx >= 0 && cmd.copy_dy >= 0 )
+			{
+				m_gpu_frame_commands.push_back( osd::gpu_command::make_copy( cmd.copy_sx, cmd.copy_sy, cmd.copy_dx, cmd.copy_dy, w, h ) );
+			}
+			break;
+		}
+		}
+	}
+	flush_run();
+	m_gpu_queue.clear();
+}
+
+// Submits the frame built by gpu_build_frame() and reads the given
+// rectangles of the render target back (count may be 0). The target
+// models PS1 VRAM, which persists across frames, so it is not cleared
+// per frame. It is sized to the whole VRAM, not only the displayed part:
+// draw-offset-relative geometry can land anywhere in VRAM, for example in
+// the hidden half of a double buffer.
+bool psxgpu_device::gpu_submit_frame( const osd::gpu_readback_rect *rects, int count )
+{
+	osd::gpu_texture_update vram;
+	vram.texture = m_gpu_vram_tex;
+	vram.w = 1024;
+	vram.h = m_vram_height;
+	vram.data = p_vram;
+
+	osd::gpu_frame frame;
+	frame.target.width = n_screenwidth * gpu_scale();
+	frame.target.height = m_vram_height * gpu_scale();
+	frame.target.persistent = true;
+	frame.target.msaa_samples = machine().osd().gpu_render_msaa_samples();
+	frame.target.clear_color[ 3 ] = 1.0f;
+	frame.updates = &vram;
+	frame.update_count = 1;
+	frame.vertices = m_gpu_frame_vertices.data();
+	frame.vertex_count = m_gpu_frame_vertex_count;
+	frame.varyings_per_vertex = PSXGPU_SHADER_VARYINGS;
+	frame.prim_state = m_gpu_frame_state.data();
+	frame.prim_count = (uint32_t)( m_gpu_frame_state.size() / PSXGPU_SHADER_STATE_WORDS );
+	frame.state_stride = PSXGPU_SHADER_STATE_WORDS;
+	frame.commands = m_gpu_frame_commands.data();
+	frame.command_count = (int)m_gpu_frame_commands.size();
+	frame.readbacks = rects;
+	frame.readback_count = count;
+
+	const bool ok = m_gpu_engine->submit_frame( frame );
+	m_gpu_frame_vertices.clear();
+	m_gpu_frame_state.clear();
+	m_gpu_frame_commands.clear();
+	m_gpu_frame_vertex_count = 0;
+	return ok;
+}
+
+// Submits this frame's queued commands (see gpu_build_frame() and the
+// m_gpu_queue comment in psx.h), reads the result back into bitmap, then
+// clears the queue for the next frame. The GPU target itself is NOT
+// cleared per frame (see gpu_submit_frame()) - it models PS1
 // VRAM, which is persistent across frames, matching the original
 // VRAM-scanout path. A game that doesn't fully redraw the visible area
 // every single refresh (common - most games only resubmit what changed,
@@ -2423,70 +2663,7 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 	// meaning VRAM rows 0-479 are all live, not just 0-239.
 	int h = m_vram_height * gpu_scale();
 
-	// One context acquisition for the whole burst below (begin_frame,
-	// every queued call, and the final readback) instead of one per call -
-	// see the begin_batch()/end_batch() comment in retro_gpu_target.h for
-	// why this specific usage (a tight synchronous loop with nothing else
-	// running in between) is safe where holding the context across
-	// multiple *separate* MAME calls was not.
-	m_gpu_render_target->begin_batch();
-	m_gpu_render_target->begin_frame( w, h );
-
-	// Whole-VRAM upload, once per frame, regardless of how many texture
-	// page/CLUT switches this frame's polygons make - see the fragment
-	// shader comment in retro_gpu_target.cpp for why this replaced a
-	// per-texture-page CPU decode (that was 43% of total CPU time in
-	// profiling, more than PS1 CPU emulation itself).
-	m_gpu_render_target->upload_vram( p_vram, 1024, m_vram_height );
-
-	std::vector<osd::gpu_vertex> run;
-	bool run_textured = false;
-	bool run_filterable = true;
-	osd::gpu_blend_mode run_blend = osd::gpu_blend_mode::NONE;
-	auto flush_run = [ this, &run, &run_textured, &run_filterable, &run_blend ]()
-	{
-		if( !run.empty() )
-		{
-			m_gpu_render_target->submit_triangles( run.data(), (int)run.size(), run_textured, run_blend, run_filterable );
-			run.clear();
-		}
-	};
-
-	for( auto &cmd : m_gpu_queue )
-	{
-		switch( cmd.kind )
-		{
-		case gpu_queued_cmd::kind_t::TRIANGLE:
-			if( !run.empty() && ( cmd.textured != run_textured || cmd.blend != run_blend || cmd.filterable != run_filterable ) )
-				flush_run();
-			run_textured = cmd.textured;
-			run_filterable = cmd.filterable;
-			run_blend = cmd.blend;
-			run.push_back( cmd.tri[ 0 ] );
-			run.push_back( cmd.tri[ 1 ] );
-			run.push_back( cmd.tri[ 2 ] );
-			break;
-		case gpu_queued_cmd::kind_t::TEXPARAM:
-			flush_run();
-			m_gpu_render_target->set_texture_page( cmd.tex_tx, cmd.tex_ty, cmd.tex_tp, cmd.tex_clutx, cmd.tex_cluty );
-			break;
-		case gpu_queued_cmd::kind_t::TEXWIN:
-			flush_run();
-			m_gpu_render_target->set_texture_window( cmd.tw_and_u, cmd.tw_and_v, cmd.tw_off_u, cmd.tw_off_v );
-			m_gpu_render_target->set_texture_interleave( cmd.tw_interleave != 0 );
-			break;
-		case gpu_queued_cmd::kind_t::CLIP:
-			flush_run();
-			m_gpu_render_target->set_clip_rect( cmd.clip_x1, cmd.clip_y1, cmd.clip_x2, cmd.clip_y2 );
-			break;
-		case gpu_queued_cmd::kind_t::COPY:
-			flush_run();
-			m_gpu_render_target->copy_rect( cmd.copy_sx, cmd.copy_sy, cmd.copy_dx, cmd.copy_dy, cmd.copy_w, cmd.copy_h );
-			break;
-		}
-	}
-	flush_run();
-	m_gpu_queue.clear();
+	gpu_build_frame();
 
 	// Mirrors update_screen()'s (the software display path, further down in
 	// this file) border/overscan cropping and display_start windowing -
@@ -2506,8 +2683,7 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 	if( ( n_gpustatus & ( 1 << 0x17 ) ) != 0 )
 	{
 		/* display disabled */
-		m_gpu_render_target->end_frame_and_readback( nullptr, 0 );
-		m_gpu_render_target->end_batch();
+		gpu_submit_frame( nullptr, 0 );
 		bitmap.fill( 0 );
 		return 0;
 	}
@@ -2589,8 +2765,7 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 	if( ( n_gpustatus & ( 1 << 0x15 ) ) != 0 )
 	{
 		// The picture comes from p_p_vram, not the render target.
-		m_gpu_render_target->end_frame_and_readback( nullptr, 0 );
-		m_gpu_render_target->end_batch();
+		gpu_submit_frame( nullptr, 0 );
 		if( n_lines > 0 && n_columns > 0 )
 		{
 			int dst_y0 = ( n_y + n_top ) * scale;
@@ -2673,13 +2848,12 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 				}
 			}
 		}
-		m_gpu_render_target->end_frame_and_readback( rects, count );
+		gpu_submit_frame( rects, count );
 	}
 	else
 	{
-		m_gpu_render_target->end_frame_and_readback( nullptr, 0 );
+		gpu_submit_frame( nullptr, 0 );
 	}
-	m_gpu_render_target->end_batch();
 
 	return 0;
 }

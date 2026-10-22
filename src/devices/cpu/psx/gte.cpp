@@ -465,7 +465,7 @@ uint32_t gte::Lm_E( uint32_t result )
 //
 // sz3 (the vertex's raw eye-space depth) is stored as-is for
 // perspective-correct texture/color interpolation - see
-// psxgpu_device::gpu_vertex_xyw() and retro_gpu_target's vertex shader.
+// psxgpu_device::gpu_vertex_xyw() and the PS1 engine vertex layout (gpuengine.h).
 // This never changes any existing register/FLAG value.
 void gte::pgxp_write_shadow( int64_t ir1, int64_t ir2, int32_t sz3 )
 {

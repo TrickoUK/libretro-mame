@@ -5,10 +5,14 @@
     retro_gpu_engine.h
 
     Headless EGL/OpenGL implementation of osd::gpu_engine for the libretro
-    OSD. It owns a private GL 3.3 core context, independent of the
-    frontend's own, and makes it current only inside submit_frame(). See
-    interface/gpuengine.h for the frame model and retro_gpu_target.h for
-    why the context is private.
+    OSD. It owns a private GL 3.3 core context on the surfaceless EGL
+    platform, independent of the frontend's own, and makes it current only
+    inside submit_frame(). The frontend can perform its own EGL work from
+    inside a core call (for example when a resolution change reaches it as
+    SET_SYSTEM_AV_INFO), and keeping a second context current across
+    separately scheduled calls was found to corrupt driver state, so the
+    context is taken and released within one synchronous call. See
+    interface/gpuengine.h for the frame model.
 
     Only compiled when HAVE_RETRO_GPU_TARGET is defined.
 
