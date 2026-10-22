@@ -722,6 +722,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
+      CORE_NAME "_3d_output_scale",
+      "3D Output Scale",
+      NULL,
+      "Sega Model 2. Normally 3D Supersampling renders the 3D layer larger and averages it back down to the native screen size. With this set to 'Match supersampling' the screen is presented at the supersampling size instead (for example 2x of 496x384), so the 3D layer keeps all its extra detail; the 2D layers (tilemaps, sprites, text) are enlarged with sharp pixels. Needs 3D Supersampling set to 2x or higher; it has no effect otherwise. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "native", "Native" },
+         { "match",  "Match supersampling" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
       CORE_NAME "_3d_edge_aa",
       "3D Edge Anti-Aliasing",
       NULL,

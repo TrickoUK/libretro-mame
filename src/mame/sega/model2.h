@@ -154,6 +154,7 @@ protected:
 	std::unique_ptr<raster_state> m_raster;
 	std::unique_ptr<geo_state> m_geo;
 	bitmap_rgb32 m_sys24_bitmap;
+	int m_output_scale = 1;
 	u8 m_gearsel = 0;
 	u8 m_lightgun_mux = 0;
 
@@ -242,6 +243,7 @@ protected:
 	void geo_parse();
 	void render_polygons(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void enlarge_layer(bitmap_rgb32 &bitmap, const bitmap_rgb32 &layer, const rectangle &cliprect, bool opaque);
 	void draw_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
 	void model2_timers(machine_config &config) ATTR_COLD;

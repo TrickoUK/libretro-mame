@@ -206,6 +206,13 @@ public:
 	// native size and averages it down.
 	virtual int supersample() const { return 1; }
 
+	// Output scale of the supersampled 3D layer (see the retro OSD's
+	// mame_3d_output_scale core option): false = average the layer down to
+	// the native screen size, true = present the screen at supersample() times
+	// the native size. Only meaningful when supersample() > 1, and only read
+	// by renderers that can present a larger screen (Sega Model 2 today).
+	virtual bool supersample_output() const { return false; }
+
 	// 3D edge anti-aliasing enhancement (see the retro OSD's mame_3d_edge_aa
 	// core option), for every 3D renderer that supports it (the Voodoo
 	// today): smooths the outlines of 3D geometry at scan-out; false = off

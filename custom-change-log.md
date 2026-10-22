@@ -432,3 +432,10 @@ builds get them straight from here.
 
 ### Round Up 5: no longer flagged as not working
 - The game starts without the "not working" warning screen. It is still marked as having imperfect graphics.
+
+## 2026-10-22
+
+### Sega Model 2: 3D output scale option
+- New core option "3D Output Scale". With 3D Supersampling on and this set to "Match supersampling", Model 2 games show
+  the 3D layer at the supersampled size (992x768 at 2x) instead of averaging it down, so the picture keeps the extra
+  detail. The tilemaps, sprites and text are enlarged with sharp pixels. Off by default.

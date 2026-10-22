@@ -182,6 +182,7 @@ public:
 #endif
 	}
 	virtual int supersample() const override { return supersample_factor; }
+	virtual bool supersample_output() const override { return supersample_output_enable; }
 	virtual bool edge_aa() const override { return edge_aa_enable; }
 	virtual bool texture_filter() const override { return texfilter_enable; }
 	virtual osd::gpu_render_target *get_gpu_render_target() override;

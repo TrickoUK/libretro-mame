@@ -628,6 +628,12 @@ static void check_variables(void)
          supersample_factor = 4;
    }
 
+   var.key   = CORE_NAME "_3d_output_scale";
+   var.value = NULL;
+   supersample_output_enable = false;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      supersample_output_enable = !strcmp(var.value, "match");
+
    var.key   = CORE_NAME "_3d_edge_aa";
    var.value = NULL;
    edge_aa_enable = false;
@@ -1175,6 +1181,15 @@ bool retro_load_game(const struct retro_game_info *info)
    {
       max_width  *= psx_gpu_hle_scale;
       max_height *= psx_gpu_hle_scale;
+   }
+
+   // The 3D output scale option declares the screen at supersample_factor
+   // times its native size; the same pre-scaling keeps those resolutions
+   // within the declared maximum.
+   if (supersample_output_enable && supersample_factor > 1)
+   {
+      max_width  *= supersample_factor;
+      max_height *= supersample_factor;
    }
 
 //FIXME: re-add way to handle OGL

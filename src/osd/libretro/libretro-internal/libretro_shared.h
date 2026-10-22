@@ -150,6 +150,10 @@ extern int psx_gpu_filter_exclude_2d_polygon_mode;
 // that support it (Voodoo texture samples, Konami K001005 render scale),
 // 1 = off (see osdepend.h).
 extern int supersample_factor;
+// mame_3d_output_scale core option: present the supersampled 3D layer at
+// supersample_factor times the native screen size instead of averaging it
+// down (see osdepend.h).
+extern bool supersample_output_enable;
 // mame_3d_edge_aa core option: smooth 3D geometry outlines in the renderers
 // that support it (the Voodoo today, see osdepend.h).
 extern bool edge_aa_enable;

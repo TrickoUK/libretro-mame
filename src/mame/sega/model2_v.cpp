@@ -773,6 +773,24 @@ void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cl
 	bitmap_ind8 &srcfill = m_renderer->fillmap();
 	int const ss = m_renderer->supersample();
 
+	// At the output scale the screen has the supersampled resolution, so opaque texels are copied as they are.
+	if (m_output_scale > 1)
+	{
+		for (int y = cliprect.min_y * ss; y <= (cliprect.max_y + 1) * ss - 1; y++)
+		{
+			u8 const *const fillrow = &srcfill.pix(y);
+			u32 const *const srcrow = &src.pix(y);
+			u32 *const dest = &bitmap.pix(y);
+
+			for (int x = cliprect.min_x * ss; x <= (cliprect.max_x + 1) * ss - 1; x++)
+			{
+				if (fillrow[x])
+					dest[x] = srcrow[x];
+			}
+		}
+		return;
+	}
+
 	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
 	{
 		int const sy0 = y * ss;
@@ -803,6 +821,30 @@ void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cl
 
 			if (count > 0)
 				dest[x] = rgb_t(r / count, g / count, b / count);
+		}
+	}
+}
+
+// Nearest-neighbour enlargement of a native-size layer into the screen bitmap at the output scale.
+// A non-opaque layer leaves the destination untouched where the layer is zero (transparent).
+void model2_state::enlarge_layer(bitmap_rgb32 &bitmap, const bitmap_rgb32 &layer, const rectangle &cliprect, bool opaque)
+{
+	int const scale = m_output_scale;
+
+	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		u32 const *const src = &layer.pix(y);
+
+		for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+		{
+			if (!opaque && !src[x])
+				continue;
+
+			for (int dy = 0; dy < scale; dy++)
+			{
+				u32 *const dest = &bitmap.pix(y * scale + dy);
+				std::fill_n(&dest[x * scale], scale, src[x]);
+			}
 		}
 	}
 }
@@ -2436,6 +2478,17 @@ void model2_state::video_start()
 
 	m_sys24_bitmap.allocate(width, height+4);
 
+	// With the 3D output scale enabled the screen is presented at the supersampling factor times
+	// its native size. The tilemaps and the frame buffer view still draw at native size.
+	if (machine().osd().supersample_output() && model2_supersample_factor(machine()) > 1)
+	{
+		m_output_scale = model2_supersample_factor(machine());
+		rectangle scaled_visarea(visarea.min_x * m_output_scale, (visarea.max_x + 1) * m_output_scale - 1,
+				visarea.min_y * m_output_scale, (visarea.max_y + 1) * m_output_scale - 1);
+		m_screen->configure(m_screen->width() * m_output_scale, m_screen->height() * m_output_scale,
+				scaled_visarea, m_screen->frame_period());
+	}
+
 	m_renderer = std::make_unique<model2_renderer>(*this);
 
 	/* initialize the hardware rasterizer */
@@ -2489,31 +2542,53 @@ u32 model2_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, con
 		}
 	}
 
+	// At the output scale the cliprect is in screen pixels; the layers are drawn at native size.
+	int const scale = m_output_scale;
+	rectangle const native_cliprect(
+			cliprect.min_x / scale, cliprect.max_x / scale,
+			cliprect.min_y / scale, cliprect.max_y / scale);
+	rectangle const &clip = (scale > 1) ? native_cliprect : cliprect;
+
 	//logerror("--- frame ---\n");
 	bitmap.fill(m_palette->pen(0), cliprect);
-	m_sys24_bitmap.fill(0, cliprect);
+	m_sys24_bitmap.fill(0, clip);
 
 	// draw tilemap B as opaque
 	for (int layer = 3; layer >= 2; layer--)
-		m_tiles->draw(screen, m_sys24_bitmap, cliprect, layer << 1, 0, TILEMAP_DRAW_OPAQUE);
+		m_tiles->draw(screen, m_sys24_bitmap, clip, layer << 1, 0, TILEMAP_DRAW_OPAQUE);
 
 	for (int layer = 1; layer >= 0; layer--)
-		m_tiles->draw(screen, m_sys24_bitmap, cliprect, layer << 1, 0, 0);
+		m_tiles->draw(screen, m_sys24_bitmap, clip, layer << 1, 0, 0);
 
-	copybitmap_trans(bitmap, m_sys24_bitmap, 0, 0, 0, 0, cliprect, 0);
+	if (scale > 1)
+		enlarge_layer(bitmap, m_sys24_bitmap, clip, false);
+	else
+		copybitmap_trans(bitmap, m_sys24_bitmap, 0, 0, 0, 0, clip, 0);
 
 	/* tell the rasterizer we're starting a frame */
 	if (m_render_test_mode == true)
-		draw_framebuffer(bitmap, cliprect);
+	{
+		if (scale > 1)
+		{
+			m_sys24_bitmap.fill(0, clip);
+			draw_framebuffer(m_sys24_bitmap, clip);
+			enlarge_layer(bitmap, m_sys24_bitmap, clip, false);
+		}
+		else
+			draw_framebuffer(bitmap, clip);
+	}
 	else
-		render_polygons(bitmap, cliprect);
+		render_polygons(bitmap, clip);
 
-	m_sys24_bitmap.fill(0, cliprect);
+	m_sys24_bitmap.fill(0, clip);
 
 	for (int layer = 3; layer >= 0; layer--)
-		m_tiles->draw(screen, m_sys24_bitmap, cliprect, (layer<<1) | 1, 0, 0);
+		m_tiles->draw(screen, m_sys24_bitmap, clip, (layer<<1) | 1, 0, 0);
 
-	copybitmap_trans(bitmap, m_sys24_bitmap, 0, 0, 0, 0, cliprect, 0);
+	if (scale > 1)
+		enlarge_layer(bitmap, m_sys24_bitmap, clip, false);
+	else
+		copybitmap_trans(bitmap, m_sys24_bitmap, 0, 0, 0, 0, clip, 0);
 
 	return 0;
 }
