@@ -3786,7 +3786,10 @@ s32 voodoo_1_device::triangle()
 			s32 const yo = m_renderer->yorigin();
 			gpu_mark_rows(gpu_buffer, s32(std::floor(flip ? yo + 1 - ymax : ymin)) - 1, s32(std::ceil(flip ? yo + 1 - ymin : ymax)) + 1);
 		}
+		auto const count_start = voodoo::gpu_renderer::profiling() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
 		pixels = m_gpu_parallel ? m_renderer->enqueue_triangle(poly, vert) : m_renderer->count_triangle(vert);
+		if (voodoo::gpu_renderer::profiling())
+			m_gpu->profile_count("count_us", u32(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - count_start).count()));
 		if (voodoo::gpu_renderer::profiling())
 			m_gpu->profile_capture(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prof_start).count());
 	}

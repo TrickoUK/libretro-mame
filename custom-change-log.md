@@ -479,3 +479,8 @@ builds get them straight from here.
   table. Alpha-blended and cut-out textures (billboards, explosions, car reflections, water) use the ARGB4444 and
   ARGB1555 formats and show correctly. Checked on GTI Club 2 over a 90 s attract run (the GPU picture stays within
   about 8/765 of the software one), plus X-Trial Racing, Thrill Drive 2 and Jurassic Park 3 (attract mode). Off by default.
+
+### Konami Viper: GPU path after a save-state load, faster picture copy
+- The host-GPU path now works after a save state is loaded (before, it silently did nothing until the game reset the video mode).
+- The picture copy to the screen is cached between new GPU frames and uses a tighter loop; GTI Club 2 at 2x runs about
+  6-8% faster with the GPU path on (still about 85-91% of software speed).
