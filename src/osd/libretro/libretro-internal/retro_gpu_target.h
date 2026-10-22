@@ -57,7 +57,7 @@ public:
 	virtual void set_texture_interleave(bool interleaved) override;
 	virtual void submit_triangle(const osd::gpu_vertex tri[3], bool textured, osd::gpu_blend_mode blend, bool filterable = true) override;
 	virtual void submit_triangles(const osd::gpu_vertex *verts, int count, bool textured, osd::gpu_blend_mode blend, bool filterable = true) override;
-	virtual void end_frame_and_readback(uint32_t *rgba_out) override;
+	virtual void end_frame_and_readback(const osd::gpu_readback_rect *rects, int count) override;
 	virtual void set_clip_rect(int x1, int y1, int x2, int y2) override;
 	virtual void copy_rect(int sx, int sy, int dx, int dy, int w, int h) override;
 	virtual void begin_batch() override;
@@ -71,6 +71,7 @@ public:
 private:
 	bool init_context();
 	void resize_target(int width, int height);
+	void ensure_flip_target(int width, int height);
 	uint32_t compile_program();
 	void set_blend_mode(osd::gpu_blend_mode blend);
 
@@ -133,6 +134,10 @@ private:
 	uint32_t m_color_rb_ms;
 	uint32_t m_resolve_fbo;
 	uint32_t m_color_tex;
+	uint32_t m_flip_fbo = 0;
+	uint32_t m_flip_tex = 0;
+	int m_flip_width = 0;
+	int m_flip_height = 0;
 	int m_fbo_width;
 	int m_fbo_height;
 
