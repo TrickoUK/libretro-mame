@@ -443,3 +443,7 @@ builds get them straight from here.
 ### PS1 GPU path (Sony ZN, Namco System 10/11/12, Konami GQ/GV, Taito G-NET): loading a save state
 - With the GPU option on, loading a state no longer leaves the picture from before the load on screen. The screen goes
   blank and fills in as the game draws its next frames.
+
+### PS1 GPU path (Sony ZN, Namco System 10/11/12, Konami GQ/GV, Taito G-NET): faster at high resolution
+- The 4x setting runs much faster: a Brave Blade attract scene went from about 28 fps to about 90 fps on the dev PC
+  (uncapped). 2x is also a little faster. The picture is the same as before.
