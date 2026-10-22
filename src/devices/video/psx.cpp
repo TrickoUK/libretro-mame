@@ -693,6 +693,28 @@ void psxgpu_device::psx_gpu_init( int n_gputype )
 void psxgpu_device::device_post_load()
 {
 	updatevisiblearea();
+	gpu_restore_from_vram();
+}
+
+// The GPU target is persistent while only p_vram is saved, so the target
+// holds the pre-load picture after a state load. Commands queued before the
+// load are dropped, the cached target state is forgotten and the next frame
+// replays an opaque black fill of the whole target, leaving the screen blank
+// until the game draws its next frames. Saving does not touch the target.
+void psxgpu_device::gpu_restore_from_vram()
+{
+	if( !gpu_active() )
+		return;
+
+	m_gpu_queue.clear();
+	m_gpu_last_tx = m_gpu_last_ty = m_gpu_last_tp = m_gpu_last_clutx = m_gpu_last_cluty = -1;
+	m_gpu_last_tw_and_u = m_gpu_last_tw_and_v = m_gpu_last_tw_off_u = m_gpu_last_tw_off_v = -1;
+	m_gpu_last_interleave = -1;
+	m_gpu_drawarea_cached = false;
+
+	PAIR black;
+	black.d = 0;
+	gpu_submit_vram_fill_rectangle( 0, 0, n_screenwidth, m_vram_height, black );
 }
 
 uint32_t psxgpu_device::update_screen(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
