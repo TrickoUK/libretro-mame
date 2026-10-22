@@ -34,7 +34,6 @@
 
 #if defined(HAVE_RETRO_GPU_TARGET)
 #include "libretro-internal/retro_gpu_engine.h"
-#include "libretro-internal/retro_gpu_target.h"
 #endif
 
 bool fexists(std::string path)
@@ -317,43 +316,17 @@ void retro_osd_interface::osd_exit()
 
 
 //============================================================
-//  get_gpu_render_target
-//============================================================
-
-osd::gpu_render_target *retro_osd_interface::get_gpu_render_target()
-{
-#if defined(HAVE_RETRO_GPU_TARGET)
-	// mame_psx_gpu_hle core option: user-selected "disabled" means never
-	// construct (or keep returning) a real GPU context, regardless of this
-	// being a HAVE_RETRO_GPU_TARGET build - matches gpu_render_available()
-	// (see its doc comment in osdepend.h) so a caller checking only one of
-	// the two still gets consistent behavior.
-	if (psx_gpu_hle_scale <= 0)
-		return nullptr;
-	if (!m_gpu_render_target)
-	{
-		auto target = std::make_unique<retro_gpu_target>(gpu_render_msaa_samples(), gpu_render_texfilter());
-		if (!target->is_valid())
-			return nullptr;
-		m_gpu_render_target = std::move(target);
-	}
-	return m_gpu_render_target.get();
-#else
-	return nullptr;
-#endif
-}
-
-
-//============================================================
 //  get_gpu_engine
 //============================================================
 
 osd::gpu_engine *retro_osd_interface::get_gpu_engine(const char *system)
 {
 #if defined(HAVE_RETRO_GPU_TARGET)
-	// One engine serves every system. The core option is the enable for all
-	// adapters; an adapter that needs its own switch adds a check on `system`.
-	if (!gpu3d_enable || m_gpu_engine_failed)
+	// One engine serves every system. The PS1 path is enabled by its own
+	// resolution option (mame_psx_gpu_hle); every other system by the
+	// generic mame_3d_gpu option.
+	const bool enabled = (system && !strcmp(system, "ps1")) ? (psx_gpu_hle_scale > 0) : gpu3d_enable;
+	if (!enabled || m_gpu_engine_failed)
 		return nullptr;
 	if (!m_gpu_engine)
 	{
