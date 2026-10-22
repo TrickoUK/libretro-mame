@@ -447,3 +447,8 @@ builds get them straight from here.
 ### PS1 GPU path (Sony ZN, Namco System 10/11/12, Konami GQ/GV, Taito G-NET): faster at high resolution
 - The 4x setting runs much faster: a Brave Blade attract scene went from about 28 fps to about 90 fps on the dev PC
   (uncapped). 2x is also a little faster. The picture is the same as before.
+
+### Sega Model 2: GPU rendering option
+- New core option "3D GPU Rendering" (off by default). The 3D layer is drawn on the host GPU at the 3D Supersampling
+  resolution and matches the software picture closely. It falls back to the software renderer if no GPU context can be
+  created. Checked on Daytona USA, House of the Dead and Virtua Fighter 2 (attract mode).
