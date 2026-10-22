@@ -160,6 +160,9 @@ extern bool edge_aa_enable;
 // mame_3d_texfilter core option: bilinear filter textures in the renderers
 // that support it (the Konami K001005 today, see osdepend.h).
 extern bool texfilter_enable;
+// mame_3d_gpu core option: let systems with a GPU engine adapter render their 3D
+// layer on the host GPU (osd::gpu_engine). Off until an adapter registers the option.
+extern bool gpu3d_enable;
 // mame_steering_response/_smoothing/_input, mame_stick_steering_speed core
 // options: override the fork's gamepad steering Machine Configuration
 // settings (see apply_steering_options() in libretro.cpp). Set when a machine

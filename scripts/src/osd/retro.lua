@@ -129,7 +129,12 @@ project ("osd_" .. _OPTIONS["osd"])
 		files {
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_target.cpp",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_target.h",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.cpp",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.h",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gl_loader.cpp",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gl_loader.h",
 			MAME_DIR .. "src/osd/interface/gpurender.h",
+			MAME_DIR .. "src/osd/interface/gpuengine.h",
 		}
 	end
 

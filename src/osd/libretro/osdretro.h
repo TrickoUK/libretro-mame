@@ -4,6 +4,8 @@
 #include "modules/lib/osdobj_common.h"
 #include "modules/osdmodule.h"
 #include "modules/font/font_module.h"
+#include "interface/gpurender.h"
+#include "interface/gpuengine.h"
 #include <chrono>
 #include <memory>
 
@@ -186,6 +188,7 @@ public:
 	virtual bool edge_aa() const override { return edge_aa_enable; }
 	virtual bool texture_filter() const override { return texfilter_enable; }
 	virtual osd::gpu_render_target *get_gpu_render_target() override;
+	virtual osd::gpu_engine *get_gpu_engine(const char *system) override;
 
 private:
 	virtual void osd_exit() override;
@@ -200,6 +203,8 @@ private:
 	int m_last_click_y;
 
 	std::unique_ptr<osd::gpu_render_target> m_gpu_render_target;
+	std::unique_ptr<osd::gpu_engine> m_gpu_engine;
+	bool m_gpu_engine_failed = false;
 };
 
 //============================================================
