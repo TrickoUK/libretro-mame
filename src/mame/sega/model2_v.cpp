@@ -755,7 +755,7 @@ bool model2_state::gpu_init()
 	return m_gpu_engine != nullptr && !m_gpu_engine->failed();
 }
 
-// Renders the 3D layer on the host GPU into destmap/fillmap. Returns false when the GPU cannot produce the
+// Renders the 3D layer on the host GPU into destmap, with the coverage in alpha. Returns false when the GPU cannot produce the
 // frame; the caller then renders it in software.
 bool model2_state::render_polygons_gpu(const rectangle &ss_cliprect)
 {
@@ -781,12 +781,11 @@ bool model2_state::render_polygons_gpu(const rectangle &ss_cliprect)
 	}
 
 	bitmap_rgb32 &destmap = m_renderer->destmap();
-	bitmap_ind8 &fillmap = m_renderer->fillmap();
 	u32 const prim_count = m_gpu_state.size() / MODEL2_SHADER_STATE_WORDS;
 	if (prim_count == 0)
 	{
 		destmap.fill(0x00000000, ss_cliprect);
-		fillmap.fill(0x00, ss_cliprect);
+		m_layer_from_gpu = true;
 		return true;
 	}
 
@@ -857,7 +856,7 @@ bool model2_state::render_polygons_gpu(const rectangle &ss_cliprect)
 	draw.bindings[2] = m_gpu_xlat;
 	draw.bindings[3] = m_gpu_gamma;
 
-	// The layer is read back into destmap; the coverage in alpha becomes fillmap.
+	// The layer is read back into destmap; the coverage is in alpha.
 	osd::gpu_readback_rect readback;
 	readback.x = ss_cliprect.min_x;
 	readback.y = ss_cliprect.min_y;
@@ -889,13 +888,7 @@ bool model2_state::render_polygons_gpu(const rectangle &ss_cliprect)
 		return false;
 	}
 
-	for (int y = ss_cliprect.min_y; y <= ss_cliprect.max_y; y++)
-	{
-		u32 const *const src = &destmap.pix(y);
-		u8 *const fill = &fillmap.pix(y);
-		for (int x = ss_cliprect.min_x; x <= ss_cliprect.max_x; x++)
-			fill[x] = BIT(src[x], 24, 8) ? 0xff : 0x00;
-	}
+	m_layer_from_gpu = true;
 	return true;
 }
 
@@ -999,6 +992,7 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 		return;
 	}
 
+	m_layer_from_gpu = false;
 	m_renderer->destmap().fill(0x00000000, ss_cliprect);
 	m_renderer->fillmap().fill(0x00, ss_cliprect);
 
@@ -1045,6 +1039,7 @@ void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cl
 	bitmap_rgb32 &src = m_renderer->destmap();
 	bitmap_ind8 &srcfill = m_renderer->fillmap();
 	int const ss = m_renderer->supersample();
+	bool const from_gpu = m_layer_from_gpu;
 
 	// At the output scale the screen has the supersampled resolution, so opaque texels are copied as they are.
 	if (m_output_scale > 1)
@@ -1055,10 +1050,22 @@ void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cl
 			u32 const *const srcrow = &src.pix(y);
 			u32 *const dest = &bitmap.pix(y);
 
-			for (int x = cliprect.min_x * ss; x <= (cliprect.max_x + 1) * ss - 1; x++)
+			// the GPU layer carries its coverage in alpha
+			if (from_gpu)
 			{
-				if (fillrow[x])
-					dest[x] = srcrow[x];
+				for (int x = cliprect.min_x * ss; x <= (cliprect.max_x + 1) * ss - 1; x++)
+				{
+					if (srcrow[x] >> 24)
+						dest[x] = srcrow[x];
+				}
+			}
+			else
+			{
+				for (int x = cliprect.min_x * ss; x <= (cliprect.max_x + 1) * ss - 1; x++)
+				{
+					if (fillrow[x])
+						dest[x] = srcrow[x];
+				}
 			}
 		}
 		return;
@@ -1081,7 +1088,7 @@ void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cl
 
 				for (int sx = 0; sx < ss; sx++)
 				{
-					if (fillrow[sx0 + sx])
+					if (from_gpu ? (srcrow[sx0 + sx] >> 24) != 0 : fillrow[sx0 + sx] != 0)
 					{
 						rgb_t const c(srcrow[sx0 + sx]);
 						r += c.r();
