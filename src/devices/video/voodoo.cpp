@@ -1010,6 +1010,11 @@ void voodoo_1_device::device_start()
 	// create the renderer
 	m_renderer = std::make_unique<voodoo_renderer>(machine(), tmu_config, m_shared->rgb565, m_reg, &m_tmu[0].regs(), BIT(m_chipmask, 2) ? &m_tmu[1].regs() : nullptr);
 
+	// host-GPU path: capture the frame's triangles and fast fills when the OSD
+	// offers a GPU engine
+	if (machine().osd().get_gpu_engine("voodoo") != nullptr)
+		m_gpu_batch = std::make_unique<voodoo::gpu_batch>();
+
 	// texture supersampling enhancement (max NxN per minified pixel, 0 = off),
 	// from the OSD; the MAME_VOODOO_TEXSS environment variable overrides it
 	// for testing
@@ -2344,6 +2349,8 @@ u32 voodoo_1_device::reg_fastfill_w(u32 chipmask, u32 regnum, u32 data)
 	poly.clipbottom = m_reg.clip_bottom();
 	poly.color1 = m_reg.color1().argb();
 	poly.zacolor = m_reg.za_color();
+	if (m_gpu_batch)
+		m_gpu_batch->add_fastfill(poly);
 
 	// 2 pixels per clock
 	return m_renderer->enqueue_fastfill(poly) / 2;
@@ -2644,6 +2651,14 @@ void voodoo_1_device::swap_buffers()
 
 	// keep a history of swap intervals
 	m_reg.update_swap_history(std::min<u8>(m_vblank_count, 15));
+
+	// close the host-GPU batch
+	if (m_gpu_batch)
+	{
+		if (LOG_GPU_BATCH)
+			logerror("gpu batch: %u triangles, %u fast fills, %u dropped, %zu vertices\n", m_gpu_batch->triangle_count(), m_gpu_batch->fastfill_count(), m_gpu_batch->dropped_count(), m_gpu_batch->vertices().size());
+		m_gpu_batch->reset();
+	}
 
 	// rotate the buffers; implementation differs between models
 	rotate_buffers();
@@ -3216,6 +3231,14 @@ s32 voodoo_1_device::triangle()
 	vert[1].y = float(m_reg.by()) * (1.0f / 16.0f);
 	vert[2].x = float(m_reg.cx()) * (1.0f / 16.0f);
 	vert[2].y = float(m_reg.cy()) * (1.0f / 16.0f);
+
+	// capture the triangle for the host-GPU path
+	if (m_gpu_batch)
+	{
+		float const x[3] = { vert[0].x, vert[1].x, vert[2].x };
+		float const y[3] = { vert[0].y, vert[1].y, vert[2].y };
+		m_gpu_batch->add_triangle(poly, poly.raster.fbzmode().y_origin(), m_renderer->yorigin(), x, y);
+	}
 
 	// enqueue a triangle
 	s32 pixels = m_renderer->enqueue_triangle(poly, vert);

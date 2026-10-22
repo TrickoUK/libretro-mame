@@ -1836,6 +1836,8 @@ if VIDEOS["VOODOO"] then
 		MAME_DIR .. "src/devices/video/voodoo_2.h",
 		MAME_DIR .. "src/devices/video/voodoo_banshee.cpp",
 		MAME_DIR .. "src/devices/video/voodoo_banshee.h",
+		MAME_DIR .. "src/devices/video/voodoo_gpu.cpp",
+		MAME_DIR .. "src/devices/video/voodoo_gpu.h",
 		MAME_DIR .. "src/devices/video/voodoo_regs.h",
 		MAME_DIR .. "src/devices/video/voodoo_render.cpp",
 		MAME_DIR .. "src/devices/video/voodoo_render.h",

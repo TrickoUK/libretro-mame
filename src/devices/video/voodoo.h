@@ -44,6 +44,7 @@ static constexpr bool DEBUG_STATS = false;      // \ key to view stats
 
 // logging
 static constexpr bool LOG_VBLANK_SWAP = false;
+static constexpr bool LOG_GPU_BATCH = false;
 static constexpr bool LOG_FIFO = false;
 static constexpr bool LOG_FIFO_VERBOSE = false;
 static constexpr bool LOG_REGISTERS = false;
@@ -63,6 +64,7 @@ static constexpr bool LOG_CMDFIFO_VERBOSE = false;
 // include register and render classes
 #include "voodoo_regs.h"
 #include "voodoo_render.h"
+#include "voodoo_gpu.h"
 
 
 namespace voodoo
@@ -643,6 +645,7 @@ protected:
 	std::unique_ptr<u8[]> m_memory;          // allocated framebuffer/texture memory
 	std::unique_ptr<voodoo::shared_tables> m_shared; // shared tables
 	std::unique_ptr<voodoo::voodoo_renderer> m_renderer; // rendering helper
+	std::unique_ptr<voodoo::gpu_batch> m_gpu_batch;      // host-GPU frame batch (nullptr = software only)
 
 	// edge anti-aliasing enhancement (see compute_edge_aa())
 	void compute_edge_aa();
