@@ -70,6 +70,11 @@ mixed into history.
   overlap was `voodoo_render.cpp`: upstream's static rasterizers for thrild2/gticlub2 (pure added table
   entries, `006f4ade8d4`). Full `-j10` build linked clean. Smoke-tested gticlub2, thrild2, xtrial, jpark3
   (90 s each, `my-docs/out/sync1696`).
+- **Follow-up sync, 2026-10-22**: merge commit `3d38025dee2` merged mamedev master
+  `mame0289-1727-gdddae560fa9` (31 commits); libretro/mame master had nothing new. No conflicts,
+  `arcade.flt` unchanged (validated; the new `rca/nl_studio2.cpp` is a console). `scripts/src/bus.lua`
+  changed, so genie was regenerated directly; full `-j10` build linked clean (119 objects). No smoke tests:
+  the only fork/incoming overlap was `mame.lst`.
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
