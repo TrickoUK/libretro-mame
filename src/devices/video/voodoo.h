@@ -164,6 +164,7 @@ public:
 	// simple getters
 	voodoo_regs &regs() { return m_reg; }
 	bool dirty() const { return m_regdirty; }
+	u8 *ram() const { return m_ram; }
 
 	// simple setters
 	void mark_dirty() { m_regdirty = true; }
@@ -645,7 +646,16 @@ protected:
 	std::unique_ptr<u8[]> m_memory;          // allocated framebuffer/texture memory
 	std::unique_ptr<voodoo::shared_tables> m_shared; // shared tables
 	std::unique_ptr<voodoo::voodoo_renderer> m_renderer; // rendering helper
-	std::unique_ptr<voodoo::gpu_batch> m_gpu_batch;      // host-GPU frame batch (nullptr = software only)
+	// host-GPU path (nullptr = software only)
+	int gpu_buffer_index(u16 const *buffer) const;
+	void gpu_configure();
+	bool gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprect);
+	std::unique_ptr<voodoo::gpu_renderer> m_gpu;
+	std::vector<u32> m_gpu_image;            // front buffer as read back, rgb32
+	u32 m_gpu_seen_serial = ~0U;             // renderer submit serial of m_gpu_image
+	int m_gpu_seen_front = -1;               // front buffer index of m_gpu_image
+	bool m_gpu_compare = false;              // log the difference to the software picture
+	u32 m_gpu_compare_count = 0;
 
 	// edge anti-aliasing enhancement (see compute_edge_aa())
 	void compute_edge_aa();

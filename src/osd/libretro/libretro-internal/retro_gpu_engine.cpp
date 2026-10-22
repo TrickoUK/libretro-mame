@@ -119,9 +119,14 @@ GLenum blend_factor_enum(osd::gpu_blend_factor f)
 	case osd::gpu_blend_factor::SRC_ALPHA:                  return GL_SRC_ALPHA;
 	case osd::gpu_blend_factor::ONE_MINUS_SRC_ALPHA:        return GL_ONE_MINUS_SRC_ALPHA;
 	case osd::gpu_blend_factor::CONSTANT_ALPHA:             return GL_CONSTANT_ALPHA;
-	case osd::gpu_blend_factor::ONE_MINUS_CONSTANT_ALPHA:   break;
+	case osd::gpu_blend_factor::ONE_MINUS_CONSTANT_ALPHA:   return GL_ONE_MINUS_CONSTANT_ALPHA;
+	case osd::gpu_blend_factor::SRC_COLOR:                  return GL_SRC_COLOR;
+	case osd::gpu_blend_factor::ONE_MINUS_SRC_COLOR:        return GL_ONE_MINUS_SRC_COLOR;
+	case osd::gpu_blend_factor::DST_COLOR:                  return GL_DST_COLOR;
+	case osd::gpu_blend_factor::ONE_MINUS_DST_COLOR:        return GL_ONE_MINUS_DST_COLOR;
+	case osd::gpu_blend_factor::SRC_ALPHA_SATURATE:         break;
 	}
-	return GL_ONE_MINUS_CONSTANT_ALPHA;
+	return GL_SRC_ALPHA_SATURATE;
 }
 
 const char *interpolation_qualifier(osd::gpu_varying_mode m)
@@ -426,6 +431,7 @@ osd::gpu_handle retro_gpu_engine::create_shader_module(const osd::gpu_shader_mod
 	m.varying_count = desc.varying_count;
 	std::copy(std::begin(desc.varying_mode), std::end(desc.varying_mode), std::begin(m.varying_mode));
 	m.state_stride = desc.state_stride;
+	m.writes_depth = desc.writes_depth;
 	m.binding_count = desc.binding_count;
 	for (int i = 0; i < desc.binding_count; i++)
 	{
@@ -508,8 +514,10 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 		fs += std::string("uniform ") + sampler_type(m.binding_format[i]) + " " + m.binding_name[i] + ";\n";
 		fs += "ivec2 " + m.binding_name[i] + "_size()\n{\n\treturn textureSize(" + m.binding_name[i] + ", 0);\n}\n";
 	}
+	if (m.writes_depth)
+		fs += "float frag_depth = 0.0;\n";
 	fs += m.source + "\n";
-	fs += "void main()\n{\n\tvec4 c;\n\tif (!shade(c))\n\t\tdiscard;\n\to_color = c;\n}\n";
+	fs += std::string("void main()\n{\n\tvec4 c;\n\tif (!shade(c))\n\t\tdiscard;\n\to_color = c;\n") + (m.writes_depth ? "\tgl_FragDepth = frag_depth;\n" : "") + "}\n";
 
 	program p;
 	GLuint shaders[2] = { 0, 0 };
@@ -921,6 +929,7 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 			}
 
 			apply_blend(c.blend);
+			g_gl.ColorMask(c.color_write, c.color_write, c.color_write, c.color_write);
 			if (target.depth == osd::gpu_depth_mode::ORDER)
 			{
 				g_gl.DepthFunc(GL_LESS);

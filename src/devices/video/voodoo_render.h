@@ -23,6 +23,7 @@ namespace voodoo
 // forward declarations
 struct rasterizer_info;
 struct poly_data;
+class gpu_batch;
 class dither_helper;
 
 // base class for our renderer
@@ -379,6 +380,9 @@ public:
 	// texture-specific color combination unit
 	rgbaint_t combine_texture(voodoo::reg_texture_mode const texmode, rgbaint_t const &c_local, rgbaint_t const &c_other, s32 lod);
 
+	// the host-GPU frame batch reads the decoded texture state
+	friend class gpu_batch;
+
 	// return a write pointer based on the LOD, s/t coordinates, and format
 	u8 *write_ptr(u32 lod, u32 s, u32 t, u32 scale) const
 	{
@@ -541,6 +545,10 @@ public:
 	u32 rowpixels() const { return m_rowpixels; }
 	u16 tmu_config() const { return m_tmu_config; }
 	std::vector<thread_stats_block> &thread_stats() { return m_thread_stats; }
+	u8 const *fogblend() const { return m_fogblend; }
+	u8 const *fogdelta() const { return m_fogdelta; }
+	u8 fogdelta_mask() const { return m_fogdelta_mask; }
+	u8 bilinear_mask() const { return m_bilinear_mask; }
 
 	// simple setters
 	void set_tmu_config(u16 value) { m_tmu_config = value; }

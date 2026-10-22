@@ -73,6 +73,7 @@ private:
 		int varying_count = 0;
 		osd::gpu_varying_mode varying_mode[osd::GPU_MAX_VARYINGS] = {};
 		int state_stride = 0;
+		bool writes_depth = false;
 		int binding_count = 0;
 		std::string binding_name[osd::GPU_MAX_BINDINGS];
 		osd::gpu_texture_format binding_format[osd::GPU_MAX_BINDINGS] = {};
