@@ -640,6 +640,8 @@ static void check_variables(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
       edge_aa_enable = !strcmp(var.value, "enabled");
 
+   // TODO: read the mame_3d_gpu core option into gpu3d_enable once the first engine adapter registers it.
+
    var.key   = CORE_NAME "_3d_texfilter";
    var.value = NULL;
    texfilter_enable = false;

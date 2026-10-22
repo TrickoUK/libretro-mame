@@ -88,6 +88,7 @@ int supersample_factor = 1;
 bool supersample_output_enable = false;
 bool edge_aa_enable = false;
 bool texfilter_enable = false;
+bool gpu3d_enable = false;
 bool steering_options_pending = false;
 
 // emu flags

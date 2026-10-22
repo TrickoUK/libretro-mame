@@ -17,7 +17,6 @@
 
 #include "bitmap.h"
 #include "interface/audio.h"
-#include "interface/gpurender.h"
 #include "interface/midiport.h"
 #include "interface/nethandler.h"
 
@@ -30,7 +29,7 @@
 
 // forward references
 class input_type_entry;
-namespace osd { class midi_input_port; class midi_output_port; }
+namespace osd { class midi_input_port; class midi_output_port; class gpu_render_target; class gpu_engine; }
 namespace ui { class menu_item; }
 
 
@@ -129,6 +128,13 @@ public:
 	// caller only needs this one check.
 	virtual bool gpu_render_available() const { return false; }
 	virtual osd::gpu_render_target *get_gpu_render_target() = 0;
+
+	// Frame-based GPU engine (interface/gpuengine.h). `system` names the
+	// requesting emulated system (for example "model2") so the OSD can apply
+	// that system's enable option. Returns nullptr when the OSD has no engine,
+	// the system's option is off, no GPU context could be created, or the
+	// engine latched to failed; callers keep their software renderer then.
+	virtual osd::gpu_engine *get_gpu_engine(const char *system) { return nullptr; }
 
 	// The resolution multiplier a caller should scale by when
 	// gpu_render_available() is true (e.g. 2 or 4 for 2x/4x internal

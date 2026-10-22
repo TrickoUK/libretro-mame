@@ -33,6 +33,7 @@
 #include "libretro_vfs.h"
 
 #if defined(HAVE_RETRO_GPU_TARGET)
+#include "libretro-internal/retro_gpu_engine.h"
 #include "libretro-internal/retro_gpu_target.h"
 #endif
 
@@ -337,6 +338,36 @@ osd::gpu_render_target *retro_osd_interface::get_gpu_render_target()
 		m_gpu_render_target = std::move(target);
 	}
 	return m_gpu_render_target.get();
+#else
+	return nullptr;
+#endif
+}
+
+
+//============================================================
+//  get_gpu_engine
+//============================================================
+
+osd::gpu_engine *retro_osd_interface::get_gpu_engine(const char *system)
+{
+#if defined(HAVE_RETRO_GPU_TARGET)
+	// One engine serves every system. The core option is the enable for all
+	// adapters; an adapter that needs its own switch adds a check on `system`.
+	if (!gpu3d_enable || m_gpu_engine_failed)
+		return nullptr;
+	if (!m_gpu_engine)
+	{
+		auto engine = std::make_unique<retro_gpu_engine>();
+		if (!engine->is_valid())
+		{
+			m_gpu_engine_failed = true;
+			return nullptr;
+		}
+		m_gpu_engine = std::move(engine);
+	}
+	if (m_gpu_engine->failed())
+		return nullptr;
+	return m_gpu_engine.get();
 #else
 	return nullptr;
 #endif
