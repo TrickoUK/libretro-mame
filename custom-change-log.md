@@ -439,3 +439,7 @@ builds get them straight from here.
 - New core option "3D Output Scale". With 3D Supersampling on and this set to "Match supersampling", Model 2 games show
   the 3D layer at the supersampled size (992x768 at 2x) instead of averaging it down, so the picture keeps the extra
   detail. The tilemaps, sprites and text are enlarged with sharp pixels. Off by default.
+
+### PS1 GPU path (Sony ZN, Namco System 10/11/12, Konami GQ/GV, Taito G-NET): loading a save state
+- With the GPU option on, loading a state no longer leaves the picture from before the load on screen. The screen goes
+  blank and fills in as the game draws its next frames.
