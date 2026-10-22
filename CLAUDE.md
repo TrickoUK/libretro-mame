@@ -1035,6 +1035,13 @@ host `$HOME`.
 distrobox enter mame-dev -- retroarch -v -L /var/home/bazzite/Projects/libretro/mame/mame_libretro.so /var/home/bazzite/Projects/mame-roms/roms/daytona.zip
 ```
 
+- **Stall check for single-game runs.** If one game has been running in RetroArch for more than 4 minutes
+  (a smoke test, a screenshot run, a measurement), stop and check whether the run itself has stalled before
+  waiting longer. Attract mode rarely needs that long, so a long session usually means something went wrong:
+  a shader or GL error repeating in the log, a black or frozen frame, a hung boot, a missing ROM/CHD, a
+  blocked dialog. Look at the log tail and take one screenshot, then kill the run (`pkill -x retroarch`, then
+  check `pgrep -x retroarch` is empty) if it is not making progress. Exceptions: a first G-NET boot (about 4
+  minutes), and runs that are meant to be long (soak tests, profiling windows); say so when starting those.
 - `-v` enables verbose frontend logging — useful while iterating on a HW-render path.
 - This RetroArch's config lives at `~/.config/retroarch/` (native install
   inside the container, shared `$HOME` — so this path is the same whether you
