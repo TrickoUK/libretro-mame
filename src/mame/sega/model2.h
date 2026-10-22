@@ -170,6 +170,7 @@ protected:
 	osd::gpu_engine *m_gpu_engine = nullptr;
 	bool m_gpu_checked = false;
 	bool m_gpu_full_upload = true;
+	bool m_layer_from_gpu = false;      // the 3D layer in destmap holds its coverage in alpha, fillmap is not written
 	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_tex_sheets = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_luma = osd::GPU_NULL_HANDLE;
