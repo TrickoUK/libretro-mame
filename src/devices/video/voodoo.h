@@ -647,17 +647,25 @@ protected:
 	std::unique_ptr<voodoo::shared_tables> m_shared; // shared tables
 	std::unique_ptr<voodoo::voodoo_renderer> m_renderer; // rendering helper
 	// host-GPU path (nullptr = software only)
-	int gpu_buffer_index(u16 const *buffer) const;
+	static constexpr int GPU_SLOTS = 4;
+	bool gpu_shared_memory() const { return m_model == voodoo::voodoo_model::VOODOO_BANSHEE || m_model == voodoo::voodoo_model::VOODOO_3; }
+	int gpu_buffer_index(u16 const *buffer, bool create = false);
+	u32 gpu_slot_offset(int slot) const;
+	u16 *gpu_slot_buffer(int slot) const { return (u16 *)(m_fbram + gpu_slot_offset(slot)); }
+	int gpu_front_slot();
+	void gpu_ram_write(u32 offs, u32 bytes);
+	void gpu_ram_read(u32 offs, u32 bytes);
 	void gpu_sync_down(int buffer, u32 first_row = 0, u32 last_row = 1023);
 	void gpu_mark_rows(int buffer, s32 first_row, s32 last_row);
 	void gpu_sync_up();
 	void gpu_latch(char const *reason);
 	void gpu_configure();
-	bool gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprect);
+	bool gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprect, rgb_t const *pens);
 	std::unique_ptr<voodoo::gpu_renderer> m_gpu;
 	std::vector<u32> m_gpu_image;            // front buffer as read back, rgb32
-	bool m_gpu_shadow_dirty[3] = { };        // the GPU drew into the buffer since m_fbram was last updated from it
-	bool m_gpu_dirty_row[3][1024] = { };     // per row of each buffer, in 16-row groups checked together
+	bool m_gpu_shadow_dirty[GPU_SLOTS] = { };        // the GPU drew into the buffer since m_fbram was last updated from it
+	bool m_gpu_dirty_row[GPU_SLOTS][1024] = { };     // per row of each buffer, in 16-row groups checked together
+	u32 m_gpu_slot_offs[GPU_SLOTS] = { ~0U, ~0U, ~0U, ~0U };  // shared-memory models: RAM offset of the buffer in each slot
 	u32 m_gpu_seen_serial = ~0U;             // renderer submit serial of m_gpu_image
 	int m_gpu_seen_front = -1;               // front buffer index of m_gpu_image
 	bool m_gpu_compare = false;              // log the difference to the software picture

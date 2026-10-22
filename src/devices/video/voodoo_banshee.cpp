@@ -334,6 +334,7 @@ u32 voodoo_banshee_device::read_lfb(offs_t offset, u32 mem_mask)
 	if (addr <= m_fbmask)
 	{
 		m_renderer->wait("read_lfb");
+		gpu_ram_read(addr, 4);
 		u32 result = *(u32 *)&m_fbram[addr];
 		if (LOG_LFB)
 			logerror("%s:read_lfb(%X) = %08X\n", machine().describe_context(), addr, result);
@@ -369,6 +370,7 @@ void voodoo_banshee_device::write_lfb(offs_t offset, u32 data, u32 mem_mask)
 		m_renderer->wait("write_lfb");
 		if (LOG_LFB)
 			logerror("%s:write_lfb(%X) = %08X & %08X\n", machine().describe_context(), addr, data, mem_mask);
+		gpu_ram_write(addr, 4);
 		COMBINE_DATA((u32 *)&m_fbram[addr]);
 	}
 	else
@@ -1085,6 +1087,8 @@ void voodoo_banshee_device::internal_texture_w(offs_t offset, u32 data)
 
 	// wait for any outstanding work to finish
 	m_renderer->wait("internal_texture_w");
+	if (m_gpu)
+		m_gpu->texture_write(0, dest - m_fbram, 4);
 
 	// write the four bytes in little-endian order
 	u32 bytes_per_texel = (texmode.format() < 8) ? 1 : 2;
@@ -1150,6 +1154,8 @@ void voodoo_banshee_device::internal_lfb_direct_w(offs_t offset, u32 data, u32 m
 
 	// wait for any outstanding work to finish
 	m_renderer->wait("internal_lfb_direct_w");
+	if (m_gpu && dest < end)
+		gpu_ram_write(u32(reinterpret_cast<u8 *>(dest) - m_fbram), 4);
 
 	// write to the RGB buffer
 	if (ACCESSING_BITS_0_15 && dest < end)
@@ -1392,6 +1398,7 @@ u32 voodoo_banshee_device::reg_colbufstride_w(u32 chipmask, u32 regnum, u32 data
 		{
 			m_renderer->set_rowpixels(newpix);
 			m_video_changed = true;
+			gpu_configure();
 		}
 	}
 	return 0;
@@ -1585,6 +1592,7 @@ void voodoo_banshee_device::execute_blit(u32 data)
 				logerror("   blit_2d:host_to_screen: %08x -> %08x, %d, %d\n", data, addr, m_blt_dst_x, m_blt_dst_y);
 
 			m_renderer->wait("execute_blit(3)");
+			gpu_ram_write(addr, 4);
 
 			switch (m_blt_dst_bpp)
 			{
@@ -1707,6 +1715,8 @@ void voodoo_banshee_device::screen_to_screen_blit(u32 srcx, u32 srcy)
 		s64 const dstrow = s64(dstbase) + s64(y0 + row) * dststride + s64(x0) * bpp;
 		if (srcrow < 0 || dstrow < 0 || srcrow + span > fbsize || dstrow + span > fbsize)
 			continue;
+		gpu_ram_read(u32(srcrow), span);
+		gpu_ram_write(u32(dstrow), span);
 		u8 const *const s = &m_fbram[srcrow];
 		u8 *const d = &m_fbram[dstrow];
 		if (rop == 0xcc)

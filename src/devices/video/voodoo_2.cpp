@@ -582,6 +582,7 @@ u32 command_fifo::packet_type_5(u32 command)
 				m_device.logerror("  PACKET TYPE 5: FB count=%d dest=%08X bd2=%X bdN=%X\n", count, target, BIT(command, 26, 4), BIT(command, 22, 4));
 
 			m_device.renderer().wait("packet_type_5(0)");
+			m_device.gpu_ram_write((target & m_mask) * 4, count * 4);
 			for (u32 word = 0; word < count; word++)
 				m_ram[target++ & m_mask] = little_endianize_int32(read_next());
 			break;

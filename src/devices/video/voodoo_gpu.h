@@ -125,6 +125,8 @@ public:
 		u8 const *fogdelta;
 		u8 fogdelta_mask;
 		u8 bilinear_mask;
+		rgb_t const *argb1555;      // texel tables, to tell the 16-bit formats apart
+		rgb_t const *argb4444;
 	};
 
 	// the reason a polygon cannot be drawn on the GPU, or nullptr
@@ -234,6 +236,7 @@ private:
 	running_machine &m_machine;
 	osd::gpu_engine *m_engine;
 	bool m_ok = false;
+	bool m_shared_ram = false;              // both TMUs address the same memory
 	bool m_latched = false;                 // an unsupported mode was seen: software only from now on
 	osd::gpu_handle m_module = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_tmu_tex[2] = {};

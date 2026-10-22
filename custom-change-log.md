@@ -472,3 +472,10 @@ builds get them straight from here.
   framebuffer writes) hands the game back to software without a glitch. Voodoo 3 / Banshee boards (Konami Viper) are
   unchanged. Checked on San Francisco Rush and California Speed (attract mode); off by default.
 
+### Konami Viper (3dfx Voodoo 3 / Banshee): GPU rendering option
+- "3D GPU Rendering" now also covers the Viper boards (GTI Club 2, X-Trial Racing, Thrill Drive 2, Jurassic Park 3 and
+  the rest). The frame buffers and textures share one video memory on these chips, so the GPU path follows the buffers
+  by address, keeps the textures in step with every kind of write the game uses, and applies the video output gamma
+  table. Alpha-blended and cut-out textures (billboards, explosions, car reflections, water) use the ARGB4444 and
+  ARGB1555 formats and show correctly. Checked on GTI Club 2 over a 90 s attract run (the GPU picture stays within
+  about 8/765 of the software one), plus X-Trial Racing, Thrill Drive 2 and Jurassic Park 3 (attract mode). Off by default.
