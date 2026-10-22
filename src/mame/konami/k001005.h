@@ -10,7 +10,11 @@
 #include "k001006.h"
 #include "video/rgbutil.h"
 
+#include "interface/gpuengine.h"
+#include "k001005_shader.h"
+
 #include <cfloat>
+#include <vector>
 
 
 struct k001005_polydata
@@ -26,6 +30,14 @@ struct k001005_polydata
 	rgb_t fog_color;
 	uint32_t cmd;
 	bool fog_enable;
+};
+
+// vertex layout of the host-GPU path (see osd/interface/gpuengine.h)
+struct k001005_gpu_vertex
+{
+	float x, y, z, w;
+	uint32_t prim;
+	float v[K001005_SHADER_VARYINGS];
 };
 
 class k001005_renderer : public poly_manager<float, k001005_polydata, 10>
@@ -100,6 +112,31 @@ private:
 	int16_t m_viewport_center_y;
 
 	device_t *m_k001006;
+
+	// host-GPU renderer (see k001005_shader.h); the engine is null when the path is off or has failed
+	struct gpu_run
+	{
+		uint32_t first_vertex;
+		uint32_t vertex_count;
+		bool z_compare;
+		bool fb_blend;
+	};
+
+	bool gpu_init();
+	void gpu_add_polygon(k001005_polydata const &extra, rectangle const &cliprect, bool textured, bool vertex_color, bool is_quad, int v0, int v1, int v2, int v3);
+	void gpu_submit();
+
+	running_machine &m_gpu_machine;
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	bool m_gpu_checked = false;
+	bool m_gpu_full_upload = true;
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tex_rom = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_palette = osd::GPU_NULL_HANDLE;
+	std::unique_ptr<uint32_t []> m_gpu_shadow_palette;
+	std::vector<uint32_t> m_gpu_state;
+	std::vector<k001005_gpu_vertex> m_gpu_vertices;
+	std::vector<gpu_run> m_gpu_runs;
 
 	std::unique_ptr<int[]> m_tex_mirror_table[2][8];
 };

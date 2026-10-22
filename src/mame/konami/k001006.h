@@ -24,6 +24,10 @@ public:
 
 	bool bilinear_enabled() { return m_enable_bilinear; }
 
+	// 8-bit texel pages of 512 x 512, as read by fetch_texel()
+	uint8_t const *texture_pages() const { return m_texrom.get(); }
+	int texture_page_count() const { return m_gfxrom.length() / 0x40000; }
+
 protected:
 	// device-level overrides
 	virtual void device_start() override ATTR_COLD;
