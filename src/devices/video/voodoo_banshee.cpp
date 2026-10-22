@@ -428,6 +428,7 @@ int voodoo_banshee_device::update(bitmap_rgb32 &bitmap, const rectangle &cliprec
 
 		// no longer dirty
 		m_clut_dirty = false;
+		m_pen_generation++;
 		m_video_changed = true;
 	}
 	return update_common(bitmap, cliprect, &m_pen[0]);

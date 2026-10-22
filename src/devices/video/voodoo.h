@@ -668,6 +668,10 @@ protected:
 	u32 m_gpu_slot_offs[GPU_SLOTS] = { ~0U, ~0U, ~0U, ~0U };  // shared-memory models: RAM offset of the buffer in each slot
 	u32 m_gpu_seen_serial = ~0U;             // renderer submit serial of m_gpu_image
 	int m_gpu_seen_front = -1;               // front buffer index of m_gpu_image
+	u32 m_pen_generation = 0;                // changes whenever m_pen is recomputed
+	std::vector<u32> m_gpu_out;              // the finished picture (scaled to the output, through the pens), by bitmap row
+	std::vector<u8> m_gpu_out_valid;         // per bitmap row: m_gpu_out holds the finished row
+	u64 m_gpu_out_key = 0;                   // what m_gpu_out was built from
 	bool m_gpu_compare = false;              // log the difference to the software picture
 	int m_output_scale = 1;                  // the screen is presented at this multiple of the native size
 	bool m_gpu_parallel = false;             // the software renderer still draws every triangle and fill

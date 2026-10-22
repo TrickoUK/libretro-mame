@@ -14,6 +14,7 @@
 
 #include "osdepend.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -561,7 +562,10 @@ void gpu_renderer::texture_write(int tmu, u32 offs, u32 bytes)
 	if (!m_ok)
 		return;
 	if (m_batch.texture_hazard(tmu, offs, bytes) || (m_shared_ram && m_batch.texture_hazard(tmu ^ 1, offs, bytes)))
+	{
+		why("texture hazard");
 		flush();
+	}
 	if (m_shared_ram)
 		tmu = 0;
 	u32 const row0 = offs / 2048;
@@ -590,10 +594,57 @@ void gpu_renderer::invalidate()
 //  the batch
 //-------------------------------------------------
 
+bool gpu_renderer::profiling()
+{
+	static bool const enabled = getenv("MAME_VOODOO_GPU_PROF") != nullptr;
+	return enabled;
+}
+
+void gpu_renderer::profile_report()
+{
+	if (++m_prof.presents % 120)
+		return;
+	profile_data &p = m_prof;
+	double const n = 120;
+	std::string reasons;
+	for (auto const &r : p.reasons)
+		reasons += util::string_format(" %s=%.1f", r.first, r.second / n);
+	std::string const line = util::string_format("Voodoo GPU prof/frame: capture %.2f ms (%.0f tris) | flush build %.2f submit %.2f (upload %.2f draw %.2f readback %.2f) | present CPU %.2f | "
+			"flushes %.1f, tris %.0f, fills %.1f, verts %.0f, states %.0f, draws %.1f, upload %.2f MB, readbacks %.1f |%s\n",
+			p.capture_ms / n, double(p.capture_count) / n, p.build_ms / n, p.submit_ms / n, p.upload_ms / n, p.draw_ms / n, p.readback_ms / n, p.present_ms / n,
+			p.flushes / n, p.triangles / n, p.fills / n, p.vertices / n, p.states / n, p.draws / n, p.uploaded / n / 1048576.0, p.readbacks / n, reasons);
+	// a value other than 1 names a file to append to, which survives a killed run
+	if (char const *path = getenv("MAME_VOODOO_GPU_PROF"); path && strcmp(path, "1"))
+	{
+		if (FILE *f = fopen(path, "a"))
+		{
+			fputs(line.c_str(), f);
+			fclose(f);
+		}
+	}
+	else
+		osd_printf_info("%s", line);
+	p = profile_data();
+	p.presents = 120;
+}
+
 bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count)
 {
 	if (!usable() || m_rowpixels == 0)
 		return false;
+	bool const prof = profiling();
+	auto const t_start = std::chrono::steady_clock::now();
+	auto const ms_since = [] (std::chrono::steady_clock::time_point from) { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - from).count(); };
+	if (prof)
+	{
+		m_prof.reasons[m_why ? m_why : "other"]++;
+		m_prof.flushes++;
+		m_prof.triangles += m_batch.triangle_count();
+		m_prof.fills += m_batch.fastfill_count();
+		m_prof.vertices += m_batch.vertices().size();
+		m_prof.states += m_batch.state().size() / STATE_WORDS;
+	}
+	m_why = nullptr;
 	if (m_batch.unsupported())
 	{
 		latch(m_batch.unsupported());
@@ -815,7 +866,21 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 		frame.readbacks = &readback;
 		frame.readback_count = 1;
 	}
+	double const build_ms = prof ? ms_since(t_start) : 0.0;
+	auto const t_submit = std::chrono::steady_clock::now();
 	bool const ok = m_engine->submit_frame(frame);
+	if (prof)
+	{
+		auto const &st = m_engine->last_frame_stats();
+		m_prof.build_ms += build_ms;
+		m_prof.submit_ms += ms_since(t_submit);
+		m_prof.upload_ms += st.upload_ms;
+		m_prof.draw_ms += st.draw_ms;
+		m_prof.readback_ms += st.readback_ms;
+		m_prof.uploaded += st.uploaded_bytes;
+		m_prof.draws += st.draw_calls;
+		m_prof.readbacks += frame.readback_count;
+	}
 	m_serial++;
 	m_batch.reset();
 	return ok;

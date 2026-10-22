@@ -30,7 +30,9 @@
 
 #include "interface/gpuengine.h"
 
+#include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 
@@ -232,7 +234,24 @@ public:
 	// buffer back as rgb32 (row_count 0 = all rows)
 	bool flush(int read_buffer = -1, u32 *out = nullptr, u32 first_row = 0, u32 row_count = 0);
 
+	// per-stage timers, printed by profile_report() when MAME_VOODOO_GPU_PROF is set in the environment
+	static bool profiling();
+	void why(char const *reason) { m_why = reason; }
+	void profile_capture(double ms) { m_prof.capture_ms += ms; m_prof.capture_count++; }
+	void profile_present(double ms) { m_prof.present_ms += ms; }
+	void profile_count(char const *name, u32 n = 1) { m_prof.reasons[name] += n; }
+	void profile_report();
+
 private:
+	struct profile_data
+	{
+		double capture_ms = 0, build_ms = 0, upload_ms = 0, draw_ms = 0, readback_ms = 0, submit_ms = 0, present_ms = 0;
+		u64 capture_count = 0, flushes = 0, triangles = 0, fills = 0, vertices = 0, states = 0, uploaded = 0, draws = 0, readbacks = 0;
+		std::map<std::string, u32> reasons;
+		u32 presents = 0;
+	};
+	char const *m_why = nullptr;
+	profile_data m_prof;
 	running_machine &m_machine;
 	osd::gpu_engine *m_engine;
 	bool m_ok = false;
