@@ -76,6 +76,17 @@ enum class gpu_blend_mode
 	ADD_QUARTER     // 1.0*back + 0.25*front
 };
 
+// a rectangle of the render target to read back, in top-left-origin
+// target pixels, and the caller-owned buffer receiving it (row 0 = top,
+// matching bitmap_rgb32 convention). stride is the distance between
+// output rows in pixels.
+struct gpu_readback_rect
+{
+	int x = 0, y = 0, w = 0, h = 0;
+	uint32_t *out = nullptr;
+	int stride = 0;
+};
+
 // an independent, headless GPU render target. One instance renders one
 // screen's worth of geometry per frame; not thread-safe, not shared
 // between devices.
@@ -143,10 +154,13 @@ public:
 			submit_triangle(&verts[i], textured, blend, filterable);
 	}
 
-	// finish rendering and read the target back into a caller-owned RGBA8
-	// buffer (width*height*4 bytes, row 0 = top, matching bitmap_rgb32
-	// convention.
-	virtual void end_frame_and_readback(uint32_t *rgba_out) = 0;
+	// finish rendering and read the given rectangles of the target back
+	// into their caller-owned buffers (32-bit pixels laid out as
+	// bitmap_rgb32 stores them, row 0 = top). Rectangles must lie inside
+	// the target and must not wrap; the caller splits a wrapped window
+	// into several rectangles. Only the requested pixels are resolved and
+	// transferred; count may be 0 to just finish the frame.
+	virtual void end_frame_and_readback(const gpu_readback_rect *rects, int count) = 0;
 
 	// restrict subsequent submit_triangle() calls to an inclusive
 	// rectangle in the same target-pixel space as gpu_vertex positions

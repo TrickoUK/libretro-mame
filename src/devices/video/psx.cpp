@@ -2488,10 +2488,6 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 	flush_run();
 	m_gpu_queue.clear();
 
-	std::vector<uint32_t> temp( (size_t)w * h );
-	m_gpu_render_target->end_frame_and_readback( temp.data() );
-	m_gpu_render_target->end_batch();
-
 	// Mirrors update_screen()'s (the software display path, further down in
 	// this file) border/overscan cropping and display_start windowing -
 	// the GPU path previously showed the raw n_screenwidth x n_screenheight
@@ -2510,6 +2506,8 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 	if( ( n_gpustatus & ( 1 << 0x17 ) ) != 0 )
 	{
 		/* display disabled */
+		m_gpu_render_target->end_frame_and_readback( nullptr, 0 );
+		m_gpu_render_target->end_batch();
 		bitmap.fill( 0 );
 		return 0;
 	}
@@ -2590,6 +2588,9 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 	// scale x scale to fill the scaled bitmap.
 	if( ( n_gpustatus & ( 1 << 0x15 ) ) != 0 )
 	{
+		// The picture comes from p_p_vram, not the render target.
+		m_gpu_render_target->end_frame_and_readback( nullptr, 0 );
+		m_gpu_render_target->end_batch();
 		if( n_lines > 0 && n_columns > 0 )
 		{
 			int dst_y0 = ( n_y + n_top ) * scale;
@@ -2639,28 +2640,46 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 		int copy_h = std::min( n_lines * scale, bitmap.height() - dst_y0 );
 		int copy_w = std::min( n_columns * scale, bitmap.width() - dst_x0 );
 
+		// The display window may wrap around the target in both
+		// directions (display start near the end of VRAM); each wrapped
+		// piece is read straight into its place in the bitmap.
+		osd::gpu_readback_rect rects[ 4 ];
+		int count = 0;
 		if( copy_h > 0 && copy_w > 0 )
 		{
+			copy_h = std::min( copy_h, h );
+			copy_w = std::min( copy_w, w );
 			int sx = ( ( src_x0 % w ) + w ) % w;
-			for( int y = 0; y < copy_h; y++ )
+			int sy = ( ( src_y0 % h ) + h ) % h;
+			int first_h = std::min( copy_h, h - sy );
+			int first_w = std::min( copy_w, w - sx );
+			for( int yp = 0; yp < 2; yp++ )
 			{
-				int src_y = ( ( ( src_y0 + y ) % h ) + h ) % h;
-				const uint32_t *src_row = &temp[ (size_t)src_y * w ];
-				uint32_t *dst_row = &bitmap.pix( dst_y0 + y, dst_x0 );
-				if( sx == 0 )
+				int piece_h = yp == 0 ? first_h : copy_h - first_h;
+				int piece_y = yp == 0 ? sy : 0;
+				int dst_y = yp == 0 ? 0 : first_h;
+				for( int xp = 0; xp < 2; xp++ )
 				{
-					memcpy( dst_row, src_row, (size_t)copy_w * sizeof( uint32_t ) );
-				}
-				else
-				{
-					int first_part = std::min( copy_w, w - sx );
-					memcpy( dst_row, src_row + sx, (size_t)first_part * sizeof( uint32_t ) );
-					if( copy_w > first_part )
-						memcpy( dst_row + first_part, src_row, (size_t)( copy_w - first_part ) * sizeof( uint32_t ) );
+					int piece_w = xp == 0 ? first_w : copy_w - first_w;
+					if( piece_h <= 0 || piece_w <= 0 )
+						continue;
+					osd::gpu_readback_rect &r = rects[ count++ ];
+					r.x = xp == 0 ? sx : 0;
+					r.y = piece_y;
+					r.w = piece_w;
+					r.h = piece_h;
+					r.out = &bitmap.pix( dst_y0 + dst_y, dst_x0 + ( xp == 0 ? 0 : first_w ) );
+					r.stride = bitmap.rowpixels();
 				}
 			}
 		}
+		m_gpu_render_target->end_frame_and_readback( rects, count );
 	}
+	else
+	{
+		m_gpu_render_target->end_frame_and_readback( nullptr, 0 );
+	}
+	m_gpu_render_target->end_batch();
 
 	return 0;
 }
