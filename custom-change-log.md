@@ -457,3 +457,8 @@ builds get them straight from here.
 - "3D GPU Rendering" now also covers the K001005 boards (GTI Club, Thunder Hurricane, Hang Pilot, Winding Heat, Midnight Run).
   The 3D layer is drawn on the host GPU at the 3D Supersampling resolution with the same lighting, fog, texture mirroring
   and filtering as the software renderer. Checked on Thunder Hurricane (attract mode), where it looks the same as software.
+
+### SNK Hyper Neo Geo 64: GPU rendering option
+- "3D GPU Rendering" now also covers Hyper Neo Geo 64 (Fatal Fury: Wild Ambition, Xtreme Rally, Beast Busters 2 and the rest).
+  The 3D polygons are drawn on the host GPU at the 3D Supersampling resolution; the palette, fade and blend handling is unchanged.
+  Checked on Fatal Fury: Wild Ambition, Xtreme Rally and Beast Busters 2 (attract mode). Off by default.

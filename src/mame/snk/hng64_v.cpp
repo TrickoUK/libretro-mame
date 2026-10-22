@@ -876,6 +876,8 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 	*/
 
 	// 3d gets drawn next
+	m_poly_renderer->gpu_flush();
+
 	// 3D palette half, same bit as spriteblendtype
 	const u16 palbase = BIT(m_tcram[0x4c / 4], 16) ? 0x800 : 0x000;
 

@@ -1067,6 +1067,8 @@ void hng64_state::clear3d()
 		m_poly_renderer->colorBuffer3d()[i] = 0;
 	}
 
+	m_poly_renderer->gpu_clear();
+
 	m_paletteState3d = 0;
 
 	// Set some matrices to the identity...
@@ -1452,8 +1454,178 @@ void hng64_poly_renderer::render_flat_scanline(s32 scanline, const extent_t& ext
 	}
 }
 
+bool hng64_poly_renderer::gpu_init()
+{
+	if (!m_gpu_checked)
+	{
+		m_gpu_checked = true;
+		m_gpu_engine = m_state.machine().osd().get_gpu_engine("hng64");
+		const int pages = std::min<int>(m_state.m_texturerom.length() / (1024 * 1024), 16);
+		if (m_gpu_engine && (pages == 0 || pages * 1024 > m_gpu_engine->caps().max_texture_size))
+			m_gpu_engine = nullptr;
+		if (m_gpu_engine)
+		{
+			osd::gpu_shader_module module;
+			module.name = "hng64";
+			module.fragment_source = HNG64_FRAGMENT_SOURCE;
+			module.varying_count = HNG64_SHADER_VARYINGS;
+			for (int i = 0; i < HNG64_SHADER_VARYINGS; i++)
+				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+			module.state_stride = HNG64_SHADER_STATE_WORDS;
+			module.binding_count = 1;
+			module.binding_name[0] = "tex_rom";
+			module.binding_format[0] = osd::gpu_texture_format::R8UI;
+			m_gpu_module = m_gpu_engine->create_shader_module(module);
+
+			osd::gpu_texture_desc desc;
+			desc.format = osd::gpu_texture_format::R8UI;
+			desc.width = 1024;
+			desc.height = pages * 1024;
+			m_gpu_tex_rom = m_gpu_engine->create_texture(desc);
+
+			if (!m_gpu_module || !m_gpu_tex_rom)
+				m_gpu_engine = nullptr;
+		}
+	}
+	return m_gpu_engine != nullptr && !m_gpu_engine->failed();
+}
+
+// Queues the triangles of one polygon with the state its scanline routine would have read.
+void hng64_poly_renderer::gpu_add_polygon(polygon *p)
+{
+	const u32 prim = m_gpu_state.size() / HNG64_SHADER_STATE_WORDS;
+	m_gpu_state.insert(m_gpu_state.end(), {
+			u32(p->flatShade ? 1 : 0) | u32(p->tex4bpp ? 2 : 0) | u32(p->blend ? 4 : 0),
+			u32(p->texIndex),
+			u32(p->palOffset),
+			u32(p->texPageSmall),
+			u32(p->colorIndex),
+			u32(p->texscrollx),
+			u32(p->texscrolly),
+			u32(p->tex_mask_x),
+			u32(p->tex_mask_y),
+			0, 0, 0 });
+
+	auto emit = [this, p, prim] (const polyVert &pv)
+	{
+		hng64_gpu_vertex &dst = m_gpu_vertices.emplace_back();
+		dst.x = pv.clipCoords[0];
+		dst.y = pv.clipCoords[1];
+		dst.z = std::clamp(pv.clipCoords[2], 0.0f, 1.0f) * 0.9999f;
+		dst.w = 1.0f;
+		dst.prim = prim;
+		if (p->flatShade)
+		{
+			dst.v[0] = dst.v[1] = dst.v[2] = dst.v[3] = 0.0f;
+		}
+		else
+		{
+			// attributes divided by w, so that they interpolate linearly across the screen
+			const float invw = 1.0f / pv.clipCoords[3];
+			dst.v[0] = invw;
+			dst.v[1] = pv.light * invw;
+			dst.v[2] = pv.texCoords[0] * invw;
+			dst.v[3] = pv.texCoords[1] * invw;
+		}
+	};
+
+	for (int j = 1; j < p->n - 1; j++)
+	{
+		emit(p->vert[0]);
+		emit(p->vert[j]);
+		emit(p->vert[j + 1]);
+	}
+}
+
+// Draws the queued polygons and reads the colour words back into the software colour buffer.
+void hng64_poly_renderer::gpu_flush()
+{
+	if (m_gpu_vertices.empty())
+		return;
+
+	const int size = bufferSize();
+	osd::gpu_texture_update update;
+	int update_count = 0;
+	if (m_gpu_full_upload)
+	{
+		update.texture = m_gpu_tex_rom;
+		update.w = 1024;
+		update.h = std::min<int>(m_state.m_texturerom.length() / (1024 * 1024), 16) * 1024;
+		update.data = &m_state.m_texturerom[0];
+		update.pitch_bytes = 1024;
+		update_count = 1;
+	}
+	m_gpu_full_upload = false;
+
+	osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, 0, m_gpu_vertices.size());
+	draw.bindings[0] = m_gpu_tex_rom;
+	draw.depth_func = osd::gpu_depth_func::LESS;
+	draw.depth_write = true;
+
+	m_gpu_pixels.resize(size * size);
+	osd::gpu_readback_rect readback;
+	readback.x = 0;
+	readback.y = 0;
+	readback.w = size;
+	readback.h = size;
+	readback.out = m_gpu_pixels.data();
+	readback.stride = size;
+
+	osd::gpu_frame frame;
+	frame.target.width = size;
+	frame.target.height = size;
+	frame.target.persistent = true;
+	frame.target.depth = osd::gpu_depth_mode::REAL;
+	frame.target.generation = m_gpu_generation;
+	frame.updates = &update;
+	frame.update_count = update_count;
+	frame.vertices = m_gpu_vertices.data();
+	frame.vertex_count = m_gpu_vertices.size();
+	frame.varyings_per_vertex = HNG64_SHADER_VARYINGS;
+	frame.prim_state = m_gpu_state.data();
+	frame.prim_count = m_gpu_state.size() / HNG64_SHADER_STATE_WORDS;
+	frame.state_stride = HNG64_SHADER_STATE_WORDS;
+	frame.commands = &draw;
+	frame.command_count = 1;
+	frame.readbacks = &readback;
+	frame.readback_count = 1;
+	if (m_gpu_engine->submit_frame(frame))
+	{
+		// red holds the low byte of the colour word and green the high byte
+		u16 *const colorBuffer = m_colorBuffer3d.get();
+		for (int i = 0; i < size * size; i++)
+		{
+			const u32 pixel = m_gpu_pixels[i];
+			colorBuffer[i] = ((pixel >> 16) & 0xff) | (((pixel >> 8) & 0xff) << 8);
+		}
+	}
+	else
+	{
+		// the texture ROM may not have reached the GPU, and the target no longer matches the colour buffer
+		m_gpu_full_upload = true;
+		m_gpu_generation++;
+	}
+
+	m_gpu_state.clear();
+	m_gpu_vertices.clear();
+}
+
+// The buffers were cleared: forget queued polygons and have the GPU buffers cleared with the next frame.
+void hng64_poly_renderer::gpu_clear()
+{
+	m_gpu_state.clear();
+	m_gpu_vertices.clear();
+	m_gpu_generation++;
+}
+
 void hng64_poly_renderer::drawShaded(polygon *p)
 {
+	if (gpu_init())
+	{
+		gpu_add_polygon(p);
+		return;
+	}
+
 	// Polygon information for the rasterizer
 	hng64_poly_data rOptions;
 	rOptions.tex4bpp = p->tex4bpp;
