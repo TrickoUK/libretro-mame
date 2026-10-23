@@ -749,6 +749,7 @@ bool model2_state::gpu_init()
 				m_gpu_shadow_tex = make_unique_clear<u16[]>(512 * 2048);
 				m_gpu_shadow_luma = make_unique_clear<u8[]>(0x8000);
 				m_gpu_shadow_xlat = make_unique_clear<u16[]>(0xc000 / 2);
+				m_gpu_layer.allocate(512, 512);
 			}
 		}
 	}
@@ -782,11 +783,18 @@ bool model2_state::gpu_layer_submit(const rectangle &ss_cliprect)
 		}
 	}
 
-	bitmap_rgb32 &destmap = m_renderer->destmap();
+	// Without an output scale the GPU averages the covered samples down to the native size.
+	bool const native = (m_output_scale == 1);
+	bitmap_rgb32 &destmap = native ? m_gpu_layer : m_renderer->destmap();
+	int const ss = m_renderer->supersample();
+	rectangle const out_cliprect = native ?
+			rectangle(ss_cliprect.min_x / ss, (ss_cliprect.max_x + 1) / ss - 1, ss_cliprect.min_y / ss, (ss_cliprect.max_y + 1) / ss - 1) :
+			ss_cliprect;
 	u32 const prim_count = m_gpu_state.size() / MODEL2_SHADER_STATE_WORDS;
 	if (prim_count == 0)
 	{
-		destmap.fill(0x00000000, ss_cliprect);
+		destmap.fill(0x00000000, out_cliprect);
+		m_layer_native = native;
 		m_layer_from_gpu = true;
 		m_gpu_layer_ready = true;
 		return true;
@@ -859,18 +867,23 @@ bool model2_state::gpu_layer_submit(const rectangle &ss_cliprect)
 	draw.bindings[2] = m_gpu_xlat;
 	draw.bindings[3] = m_gpu_gamma;
 
-	// The layer is read back into destmap; the coverage is in alpha.
+	// The layer is read back into destmap, or averaged into m_gpu_layer; the coverage is in alpha.
 	osd::gpu_readback_rect readback;
 	readback.x = ss_cliprect.min_x;
 	readback.y = ss_cliprect.min_y;
 	readback.w = ss_cliprect.width();
 	readback.h = ss_cliprect.height();
-	readback.out = &destmap.pix(ss_cliprect.min_y, ss_cliprect.min_x);
+	readback.out = &destmap.pix(out_cliprect.min_y, out_cliprect.min_x);
 	readback.stride = destmap.rowpixels();
+	if (native)
+	{
+		readback.downsample = ss;
+		readback.coverage = true;
+	}
 
 	osd::gpu_frame frame;
-	frame.target.width = destmap.width();
-	frame.target.height = destmap.height();
+	frame.target.width = m_renderer->destmap().width();
+	frame.target.height = m_renderer->destmap().height();
 	frame.target.depth = osd::gpu_depth_mode::ORDER;
 	frame.updates = updates;
 	frame.update_count = update_count;
@@ -892,6 +905,7 @@ bool model2_state::gpu_layer_submit(const rectangle &ss_cliprect)
 		return false;
 	}
 
+	m_layer_native = native;
 	m_gpu_layer_pending = true;
 	return true;
 }
@@ -1064,6 +1078,23 @@ void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cl
 	bitmap_ind8 &srcfill = m_renderer->fillmap();
 	int const ss = m_renderer->supersample();
 	bool const from_gpu = m_layer_from_gpu;
+
+	// The GPU has already averaged the covered samples to the native size.
+	if (from_gpu && m_layer_native)
+	{
+		for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+		{
+			u32 const *const srcrow = &m_gpu_layer.pix(y);
+			u32 *const dest = &bitmap.pix(y);
+
+			for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+			{
+				if (srcrow[x] >> 24)
+					dest[x] = srcrow[x];
+			}
+		}
+		return;
+	}
 
 	// At the output scale the screen has the supersampled resolution, so opaque texels are copied as they are.
 	if (m_output_scale > 1)

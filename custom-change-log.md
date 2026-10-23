@@ -502,3 +502,9 @@ builds get them straight from here.
   Hyper Neo Geo 64 now reads its 16-bit colour words straight from the GPU. Measured with the screen at native size and
   4x supersampling: Model 2 (Daytona USA) about 3% faster, Operation Thunder Hurricane about 1% faster (23% faster than software),
   Xtreme Rally unchanged (limited by the CPU composite, same speed as software).
+
+### Model 2: GPU path averages the supersampled layer on the GPU
+- With 3D GPU Rendering on and the screen at native size, the supersampled 3D layer is averaged down to the screen size on
+  the GPU (only the pixels a polygon covers count, as before) and read at screen size, instead of reading the full
+  supersampled image and averaging it on the CPU. The picture is pixel-identical (checked on Daytona USA at 4x over
+  four frames). Daytona USA at 4x supersampling runs at about 1.50x real time instead of 1.04x on this machine.

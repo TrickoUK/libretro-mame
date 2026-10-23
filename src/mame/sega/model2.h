@@ -172,7 +172,9 @@ protected:
 	bool m_gpu_full_upload = true;
 	bool m_gpu_layer_pending = false;   // a layer was submitted at the start of screen_update() and not collected
 	bool m_gpu_layer_ready = false;     // the GPU layer is already in destmap (no polygons)
-	bool m_layer_from_gpu = false;      // the 3D layer in destmap holds its coverage in alpha, fillmap is not written
+	bool m_layer_from_gpu = false;      // the 3D layer holds its coverage in alpha, fillmap is not written
+	bool m_layer_native = false;        // the GPU layer was averaged to native size into m_gpu_layer, destmap is not written
+	bitmap_rgb32 m_gpu_layer;           // native-size GPU layer, zero where no polygon covers the pixel
 	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_tex_sheets = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_luma = osd::GPU_NULL_HANDLE;

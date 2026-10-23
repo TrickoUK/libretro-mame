@@ -903,13 +903,20 @@ bool retro_gpu_engine::ensure_output_program()
 			"out vec4 o_color;\n"
 			"void main()\n{\n"
 			"\tivec2 base = ivec2(gl_FragCoord.xy) * u_ds;\n"
-			"\tvec4 sum = vec4(0.0);\n"
-			"\tfor (int y = 0; y < u_ds; y++)\n\t\tfor (int x = 0; x < u_ds; x++)\n\t\t\tsum += texelFetch(u_src, base + ivec2(x, y), 0);\n"
-			"\tivec4 v = ivec4(sum * 255.0 + 0.5) / (u_ds * u_ds);\n"
+			"\tivec4 sum = ivec4(0);\n"
+			"\tint count = 0;\n"
+			"\tfor (int y = 0; y < u_ds; y++)\n\t{\n"
+			"\t\tfor (int x = 0; x < u_ds; x++)\n\t\t{\n"
+			"\t\t\tivec4 t = ivec4(texelFetch(u_src, base + ivec2(x, y), 0) * 255.0 + 0.5);\n"
+			"\t\t\tif ((u_flags & 4) == 0 || t.a != 0)\n\t\t\t{\n"
+			"\t\t\t\tsum += t;\n\t\t\t\tcount++;\n"
+			"\t\t\t}\n\t\t}\n\t}\n"
+			"\tivec4 v = (count > 0) ? (sum / count) : ivec4(0);\n"
 			"\tif ((u_flags & 1) != 0)\n\t{\n"
 			"\t\tv.r = u_lut[v.r >> 3];\n\t\tv.g = u_lut[32 + (v.g >> 2)];\n\t\tv.b = u_lut[96 + (v.b >> 3)];\n"
 			"\t}\n"
 			"\tif ((u_flags & 2) != 0)\n\t\tv.a = 255;\n"
+			"\tif ((u_flags & 4) != 0)\n\t\tv.a = (count > 0) ? 255 : 0;\n"
 			"\tvec4 c = vec4(v) / 255.0;\n"
 			"\to_color = c;\n}\n";
 
@@ -1016,7 +1023,7 @@ void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r, void *dest, 
 	g_gl.ColorMask(1, 1, 1, 1);
 	g_gl.UseProgram(m_op_program);
 	g_gl.Uniform1i(m_op_u_ds, ds);
-	g_gl.Uniform1i(m_op_u_flags, (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0));
+	g_gl.Uniform1i(m_op_u_flags, (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0) | (r.coverage ? 4 : 0));
 	if (r.channel_lut)
 	{
 		GLint lut[128];
