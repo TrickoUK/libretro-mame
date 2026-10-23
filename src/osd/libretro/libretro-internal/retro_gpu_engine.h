@@ -137,6 +137,16 @@ private:
 	uint32_t m_vao = 0;
 	uint32_t m_vbo = 0;
 
+	// GPU timer query over the command loop, only when timers are enabled
+	bool m_timers = false;
+	uint32_t m_query = 0;
+	bool m_query_pending = false;
+	double m_last_gpu_ms = 0.0;
+
+	void poll_gpu_timer(bool wait);
+	bool valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg);
+	void do_readback(const osd::gpu_readback_rect &r);
+
 	int m_problem_count = 0;
 };
 

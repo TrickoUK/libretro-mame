@@ -190,6 +190,13 @@ typedef void (*PFNGLDELETEVERTEXARRAYSPROC)(GLsizei, const GLuint *);
 typedef void (*PFNGLUNIFORM1FPROC)(GLint, GLfloat);
 typedef void (*PFNGLUNIFORM2IPROC)(GLint, GLint, GLint);
 typedef void (*PFNGLGETINTEGERVPROC)(GLenum, GLint *);
+typedef void (*PFNGLGENQUERIESPROC)(GLsizei, GLuint *);
+typedef void (*PFNGLDELETEQUERIESPROC)(GLsizei, const GLuint *);
+typedef void (*PFNGLBEGINQUERYPROC)(GLenum, GLuint);
+typedef void (*PFNGLENDQUERYPROC)(GLenum);
+typedef void (*PFNGLGETQUERYOBJECTUI64VPROC)(GLuint, GLenum, uint64_t *);
+typedef void (*PFNGLGETQUERYOBJECTIVPROC)(GLuint, GLenum, GLint *);
+typedef void (*PFNGLFLUSHPROC)(void);
 #define GL_VENDOR 0x1F00
 #define GL_RENDERER 0x1F01
 #define GL_VERSION 0x1F02
@@ -236,6 +243,9 @@ typedef void (*PFNGLGETINTEGERVPROC)(GLenum, GLint *);
 #define GL_NO_ERROR 0
 #define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
 #define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#define GL_TIME_ELAPSED 0x88BF
+#define GL_QUERY_RESULT 0x8866
+#define GL_QUERY_RESULT_AVAILABLE 0x8867
 
 
 namespace retro_gl {
@@ -309,6 +319,13 @@ struct gl_dispatch
 	PFNGLUNIFORM1FPROC Uniform1f = nullptr;
 	PFNGLUNIFORM2IPROC Uniform2i = nullptr;
 	PFNGLGETINTEGERVPROC GetIntegerv = nullptr;
+	PFNGLGENQUERIESPROC GenQueries = nullptr;
+	PFNGLDELETEQUERIESPROC DeleteQueries = nullptr;
+	PFNGLBEGINQUERYPROC BeginQuery = nullptr;
+	PFNGLENDQUERYPROC EndQuery = nullptr;
+	PFNGLGETQUERYOBJECTUI64VPROC GetQueryObjectui64v = nullptr;
+	PFNGLGETQUERYOBJECTIVPROC GetQueryObjectiv = nullptr;
+	PFNGLFLUSHPROC Flush = nullptr;
 };
 
 struct egl_dispatch

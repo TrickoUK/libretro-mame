@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -240,6 +241,10 @@ bool retro_gpu_engine::init_context()
 	g_gl.GenVertexArrays(1, &m_vao);
 	g_gl.GenBuffers(1, &m_vbo);
 
+	m_timers = (std::getenv("MAME_GPU_PROF") != nullptr) || (std::getenv("MAME_VOODOO_GPU_PROF") != nullptr);
+	if (m_timers)
+		g_gl.GenQueries(1, &m_query);
+
 	fprintf(stderr, "[retro_gpu_engine] initialized: %s / %s / %s\n",
 			(const char *)g_gl.GetString(GL_VENDOR), m_renderer.c_str(), version ? version : "?");
 	return true;
@@ -268,6 +273,8 @@ void retro_gpu_engine::shutdown()
 				g_gl.DeleteBuffers(1, &m_vbo);
 			if (m_vao)
 				g_gl.DeleteVertexArrays(1, &m_vao);
+			if (m_query)
+				g_gl.DeleteQueries(1, &m_query);
 		}
 	}
 	m_textures.clear();
@@ -821,6 +828,10 @@ bool retro_gpu_engine::validate_frame(const osd::gpu_frame &frame)
 			if (!validate_update(c.update))
 				return false;
 			break;
+		case osd::gpu_command_type::READBACK:
+			if (!valid_readback(c.readback, tg))
+				return false;
+			break;
 		case osd::gpu_command_type::SET_CLIP:
 		case osd::gpu_command_type::CLEAR:
 			break;
@@ -828,15 +839,53 @@ bool retro_gpu_engine::validate_frame(const osd::gpu_frame &frame)
 	}
 
 	for (int i = 0; i < frame.readback_count; i++)
-	{
-		const osd::gpu_readback_rect &r = frame.readbacks[i];
-		if (!r.out || r.w <= 0 || r.h <= 0 || r.x < 0 || r.y < 0 || r.x + r.w > tg.width || r.y + r.h > tg.height || r.stride < r.w)
-		{
-			log_problem("readback", "rectangle outside the target or bad buffer");
+		if (!valid_readback(frame.readbacks[i], tg))
 			return false;
-		}
+	return true;
+}
+
+bool retro_gpu_engine::valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg)
+{
+	if (!r.out || r.w <= 0 || r.h <= 0 || r.x < 0 || r.y < 0 || r.x + r.w > tg.width || r.y + r.h > tg.height || r.stride < r.w)
+	{
+		log_problem("readback", "rectangle outside the target or bad buffer");
+		return false;
 	}
 	return true;
+}
+
+// Reads the finished timer query, if any. With wait false a result that has not arrived is left for later.
+void retro_gpu_engine::poll_gpu_timer(bool wait)
+{
+	if (!m_query_pending)
+		return;
+	GLint available = 0;
+	g_gl.GetQueryObjectiv(m_query, GL_QUERY_RESULT_AVAILABLE, &available);
+	if (!available && !wait)
+		return;
+	uint64_t ns = 0;
+	g_gl.GetQueryObjectui64v(m_query, GL_QUERY_RESULT, &ns);
+	m_last_gpu_ms = double(ns) * 1e-6;
+	m_query_pending = false;
+}
+
+// Reads one target rectangle into the caller's buffer. A multisampled target is resolved for that rectangle first.
+void retro_gpu_engine::do_readback(const osd::gpu_readback_rect &r)
+{
+	if (m_resolve_fbo)
+	{
+		g_gl.BindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
+		g_gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, m_resolve_fbo);
+		g_gl.BlitFramebuffer(r.x, r.y, r.x + r.w, r.y + r.h, r.x, r.y, r.x + r.w, r.y + r.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_resolve_fbo);
+	}
+	else
+		g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+	g_gl.PixelStorei(GL_PACK_ALIGNMENT, 4);
+	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, r.stride);
+	g_gl.ReadPixels(r.x, r.y, r.w, r.h, GL_BGRA, GL_UNSIGNED_BYTE, r.out);
+	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, 0);
+	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
 }
 
 bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
@@ -854,6 +903,14 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 		return false;
 
 	while (g_gl.GetError() != GL_NO_ERROR) { }
+
+	// result of an earlier frame's query that was still running when it returned
+	if (m_timers && m_query_pending)
+	{
+		poll_gpu_timer(false);
+		if (!m_query_pending)
+			m_stats.gpu_ms = m_last_gpu_ms;
+	}
 
 	const auto upload_start = clock_type::now();
 	osd::gpu_target_desc target = frame.target;
@@ -898,6 +955,11 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 	const float order_scale = 1.0f / float(frame.prim_count + 1);
 	const int rec_texels = std::max(1, (frame.state_stride + 3) / 4);
 
+	bool scissor_on = false;
+	const bool timing = m_timers && !m_query_pending;
+	if (timing)
+		g_gl.BeginQuery(GL_TIME_ELAPSED, m_query);
+
 	for (int i = 0; i < frame.command_count; i++)
 	{
 		const osd::gpu_command &c = frame.commands[i];
@@ -909,7 +971,11 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 				break;
 			const program *p = get_program(c.module, c.variant);
 			if (!p)
+			{
+				if (timing)
+					g_gl.EndQuery(GL_TIME_ELAPSED);
 				return false;
+			}
 			const module &m = m_modules.find(c.module)->second;
 
 			g_gl.UseProgram(p->gl_id);
@@ -960,6 +1026,7 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 				g_gl.Scissor(x1, y1, x2 - x1, y2 - y1);
 			}
 			g_gl.Enable(GL_SCISSOR_TEST);
+			scissor_on = true;
 			break;
 
 		case osd::gpu_command_type::COPY_RECT:
@@ -973,6 +1040,17 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 		case osd::gpu_command_type::UPDATE_TEXTURE:
 			apply_update(c.update);
 			break;
+
+		case osd::gpu_command_type::READBACK:
+		{
+			const auto rb_start = clock_type::now();
+			g_gl.Disable(GL_SCISSOR_TEST);
+			do_readback(c.readback);
+			if (scissor_on)
+				g_gl.Enable(GL_SCISSOR_TEST);
+			m_stats.readback_ms += elapsed_ms(rb_start);
+			break;
+		}
 
 		case osd::gpu_command_type::CLEAR:
 		{
@@ -997,29 +1075,32 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 		}
 	}
 	g_gl.Disable(GL_SCISSOR_TEST);
-	g_gl.Finish();
-	m_stats.draw_ms = elapsed_ms(draw_start);
-
-	const auto read_start = clock_type::now();
-	for (int i = 0; i < frame.readback_count; i++)
+	if (timing)
 	{
-		const osd::gpu_readback_rect &r = frame.readbacks[i];
-		if (m_resolve_fbo)
-		{
-			g_gl.BindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
-			g_gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, m_resolve_fbo);
-			g_gl.BlitFramebuffer(r.x, r.y, r.x + r.w, r.y + r.h, r.x, r.y, r.x + r.w, r.y + r.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-			g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_resolve_fbo);
-		}
-		else
-			g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-		g_gl.PixelStorei(GL_PACK_ALIGNMENT, 4);
-		g_gl.PixelStorei(GL_PACK_ROW_LENGTH, r.stride);
-		g_gl.ReadPixels(r.x, r.y, r.w, r.h, GL_BGRA, GL_UNSIGNED_BYTE, r.out);
+		g_gl.EndQuery(GL_TIME_ELAPSED);
+		m_query_pending = true;
 	}
-	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, 0);
-	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-	m_stats.readback_ms = elapsed_ms(read_start);
+	// A frame that reads nothing back is not waited for. The commands are flushed (the context
+	// release would do it too) and the GPU works on while emulation continues.
+	const bool waits = frame.readback_count > 0;
+	if (waits)
+		g_gl.Finish();
+	else
+		g_gl.Flush();
+	m_stats.draw_ms = elapsed_ms(draw_start) - m_stats.readback_ms;
+	if (timing && waits)
+	{
+		poll_gpu_timer(true);
+		m_stats.gpu_ms = m_last_gpu_ms;
+	}
+
+	if (frame.readback_count > 0)
+	{
+		const auto read_start = clock_type::now();
+		for (int i = 0; i < frame.readback_count; i++)
+			do_readback(frame.readbacks[i]);
+		m_stats.readback_ms += elapsed_ms(read_start);
+	}
 
 	const GLenum error = g_gl.GetError();
 	if (error != GL_NO_ERROR)

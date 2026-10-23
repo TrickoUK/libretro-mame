@@ -3483,7 +3483,8 @@ bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprec
 	{
 		m_gpu_image.resize(size_t(rowpixels) * scale * rows * scale);
 		m_gpu->why("present");
-		if (!m_gpu->flush(front, m_gpu_image.data()))
+		bool const read_first = !m_gpu->batch().commands().empty() && !m_gpu->batch_writes_buffer(front);
+		if (!m_gpu->flush(front, m_gpu_image.data(), 0, 0, read_first))
 			return false;
 		m_gpu_seen_serial = m_gpu->serial();
 		m_gpu_seen_front = front;

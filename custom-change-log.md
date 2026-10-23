@@ -484,3 +484,10 @@ builds get them straight from here.
 - The host-GPU path now works after a save state is loaded (before, it silently did nothing until the game reset the video mode).
 - The picture copy to the screen is cached between new GPU frames and uses a tighter loop; GTI Club 2 at 2x runs about
   6-8% faster with the GPU path on (still about 85-91% of software speed).
+
+## 2026-10-23
+
+### Konami Viper: GPU path no longer waits for the GPU draw
+- With 3D GPU Rendering on, the emulation no longer stalls while the GPU draws a frame; the finished picture is read
+  first and the new frame's drawing runs on the GPU while the game keeps going. The picture is unchanged and shown at
+  the same time as before. GTI Club 2 at 2x runs about 8% faster on the GPU path (about 85-97% of software speed).

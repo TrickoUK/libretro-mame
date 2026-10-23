@@ -87,6 +87,8 @@ bool load_gl_dispatch()
 	LOAD_GL(DeleteTextures); LOAD_GL(DeleteBuffers); LOAD_GL(DeleteProgram); LOAD_GL(DeleteShader);
 	LOAD_GL(DeleteFramebuffers); LOAD_GL(DeleteRenderbuffers); LOAD_GL(DeleteVertexArrays);
 	LOAD_GL(Uniform1f); LOAD_GL(Uniform2i); LOAD_GL(GetIntegerv);
+	LOAD_GL(GenQueries); LOAD_GL(DeleteQueries); LOAD_GL(BeginQuery); LOAD_GL(EndQuery);
+	LOAD_GL(GetQueryObjectui64v); LOAD_GL(GetQueryObjectiv); LOAD_GL(Flush);
 #undef LOAD_GL
 	return true;
 }

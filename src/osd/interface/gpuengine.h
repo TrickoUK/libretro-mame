@@ -29,9 +29,13 @@
       produce the frame (no context, a shader that does not compile, a
       bad frame description). The device then renders the frame in
       software and stops submitting once failed() is true.
-    - Submission is synchronous. The engine makes its GPU context current
-      only inside submit_frame() and releases it before returning, so it
-      never stays current across separately scheduled emulator calls.
+    - The engine makes its GPU context current only inside submit_frame()
+      and releases it before returning, so it never stays current across
+      separately scheduled emulator calls. A frame with read-backs (at the
+      end, or READBACK commands) returns with their pixels written; a frame
+      without any returns once its commands are issued, and the GPU executes
+      them while emulation runs. Later work on the same engine is ordered
+      after it.
 
     Vertex layout (gpu_frame::vertices), per vertex, tightly packed:
         float x, y   target pixels, (0,0) = top-left of the target
@@ -173,7 +177,8 @@ enum class gpu_command_type : uint8_t
 	SET_CLIP,       // scissor rectangle (x, y, w, h), top-left origin; persists until changed
 	COPY_RECT,      // copy (x, y, w, h) to (dx, dy) inside the target, ignoring the clip
 	UPDATE_TEXTURE, // replace a texture rectangle at this point of the frame
-	CLEAR           // clear the whole target, ignoring the clip
+	CLEAR,          // clear the whole target, ignoring the clip
+	READBACK        // read a target rectangle back at this point of the frame (waits for the commands before it)
 };
 
 struct gpu_command
@@ -202,6 +207,9 @@ struct gpu_command
 	float clear_color[4] = {};
 	bool clear_color_enable = true;
 	bool clear_depth_enable = true;
+
+	// READBACK
+	gpu_readback_rect readback;
 
 	static gpu_command make_draw(gpu_handle module, uint32_t first_vertex, uint32_t vertex_count)
 	{
@@ -237,6 +245,14 @@ struct gpu_command
 		return c;
 	}
 
+	static gpu_command make_readback(const gpu_readback_rect &r)
+	{
+		gpu_command c;
+		c.type = gpu_command_type::READBACK;
+		c.readback = r;
+		return c;
+	}
+
 	static gpu_command make_clear(float r, float g, float b, float a)
 	{
 		gpu_command c;
@@ -267,7 +283,10 @@ struct gpu_frame
 	const gpu_command *commands = nullptr;
 	int command_count = 0;
 
-	// regions read back at the end of the frame (target pixels, row 0 = top)
+	// regions read back after the last command (target pixels, row 0 = top).
+	// A frame without any (and without READBACK commands) is not waited for:
+	// the commands are flushed to the GPU and the call returns, so the GPU
+	// works while emulation continues.
 	const gpu_readback_rect *readbacks = nullptr;
 	int readback_count = 0;
 };
@@ -284,8 +303,9 @@ struct gpu_engine_caps
 struct gpu_engine_stats
 {
 	double upload_ms = 0.0;
-	double draw_ms = 0.0;
+	double draw_ms = 0.0;           // CPU time spent issuing the commands (and waiting for them, while submission is synchronous)
 	double readback_ms = 0.0;
+	double gpu_ms = 0.0;            // GPU execution time of the command loop; 0 unless timers are enabled (MAME_GPU_PROF) and a result has arrived
 	uint64_t uploaded_bytes = 0;
 	uint32_t draw_calls = 0;
 	uint32_t program_compiles = 0;      // programs built during this frame

@@ -231,8 +231,13 @@ public:
 	void invalidate();
 
 	// submit the batch; with a buffer and output it also reads rows of that
-	// buffer back as rgb32 (row_count 0 = all rows)
-	bool flush(int read_buffer = -1, u32 *out = nullptr, u32 first_row = 0, u32 row_count = 0);
+	// buffer back as rgb32 (row_count 0 = all rows). read_first reads before the
+	// batch is drawn, which is only right when the batch does not write that buffer;
+	// the draws then run on the GPU while emulation continues.
+	bool flush(int read_buffer = -1, u32 *out = nullptr, u32 first_row = 0, u32 row_count = 0, bool read_first = false);
+
+	// true if any command of the batch can change the colour of the buffer slot
+	bool batch_writes_buffer(int buffer) const;
 
 	// per-stage timers, printed by profile_report() when MAME_VOODOO_GPU_PROF is set in the environment
 	static bool profiling();
@@ -245,7 +250,7 @@ public:
 private:
 	struct profile_data
 	{
-		double capture_ms = 0, build_ms = 0, upload_ms = 0, draw_ms = 0, readback_ms = 0, submit_ms = 0, present_ms = 0;
+		double capture_ms = 0, build_ms = 0, upload_ms = 0, draw_ms = 0, gpu_ms = 0, readback_ms = 0, submit_ms = 0, present_ms = 0;
 		u64 capture_count = 0, flushes = 0, triangles = 0, fills = 0, vertices = 0, states = 0, uploaded = 0, draws = 0, readbacks = 0;
 		std::map<std::string, u32> reasons;
 		u32 presents = 0;

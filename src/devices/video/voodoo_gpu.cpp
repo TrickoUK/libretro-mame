@@ -609,9 +609,9 @@ void gpu_renderer::profile_report()
 	std::string reasons;
 	for (auto const &r : p.reasons)
 		reasons += util::string_format(" %s=%.1f", r.first, r.second / n);
-	std::string const line = util::string_format("Voodoo GPU prof/frame: capture %.2f ms (%.0f tris) | flush build %.2f submit %.2f (upload %.2f draw %.2f readback %.2f) | present CPU %.2f | "
+	std::string const line = util::string_format("Voodoo GPU prof/frame: capture %.2f ms (%.0f tris) | flush build %.2f submit %.2f (upload %.2f draw %.2f gpu %.2f readback %.2f) | present CPU %.2f | "
 			"flushes %.1f, tris %.0f, fills %.1f, verts %.0f, states %.0f, draws %.1f, upload %.2f MB, readbacks %.1f |%s\n",
-			p.capture_ms / n, double(p.capture_count) / n, p.build_ms / n, p.submit_ms / n, p.upload_ms / n, p.draw_ms / n, p.readback_ms / n, p.present_ms / n,
+			p.capture_ms / n, double(p.capture_count) / n, p.build_ms / n, p.submit_ms / n, p.upload_ms / n, p.draw_ms / n, p.gpu_ms / n, p.readback_ms / n, p.present_ms / n,
 			p.flushes / n, p.triangles / n, p.fills / n, p.vertices / n, p.states / n, p.draws / n, p.uploaded / n / 1048576.0, p.readbacks / n, reasons);
 	// a value other than 1 names a file to append to, which survives a killed run
 	if (char const *path = getenv("MAME_VOODOO_GPU_PROF"); path && strcmp(path, "1"))
@@ -628,7 +628,23 @@ void gpu_renderer::profile_report()
 	p.presents = 120;
 }
 
-bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count)
+//-------------------------------------------------
+//  batch_writes_buffer - true if any command of the
+//  batch can change the colour of a buffer slot
+//-------------------------------------------------
+
+bool gpu_renderer::batch_writes_buffer(int buffer) const
+{
+	for (gpu_command const &cmd : m_batch.commands())
+	{
+		u32 const *s = &m_batch.state()[cmd.prim * STATE_WORDS];
+		if (s[S_BUFFER] == u32(buffer) && (cmd.kind == gpu_command::type::STAMP || reg_fbz_mode(s[S_FBZMODE]).rgb_buffer_mask()))
+			return true;
+	}
+	return false;
+}
+
+bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count, bool read_first)
 {
 	if (!usable() || m_rowpixels == 0)
 		return false;
@@ -643,6 +659,10 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 		m_prof.fills += m_batch.fastfill_count();
 		m_prof.vertices += m_batch.vertices().size();
 		m_prof.states += m_batch.state().size() / STATE_WORDS;
+		if (read_buffer >= 0)
+		{
+			m_prof.reasons[batch_writes_buffer(read_buffer) ? "front_written" : "front_untouched"]++;
+		}
 	}
 	m_why = nullptr;
 	if (m_batch.unsupported())
@@ -863,8 +883,19 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 		readback.h = row_count * scale;
 		readback.out = out;
 		readback.stride = readback.w;
-		frame.readbacks = &readback;
-		frame.readback_count = 1;
+		if (read_first)
+		{
+			// the picture is complete before this batch starts, so it is read before the draws and the
+			// emulation thread does not wait for them
+			commands.insert(commands.begin(), osd::gpu_command::make_readback(readback));
+			frame.commands = commands.data();
+			frame.command_count = commands.size();
+		}
+		else
+		{
+			frame.readbacks = &readback;
+			frame.readback_count = 1;
+		}
 	}
 	double const build_ms = prof ? ms_since(t_start) : 0.0;
 	auto const t_submit = std::chrono::steady_clock::now();
@@ -876,6 +907,7 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 		m_prof.submit_ms += ms_since(t_submit);
 		m_prof.upload_ms += st.upload_ms;
 		m_prof.draw_ms += st.draw_ms;
+		m_prof.gpu_ms += st.gpu_ms;
 		m_prof.readback_ms += st.readback_ms;
 		m_prof.uploaded += st.uploaded_bytes;
 		m_prof.draws += st.draw_calls;
