@@ -490,4 +490,7 @@ builds get them straight from here.
 ### Konami Viper: GPU path no longer waits for the GPU draw
 - With 3D GPU Rendering on, the emulation no longer stalls while the GPU draws a frame; the finished picture is read
   first and the new frame's drawing runs on the GPU while the game keeps going. The picture is unchanged and shown at
-  the same time as before. GTI Club 2 at 2x runs about 8% faster on the GPU path (about 85-97% of software speed).
+  the same time as before.
+- The finished picture is now averaged to the screen size and mapped through the video gamma table on the GPU and read
+  straight into the screen image, instead of being converted pixel by pixel on the CPU (identical pixels). GTI Club 2 at
+  2x with the screen at native size now runs at about 91-97% of software speed on this machine (was 85-91%).

@@ -142,6 +142,7 @@ typedef void (*PFNGLUSEPROGRAMPROC)(GLuint);
 typedef GLint (*PFNGLGETUNIFORMLOCATIONPROC)(GLuint, const GLchar *);
 typedef void (*PFNGLUNIFORM2FPROC)(GLint, GLfloat, GLfloat);
 typedef void (*PFNGLUNIFORM1IPROC)(GLint, GLint);
+typedef void (*PFNGLUNIFORM1IVPROC)(GLint, GLsizei, const GLint *);
 typedef void (*PFNGLGENVERTEXARRAYSPROC)(GLsizei, GLuint *);
 typedef void (*PFNGLBINDVERTEXARRAYPROC)(GLuint);
 typedef void (*PFNGLGENBUFFERSPROC)(GLsizei, GLuint *);
@@ -271,6 +272,7 @@ struct gl_dispatch
 	PFNGLGETUNIFORMLOCATIONPROC GetUniformLocation = nullptr;
 	PFNGLUNIFORM2FPROC Uniform2f = nullptr;
 	PFNGLUNIFORM1IPROC Uniform1i = nullptr;
+	PFNGLUNIFORM1IVPROC Uniform1iv = nullptr;
 	PFNGLGENVERTEXARRAYSPROC GenVertexArrays = nullptr;
 	PFNGLBINDVERTEXARRAYPROC BindVertexArray = nullptr;
 	PFNGLGENBUFFERSPROC GenBuffers = nullptr;

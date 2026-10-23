@@ -644,7 +644,7 @@ bool gpu_renderer::batch_writes_buffer(int buffer) const
 	return false;
 }
 
-bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count, bool read_first)
+bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count, bool read_first, u32 out_stride, bool opaque, u8 const *channel_lut, int downsample)
 {
 	if (!usable() || m_rowpixels == 0)
 		return false;
@@ -882,7 +882,10 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 		readback.w = m_rowpixels * scale;
 		readback.h = row_count * scale;
 		readback.out = out;
-		readback.stride = readback.w;
+		readback.stride = out_stride ? out_stride : readback.w / downsample;
+		readback.downsample = downsample;
+		readback.opaque = opaque;
+		readback.channel_lut = channel_lut;
 		if (read_first)
 		{
 			// the picture is complete before this batch starts, so it is read before the draws and the

@@ -666,8 +666,26 @@ protected:
 	bool m_gpu_shadow_dirty[GPU_SLOTS] = { };        // the GPU drew into the buffer since m_fbram was last updated from it
 	bool m_gpu_dirty_row[GPU_SLOTS][1024] = { };     // per row of each buffer, in 16-row groups checked together
 	u32 m_gpu_slot_offs[GPU_SLOTS] = { ~0U, ~0U, ~0U, ~0U };  // shared-memory models: RAM offset of the buffer in each slot
-	u32 m_gpu_seen_serial = ~0U;             // renderer submit serial of m_gpu_image
-	int m_gpu_seen_front = -1;               // front buffer index of m_gpu_image
+	u32 m_gpu_seen_serial = ~0U;             // renderer submit serial of the last picture read from the GPU
+	int m_gpu_seen_front = -1;               // front buffer index of that picture
+	u32 m_gpu_image_serial = ~0U;            // serial and front buffer m_gpu_image holds
+	int m_gpu_image_front = -1;
+
+	// screen bitmaps holding the current GPU picture, read straight into them (see gpu_present())
+	struct gpu_direct_copy
+	{
+		bitmap_rgb32 const *bitmap = nullptr;
+		u32 const *pixels = nullptr;
+		u32 serial = 0;
+		int front = -1;
+		u32 pen_generation = 0;
+		rgb_t const *pens = nullptr;
+		int width = 0, height = 0;
+		u32 epoch = 0;
+		bool same_picture(gpu_direct_copy const &o) const { return serial == o.serial && front == o.front && pen_generation == o.pen_generation && pens == o.pens && width == o.width && height == o.height && epoch == o.epoch; }
+	};
+	gpu_direct_copy m_gpu_direct[2];
+	u32 m_gpu_epoch = 0;                     // changes when the GPU contents are replaced (state load)
 	u32 m_pen_generation = 0;                // changes whenever m_pen is recomputed
 	std::vector<u32> m_gpu_out;              // the finished picture (scaled to the output, through the pens), by bitmap row
 	std::vector<u8> m_gpu_out_valid;         // per bitmap row: m_gpu_out holds the finished row

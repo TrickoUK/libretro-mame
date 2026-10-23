@@ -137,6 +137,15 @@ private:
 	uint32_t m_vao = 0;
 	uint32_t m_vbo = 0;
 
+	// final pass of a read-back (lookup, downsample, opaque alpha)
+	uint32_t m_op_program = 0;
+	int m_op_u_ds = -1, m_op_u_flags = -1, m_op_u_lut = -1;
+	uint32_t m_op_vao = 0;
+	uint32_t m_op_src_tex = 0, m_op_src_fbo = 0;
+	int m_op_src_w = 0, m_op_src_h = 0;
+	uint32_t m_op_dst_tex = 0, m_op_dst_fbo = 0;
+	int m_op_dst_w = 0, m_op_dst_h = 0;
+
 	// GPU timer query over the command loop, only when timers are enabled
 	bool m_timers = false;
 	uint32_t m_query = 0;
@@ -145,6 +154,8 @@ private:
 
 	void poll_gpu_timer(bool wait);
 	bool valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg);
+	void output_pass(const osd::gpu_readback_rect &r);
+	bool ensure_output_program();
 	void do_readback(const osd::gpu_readback_rect &r);
 
 	int m_problem_count = 0;

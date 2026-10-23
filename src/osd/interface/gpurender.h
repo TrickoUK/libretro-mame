@@ -70,11 +70,21 @@ enum class gpu_blend_mode
 // target pixels, and the caller-owned buffer receiving it (row 0 = top,
 // matching bitmap_rgb32 convention). stride is the distance between
 // output rows in pixels.
+//
+// By default the pixels come back as they are in the target. The optional
+// fields run a final pass on the GPU before the copy: the output is then
+// (w / downsample) x (h / downsample) pixels.
 struct gpu_readback_rect
 {
 	int x = 0, y = 0, w = 0, h = 0;
 	uint32_t *out = nullptr;
 	int stride = 0;
+
+	int downsample = 1;                     // average this many target pixels (each way) into one output pixel; w and h must be multiples
+	bool opaque = false;                    // force alpha to 1
+	const uint8_t *channel_lut = nullptr;   // 128 bytes: output levels for the 5-bit red (32), 6-bit green (64) and 5-bit blue (32) value of the averaged colour
+
+	bool plain() const { return downsample == 1 && !opaque && !channel_lut; }
 };
 
 } // namespace osd

@@ -275,6 +275,18 @@ void retro_gpu_engine::shutdown()
 				g_gl.DeleteVertexArrays(1, &m_vao);
 			if (m_query)
 				g_gl.DeleteQueries(1, &m_query);
+			if (m_op_program)
+				g_gl.DeleteProgram(m_op_program);
+			if (m_op_vao)
+				g_gl.DeleteVertexArrays(1, &m_op_vao);
+			if (m_op_src_fbo)
+				g_gl.DeleteFramebuffers(1, &m_op_src_fbo);
+			if (m_op_src_tex)
+				g_gl.DeleteTextures(1, &m_op_src_tex);
+			if (m_op_dst_fbo)
+				g_gl.DeleteFramebuffers(1, &m_op_dst_fbo);
+			if (m_op_dst_tex)
+				g_gl.DeleteTextures(1, &m_op_dst_tex);
 		}
 	}
 	m_textures.clear();
@@ -846,7 +858,9 @@ bool retro_gpu_engine::validate_frame(const osd::gpu_frame &frame)
 
 bool retro_gpu_engine::valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg)
 {
-	if (!r.out || r.w <= 0 || r.h <= 0 || r.x < 0 || r.y < 0 || r.x + r.w > tg.width || r.y + r.h > tg.height || r.stride < r.w)
+	const int ds = std::max(r.downsample, 1);
+	if (!r.out || r.w <= 0 || r.h <= 0 || r.x < 0 || r.y < 0 || r.x + r.w > tg.width || r.y + r.h > tg.height
+			|| r.w % ds != 0 || r.h % ds != 0 || r.stride < r.w / ds)
 	{
 		log_problem("readback", "rectangle outside the target or bad buffer");
 		return false;
@@ -869,9 +883,169 @@ void retro_gpu_engine::poll_gpu_timer(bool wait)
 	m_query_pending = false;
 }
 
+bool retro_gpu_engine::ensure_output_program()
+{
+	if (m_op_program)
+		return true;
+	static const char *const vs =
+			"#version 330 core\n"
+			"void main()\n{\n"
+			"\tvec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
+			"\tgl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n}\n";
+	// The averaged colour is quantised to the 5/6/5-bit value the lookup table is indexed by.
+	static const char *const fs =
+			"#version 330 core\n"
+			"uniform sampler2D u_src;\nuniform int u_ds;\nuniform int u_flags;\nuniform int u_lut[128];\n"
+			"out vec4 o_color;\n"
+			"void main()\n{\n"
+			"\tivec2 base = ivec2(gl_FragCoord.xy) * u_ds;\n"
+			"\tvec4 sum = vec4(0.0);\n"
+			"\tfor (int y = 0; y < u_ds; y++)\n\t\tfor (int x = 0; x < u_ds; x++)\n\t\t\tsum += texelFetch(u_src, base + ivec2(x, y), 0);\n"
+			"\tivec4 v = ivec4(sum * 255.0 + 0.5) / (u_ds * u_ds);\n"
+			"\tif ((u_flags & 1) != 0)\n\t{\n"
+			"\t\tv.r = u_lut[v.r >> 3];\n\t\tv.g = u_lut[32 + (v.g >> 2)];\n\t\tv.b = u_lut[96 + (v.b >> 3)];\n"
+			"\t}\n"
+			"\tif ((u_flags & 2) != 0)\n\t\tv.a = 255;\n"
+			"\tvec4 c = vec4(v) / 255.0;\n"
+			"\to_color = c;\n}\n";
+
+	GLuint shaders[2] = { 0, 0 };
+	const char *sources[2] = { vs, fs };
+	const GLenum types[2] = { GL_VERTEX_SHADER, GL_FRAGMENT_SHADER };
+	bool ok = true;
+	for (int i = 0; i < 2 && ok; i++)
+	{
+		shaders[i] = g_gl.CreateShader(types[i]);
+		g_gl.ShaderSource(shaders[i], 1, &sources[i], nullptr);
+		g_gl.CompileShader(shaders[i]);
+		GLint status = 0;
+		g_gl.GetShaderiv(shaders[i], GL_COMPILE_STATUS, &status);
+		if (!status)
+		{
+			char log[2048];
+			g_gl.GetShaderInfoLog(shaders[i], sizeof(log), nullptr, log);
+			fprintf(stderr, "[retro_gpu_engine] output pass %s shader failed to compile:\n%s\n", i ? "fragment" : "vertex", log);
+			ok = false;
+		}
+	}
+	GLuint program = 0;
+	if (ok)
+	{
+		program = g_gl.CreateProgram();
+		g_gl.AttachShader(program, shaders[0]);
+		g_gl.AttachShader(program, shaders[1]);
+		g_gl.LinkProgram(program);
+		GLint status = 0;
+		g_gl.GetProgramiv(program, GL_LINK_STATUS, &status);
+		if (!status)
+		{
+			char log[2048];
+			g_gl.GetProgramInfoLog(program, sizeof(log), nullptr, log);
+			fprintf(stderr, "[retro_gpu_engine] output pass link failed:\n%s\n", log);
+			g_gl.DeleteProgram(program);
+			program = 0;
+			ok = false;
+		}
+	}
+	for (GLuint sh : shaders)
+		if (sh)
+			g_gl.DeleteShader(sh);
+	if (!ok)
+	{
+		m_failed = true;
+		return false;
+	}
+	m_op_program = program;
+	g_gl.UseProgram(program);
+	g_gl.Uniform1i(g_gl.GetUniformLocation(program, "u_src"), 0);
+	m_op_u_ds = g_gl.GetUniformLocation(program, "u_ds");
+	m_op_u_flags = g_gl.GetUniformLocation(program, "u_flags");
+	m_op_u_lut = g_gl.GetUniformLocation(program, "u_lut");
+	g_gl.GenVertexArrays(1, &m_op_vao);
+	return true;
+}
+
+// Read-back through a final pass: the rectangle (resolved if multisampled) is copied into a texture, a
+// full-screen pass averages and maps it into a second texture of the output size, and that is read.
+void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r)
+{
+	if (!ensure_output_program())
+		return;
+	const int ds = std::max(r.downsample, 1);
+	const int ow = r.w / ds, oh = r.h / ds;
+
+	auto make_target = [] (uint32_t &tex, uint32_t &fbo, int &cur_w, int &cur_h, int w, int h)
+	{
+		if (tex && cur_w == w && cur_h == h)
+			return;
+		if (fbo)
+			g_gl.DeleteFramebuffers(1, &fbo);
+		if (tex)
+			g_gl.DeleteTextures(1, &tex);
+		g_gl.GenTextures(1, &tex);
+		g_gl.BindTexture(GL_TEXTURE_2D, tex);
+		g_gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+		g_gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		g_gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		g_gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		g_gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		g_gl.GenFramebuffers(1, &fbo);
+		g_gl.BindFramebuffer(GL_FRAMEBUFFER, fbo);
+		g_gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+		cur_w = w;
+		cur_h = h;
+	};
+	make_target(m_op_src_tex, m_op_src_fbo, m_op_src_w, m_op_src_h, r.w, r.h);
+	make_target(m_op_dst_tex, m_op_dst_fbo, m_op_dst_w, m_op_dst_h, ow, oh);
+
+	// target (resolved) -> source texture
+	g_gl.Disable(GL_SCISSOR_TEST);
+	g_gl.BindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
+	g_gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, m_op_src_fbo);
+	g_gl.BlitFramebuffer(r.x, r.y, r.x + r.w, r.y + r.h, 0, 0, r.w, r.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+	// source texture -> output texture
+	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_op_dst_fbo);
+	g_gl.Viewport(0, 0, ow, oh);
+	g_gl.Disable(GL_BLEND);
+	g_gl.Disable(GL_DEPTH_TEST);
+	g_gl.ColorMask(1, 1, 1, 1);
+	g_gl.UseProgram(m_op_program);
+	g_gl.Uniform1i(m_op_u_ds, ds);
+	g_gl.Uniform1i(m_op_u_flags, (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0));
+	if (r.channel_lut)
+	{
+		GLint lut[128];
+		for (int i = 0; i < 128; i++)
+			lut[i] = r.channel_lut[i];
+		g_gl.Uniform1iv(m_op_u_lut, 128, lut);
+	}
+	g_gl.ActiveTexture(GL_TEXTURE0);
+	g_gl.BindTexture(GL_TEXTURE_2D, m_op_src_tex);
+	g_gl.BindVertexArray(m_op_vao);
+	g_gl.DrawArrays(GL_TRIANGLES, 0, 3);
+
+	g_gl.PixelStorei(GL_PACK_ALIGNMENT, 4);
+	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, r.stride);
+	g_gl.ReadPixels(0, 0, ow, oh, GL_BGRA, GL_UNSIGNED_BYTE, r.out);
+	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, 0);
+
+	// back to the state the frame's commands expect
+	g_gl.BindVertexArray(m_vao);
+	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+	g_gl.Viewport(0, 0, m_target.width, m_target.height);
+	if (m_target.depth != osd::gpu_depth_mode::NONE)
+		g_gl.Enable(GL_DEPTH_TEST);
+}
+
 // Reads one target rectangle into the caller's buffer. A multisampled target is resolved for that rectangle first.
 void retro_gpu_engine::do_readback(const osd::gpu_readback_rect &r)
 {
+	if (!r.plain())
+	{
+		output_pass(r);
+		return;
+	}
 	if (m_resolve_fbo)
 	{
 		g_gl.BindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);

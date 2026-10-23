@@ -1113,6 +1113,7 @@ void voodoo_1_device::device_post_load()
 		gpu_configure();
 		m_gpu->invalidate();
 		gpu_sync_up();
+		m_gpu_epoch++;
 	}
 }
 
@@ -3479,7 +3480,89 @@ bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprec
 	int const front = gpu_front_slot();
 	if (front < 0)
 		return false;
-	if (!m_gpu->batch().commands().empty() || m_gpu->serial() != m_gpu_seen_serial || front != m_gpu_seen_front)
+	bool const new_frame = !m_gpu->batch().commands().empty() || m_gpu->serial() != m_gpu_seen_serial || front != m_gpu_seen_front;
+	s32 const os_direct = m_output_scale;
+
+	// The picture is read straight into the screen bitmap, through the output pass (which also averages the render
+	// scale down to the output scale), when the update covers the whole picture. The bitmap that already holds the current picture needs nothing, another one is copied.
+	bool const direct = !m_gpu_compare && (scale % os_direct) == 0 && m_xoffs == 0 && m_yoffs == 0
+			&& cliprect.min_x == 0 && cliprect.min_y == 0 && cliprect.width() == s32(rowpixels) * os_direct && cliprect.height() == s32(rows) * os_direct
+			&& bitmap.width() >= cliprect.width() && bitmap.height() >= cliprect.height();
+	if (direct)
+	{
+		gpu_direct_copy want;
+		want.bitmap = &bitmap;
+		want.pixels = &bitmap.pix(0);
+		want.pen_generation = m_pen_generation;
+		want.pens = pens;
+		want.front = front;
+		want.width = cliprect.width();
+		want.height = cliprect.height();
+		want.epoch = m_gpu_epoch;
+		auto const profiling = voodoo::gpu_renderer::profiling();
+		auto const prof_start = profiling ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+		if (!new_frame)
+		{
+			want.serial = m_gpu->serial();
+			for (gpu_direct_copy const &have : m_gpu_direct)
+				if (have.bitmap == &bitmap && have.pixels == want.pixels && have.same_picture(want))
+				{
+					if (profiling)
+						m_gpu->profile_count("direct_have");
+					return true;
+				}
+			for (gpu_direct_copy &src : m_gpu_direct)
+				if (src.bitmap && src.bitmap != &bitmap && src.same_picture(want))
+				{
+					for (s32 y = 0; y < want.height; y++)
+						memcpy(&bitmap.pix(y), &src.bitmap->pix(y), size_t(want.width) * sizeof(u32));
+					m_gpu_direct[1] = m_gpu_direct[0];
+					m_gpu_direct[0] = want;
+					if (profiling)
+					{
+						m_gpu->profile_count("direct_copy");
+						m_gpu->profile_present(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prof_start).count());
+						m_gpu->profile_report();
+					}
+					return true;
+				}
+		}
+
+		// a new frame, or no bitmap holds the picture: read the front buffer into this bitmap
+		u8 lut[128];
+		bool const gamma = pens != m_shared->rgb565;
+		if (gamma)
+		{
+			for (u32 i = 0; i < 32; i++)
+			{
+				lut[i] = pens[i << 11].r();
+				lut[96 + i] = pens[i].b();
+			}
+			for (u32 i = 0; i < 64; i++)
+				lut[32 + i] = pens[i << 5].g();
+		}
+		m_gpu->why("present");
+		bool const read_first = !m_gpu->batch().commands().empty() && !m_gpu->batch_writes_buffer(front);
+		if (!m_gpu->flush(front, &bitmap.pix(0), 0, 0, read_first, bitmap.rowpixels(), true, gamma ? lut : nullptr, scale / os_direct))
+			return false;
+		m_gpu_seen_serial = m_gpu->serial();
+		m_gpu_seen_front = front;
+		want.serial = m_gpu_seen_serial;
+		m_gpu_direct[0] = want;
+		m_gpu_direct[1] = gpu_direct_copy();
+		if (profiling)
+		{
+			m_gpu->profile_count("direct_read");
+			m_gpu->profile_present(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prof_start).count());
+			m_gpu->profile_report();
+		}
+		return true;
+	}
+
+	// the other paths average and map the picture on the CPU from m_gpu_image
+	for (gpu_direct_copy &d : m_gpu_direct)
+		d = gpu_direct_copy();
+	if (new_frame || m_gpu_image_serial != m_gpu->serial() || m_gpu_image_front != front || m_gpu_image.size() != size_t(rowpixels) * scale * rows * scale)
 	{
 		m_gpu_image.resize(size_t(rowpixels) * scale * rows * scale);
 		m_gpu->why("present");
@@ -3488,6 +3571,8 @@ bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprec
 			return false;
 		m_gpu_seen_serial = m_gpu->serial();
 		m_gpu_seen_front = front;
+		m_gpu_image_serial = m_gpu_seen_serial;
+		m_gpu_image_front = front;
 	}
 
 	auto const prof_start = voodoo::gpu_renderer::profiling() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
