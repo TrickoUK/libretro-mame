@@ -218,6 +218,12 @@ public:
 	// by renderers that can present a larger screen (Sega Model 2 today).
 	virtual bool supersample_output() const { return false; }
 
+	// 3D multisample anti-aliasing (see the retro OSD's mame_3d_msaa core
+	// option), for every 3D renderer on the host-GPU path: 0 = off, else the
+	// sample count requested for the GPU render target. Reduced to what the
+	// GPU supports; the software renderers ignore it.
+	virtual int msaa() const { return 0; }
+
 	// 3D edge anti-aliasing enhancement (see the retro OSD's mame_3d_edge_aa
 	// core option), for every 3D renderer that supports it (the Voodoo
 	// today): smooths the outlines of 3D geometry at scan-out; false = off

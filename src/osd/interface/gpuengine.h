@@ -153,6 +153,7 @@ struct gpu_shader_module
 {
 	const char *name = "";
 	const char *fragment_source = "";
+	bool centroid = false;              // interpolate the varyings at a point inside the primitive for a partly covered multisample pixel
 	int varying_count = 0;
 	gpu_varying_mode varying_mode[GPU_MAX_VARYINGS] = {};
 	int state_stride = 0;               // words per record the source reads
@@ -168,7 +169,8 @@ struct gpu_target_desc
 	int height = 0;
 	bool persistent = false;            // keep colour between frames; otherwise cleared to clear_color each frame
 	gpu_depth_mode depth = gpu_depth_mode::NONE;
-	int msaa_samples = 0;
+	int msaa_samples = 0;               // 0 = single sample; reduced to what the GPU supports and to the engine's memory budget
+	bool msaa_per_sample = false;       // keep the samples readable one by one, which a read-back with coverage needs
 	uint32_t generation = 0;            // a changed value clears a persistent target
 	float clear_color[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 };
@@ -196,6 +198,7 @@ struct gpu_command
 	gpu_depth_func depth_func = gpu_depth_func::ALWAYS;
 	bool depth_write = false;
 	bool color_write = true;
+	bool multisample = true;            // false: rasterise at the pixel centre and write every sample of the pixels covered (no effect on a single-sample target)
 	gpu_handle bindings[GPU_MAX_BINDINGS] = {};
 
 	// SET_CLIP, COPY_RECT

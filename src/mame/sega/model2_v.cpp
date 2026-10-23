@@ -713,6 +713,7 @@ bool model2_state::gpu_init()
 			osd::gpu_shader_module module;
 			module.name = "model2";
 			module.fragment_source = MODEL2_FRAGMENT_SOURCE;
+			module.centroid = machine().osd().msaa() > 0;
 			module.varying_count = MODEL2_SHADER_VARYINGS;
 			for (int i = 0; i < MODEL2_SHADER_VARYINGS; i++)
 				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
@@ -875,9 +876,15 @@ bool model2_state::gpu_layer_submit(const rectangle &ss_cliprect)
 	readback.h = ss_cliprect.height();
 	readback.out = &destmap.pix(out_cliprect.min_y, out_cliprect.min_x);
 	readback.stride = destmap.rowpixels();
+	int const msaa = machine().osd().msaa();
 	if (native)
 	{
 		readback.downsample = ss;
+		readback.coverage = true;
+	}
+	else if (msaa > 0)
+	{
+		// the layer is transparent where no polygon was drawn: an edge pixel averages the covered samples only
 		readback.coverage = true;
 	}
 
@@ -885,6 +892,8 @@ bool model2_state::gpu_layer_submit(const rectangle &ss_cliprect)
 	frame.target.width = m_renderer->destmap().width();
 	frame.target.height = m_renderer->destmap().height();
 	frame.target.depth = osd::gpu_depth_mode::ORDER;
+	frame.target.msaa_samples = msaa;
+	frame.target.msaa_per_sample = msaa > 0;
 	frame.updates = updates;
 	frame.update_count = update_count;
 	frame.vertices = m_gpu_vertices.data();

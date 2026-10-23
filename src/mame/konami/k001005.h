@@ -137,6 +137,10 @@ private:
 	bool m_gpu_checked = false;
 	bool m_gpu_full_upload = true;
 	bool m_gpu_pending = false;             // a submitted frame has not been collected
+	int m_gpu_msaa = 0;                     // multisample count for the GPU path (0 = off)
+	// A page drawn by the GPU with multisampling carries the share of each pixel it covers in alpha
+	// (255 = all) instead of the polygon alpha, and draw() blends partly covered pixels by it.
+	bool m_page_share[2] = { false, false };
 	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_tex_rom = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_palette = osd::GPU_NULL_HANDLE;

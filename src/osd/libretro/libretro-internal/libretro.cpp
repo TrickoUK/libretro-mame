@@ -634,6 +634,19 @@ static void check_variables(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
       supersample_output_enable = !strcmp(var.value, "match");
 
+   var.key   = CORE_NAME "_3d_msaa";
+   var.value = NULL;
+   msaa_samples_option = 0;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "2x"))
+         msaa_samples_option = 2;
+      if (!strcmp(var.value, "4x"))
+         msaa_samples_option = 4;
+      if (!strcmp(var.value, "8x"))
+         msaa_samples_option = 8;
+   }
+
    var.key   = CORE_NAME "_3d_edge_aa";
    var.value = NULL;
    edge_aa_enable = false;

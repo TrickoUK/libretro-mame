@@ -87,6 +87,7 @@ int psx_gpu_filter_exclude_2d_polygon_mode = 2;
 int supersample_factor = 1;
 bool supersample_output_enable = false;
 bool edge_aa_enable = false;
+int msaa_samples_option = 0;
 bool texfilter_enable = false;
 bool gpu3d_enable = false;
 bool steering_options_pending = false;
