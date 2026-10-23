@@ -75,6 +75,14 @@ mixed into history.
   `arcade.flt` unchanged (validated; the new `rca/nl_studio2.cpp` is a console). `scripts/src/bus.lua`
   changed, so genie was regenerated directly; full `-j10` build linked clean (119 objects). No smoke tests:
   the only fork/incoming overlap was `mame.lst`.
+- **Follow-up sync, 2026-10-23 (later)**: merge commit `cca54de5dd8` merged mamedev master
+  `mame0289-1751-gcde9d51c169` (24 commits); libretro/mame master had nothing new. One conflict,
+  `voodoo_render.cpp`: upstream's LOD clamp changes (upper clamp applied last, no level 9 for split
+  textures) landed in the function the fork split into `fetch_texel()`/`sample_texel()`; kept the fork's
+  structure, re-applied both changes in `fetch_texel()` and mirrored them in the GPU shader
+  (`voodoo_shader.h`, source `my-docs/tools/voodoo.glsl`). `arcade.flt` unchanged (validated, 2135 files).
+  `scripts/src/bus.lua` changed, so genie was regenerated directly; full `-j10` build linked clean
+  (201 objects). Smoke-tested gticlub2, jpark3, thrild2, sfrush (90 s each, `my-docs/out/sync1751`).
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
