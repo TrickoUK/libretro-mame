@@ -532,3 +532,13 @@ builds get them straight from here.
 - Where the second road pixel set is parked off the right of the screen, the area right of the first set took the "between the
   sets" pen and showed the wrong colour (the right verge on the beach stage). A set that reaches no on-screen pixel on a line
   now draws nothing and the first set's edge pen fills the rest. Forked roads and tunnels are unchanged.
+
+### Viper, Seattle/Vegas, GTI Club boards, Model 2: 3D Multisample Anti-Aliasing (new option)
+- New **3D Multisample Anti-Aliasing** option (off by default, 2x/4x/8x), used with 3D GPU Rendering. It smooths the stair-stepped
+  edges of 3D objects on the GPU without raising the render resolution, and it combines with 3D Supersampling and 3D Output Scale.
+  On GTI Club 2, 4x MSAA at 1x supersampling adds 0.03 ms of GPU time per frame where 2x supersampling adds 0.47 ms, and the frame rate
+  stayed the same within measurement noise. The multisampled 3D buffers do need video memory: the 3D target grows from 6 MB to 27 MB with
+  4x MSAA at 1x, about the same as 2x supersampling (24 MB), and from 24 MB to 108 MB at 2x supersampling.
+- HUD, text, logos and 2D layers stay sharp (only depth-tested 3D geometry is smoothed), and edges over the 2D background show no dark
+  fringe on the GTI Club boards and Model 2. It does nothing with the software renderer, and Hyper Neo Geo 64 is not covered.
+  Checked on GTI Club 2, San Francisco Rush, Daytona USA and Operation Thunder Hurricane. Cut-out textures (fences, foliage) are not smoothed.

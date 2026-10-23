@@ -81,7 +81,7 @@ bool load_gl_dispatch()
 	LOAD_GL(ReadPixels); LOAD_GL(PixelStorei); LOAD_GL(Finish); LOAD_GL(Enable); LOAD_GL(Disable); LOAD_GL(Scissor);
 	LOAD_GL(BlitFramebuffer);
 	LOAD_GL(GenRenderbuffers); LOAD_GL(BindRenderbuffer);
-	LOAD_GL(RenderbufferStorageMultisample); LOAD_GL(FramebufferRenderbuffer);
+	LOAD_GL(RenderbufferStorageMultisample); LOAD_GL(TexImage2DMultisample); LOAD_GL(FramebufferRenderbuffer);
 	LOAD_GL(DepthFunc); LOAD_GL(DepthMask); LOAD_GL(ClearDepth); LOAD_GL(ColorMask);
 	LOAD_GL(TexSubImage2D); LOAD_GL(VertexAttribIPointer);
 	LOAD_GL(DeleteTextures); LOAD_GL(DeleteBuffers); LOAD_GL(DeleteProgram); LOAD_GL(DeleteShader);

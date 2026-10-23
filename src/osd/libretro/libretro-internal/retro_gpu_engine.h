@@ -71,6 +71,7 @@ private:
 	{
 		std::string name;
 		std::string source;
+		uint32_t centroid_mask = 0;
 		int varying_count = 0;
 		osd::gpu_varying_mode varying_mode[osd::GPU_MAX_VARYINGS] = {};
 		int state_stride = 0;
@@ -131,6 +132,7 @@ private:
 	bool m_target_valid = false;
 	uint32_t m_fbo = 0;
 	uint32_t m_color_rb = 0;
+	uint32_t m_color_tex = 0;           // the multisample colour when its samples must be readable, instead of m_color_rb
 	uint32_t m_depth_rb = 0;
 	uint32_t m_resolve_fbo = 0;
 	uint32_t m_resolve_tex = 0;
@@ -154,8 +156,12 @@ private:
 	void *m_fence = nullptr;
 
 	// final pass of a read-back (lookup, downsample, opaque alpha)
-	uint32_t m_op_program = 0;
-	int m_op_u_ds = -1, m_op_u_flags = -1, m_op_u_lut = -1;
+	struct output_program
+	{
+		uint32_t id = 0;
+		int u_ds = -1, u_flags = -1, u_lut = -1, u_samples = -1, u_origin = -1;
+	};
+	output_program m_op[2];             // [1] reads the samples of a multisample target
 	uint32_t m_op_vao = 0;
 	uint32_t m_op_src_tex = 0, m_op_src_fbo = 0;
 	int m_op_src_w = 0, m_op_src_h = 0;
@@ -171,9 +177,14 @@ private:
 	void poll_gpu_timer(bool wait);
 	bool valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg);
 	void output_pass(const osd::gpu_readback_rect &r, void *dest, int row_length);
-	bool ensure_output_program();
+	bool ensure_output_program(bool per_sample);
+	void fit_msaa(osd::gpu_target_desc &target);
 	void do_readback(const osd::gpu_readback_rect &r, void *dest, int row_length);
 	void drop_pending();
+
+	int m_max_texture_samples = 0;
+	uint64_t m_msaa_budget = 1024ULL * 1024 * 1024;
+	int m_msaa_logged_requested = 0, m_msaa_logged_granted = 0;
 
 	int m_problem_count = 0;
 };

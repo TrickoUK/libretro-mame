@@ -172,6 +172,7 @@ typedef void (*PFNGLBLITFRAMEBUFFERPROC)(GLint, GLint, GLint, GLint, GLint, GLin
 typedef void (*PFNGLGENRENDERBUFFERSPROC)(GLsizei, GLuint *);
 typedef void (*PFNGLBINDRENDERBUFFERPROC)(GLenum, GLuint);
 typedef void (*PFNGLRENDERBUFFERSTORAGEMULTISAMPLEPROC)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
+typedef void (*PFNGLTEXIMAGE2DMULTISAMPLEPROC)(GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLboolean);
 typedef void (*PFNGLFRAMEBUFFERRENDERBUFFERPROC)(GLenum, GLenum, GLenum, GLuint);
 typedef const GLchar *(*PFNGLGETSTRINGPROC)(GLenum);
 typedef GLenum (*PFNGLGETERRORPROC)(void);
@@ -246,6 +247,9 @@ typedef GLboolean (*PFNGLUNMAPBUFFERPROC)(GLenum);
 #define GL_ONE_MINUS_CONSTANT_ALPHA 0x8004
 #define GL_MAX_TEXTURE_SIZE 0x0D33
 #define GL_MAX_SAMPLES 0x8D57
+#define GL_MAX_COLOR_TEXTURE_SAMPLES 0x910E
+#define GL_MULTISAMPLE 0x809D
+#define GL_TEXTURE_2D_MULTISAMPLE 0x9100
 #define GL_DEPTH_WRITEMASK 0x0B72
 #define GL_STATIC_DRAW 0x88E4
 #define GL_STREAM_DRAW 0x88E0
@@ -320,6 +324,7 @@ struct gl_dispatch
 	PFNGLGENRENDERBUFFERSPROC GenRenderbuffers = nullptr;
 	PFNGLBINDRENDERBUFFERPROC BindRenderbuffer = nullptr;
 	PFNGLRENDERBUFFERSTORAGEMULTISAMPLEPROC RenderbufferStorageMultisample = nullptr;
+	PFNGLTEXIMAGE2DMULTISAMPLEPROC TexImage2DMultisample = nullptr;
 	PFNGLFRAMEBUFFERRENDERBUFFERPROC FramebufferRenderbuffer = nullptr;
 	PFNGLGETSTRINGPROC GetString = nullptr;
 	PFNGLGETERRORPROC GetError = nullptr;

@@ -130,15 +130,19 @@ GLenum blend_factor_enum(osd::gpu_blend_factor f)
 	return GL_SRC_ALPHA_SATURATE;
 }
 
-const char *interpolation_qualifier(osd::gpu_varying_mode m)
+// flat varyings have a single value and take no centroid qualifier
+std::string interpolation_qualifier(osd::gpu_varying_mode m, bool centroid)
 {
+	std::string q;
 	switch (m)
 	{
-	case osd::gpu_varying_mode::NOPERSPECTIVE:  return "noperspective ";
+	case osd::gpu_varying_mode::NOPERSPECTIVE:  q = "noperspective "; break;
 	case osd::gpu_varying_mode::FLAT:           return "flat ";
 	case osd::gpu_varying_mode::PERSPECTIVE:    break;
 	}
-	return "";
+	if (centroid)
+		q += "centroid ";
+	return q;
 }
 
 constexpr int STATE_TEX_WIDTH = 2048;
@@ -237,6 +241,9 @@ bool retro_gpu_engine::init_context()
 	value = 0;
 	g_gl.GetIntegerv(GL_MAX_SAMPLES, &value);
 	m_caps.max_samples = value;
+	value = 0;
+	g_gl.GetIntegerv(GL_MAX_COLOR_TEXTURE_SAMPLES, &value);
+	m_max_texture_samples = value;
 
 	g_gl.GenVertexArrays(1, &m_vao);
 	g_gl.GenBuffers(1, &m_vbo);
@@ -278,8 +285,9 @@ void retro_gpu_engine::shutdown()
 			drop_pending();
 			if (m_pbo)
 				g_gl.DeleteBuffers(1, &m_pbo);
-			if (m_op_program)
-				g_gl.DeleteProgram(m_op_program);
+			for (output_program &op : m_op)
+				if (op.id)
+					g_gl.DeleteProgram(op.id);
 			if (m_op_vao)
 				g_gl.DeleteVertexArrays(1, &m_op_vao);
 			if (m_op_src_fbo)
@@ -450,6 +458,7 @@ osd::gpu_handle retro_gpu_engine::create_shader_module(const osd::gpu_shader_mod
 	module m;
 	m.name = desc.name ? desc.name : "";
 	m.source = desc.fragment_source;
+	m.centroid_mask = desc.centroid_mask;
 	m.varying_count = desc.varying_count;
 	std::copy(std::begin(desc.varying_mode), std::end(desc.varying_mode), std::begin(m.varying_mode));
 	m.state_stride = desc.state_stride;
@@ -503,7 +512,7 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 	vs += "uniform vec2 u_target_size;\nuniform float u_order_scale;\nuniform int u_depth_order;\n";
 	vs += "flat out uint g_prim;\n";
 	for (int i = 0; i < m.varying_count; i++)
-		vs += std::string(interpolation_qualifier(m.varying_mode[i])) + "out float v" + std::to_string(i) + ";\n";
+		vs += interpolation_qualifier(m.varying_mode[i], (((m.centroid_mask >> i) & 1) != 0)) + "out float v" + std::to_string(i) + ";\n";
 	vs += "void main()\n{\n";
 	// rows are used top-down: target y = 0 is framebuffer row 0
 	vs += "\tvec2 ndc = a_pos.xy / u_target_size * 2.0 - 1.0;\n";
@@ -521,7 +530,7 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 	fs += "#define VARIANT " + std::to_string(variant) + "\n";
 	fs += "flat in uint g_prim;\n";
 	for (int i = 0; i < m.varying_count; i++)
-		fs += std::string(interpolation_qualifier(m.varying_mode[i])) + "in float v" + std::to_string(i) + ";\n";
+		fs += interpolation_qualifier(m.varying_mode[i], (((m.centroid_mask >> i) & 1) != 0)) + "in float v" + std::to_string(i) + ";\n";
 	fs += "out vec4 o_color;\n";
 	fs += "uniform vec2 u_target_size;\nuniform int u_rec_texels;\nuniform isampler2D u_state_tex;\n";
 	fs += "int state(int k)\n{\n";
@@ -623,14 +632,43 @@ void retro_gpu_engine::release_target()
 		g_gl.DeleteFramebuffers(1, &m_resolve_fbo);
 	if (m_resolve_tex)
 		g_gl.DeleteTextures(1, &m_resolve_tex);
-	m_fbo = m_color_rb = m_depth_rb = m_resolve_fbo = m_resolve_tex = 0;
+	if (m_color_tex)
+		g_gl.DeleteTextures(1, &m_color_tex);
+	m_fbo = m_color_rb = m_depth_rb = m_resolve_fbo = m_resolve_tex = m_color_tex = 0;
 	m_target_valid = false;
+}
+
+// Reduces the requested sample count to what the GPU supports and to the memory budget for the target (colour and
+// depth samples plus the single-sample resolve texture). One sample is not multisampling, so it becomes none.
+void retro_gpu_engine::fit_msaa(osd::gpu_target_desc &target)
+{
+	const int requested = target.msaa_samples;
+	int limit = m_caps.max_samples;
+	if (target.msaa_per_sample)
+		limit = std::min(limit, m_max_texture_samples);
+	target.msaa_samples = std::clamp(target.msaa_samples, 0, limit);
+
+	const uint64_t pixels = uint64_t(std::max(target.width, 0)) * std::max(target.height, 0);
+	const uint64_t sample_bytes = (target.depth != osd::gpu_depth_mode::NONE) ? 8 : 4;
+	while (target.msaa_samples >= 2 && pixels * target.msaa_samples * sample_bytes + pixels * 4 > m_msaa_budget)
+		target.msaa_samples /= 2;
+	if (target.msaa_samples < 2)
+		target.msaa_samples = 0;
+
+	if (requested != target.msaa_samples && (requested != m_msaa_logged_requested || target.msaa_samples != m_msaa_logged_granted))
+	{
+		m_msaa_logged_requested = requested;
+		m_msaa_logged_granted = target.msaa_samples;
+		fprintf(stderr, "[retro_gpu_engine] %dx MSAA on a %dx%d target reduced to %d samples (GPU limit %d, memory budget %llu MB)\n",
+				requested, target.width, target.height, target.msaa_samples, limit, (unsigned long long)(m_msaa_budget >> 20));
+	}
 }
 
 void retro_gpu_engine::ensure_target(const osd::gpu_target_desc &target)
 {
 	const bool realloc = !m_target_valid || target.width != m_target.width || target.height != m_target.height
-			|| target.depth != m_target.depth || target.msaa_samples != m_target.msaa_samples;
+			|| target.depth != m_target.depth || target.msaa_samples != m_target.msaa_samples
+			|| target.msaa_per_sample != m_target.msaa_per_sample;
 
 	bool clear_color = !target.persistent;
 	bool clear_depth = target.depth == osd::gpu_depth_mode::ORDER || !target.persistent;
@@ -641,10 +679,21 @@ void retro_gpu_engine::ensure_target(const osd::gpu_target_desc &target)
 
 		g_gl.GenFramebuffers(1, &m_fbo);
 		g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-		g_gl.GenRenderbuffers(1, &m_color_rb);
-		g_gl.BindRenderbuffer(GL_RENDERBUFFER, m_color_rb);
-		g_gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, target.msaa_samples, GL_RGBA8, target.width, target.height);
-		g_gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, m_color_rb);
+		if (target.msaa_samples > 0 && target.msaa_per_sample)
+		{
+			// a texture, so a read-back can look at the samples one by one
+			g_gl.GenTextures(1, &m_color_tex);
+			g_gl.BindTexture(GL_TEXTURE_2D_MULTISAMPLE, m_color_tex);
+			g_gl.TexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, target.msaa_samples, GL_RGBA8, target.width, target.height, 1);
+			g_gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, m_color_tex, 0);
+		}
+		else
+		{
+			g_gl.GenRenderbuffers(1, &m_color_rb);
+			g_gl.BindRenderbuffer(GL_RENDERBUFFER, m_color_rb);
+			g_gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, target.msaa_samples, GL_RGBA8, target.width, target.height);
+			g_gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, m_color_rb);
+		}
 		if (target.depth != osd::gpu_depth_mode::NONE)
 		{
 			g_gl.GenRenderbuffers(1, &m_depth_rb);
@@ -681,6 +730,17 @@ void retro_gpu_engine::ensure_target(const osd::gpu_target_desc &target)
 	{
 		clear_color = true;
 		clear_depth = true;
+	}
+
+	if (realloc)
+	{
+		// memory the target asks for: colour and depth for every sample, plus the single-sample resolve texture
+		const double pixels = double(target.width) * target.height;
+		const double samples = std::max(target.msaa_samples, 1);
+		const double depth_bytes = (target.depth != osd::gpu_depth_mode::NONE) ? 4.0 : 0.0;
+		const double resolve_bytes = (target.msaa_samples > 0) ? 4.0 : 0.0;
+		fprintf(stderr, "[retro_gpu_engine] target %dx%d, %d samples: colour+depth %.1f MB, resolve %.1f MB\n",
+				target.width, target.height, target.msaa_samples, pixels * samples * (4.0 + depth_bytes) / 1048576.0, pixels * resolve_bytes / 1048576.0);
 	}
 
 	m_target = target;
@@ -887,41 +947,58 @@ void retro_gpu_engine::poll_gpu_timer(bool wait)
 	m_query_pending = false;
 }
 
-bool retro_gpu_engine::ensure_output_program()
+bool retro_gpu_engine::ensure_output_program(bool per_sample)
 {
-	if (m_op_program)
+	output_program &op = m_op[per_sample ? 1 : 0];
+	if (op.id)
 		return true;
 	static const char *const vs =
 			"#version 330 core\n"
 			"void main()\n{\n"
 			"\tvec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
 			"\tgl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n}\n";
-	// The averaged colour is quantised to the 5/6/5-bit value the lookup table is indexed by.
-	static const char *const fs =
-			"#version 330 core\n"
-			"uniform sampler2D u_src;\nuniform int u_ds;\nuniform int u_flags;\nuniform int u_lut[128];\n"
+	// The averaged colour is quantised to the 5/6/5-bit value the lookup table is indexed by. With coverage, only
+	// the samples with non-zero alpha count; a multisample target is read one sample at a time.
+	std::string fs = "#version 330 core\n";
+	if (per_sample)
+	{
+		fs += "uniform sampler2DMS u_srcms;\nuniform int u_samples;\nuniform ivec2 u_origin;\n"
+				"#define SAMPLES u_samples\n#define ORIGIN u_origin\n"
+				"#define FETCH(p, s) texelFetch(u_srcms, (p), (s))\n";
+	}
+	else
+	{
+		fs += "uniform sampler2D u_src;\n"
+				"#define SAMPLES 1\n#define ORIGIN ivec2(0)\n"
+				"#define FETCH(p, s) texelFetch(u_src, (p), 0)\n";
+	}
+	fs += "uniform int u_ds;\nuniform int u_flags;\nuniform int u_lut[128];\n"
 			"out vec4 o_color;\n"
 			"void main()\n{\n"
-			"\tivec2 base = ivec2(gl_FragCoord.xy) * u_ds;\n"
+			"\tivec2 base = ivec2(gl_FragCoord.xy) * u_ds + ORIGIN;\n"
 			"\tivec4 sum = ivec4(0);\n"
 			"\tint count = 0;\n"
 			"\tfor (int y = 0; y < u_ds; y++)\n\t{\n"
 			"\t\tfor (int x = 0; x < u_ds; x++)\n\t\t{\n"
-			"\t\t\tivec4 t = ivec4(texelFetch(u_src, base + ivec2(x, y), 0) * 255.0 + 0.5);\n"
-			"\t\t\tif ((u_flags & 4) == 0 || t.a != 0)\n\t\t\t{\n"
-			"\t\t\t\tsum += t;\n\t\t\t\tcount++;\n"
-			"\t\t\t}\n\t\t}\n\t}\n"
+			"\t\t\tfor (int s = 0; s < SAMPLES; s++)\n\t\t\t{\n"
+			"\t\t\t\tivec4 t = ivec4(FETCH(base + ivec2(x, y), s) * 255.0 + 0.5);\n"
+			"\t\t\t\tif ((u_flags & 4) == 0 || t.a != 0)\n\t\t\t\t{\n"
+			"\t\t\t\t\tsum += t;\n\t\t\t\t\tcount++;\n"
+			"\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n"
 			"\tivec4 v = (count > 0) ? (sum / count) : ivec4(0);\n"
 			"\tif ((u_flags & 1) != 0)\n\t{\n"
 			"\t\tv.r = u_lut[v.r >> 3];\n\t\tv.g = u_lut[32 + (v.g >> 2)];\n\t\tv.b = u_lut[96 + (v.b >> 3)];\n"
 			"\t}\n"
 			"\tif ((u_flags & 2) != 0)\n\t\tv.a = 255;\n"
-			"\tif ((u_flags & 4) != 0)\n\t\tv.a = (count > 0) ? 255 : 0;\n"
+			"\tif ((u_flags & 4) != 0)\n\t{\n"
+			"\t\tint total = u_ds * u_ds * SAMPLES;\n"
+			"\t\tv.a = (count == 0) ? 0 : ((u_flags & 8) != 0) ? max(1, (255 * count + total / 2) / total) : 255;\n"
+			"\t}\n"
 			"\tvec4 c = vec4(v) / 255.0;\n"
 			"\to_color = c;\n}\n";
 
 	GLuint shaders[2] = { 0, 0 };
-	const char *sources[2] = { vs, fs };
+	const char *sources[2] = { vs, fs.c_str() };
 	const GLenum types[2] = { GL_VERTEX_SHADER, GL_FRAGMENT_SHADER };
 	bool ok = true;
 	for (int i = 0; i < 2 && ok; i++)
@@ -966,13 +1043,16 @@ bool retro_gpu_engine::ensure_output_program()
 		m_failed = true;
 		return false;
 	}
-	m_op_program = program;
+	op.id = program;
 	g_gl.UseProgram(program);
-	g_gl.Uniform1i(g_gl.GetUniformLocation(program, "u_src"), 0);
-	m_op_u_ds = g_gl.GetUniformLocation(program, "u_ds");
-	m_op_u_flags = g_gl.GetUniformLocation(program, "u_flags");
-	m_op_u_lut = g_gl.GetUniformLocation(program, "u_lut");
-	g_gl.GenVertexArrays(1, &m_op_vao);
+	g_gl.Uniform1i(g_gl.GetUniformLocation(program, per_sample ? "u_srcms" : "u_src"), 0);
+	op.u_ds = g_gl.GetUniformLocation(program, "u_ds");
+	op.u_flags = g_gl.GetUniformLocation(program, "u_flags");
+	op.u_lut = g_gl.GetUniformLocation(program, "u_lut");
+	op.u_samples = g_gl.GetUniformLocation(program, "u_samples");
+	op.u_origin = g_gl.GetUniformLocation(program, "u_origin");
+	if (!m_op_vao)
+		g_gl.GenVertexArrays(1, &m_op_vao);
 	return true;
 }
 
@@ -980,8 +1060,11 @@ bool retro_gpu_engine::ensure_output_program()
 // full-screen pass averages and maps it into a second texture of the output size, and that is read.
 void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r, void *dest, int row_length)
 {
-	if (!ensure_output_program())
+	// a coverage read-back of a multisample target looks at its samples; any other is resolved first
+	const bool per_sample = m_color_tex && r.coverage;
+	if (!ensure_output_program(per_sample))
 		return;
+	const output_program &op = m_op[per_sample ? 1 : 0];
 	const int ds = std::max(r.downsample, 1);
 	const int ow = r.w / ds, oh = r.h / ds;
 
@@ -1006,33 +1089,44 @@ void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r, void *dest, 
 		cur_w = w;
 		cur_h = h;
 	};
-	make_target(m_op_src_tex, m_op_src_fbo, m_op_src_w, m_op_src_h, r.w, r.h);
 	make_target(m_op_dst_tex, m_op_dst_fbo, m_op_dst_w, m_op_dst_h, ow, oh);
 
-	// target (resolved) -> source texture
 	g_gl.Disable(GL_SCISSOR_TEST);
-	g_gl.BindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
-	g_gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, m_op_src_fbo);
-	g_gl.BlitFramebuffer(r.x, r.y, r.x + r.w, r.y + r.h, 0, 0, r.w, r.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	if (!per_sample)
+	{
+		// target (resolved) -> source texture
+		make_target(m_op_src_tex, m_op_src_fbo, m_op_src_w, m_op_src_h, r.w, r.h);
+		g_gl.BindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
+		g_gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, m_op_src_fbo);
+		g_gl.BlitFramebuffer(r.x, r.y, r.x + r.w, r.y + r.h, 0, 0, r.w, r.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	}
 
-	// source texture -> output texture
+	// source texture, or the samples of the target -> output texture
 	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_op_dst_fbo);
 	g_gl.Viewport(0, 0, ow, oh);
 	g_gl.Disable(GL_BLEND);
 	g_gl.Disable(GL_DEPTH_TEST);
 	g_gl.ColorMask(1, 1, 1, 1);
-	g_gl.UseProgram(m_op_program);
-	g_gl.Uniform1i(m_op_u_ds, ds);
-	g_gl.Uniform1i(m_op_u_flags, (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0) | (r.coverage ? 4 : 0));
+	g_gl.UseProgram(op.id);
+	g_gl.Uniform1i(op.u_ds, ds);
+	g_gl.Uniform1i(op.u_flags, (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0) | (r.coverage ? 4 : 0) | (r.coverage_share ? 8 : 0));
+	if (per_sample)
+	{
+		g_gl.Uniform1i(op.u_samples, m_target.msaa_samples);
+		g_gl.Uniform2i(op.u_origin, r.x, r.y);
+	}
 	if (r.channel_lut)
 	{
 		GLint lut[128];
 		for (int i = 0; i < 128; i++)
 			lut[i] = r.channel_lut[i];
-		g_gl.Uniform1iv(m_op_u_lut, 128, lut);
+		g_gl.Uniform1iv(op.u_lut, 128, lut);
 	}
 	g_gl.ActiveTexture(GL_TEXTURE0);
-	g_gl.BindTexture(GL_TEXTURE_2D, m_op_src_tex);
+	if (per_sample)
+		g_gl.BindTexture(GL_TEXTURE_2D_MULTISAMPLE, m_color_tex);
+	else
+		g_gl.BindTexture(GL_TEXTURE_2D, m_op_src_tex);
 	g_gl.BindVertexArray(m_op_vao);
 	g_gl.DrawArrays(GL_TRIANGLES, 0, 3);
 
@@ -1188,7 +1282,7 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 
 	const auto upload_start = clock_type::now();
 	osd::gpu_target_desc target = frame.target;
-	target.msaa_samples = std::clamp(target.msaa_samples, 0, m_caps.max_samples);
+	fit_msaa(target);
 
 	flush_deleted();
 	ensure_target(target);
@@ -1281,6 +1375,13 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 				g_gl.DepthMask(c.depth_write ? 1 : 0);
 			}
 
+			if (target.msaa_samples > 0)
+			{
+				if (c.multisample)
+					g_gl.Enable(GL_MULTISAMPLE);
+				else
+					g_gl.Disable(GL_MULTISAMPLE);
+			}
 			g_gl.DrawArrays(GL_TRIANGLES, c.first_vertex, c.vertex_count);
 			m_stats.draw_calls++;
 			break;

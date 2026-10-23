@@ -750,6 +750,22 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
+      CORE_NAME "_3d_msaa",
+      "3D Multisample Anti-Aliasing",
+      NULL,
+      "Only with 3D GPU Rendering enabled (it has no effect on the software renderer): 3dfx Voodoo boards (Midway Seattle/Vegas, Konami Viper), Konami GTI Club hardware and Sega Model 2. SNK Hyper Neo Geo 64 is not covered. Smooths the stair-stepped outlines of 3D objects on the GPU by testing several coverage samples per pixel; it costs less GPU time than raising 3D Supersampling, but the multisampled buffers need extra video memory (4x MSAA about as much as 2x supersampling). It combines with 3D Supersampling and 3D Output Scale. HUD, text and other 2D content stay sharp. Textures and cut-out edges (fences, foliage) are not smoothed. Uses more video memory (4x costs about 4 times the colour and depth buffers, and the count is reduced automatically if the buffers would pass 1 GB). Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "2x",       "2x" },
+         { "4x",       "4x" },
+         { "8x",       "8x" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
       CORE_NAME "_3d_edge_aa",
       "3D Edge Anti-Aliasing",
       NULL,

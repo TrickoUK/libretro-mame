@@ -464,6 +464,8 @@ bool gpu_renderer::init(u8 *tmu0_ram, u32 tmu0_size, u8 *tmu1_ram, u32 tmu1_size
 	osd::gpu_shader_module module;
 	module.name = "voodoo";
 	module.fragment_source = VOODOO_FRAGMENT_SOURCE;
+	if (m_machine.osd().msaa() > 0)
+		module.centroid_mask = 0xfff;
 	module.varying_count = gpu_vertex::VARYINGS;
 	for (int i = 0; i < gpu_vertex::VARYINGS; i++)
 		module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
@@ -769,11 +771,13 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 			next.color_write = true;
 			next.depth_write = false;
 			next.depth_func = osd::gpu_depth_func::ALWAYS;
+			next.multisample = false;
 		}
 		else if (cmd.kind == gpu_command::type::FASTFILL)
 		{
 			next.variant = 1;
 			next.depth_func = osd::gpu_depth_func::ALWAYS;
+			next.multisample = false;
 		}
 		else
 		{
@@ -781,6 +785,9 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 				osd::gpu_depth_func::NEVER, osd::gpu_depth_func::LESS, osd::gpu_depth_func::EQUAL, osd::gpu_depth_func::LEQUAL,
 				osd::gpu_depth_func::GREATER, osd::gpu_depth_func::NOTEQUAL, osd::gpu_depth_func::GEQUAL, osd::gpu_depth_func::ALWAYS };
 			next.depth_func = fbzmode.enable_depthbuf() ? FUNCS[fbzmode.depth_function()] : osd::gpu_depth_func::ALWAYS;
+			// Only geometry with a real depth compare has its edges multisampled. Everything drawn without one (HUD,
+			// text, logos, backdrops) covers whole pixels, so an overlay never blends toward the picture behind it.
+			next.multisample = next.depth_func != osd::gpu_depth_func::ALWAYS;
 			if (alphamode.alphablend())
 			{
 				using F = osd::gpu_blend_factor;
@@ -861,6 +868,7 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 	frame.target.height = m_rows * m_buffers * scale;
 	frame.target.persistent = true;
 	frame.target.depth = osd::gpu_depth_mode::REAL;
+	frame.target.msaa_samples = m_machine.osd().msaa();
 	frame.target.generation = m_generation;
 	frame.updates = updates.data();
 	frame.update_count = updates.size();

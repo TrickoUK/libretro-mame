@@ -185,6 +185,7 @@ public:
 	}
 	virtual int supersample() const override { return supersample_factor; }
 	virtual bool supersample_output() const override { return supersample_output_enable; }
+	virtual int msaa() const override { return msaa_samples_option; }
 	virtual bool edge_aa() const override { return edge_aa_enable; }
 	virtual bool texture_filter() const override { return texfilter_enable; }
 	virtual osd::gpu_engine *get_gpu_engine(const char *system) override;

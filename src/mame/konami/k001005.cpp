@@ -40,6 +40,7 @@ k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, devi
 	m_output_scaled = screen.machine().osd().supersample_output() && m_ss > 1;
 
 	m_force_bilinear = screen.machine().osd().texture_filter();
+	m_gpu_msaa = screen.machine().osd().msaa();
 	if (char const *env = getenv("MAME_K001005_TEXFILTER"))
 		m_force_bilinear = atoi(env) != 0;
 
@@ -152,6 +153,7 @@ void k001005_renderer::swap_buffers()
 	m_fb_page ^= 1;
 
 	m_fb[m_fb_page].fill(0, m_cliprect);
+	m_page_share[m_fb_page] = false;
 
 	float const zvalue = 10000000000.0F;
 	m_zb.fill(*(int*)&zvalue, m_cliprect);
@@ -177,6 +179,8 @@ bool k001005_renderer::gpu_init()
 			osd::gpu_shader_module module;
 			module.name = "k001005";
 			module.fragment_source = K001005_FRAGMENT_SOURCE;
+			if (m_gpu_msaa > 0)
+				module.centroid_mask = 0x1ff;
 			module.varying_count = K001005_SHADER_VARYINGS;
 			for (int i = 0; i < K001005_SHADER_VARYINGS; i++)
 				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
@@ -327,6 +331,8 @@ void k001005_renderer::gpu_submit()
 		draw.bindings[1] = m_gpu_palette;
 		draw.depth_func = run.z_compare ? osd::gpu_depth_func::LEQUAL : osd::gpu_depth_func::ALWAYS;
 		draw.depth_write = true;
+		// only geometry with a depth compare has its edges multisampled
+		draw.multisample = run.z_compare;
 		if (run.fb_blend)
 		{
 			draw.blend.enable = true;
@@ -344,11 +350,20 @@ void k001005_renderer::gpu_submit()
 	readback.h = target.height();
 	readback.out = &target.pix(0, 0);
 	readback.stride = target.rowpixels();
+	if (m_gpu_msaa > 0)
+	{
+		// the layer is transparent where nothing was drawn, so the samples of an edge pixel are averaged
+		// over the drawn ones only, with the drawn share in alpha
+		readback.coverage = true;
+		readback.coverage_share = true;
+	}
 
 	osd::gpu_frame frame;
 	frame.target.width = target.width();
 	frame.target.height = target.height();
 	frame.target.depth = osd::gpu_depth_mode::REAL;
+	frame.target.msaa_samples = m_gpu_msaa;
+	frame.target.msaa_per_sample = m_gpu_msaa > 0;
 	frame.updates = updates;
 	frame.update_count = update_count;
 	frame.vertices = m_gpu_vertices.data();
@@ -363,7 +378,10 @@ void k001005_renderer::gpu_submit()
 	frame.readback_count = 1;
 	frame.defer_readback = true;
 	if (m_gpu_engine->submit_frame(frame))
+	{
 		m_gpu_pending = true;
+		m_page_share[m_fb_page] = m_gpu_msaa > 0;
+	}
 	else
 	{
 		// the textures may not have reached the GPU, and this frame stays empty
@@ -962,6 +980,23 @@ void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 
 	int const ss = m_ss;
 	int const samples = ss * ss;
+	bitmap_rgb32 const &page = m_fb[m_fb_page ^ 1];
+
+	// A page drawn with multisampling holds the average colour of the drawn samples of each pixel and the
+	// share of the pixel they cover in alpha. A partly covered pixel is blended over what is behind the layer
+	// by that share, which anti-aliases the edge.
+	bool const share = m_page_share[m_fb_page ^ 1];
+
+	// Blends the colour channels of src over back, share_sum out of share_max of the pixel being drawn
+	auto const blend = [] (uint32_t src, uint32_t back, uint32_t share_sum, uint32_t share_max) -> uint32_t
+	{
+		uint32_t const clear = share_max - share_sum;
+		uint32_t const a = (share_sum * 255 + (back >> 24) * clear) / share_max;
+		uint32_t const r = (share_sum * ((src >> 16) & 0xff) + ((back >> 16) & 0xff) * clear) / share_max;
+		uint32_t const g = (share_sum * ((src >> 8) & 0xff) + ((back >> 8) & 0xff) * clear) / share_max;
+		uint32_t const b = (share_sum * (src & 0xff) + (back & 0xff) * clear) / share_max;
+		return (a << 24) | (r << 16) | (g << 8) | b;
+	};
 
 	if (m_output_scaled)
 	{
@@ -969,13 +1004,18 @@ void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 		for (int j = cliprect.min_y; j <= cliprect.max_y; j++)
 		{
 			uint32_t *const bmp = &bitmap.pix(j);
-			uint32_t const *const src = &m_fb[m_fb_page ^ 1].pix(j - cliprect.min_y, 0);
+			uint32_t const *const src = &page.pix(j - cliprect.min_y, 0);
 
 			for (int i = cliprect.min_x; i <= cliprect.max_x; i++)
 			{
 				uint32_t const p = src[i - cliprect.min_x];
 				if (p & 0xff000000)
-					bmp[i] = p;
+				{
+					if (share && (p >> 24) != 0xff)
+						bmp[i] = blend(p, bmp[i], p >> 24, 255);
+					else
+						bmp[i] = p;
+				}
 			}
 		}
 		return;
@@ -992,9 +1032,41 @@ void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 
 			if (ss == 1)
 			{
-				uint32_t const src = m_fb[m_fb_page ^ 1].pix(src_y, src_x);
+				uint32_t const src = page.pix(src_y, src_x);
 				if (src & 0xff000000)
-					bmp[i] = src;
+				{
+					if (share && (src >> 24) != 0xff)
+						bmp[i] = blend(src, bmp[i], src >> 24, 255);
+					else
+						bmp[i] = src;
+				}
+				continue;
+			}
+
+			if (share)
+			{
+				// Each page pixel counts for its covered share, 255 being all of it
+				uint32_t weight = 0, r = 0, g = 0, b = 0;
+				for (int sy = 0; sy < ss; sy++)
+				{
+					uint32_t const *const src = &page.pix(src_y + sy, src_x);
+					for (int sx = 0; sx < ss; sx++)
+					{
+						uint32_t const p = src[sx];
+						uint32_t const w = p >> 24;
+						weight += w;
+						r += w * ((p >> 16) & 0xff);
+						g += w * ((p >> 8) & 0xff);
+						b += w * (p & 0xff);
+					}
+				}
+
+				if (weight == 0)
+					continue;
+
+				// colour of the drawn samples, then blended by the share of the output pixel they cover
+				uint32_t const drawn = (0xff << 24) | ((r / weight) << 16) | ((g / weight) << 8) | (b / weight);
+				bmp[i] = (weight == uint32_t(samples) * 255) ? drawn : blend(drawn, bmp[i], weight, samples * 255);
 				continue;
 			}
 
@@ -1005,7 +1077,7 @@ void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 			uint32_t a = 0, r = 0, g = 0, b = 0;
 			for (int sy = 0; sy < ss; sy++)
 			{
-				uint32_t const *const src = &m_fb[m_fb_page ^ 1].pix(src_y + sy, src_x);
+				uint32_t const *const src = &page.pix(src_y + sy, src_x);
 				for (int sx = 0; sx < ss; sx++)
 				{
 					uint32_t const p = src[sx];
