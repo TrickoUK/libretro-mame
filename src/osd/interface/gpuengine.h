@@ -153,7 +153,7 @@ struct gpu_shader_module
 {
 	const char *name = "";
 	const char *fragment_source = "";
-	bool centroid = false;              // interpolate the varyings at a point inside the primitive for a partly covered multisample pixel
+	uint32_t centroid_mask = 0;         // bit i: varying i is interpolated at a point inside the primitive for a partly covered multisample pixel, instead of at the pixel centre
 	int varying_count = 0;
 	gpu_varying_mode varying_mode[GPU_MAX_VARYINGS] = {};
 	int state_stride = 0;               // words per record the source reads

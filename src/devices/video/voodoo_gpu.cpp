@@ -464,7 +464,8 @@ bool gpu_renderer::init(u8 *tmu0_ram, u32 tmu0_size, u8 *tmu1_ram, u32 tmu1_size
 	osd::gpu_shader_module module;
 	module.name = "voodoo";
 	module.fragment_source = VOODOO_FRAGMENT_SOURCE;
-	module.centroid = m_machine.osd().msaa() > 0;
+	if (m_machine.osd().msaa() > 0)
+		module.centroid_mask = 0xfff;
 	module.varying_count = gpu_vertex::VARYINGS;
 	for (int i = 0; i < gpu_vertex::VARYINGS; i++)
 		module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;

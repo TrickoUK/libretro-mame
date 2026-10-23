@@ -179,7 +179,8 @@ bool k001005_renderer::gpu_init()
 			osd::gpu_shader_module module;
 			module.name = "k001005";
 			module.fragment_source = K001005_FRAGMENT_SOURCE;
-			module.centroid = m_gpu_msaa > 0;
+			if (m_gpu_msaa > 0)
+				module.centroid_mask = 0x1ff;
 			module.varying_count = K001005_SHADER_VARYINGS;
 			for (int i = 0; i < K001005_SHADER_VARYINGS; i++)
 				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;

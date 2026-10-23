@@ -458,7 +458,7 @@ osd::gpu_handle retro_gpu_engine::create_shader_module(const osd::gpu_shader_mod
 	module m;
 	m.name = desc.name ? desc.name : "";
 	m.source = desc.fragment_source;
-	m.centroid = desc.centroid;
+	m.centroid_mask = desc.centroid_mask;
 	m.varying_count = desc.varying_count;
 	std::copy(std::begin(desc.varying_mode), std::end(desc.varying_mode), std::begin(m.varying_mode));
 	m.state_stride = desc.state_stride;
@@ -512,7 +512,7 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 	vs += "uniform vec2 u_target_size;\nuniform float u_order_scale;\nuniform int u_depth_order;\n";
 	vs += "flat out uint g_prim;\n";
 	for (int i = 0; i < m.varying_count; i++)
-		vs += interpolation_qualifier(m.varying_mode[i], m.centroid) + "out float v" + std::to_string(i) + ";\n";
+		vs += interpolation_qualifier(m.varying_mode[i], (((m.centroid_mask >> i) & 1) != 0)) + "out float v" + std::to_string(i) + ";\n";
 	vs += "void main()\n{\n";
 	// rows are used top-down: target y = 0 is framebuffer row 0
 	vs += "\tvec2 ndc = a_pos.xy / u_target_size * 2.0 - 1.0;\n";
@@ -530,7 +530,7 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 	fs += "#define VARIANT " + std::to_string(variant) + "\n";
 	fs += "flat in uint g_prim;\n";
 	for (int i = 0; i < m.varying_count; i++)
-		fs += interpolation_qualifier(m.varying_mode[i], m.centroid) + "in float v" + std::to_string(i) + ";\n";
+		fs += interpolation_qualifier(m.varying_mode[i], (((m.centroid_mask >> i) & 1) != 0)) + "in float v" + std::to_string(i) + ";\n";
 	fs += "out vec4 o_color;\n";
 	fs += "uniform vec2 u_target_size;\nuniform int u_rec_texels;\nuniform isampler2D u_state_tex;\n";
 	fs += "int state(int k)\n{\n";
@@ -730,6 +730,17 @@ void retro_gpu_engine::ensure_target(const osd::gpu_target_desc &target)
 	{
 		clear_color = true;
 		clear_depth = true;
+	}
+
+	if (realloc)
+	{
+		// memory the target asks for: colour and depth for every sample, plus the single-sample resolve texture
+		const double pixels = double(target.width) * target.height;
+		const double samples = std::max(target.msaa_samples, 1);
+		const double depth_bytes = (target.depth != osd::gpu_depth_mode::NONE) ? 4.0 : 0.0;
+		const double resolve_bytes = (target.msaa_samples > 0) ? 4.0 : 0.0;
+		fprintf(stderr, "[retro_gpu_engine] target %dx%d, %d samples: colour+depth %.1f MB, resolve %.1f MB\n",
+				target.width, target.height, target.msaa_samples, pixels * samples * (4.0 + depth_bytes) / 1048576.0, pixels * resolve_bytes / 1048576.0);
 	}
 
 	m_target = target;

@@ -713,7 +713,8 @@ bool model2_state::gpu_init()
 			osd::gpu_shader_module module;
 			module.name = "model2";
 			module.fragment_source = MODEL2_FRAGMENT_SOURCE;
-			module.centroid = machine().osd().msaa() > 0;
+			if (machine().osd().msaa() > 0)
+				module.centroid_mask = 0x7;
 			module.varying_count = MODEL2_SHADER_VARYINGS;
 			for (int i = 0; i < MODEL2_SHADER_VARYINGS; i++)
 				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;

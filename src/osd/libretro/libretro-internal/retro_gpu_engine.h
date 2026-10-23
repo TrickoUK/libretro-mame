@@ -71,7 +71,7 @@ private:
 	{
 		std::string name;
 		std::string source;
-		bool centroid = false;
+		uint32_t centroid_mask = 0;
 		int varying_count = 0;
 		osd::gpu_varying_mode varying_mode[osd::GPU_MAX_VARYINGS] = {};
 		int state_stride = 0;
