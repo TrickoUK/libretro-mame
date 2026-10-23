@@ -1061,11 +1061,8 @@ void hng64_state::clear3d()
 	// Reset the buffers...
 	//const rectangle& visarea = m_screen->visible_area();
 	const int size = m_poly_renderer->bufferSize();
-	for (int i = 0; i < size * size; i++)
-	{
-		m_poly_renderer->depthBuffer3d()[i] = 100.0f;
-		m_poly_renderer->colorBuffer3d()[i] = 0;
-	}
+	std::fill_n(m_poly_renderer->colorBuffer3d(), size * size, 0);
+	m_poly_renderer->clear_depth();
 
 	m_poly_renderer->gpu_clear();
 
@@ -1626,12 +1623,27 @@ void hng64_poly_renderer::gpu_clear()
 	m_gpu_generation++;
 }
 
+// The depth buffer is only used by the software rasteriser, so it is cleared when a polygon first needs it.
+void hng64_poly_renderer::clear_depth()
+{
+	if (gpu_init())
+		m_depth_clear_pending = true;
+	else
+		std::fill_n(m_depthBuffer3d.get(), bufferSize() * bufferSize(), 100.0f);
+}
+
 void hng64_poly_renderer::drawShaded(polygon *p)
 {
 	if (gpu_init())
 	{
 		gpu_add_polygon(p);
 		return;
+	}
+
+	if (m_depth_clear_pending)
+	{
+		m_depth_clear_pending = false;
+		std::fill_n(m_depthBuffer3d.get(), bufferSize() * bufferSize(), 100.0f);
 	}
 
 	// Polygon information for the rasterizer

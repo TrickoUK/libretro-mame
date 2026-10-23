@@ -123,6 +123,7 @@ public:
 	void gpu_submit();
 	void gpu_collect();
 	void gpu_clear();
+	void clear_depth();
 
 	hng64_state &state() { return m_state; }
 	float *depthBuffer3d() { return m_depthBuffer3d.get(); }
@@ -151,6 +152,7 @@ private:
 	std::vector<u32> m_gpu_state;
 	std::vector<hng64_gpu_vertex> m_gpu_vertices;
 	bool m_gpu_pending = false;             // a submitted frame has not been collected
+	bool m_depth_clear_pending = false;     // the software depth buffer is stale (the GPU drew the frames since the last clear)
 
 	// (Temporarily class members - someday they will live in the memory map)
 	std::unique_ptr<float[]> m_depthBuffer3d;

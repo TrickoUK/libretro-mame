@@ -514,3 +514,8 @@ builds get them straight from here.
   from the GPU already averaged to the screen size and written into the screen image at its position, as the Viper boards
   already did, instead of converting it pixel by pixel on the CPU. The picture is pixel-identical (checked on San Francisco
   Rush and California Speed, four frames each, against the CPU conversion).
+
+### Hyper Neo Geo 64: faster 3D buffer clear with GPU rendering
+- With 3D GPU Rendering on, the 3D buffers are no longer cleared on the CPU every frame (about 5.6 ms at 4x supersampling);
+  the unused software depth buffer is only cleared if the game falls back to software rendering. Xtreme Rally at 4x
+  supersampling runs about 11% faster (0.78x against 0.70x real time, same-core comparison). The picture is unchanged.
