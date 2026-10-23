@@ -37,6 +37,7 @@ k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, devi
 	if (char const *env = getenv("MAME_K001005_SS"))
 		ss = atoi(env);
 	m_ss = std::clamp(ss, 1, 4);
+	m_output_scaled = screen.machine().osd().supersample_output() && m_ss > 1;
 
 	m_force_bilinear = screen.machine().osd().texture_filter();
 	if (char const *env = getenv("MAME_K001005_TEXFILTER"))
@@ -962,6 +963,24 @@ void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 	int const ss = m_ss;
 	int const samples = ss * ss;
 
+	if (m_output_scaled)
+	{
+		// The screen has one pixel per sample
+		for (int j = cliprect.min_y; j <= cliprect.max_y; j++)
+		{
+			uint32_t *const bmp = &bitmap.pix(j);
+			uint32_t const *const src = &m_fb[m_fb_page ^ 1].pix(j - cliprect.min_y, 0);
+
+			for (int i = cliprect.min_x; i <= cliprect.max_x; i++)
+			{
+				uint32_t const p = src[i - cliprect.min_x];
+				if (p & 0xff000000)
+					bmp[i] = p;
+			}
+		}
+		return;
+	}
+
 	for (int j = cliprect.min_y; j <= cliprect.max_y; j++)
 	{
 		uint32_t *const bmp = &bitmap.pix(j);
@@ -1058,6 +1077,18 @@ void k001005_device::device_start()
 
 	m_renderer = std::make_unique<k001005_renderer>(*this, screen(), m_k001006);
 
+	// The 2D layers draw at native size, so the scaled screen gets them enlarged from a native-size bitmap
+	m_output_scale = m_renderer->output_scaled() ? m_renderer->supersample() : 1;
+	if (m_output_scale > 1)
+	{
+		rectangle const visarea = screen().visible_area();
+		m_layer.allocate(screen().width(), screen().height());
+		screen().configure(screen().width() * m_output_scale, screen().height() * m_output_scale,
+				rectangle(visarea.min_x * m_output_scale, (visarea.max_x + 1) * m_output_scale - 1,
+					visarea.min_y * m_output_scale, (visarea.max_y + 1) * m_output_scale - 1),
+				screen().frame_period());
+	}
+
 	save_pointer(NAME(m_ram[0]), 0x140000);
 	save_pointer(NAME(m_ram[1]), 0x140000);
 	save_pointer(NAME(m_fifo), 0x800);
@@ -1093,6 +1124,22 @@ void k001005_device::device_stop()
 /*****************************************************************************
     DEVICE HANDLERS
 *****************************************************************************/
+
+void k001005_device::enlarge_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect) const
+{
+	int const os = m_output_scale;
+	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		uint32_t const *const src = &m_layer.pix(y / os, 0);
+		uint32_t *const dst = &bitmap.pix(y);
+		for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+		{
+			uint32_t const p = src[x / os];
+			if (p & 0xff000000)
+				dst[x] = p;
+		}
+	}
+}
 
 void k001005_device::swap_buffers( )
 {

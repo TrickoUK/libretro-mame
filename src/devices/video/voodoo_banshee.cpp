@@ -31,6 +31,8 @@
 #include "emu.h"
 #include "voodoo_banshee.h"
 
+#include "osdepend.h"
+
 #include "endianness.h"
 
 using namespace voodoo;
@@ -1524,13 +1526,18 @@ void voodoo_banshee_device::recompute_video()
 	if (LOG_REGISTERS)
 		logerror("configure screen: htotal: %d vtotal: %d vstart: %d vstop: %d width: %d height: %d misc_vga: %02x alpha_dis %d refresh: %f\n", htotal, vtotal, vstart, vstop, width, height, misc_vga_output, alpha_dis, 1.0 / frame_period);
 
+	// the host-GPU path can present the screen at the render scale (the mame_3d_output_scale option)
+	m_output_scale = (m_gpu && machine().osd().supersample_output()) ? std::clamp(machine().osd().supersample(), 1, 4) : 1;
+	int const os = m_output_scale;
+
 	// configure the screen
-	rectangle visarea(0, width - 1, 0, height - 1);
-	screen().configure(htotal, vtotal, visarea, attotime::from_double(frame_period));
+	rectangle visarea(0, width * os - 1, 0, height * os - 1);
+	screen().configure(htotal * os, vtotal * os, visarea, attotime::from_double(frame_period));
 
 	// set the vsync start and stop
-	m_vsyncstart = vstart;
-	m_vsyncstop = vstop;
+	// the vsync positions are screen lines, which are os times the native lines
+	m_vsyncstart = vstart * os;
+	m_vsyncstop = vstop * os;
 	adjust_vblank_start_timer();
 }
 

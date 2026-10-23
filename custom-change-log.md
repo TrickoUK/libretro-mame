@@ -519,3 +519,11 @@ builds get them straight from here.
 - With 3D GPU Rendering on, the 3D buffers are no longer cleared on the CPU every frame (about 5.6 ms at 4x supersampling);
   the unused software depth buffer is only cleared if the game falls back to software rendering. Xtreme Rally at 4x
   supersampling runs about 11% faster (0.78x against 0.70x real time, same-core comparison). The picture is unchanged.
+
+### Viper, GTI Club boards and Hyper Neo Geo 64: 3D Output Scale
+- 3D Output Scale ("match") now works on every system that has 3D Supersampling, not only Model 2 and the Seattle/Vegas
+  Voodoo boards: Viper games (GTI Club 2 and others, on the GPU path), the GTI Club boards (GTI Club, Operation Thunder
+  Hurricane, Solar Assault, Midnight Run, Jet Wave) and Hyper Neo Geo 64. The screen is shown at the supersample size, so
+  the 3D layer keeps its extra detail while tilemaps, sprites and text are enlarged with sharp pixels.
+- Fixed the vertical-blank position of the Voodoo boards at an output scale above 1: it sat halfway down the scaled
+  frame, which tore the picture in the middle of the screen.

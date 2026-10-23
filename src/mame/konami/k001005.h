@@ -52,6 +52,8 @@ public:
 	void swap_buffers();
 	bool fifo_filled();
 	void draw(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	int supersample() const { return m_ss; }
+	bool output_scaled() const { return m_output_scaled; }
 
 	int parse_polygon(int index, uint32_t cmd);
 	void render_polygons();
@@ -76,6 +78,9 @@ private:
 	static constexpr int NATIVE_WIDTH = 512;
 	static constexpr int NATIVE_HEIGHT = 384;
 	int m_ss;
+	// With the 3D output scale the screen is presented at the supersampling size instead of
+	// averaging the 3D layer down, so draw() copies samples one to one.
+	bool m_output_scaled;
 	// Not a hardware setting: bilinear filter textures even where the game doesn't ask for it
 	bool m_force_bilinear;
 
@@ -166,6 +171,28 @@ public:
 	void draw(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void swap_buffers();
 
+	// With the 3D output scale the screen is presented at this multiple of its native size
+	// (1 = native). The 2D layers still draw at native size.
+	int output_scale() const { return m_output_scale; }
+
+	// Draws a 2D layer through draw_native(bitmap, cliprect) at native size and, at an output scale
+	// above 1, enlarges its opaque pixels (alpha set) onto the screen bitmap with sharp pixels.
+	template <typename F> void draw_2d_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect, F &&draw_native)
+	{
+		if (m_output_scale == 1)
+		{
+			draw_native(bitmap, cliprect);
+			return;
+		}
+
+		rectangle const native_clip(
+				cliprect.min_x / m_output_scale, cliprect.max_x / m_output_scale,
+				cliprect.min_y / m_output_scale, cliprect.max_y / m_output_scale);
+		m_layer.fill(0, native_clip);
+		draw_native(m_layer, native_clip);
+		enlarge_layer(bitmap, cliprect);
+	}
+
 	uint32_t read(address_space &space, offs_t offset, uint32_t mem_mask = ~0);
 	void write(address_space &space, offs_t offset, uint32_t data, uint32_t mem_mask = ~0);
 
@@ -176,8 +203,12 @@ protected:
 	virtual void device_reset() override ATTR_COLD;
 
 private:
+	void enlarge_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect) const;
+
 	// internal state
 	optional_device<k001006_device> m_k001006;
+	int m_output_scale = 1;
+	bitmap_rgb32 m_layer;
 
 	std::unique_ptr<uint16_t[]> m_ram[2];
 	std::unique_ptr<uint32_t[]> m_fifo;

@@ -335,6 +335,11 @@ private:
 	bitmap_ind16 m_sprite_bitmap;
 	bitmap_ind16 m_sprite_zbuffer;
 
+	// 3D output scale: the screen is m_output_scale times its native size, and the 2D layers draw at native size into m_native
+	int m_output_scale = 1;
+	bitmap_rgb32 m_native;
+	bitmap_rgb32 m_native_before;
+
 	u8 m_irq_pos_half;
 	u32 m_raster_irq_pos[2];
 
@@ -500,6 +505,9 @@ private:
 	void set_irq(u32 irq_vector);
 	template <u8 Which, u8 Size> TILE_GET_INFO_MEMBER(get_tile_info);
 	u32 screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void enlarge_native(bitmap_rgb32 &bitmap, const rectangle &cliprect) const;
+	void reduce_to_native(const bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void enlarge_changed(bitmap_rgb32 &bitmap, const rectangle &cliprect) const;
 	void screen_vblank(int state);
 	TIMER_DEVICE_CALLBACK_MEMBER(hng64_irq);
 	void do_dma(address_space &space);

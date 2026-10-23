@@ -905,14 +905,23 @@ void gticlub_base_state::machine_reset()
 
 uint32_t gticlub_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	m_k001604[0]->draw_back_layer(screen, bitmap, cliprect);
+	int const os = m_k001005->output_scale();
+
+	bitmap.fill(0, cliprect);
+	m_k001005->draw_2d_layer(bitmap, cliprect, [this, &screen, os] (bitmap_rgb32 &layer, const rectangle &clip)
+			{
+				m_k001604[0]->draw_back_layer(screen, layer, clip, os);
+			});
 
 	if (m_konppc[0].output_3d_enabled())
 	{
 		m_k001005->draw(bitmap, cliprect);
 	}
 
-	m_k001604[0]->draw_front_layer(screen, bitmap, cliprect);
+	m_k001005->draw_2d_layer(bitmap, cliprect, [this, &screen, os] (bitmap_rgb32 &layer, const rectangle &clip)
+			{
+				m_k001604[0]->draw_front_layer(screen, layer, clip, os);
+			});
 
 #if DEBUG_GTI // TODO: won't compile since k001006 has been devicified and its palette is private
 	m_tick++;
