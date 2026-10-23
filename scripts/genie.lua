@@ -407,7 +407,7 @@ newoption {
 
 newoption {
 	trigger = "HAVE_RETRO_GPU_TARGET",
-	description = "Enable the libretro OSD's optional GPU render-target service (dlopen-based EGL/GL, opt-in).",
+	description = "Enable the libretro OSD's host-GPU 3D renderer (dlopen-based EGL/GL; Makefile.libretro turns it on for Linux).",
 }
 
 newoption {

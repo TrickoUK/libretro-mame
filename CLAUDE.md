@@ -349,8 +349,8 @@ for full phase-by-phase detail):
   header/library dependencies at all; the feature just degrades to
   unavailable (`is_valid() == false`) on any system without a working
   OpenGL/EGL install.
-- Gated behind a **`HAVE_RETRO_GPU_TARGET`** build define (opt-in only,
-  default build unaffected) — **not** `HAVE_OPENGL`: that name collides
+- Gated behind a **`HAVE_RETRO_GPU_TARGET`** build define (on by default for Linux
+  builds since 2026-10-23, set in `Makefile.libretro`; pass `HAVE_RETRO_GPU_TARGET=` empty to leave it out) — **not** `HAVE_OPENGL`: that name collides
   with the pre-existing dead `RETRO_HW_RENDER` code above, which shares the
   same guard and includes a nonexistent `retroogl.c` — defining
   `HAVE_OPENGL` for real activates that broken dead code and breaks the

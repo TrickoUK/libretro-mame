@@ -333,6 +333,11 @@ endif
 ifneq ($(SOURCEFILTER),)
 	TARGETFLAGS += SOURCEFILTER=$(SOURCEFILTER)
 endif
+# The host-GPU 3D renderer loads EGL/GL with dlopen at run time, so it needs nothing at build time. It is
+# on by default for Linux builds; pass HAVE_RETRO_GPU_TARGET= (empty) to leave it out.
+ifneq ($(filter linux linux32 unix,$(platform)),)
+	HAVE_RETRO_GPU_TARGET ?= 1
+endif
 ifneq ($(HAVE_RETRO_GPU_TARGET),)
 	TARGETFLAGS += HAVE_RETRO_GPU_TARGET=$(HAVE_RETRO_GPU_TARGET)
 endif
