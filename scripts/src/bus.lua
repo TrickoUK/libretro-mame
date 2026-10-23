@@ -2048,8 +2048,14 @@ end
 ---------------------------------------------------
 if BUSES["COMPUCOLOR"] then
 	files {
+		MAME_DIR .. "src/devices/bus/compucolor/exp.cpp",
+		MAME_DIR .. "src/devices/bus/compucolor/exp.h",
 		MAME_DIR .. "src/devices/bus/compucolor/floppy.cpp",
 		MAME_DIR .. "src/devices/bus/compucolor/floppy.h",
+		MAME_DIR .. "src/devices/bus/compucolor/joysnd.cpp",
+		MAME_DIR .. "src/devices/bus/compucolor/joysnd.h",
+		MAME_DIR .. "src/devices/bus/compucolor/soundware.cpp",
+		MAME_DIR .. "src/devices/bus/compucolor/soundware.h",
 	}
 end
 
@@ -4327,6 +4333,8 @@ if BUSES["NSCSI"] then
 		MAME_DIR .. "src/devices/bus/nscsi/pc8801_30.h",
 		MAME_DIR .. "src/devices/bus/nscsi/pc98_hd.cpp",
 		MAME_DIR .. "src/devices/bus/nscsi/pc98_hd.h",
+		MAME_DIR .. "src/devices/bus/nscsi/pcfxcd.cpp",
+		MAME_DIR .. "src/devices/bus/nscsi/pcfxcd.h",
 		MAME_DIR .. "src/devices/bus/nscsi/s1410.cpp",
 		MAME_DIR .. "src/devices/bus/nscsi/s1410.h",
 		MAME_DIR .. "src/devices/bus/nscsi/sa1403d.cpp",
@@ -6463,8 +6471,12 @@ end
 
 if BUSES["VIDBRAIN"] then
 	files {
+		MAME_DIR .. "src/devices/bus/vidbrain/accessory.cpp",
+		MAME_DIR .. "src/devices/bus/vidbrain/accessory.h",
 		MAME_DIR .. "src/devices/bus/vidbrain/exp.cpp",
 		MAME_DIR .. "src/devices/bus/vidbrain/exp.h",
+		MAME_DIR .. "src/devices/bus/vidbrain/expander1.cpp",
+		MAME_DIR .. "src/devices/bus/vidbrain/expander1.h",
 		MAME_DIR .. "src/devices/bus/vidbrain/std.cpp",
 		MAME_DIR .. "src/devices/bus/vidbrain/std.h",
 		MAME_DIR .. "src/devices/bus/vidbrain/comp_language.cpp",
