@@ -527,3 +527,8 @@ builds get them straight from here.
   the 3D layer keeps its extra detail while tilemaps, sprites and text are enlarged with sharp pixels.
 - Fixed the vertical-blank position of the Voodoo boards at an output scale above 1: it sat halfway down the scaled
   frame, which tore the picture in the middle of the screen.
+
+### Round Up 5: road scenery on the right of the screen
+- Where the second road pixel set is parked off the right of the screen, the area right of the first set took the "between the
+  sets" pen and showed the wrong colour (the right verge on the beach stage). A set that reaches no on-screen pixel on a line
+  now draws nothing and the first set's edge pen fills the rest. Forked roads and tunnels are unchanged.

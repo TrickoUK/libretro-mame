@@ -259,12 +259,19 @@ pos is 11.5 fixed point
 		int const start1 = step ? ((-int16_t(shift) * 256) + 0x80) / step : 0x10000;
 		int const start2 = step ? ((-int16_t(uint16_t(shift + shift2)) * 256) + 0x80) / step : 0x10000;
 
+		// A set placed wholly off screen contributes no pixels; with the 1st set on screen the fills
+		// outside it then come from the 1st set alone
+		int const last = (step > 0) ? (0x3ffff / step) : 0;
+		bool const on1 = (step <= 0) || (start1 <= cliprect.right() && (start1 + last) >= cliprect.left());
+		bool const on2 = (step <= 0) || (start2 <= cliprect.right() && (start2 + last) >= cliprect.left());
+		bool const set2_en = on2 || !on1;
+
 		// Pixels outside both sets take the edge pen of the outermost set on that side, from that set's palette bank
-		bool const set2_left = start2 < start1;
+		bool const set2_left = set2_en && start2 < start1;
 		int const left_col = linedata[set2_left ? 0x200 : 0] & 0xf;
 		int const left_bank = set2_left ? 32 : 0;
-		int const right_col = linedata[set2_left ? 0x7f : (0x7f + 0x200)] & 0xf;
-		int const right_bank = set2_left ? 0 : 32;
+		int const right_col = linedata[(set2_left || !set2_en) ? 0x7f : (0x7f + 0x200)] & 0xf;
+		int const right_bank = (set2_left || !set2_en) ? 0 : 32;
 
 		uint32_t *const dest = &bitmap.pix(y);
 		for (int x = cliprect.left(); x <= cliprect.right(); x++)
@@ -274,7 +281,7 @@ pos is 11.5 fixed point
 			int64_t const pos1 = int64_t(x - start1) * step;
 			int64_t const pos2 = int64_t(x - start2) * step;
 			bool const in1 = pos1 >= 0 && (pos1 >> 11) < 0x80;
-			bool const in2 = pos2 >= 0 && (pos2 >> 11) < 0x80;
+			bool const in2 = set2_en && pos2 >= 0 && (pos2 >> 11) < 0x80;
 			if (in1 && in2)
 			{
 				// Where the sets overlap, as in a fork, the higher pen appears to win so that the asphalt
@@ -298,12 +305,12 @@ pos is 11.5 fixed point
 				col = linedata[(pos2 >> 11) + 0x200] & 0xf;
 				bank = 32;
 			}
-			else if (x < start1 && x < start2)
+			else if (x < start1 && (!set2_en || x < start2))
 			{
 				col = left_col;                              // left of both sets
 				bank = left_bank;
 			}
-			else if (x >= start1 && x >= start2)
+			else if (x >= start1 && (!set2_en || x >= start2))
 			{
 				col = right_col;                             // right of both sets
 				bank = right_bank;
