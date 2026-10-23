@@ -508,3 +508,9 @@ builds get them straight from here.
   the GPU (only the pixels a polygon covers count, as before) and read at screen size, instead of reading the full
   supersampled image and averaging it on the CPU. The picture is pixel-identical (checked on Daytona USA at 4x over
   four frames). Daytona USA at 4x supersampling runs at about 1.50x real time instead of 1.04x on this machine.
+
+### Seattle and Vegas Voodoo boards: GPU picture read straight into the screen
+- With 3D GPU Rendering on, San Francisco Rush, California Speed and the other Voodoo 1/2 boards now get the finished picture
+  from the GPU already averaged to the screen size and written into the screen image at its position, as the Viper boards
+  already did, instead of converting it pixel by pixel on the CPU. The picture is pixel-identical (checked on San Francisco
+  Rush and California Speed, four frames each, against the CPU conversion).

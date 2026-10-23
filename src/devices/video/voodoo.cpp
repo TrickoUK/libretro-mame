@@ -3485,14 +3485,16 @@ bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprec
 
 	// The picture is read straight into the screen bitmap, through the output pass (which also averages the render
 	// scale down to the output scale), when the update covers the whole picture. The bitmap that already holds the current picture needs nothing, another one is copied.
-	bool const direct = !m_gpu_compare && (scale % os_direct) == 0 && m_xoffs == 0 && m_yoffs == 0
-			&& cliprect.min_x == 0 && cliprect.min_y == 0 && cliprect.width() == s32(rowpixels) * os_direct && cliprect.height() == s32(rows) * os_direct
-			&& bitmap.width() >= cliprect.width() && bitmap.height() >= cliprect.height();
+	s32 const ox = m_xoffs * os_direct, oy = m_yoffs * os_direct;
+	bool const direct = !m_gpu_compare && (scale % os_direct) == 0 && m_xoffs >= 0 && m_yoffs >= 0
+			&& cliprect.min_x == ox && cliprect.min_y == oy && cliprect.width() > 0 && cliprect.width() <= s32(rowpixels) * os_direct && (cliprect.width() % os_direct) == 0
+			&& cliprect.height() == s32(rows) * os_direct
+			&& bitmap.width() > cliprect.max_x && bitmap.height() > cliprect.max_y;
 	if (direct)
 	{
 		gpu_direct_copy want;
 		want.bitmap = &bitmap;
-		want.pixels = &bitmap.pix(0);
+		want.pixels = &bitmap.pix(oy, ox);
 		want.pen_generation = m_pen_generation;
 		want.pens = pens;
 		want.front = front;
@@ -3515,7 +3517,7 @@ bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprec
 				if (src.bitmap && src.bitmap != &bitmap && src.same_picture(want))
 				{
 					for (s32 y = 0; y < want.height; y++)
-						memcpy(&bitmap.pix(y), &src.bitmap->pix(y), size_t(want.width) * sizeof(u32));
+						memcpy(&bitmap.pix(oy + y, ox), &src.bitmap->pix(oy + y, ox), size_t(want.width) * sizeof(u32));
 					m_gpu_direct[1] = m_gpu_direct[0];
 					m_gpu_direct[0] = want;
 					if (profiling)
@@ -3543,7 +3545,7 @@ bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprec
 		}
 		m_gpu->why("present");
 		bool const read_first = !m_gpu->batch().commands().empty() && !m_gpu->batch_writes_buffer(front);
-		if (!m_gpu->flush(front, &bitmap.pix(0), 0, 0, read_first, bitmap.rowpixels(), true, gamma ? lut : nullptr, scale / os_direct))
+		if (!m_gpu->flush(front, &bitmap.pix(oy, ox), 0, 0, read_first, bitmap.rowpixels(), true, gamma ? lut : nullptr, scale / os_direct, cliprect.width() / os_direct))
 			return false;
 		m_gpu_seen_serial = m_gpu->serial();
 		m_gpu_seen_front = front;

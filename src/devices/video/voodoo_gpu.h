@@ -234,9 +234,10 @@ public:
 	// buffer back as rgb32 (row_count 0 = all rows). read_first reads before the
 	// batch is drawn, which is only right when the batch does not write that buffer;
 	// the draws then run on the GPU while emulation continues.
+	// col_count is the number of native columns read from the left (0 = all);
 	// out_stride (pixels, 0 = tightly packed, in output pixels), opaque, channel_lut and downsample (see gpu_readback_rect) run a final pass on the GPU
 	bool flush(int read_buffer = -1, u32 *out = nullptr, u32 first_row = 0, u32 row_count = 0, bool read_first = false,
-			u32 out_stride = 0, bool opaque = false, u8 const *channel_lut = nullptr, int downsample = 1);
+			u32 out_stride = 0, bool opaque = false, u8 const *channel_lut = nullptr, int downsample = 1, u32 col_count = 0);
 
 	// true if any command of the batch can change the colour of the buffer slot
 	bool batch_writes_buffer(int buffer) const;

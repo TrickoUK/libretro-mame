@@ -644,7 +644,7 @@ bool gpu_renderer::batch_writes_buffer(int buffer) const
 	return false;
 }
 
-bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count, bool read_first, u32 out_stride, bool opaque, u8 const *channel_lut, int downsample)
+bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count, bool read_first, u32 out_stride, bool opaque, u8 const *channel_lut, int downsample, u32 col_count)
 {
 	if (!usable() || m_rowpixels == 0)
 		return false;
@@ -879,7 +879,7 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 		if (row_count == 0)
 			row_count = m_rows;
 		readback.y = (read_buffer * m_rows + first_row) * scale;
-		readback.w = m_rowpixels * scale;
+		readback.w = (col_count ? col_count : m_rowpixels) * scale;
 		readback.h = row_count * scale;
 		readback.out = out;
 		readback.stride = out_stride ? out_stride : readback.w / downsample;
