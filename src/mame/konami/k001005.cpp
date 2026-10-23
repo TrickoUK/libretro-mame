@@ -8,6 +8,8 @@
 
 #include "corefloat.h"
 
+#include <cmath>
+
 /*****************************************************************************/
 /* Konami K001005 Polygon Renderer (KS10071) */
 
@@ -26,6 +28,7 @@
 
 k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, device_t *k001006)
 	: poly_manager<float, k001005_polydata, 10>(screen.machine())
+	, m_gpu_machine(screen.machine())
 {
 	m_k001006 = k001006;
 
@@ -34,6 +37,7 @@ k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, devi
 	if (char const *env = getenv("MAME_K001005_SS"))
 		ss = atoi(env);
 	m_ss = std::clamp(ss, 1, 4);
+	m_output_scaled = screen.machine().osd().supersample_output() && m_ss > 1;
 
 	m_force_bilinear = screen.machine().osd().texture_filter();
 	if (char const *env = getenv("MAME_K001005_TEXFILTER"))
@@ -138,6 +142,13 @@ void k001005_renderer::push_data(uint32_t data)
 
 void k001005_renderer::swap_buffers()
 {
+	// a frame still in flight belongs to the page about to be reused
+	gpu_collect();
+
+	// the polygons of the finished frame go to the GPU now, into the buffer they were drawn for
+	if (!m_gpu_runs.empty())
+		gpu_submit();
+
 	m_fb_page ^= 1;
 
 	m_fb[m_fb_page].fill(0, m_cliprect);
@@ -149,6 +160,229 @@ void k001005_renderer::swap_buffers()
 bool k001005_renderer::fifo_filled()
 {
 	return m_3dfifo_ptr > 0;
+}
+
+
+bool k001005_renderer::gpu_init()
+{
+	if (!m_gpu_checked)
+	{
+		m_gpu_checked = true;
+		k001006_device *const k001006 = downcast<k001006_device *>(m_k001006);
+		m_gpu_engine = m_gpu_machine.osd().get_gpu_engine("k001005");
+		if (m_gpu_engine && (!k001006 || k001006->texture_page_count() * 512 > m_gpu_engine->caps().max_texture_size))
+			m_gpu_engine = nullptr;
+		if (m_gpu_engine)
+		{
+			osd::gpu_shader_module module;
+			module.name = "k001005";
+			module.fragment_source = K001005_FRAGMENT_SOURCE;
+			module.varying_count = K001005_SHADER_VARYINGS;
+			for (int i = 0; i < K001005_SHADER_VARYINGS; i++)
+				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+			module.state_stride = K001005_SHADER_STATE_WORDS;
+			module.binding_count = 2;
+			module.binding_name[0] = "tex_rom";
+			module.binding_format[0] = osd::gpu_texture_format::R8UI;
+			module.binding_name[1] = "palette";
+			module.binding_format[1] = osd::gpu_texture_format::R32UI;
+			m_gpu_module = m_gpu_engine->create_shader_module(module);
+
+			osd::gpu_texture_desc desc;
+			desc.format = osd::gpu_texture_format::R8UI;
+			desc.width = 512;
+			desc.height = k001006->texture_page_count() * 512;
+			m_gpu_tex_rom = m_gpu_engine->create_texture(desc);
+			desc.format = osd::gpu_texture_format::R32UI;
+			desc.width = 256;
+			desc.height = 8;
+			m_gpu_palette = m_gpu_engine->create_texture(desc);
+
+			if (!m_gpu_module || !m_gpu_tex_rom || !m_gpu_palette)
+				m_gpu_engine = nullptr;
+			else
+				m_gpu_shadow_palette = make_unique_clear<uint32_t []>(0x800);
+		}
+	}
+	return m_gpu_engine != nullptr && !m_gpu_engine->failed();
+}
+
+// Queues the triangles of one polygon, with the state the scanline routine would have read.
+void k001005_renderer::gpu_add_polygon(k001005_polydata const &extra, rectangle const &cliprect, bool textured, bool vertex_color, bool is_quad, int v0, int v1, int v2, int v3)
+{
+	k001006_device *const k001006 = downcast<k001006_device *>(m_k001006);
+	bool const bilinear = m_force_bilinear || k001006->bilinear_enabled();
+	bool const z_compare = BIT(extra.cmd, 2);
+	bool const fb_blend = BIT(~extra.cmd, 1);
+
+	uint32_t const prim = m_gpu_state.size() / K001005_SHADER_STATE_WORDS;
+	uint32_t const flags = (textured ? 1 : 0) | (vertex_color ? 2 : 0) | (extra.fog_enable ? 4 : 0) | (bilinear ? 8 : 0)
+			| (extra.texture_mirror ? 16 : 0) | (fb_blend ? 32 : 0);
+	m_gpu_state.insert(m_gpu_state.end(), {
+			flags,
+			uint32_t(extra.texture_x * 8),
+			uint32_t(extra.texture_y * 8),
+			uint32_t(extra.texture_width),
+			uint32_t(extra.texture_height),
+			uint32_t(extra.texture_page),
+			uint32_t(extra.texture_palette * 256),
+			uint32_t(extra.diffuse_light),
+			uint32_t(extra.ambient_light),
+			uint32_t(extra.fog_color),
+			uint32_t(extra.poly_color),
+			uint32_t(cliprect.min_x),
+			uint32_t(cliprect.min_y),
+			uint32_t(cliprect.max_x),
+			uint32_t(cliprect.max_y),
+			0 });
+
+	// quads are two triangles, other polygons the triangle of the last three vertices
+	int const quad[6] = { v0, v1, v2, v2, v3, v0 };
+	int const strip[3] = { v1, v2, v3 };
+	int const *const order = is_quad ? quad : strip;
+	int const vertex_count = is_quad ? 6 : 3;
+
+	uint32_t const start = m_gpu_vertices.size();
+	for (int i = 0; i < vertex_count; i++)
+	{
+		vertex_t const &src = m_vertexb[order[i]];
+		k001005_gpu_vertex &dst = m_gpu_vertices.emplace_back();
+		dst.x = src.x;
+		dst.y = src.y;
+		dst.z = src.p[POLY_Z];
+		dst.w = 1.0F;
+		dst.prim = prim;
+		dst.v[0] = src.p[POLY_DIFF];
+		dst.v[1] = src.p[POLY_FOG];
+		dst.v[2] = textured ? src.p[POLY_U] : 0.0F;
+		dst.v[3] = textured ? src.p[POLY_V] : 0.0F;
+		dst.v[4] = src.p[POLY_W];
+		dst.v[5] = vertex_color ? src.p[POLY_R] : 0.0F;
+		dst.v[6] = vertex_color ? src.p[POLY_G] : 0.0F;
+		dst.v[7] = vertex_color ? src.p[POLY_B] : 0.0F;
+		dst.v[8] = vertex_color ? src.p[POLY_A] : 0.0F;
+	}
+
+	// consecutive polygons with the same depth test and blend state share a draw
+	uint32_t const added = m_gpu_vertices.size() - start;
+	if (!m_gpu_runs.empty() && m_gpu_runs.back().z_compare == z_compare && m_gpu_runs.back().fb_blend == fb_blend)
+		m_gpu_runs.back().vertex_count += added;
+	else
+		m_gpu_runs.push_back({ start, added, z_compare, fb_blend });
+}
+
+// Draws the queued polygons into the frame buffer the software renderer would have drawn them into.
+void k001005_renderer::gpu_submit()
+{
+	k001006_device *const k001006 = downcast<k001006_device *>(m_k001006);
+
+	// depth is a linear remap of the vertex z to the range the GPU compares
+	float zmin = FLT_MAX, zmax = -FLT_MAX;
+	for (k001005_gpu_vertex const &vertex : m_gpu_vertices)
+	{
+		if (std::isfinite(vertex.z))
+		{
+			zmin = std::min(zmin, vertex.z);
+			zmax = std::max(zmax, vertex.z);
+		}
+	}
+	float const zscale = (zmax > zmin) ? (0.99F / (zmax - zmin)) : 0.0F;
+	for (k001005_gpu_vertex &vertex : m_gpu_vertices)
+		vertex.z = std::isfinite(vertex.z) ? (0.005F + (vertex.z - zmin) * zscale) : 0.995F;
+
+	// the K001006 pens change at any time, the texture pages never do
+	osd::gpu_texture_update updates[2];
+	int update_count = 0;
+	if (m_gpu_full_upload)
+	{
+		osd::gpu_texture_update &u = updates[update_count++];
+		u.texture = m_gpu_tex_rom;
+		u.w = 512;
+		u.h = k001006->texture_page_count() * 512;
+		u.data = k001006->texture_pages();
+		u.pitch_bytes = 512;
+	}
+	{
+		uint32_t pens[0x800];
+		for (int i = 0; i < 0x800; i++)
+			pens[i] = k001006->pen_color(i);
+		if (m_gpu_full_upload || memcmp(pens, m_gpu_shadow_palette.get(), sizeof(pens)))
+		{
+			memcpy(m_gpu_shadow_palette.get(), pens, sizeof(pens));
+			osd::gpu_texture_update &u = updates[update_count++];
+			u.texture = m_gpu_palette;
+			u.w = 256;
+			u.h = 8;
+			u.data = m_gpu_shadow_palette.get();
+			u.pitch_bytes = 256 * sizeof(uint32_t);
+		}
+	}
+	m_gpu_full_upload = false;
+
+	std::vector<osd::gpu_command> commands;
+	for (gpu_run const &run : m_gpu_runs)
+	{
+		osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, run.first_vertex, run.vertex_count);
+		draw.bindings[0] = m_gpu_tex_rom;
+		draw.bindings[1] = m_gpu_palette;
+		draw.depth_func = run.z_compare ? osd::gpu_depth_func::LEQUAL : osd::gpu_depth_func::ALWAYS;
+		draw.depth_write = true;
+		if (run.fb_blend)
+		{
+			draw.blend.enable = true;
+			draw.blend.src = osd::gpu_blend_factor::SRC_ALPHA;
+			draw.blend.dst = osd::gpu_blend_factor::ONE_MINUS_SRC_ALPHA;
+		}
+		commands.push_back(draw);
+	}
+
+	bitmap_rgb32 &target = m_fb[m_fb_page];
+	osd::gpu_readback_rect readback;
+	readback.x = 0;
+	readback.y = 0;
+	readback.w = target.width();
+	readback.h = target.height();
+	readback.out = &target.pix(0, 0);
+	readback.stride = target.rowpixels();
+
+	osd::gpu_frame frame;
+	frame.target.width = target.width();
+	frame.target.height = target.height();
+	frame.target.depth = osd::gpu_depth_mode::REAL;
+	frame.updates = updates;
+	frame.update_count = update_count;
+	frame.vertices = m_gpu_vertices.data();
+	frame.vertex_count = m_gpu_vertices.size();
+	frame.varyings_per_vertex = K001005_SHADER_VARYINGS;
+	frame.prim_state = m_gpu_state.data();
+	frame.prim_count = m_gpu_state.size() / K001005_SHADER_STATE_WORDS;
+	frame.state_stride = K001005_SHADER_STATE_WORDS;
+	frame.commands = commands.data();
+	frame.command_count = commands.size();
+	frame.readbacks = &readback;
+	frame.readback_count = 1;
+	frame.defer_readback = true;
+	if (m_gpu_engine->submit_frame(frame))
+		m_gpu_pending = true;
+	else
+	{
+		// the textures may not have reached the GPU, and this frame stays empty
+		m_gpu_full_upload = true;
+	}
+
+	m_gpu_state.clear();
+	m_gpu_vertices.clear();
+	m_gpu_runs.clear();
+}
+
+// Waits for the frame submitted at the last buffer swap and fills the page it was drawn for.
+void k001005_renderer::gpu_collect()
+{
+	if (!m_gpu_pending)
+		return;
+	m_gpu_pending = false;
+	if (!m_gpu_engine->collect_frame())
+		m_gpu_full_upload = true;
 }
 
 
@@ -441,6 +675,8 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 
 	uint32_t const *const fifo = m_3dfifo.get();
 
+	bool const gpu = gpu_init();
+
 	bool const has_texture = (cmd & 0x18) != 0;
 	bool const has_vertex_color = BIT(cmd, 8);
 	bool const has_vertex_z = BIT(~cmd, 0) || has_vertex_color;     // command 0x121 breaks the logic here, maybe vertex color enforces vertex z too?
@@ -654,7 +890,11 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 		// No texture, constant color:   Z, Fog, Diffuse
 		// Texture, constant color:      Z, Fog, Diffuse, U, V, W
 		// Per-vertex color:             Z, Fog, Diffuse, U, V, W, R, G, B, A
-		if (is_quad)
+		if (gpu)
+		{
+			gpu_add_polygon(extra, cliprect, has_texture, has_vertex_color, is_quad, v0, v1, v2, v3);
+		}
+		else if (is_quad)
 		{
 			if (has_vertex_color)
 			{
@@ -718,8 +958,28 @@ void k001005_renderer::render_polygons()
 
 void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
+	gpu_collect();
+
 	int const ss = m_ss;
 	int const samples = ss * ss;
+
+	if (m_output_scaled)
+	{
+		// The screen has one pixel per sample
+		for (int j = cliprect.min_y; j <= cliprect.max_y; j++)
+		{
+			uint32_t *const bmp = &bitmap.pix(j);
+			uint32_t const *const src = &m_fb[m_fb_page ^ 1].pix(j - cliprect.min_y, 0);
+
+			for (int i = cliprect.min_x; i <= cliprect.max_x; i++)
+			{
+				uint32_t const p = src[i - cliprect.min_x];
+				if (p & 0xff000000)
+					bmp[i] = p;
+			}
+		}
+		return;
+	}
 
 	for (int j = cliprect.min_y; j <= cliprect.max_y; j++)
 	{
@@ -817,6 +1077,18 @@ void k001005_device::device_start()
 
 	m_renderer = std::make_unique<k001005_renderer>(*this, screen(), m_k001006);
 
+	// The 2D layers draw at native size, so the scaled screen gets them enlarged from a native-size bitmap
+	m_output_scale = m_renderer->output_scaled() ? m_renderer->supersample() : 1;
+	if (m_output_scale > 1)
+	{
+		rectangle const visarea = screen().visible_area();
+		m_layer.allocate(screen().width(), screen().height());
+		screen().configure(screen().width() * m_output_scale, screen().height() * m_output_scale,
+				rectangle(visarea.min_x * m_output_scale, (visarea.max_x + 1) * m_output_scale - 1,
+					visarea.min_y * m_output_scale, (visarea.max_y + 1) * m_output_scale - 1),
+				screen().frame_period());
+	}
+
 	save_pointer(NAME(m_ram[0]), 0x140000);
 	save_pointer(NAME(m_ram[1]), 0x140000);
 	save_pointer(NAME(m_fifo), 0x800);
@@ -852,6 +1124,22 @@ void k001005_device::device_stop()
 /*****************************************************************************
     DEVICE HANDLERS
 *****************************************************************************/
+
+void k001005_device::enlarge_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect) const
+{
+	int const os = m_output_scale;
+	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		uint32_t const *const src = &m_layer.pix(y / os, 0);
+		uint32_t *const dst = &bitmap.pix(y);
+		for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+		{
+			uint32_t const p = src[x / os];
+			if (p & 0xff000000)
+				dst[x] = p;
+		}
+	}
+}
 
 void k001005_device::swap_buffers( )
 {

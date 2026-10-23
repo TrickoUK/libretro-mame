@@ -124,6 +124,8 @@ TODO:
 
 #include "endianness.h"
 
+#include <chrono>
+
 using namespace voodoo;
 
 
@@ -847,7 +849,7 @@ void voodoo_1_device::set_init_enable(u32 newval)
 
 int voodoo_1_device::update(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	// if we are blank, just fill with black
+		// if we are blank, just fill with black
 	if (m_reg.fbi_init1().software_blank())
 	{
 		bitmap.fill(0, cliprect);
@@ -889,6 +891,7 @@ int voodoo_1_device::update(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 
 		// no longer dirty
 		m_clut_dirty = false;
+		m_pen_generation++;
 		m_video_changed = true;
 	}
 	return update_common(bitmap, cliprect, &m_pen[0]);
@@ -1010,6 +1013,19 @@ void voodoo_1_device::device_start()
 	// create the renderer
 	m_renderer = std::make_unique<voodoo_renderer>(machine(), tmu_config, m_shared->rgb565, m_reg, &m_tmu[0].regs(), BIT(m_chipmask, 2) ? &m_tmu[1].regs() : nullptr);
 
+	// host-GPU path: render triangles and fast fills on the GPU when the OSD offers an
+	// engine
+	{
+		if (osd::gpu_engine *engine = machine().osd().get_gpu_engine("voodoo"))
+		{
+			m_gpu = std::make_unique<voodoo::gpu_renderer>(machine(), engine);
+			if (!m_gpu->init(tmumem[0], tmusize[0] * 1024 * 1024, BIT(m_chipmask, 2) ? tmumem[1] : nullptr, BIT(m_chipmask, 2) ? tmusize[1] * 1024 * 1024 : 0))
+				m_gpu.reset();
+			m_gpu_compare = getenv("MAME_VOODOO_GPU_CMP") != nullptr;
+			m_gpu_parallel = true;
+		}
+	}
+
 	// texture supersampling enhancement (max NxN per minified pixel, 0 = off),
 	// from the OSD; the MAME_VOODOO_TEXSS environment variable overrides it
 	// for testing
@@ -1023,6 +1039,8 @@ void voodoo_1_device::device_start()
 	m_edge_aa = machine().osd().edge_aa() ? 1 : 0;
 	if (char const *env = getenv("MAME_VOODOO_EDGEAA"))
 		m_edge_aa = std::clamp(atoi(env), 0, 2);
+	if (m_gpu)
+		m_edge_aa = 0;
 	m_aa_map_offs = ~0;
 	if (m_edge_aa)
 	{
@@ -1088,6 +1106,15 @@ void voodoo_1_device::device_post_load()
 	// recompute FBI memory FIFO to get the base pointer set
 	if (m_fbmem_fifo.configured())
 		recompute_fbmem_fifo();
+
+	// the loaded buffers in m_fbram are the truth; draw them into the GPU target
+	if (m_gpu)
+	{
+		gpu_configure();
+		m_gpu->invalidate();
+		gpu_sync_up();
+		m_gpu_epoch++;
+	}
 }
 
 
@@ -1565,6 +1592,10 @@ u32 voodoo_1_device::internal_lfb_r(offs_t offset)
 		return 0xffffffff;
 	}
 
+	// the GPU owns the picture; bring the buffer up to date
+	if (m_gpu)
+		gpu_sync_down(gpu_buffer_index(lfb_buffer_indirect(lfbmode.read_buffer_select())), scry, scry);
+
 	// wait for any outstanding work to finish before reading
 	m_renderer->wait("internal_lfb_r");
 
@@ -1634,6 +1665,17 @@ void voodoo_1_device::internal_lfb_w(offs_t offset, u32 data, u32 mem_mask)
 	u16 *dest = draw_buffer_indirect(lfbmode.write_buffer_select());
 	if (dest == nullptr)
 		return;
+	int gpu_buffer = (m_gpu && m_gpu->usable()) ? gpu_buffer_index(dest) : -1;
+	int gpu_draw_buffer = (gpu_buffer >= 0) ? gpu_buffer_index(draw_buffer_indirect(m_reg.fbz_mode().draw_buffer())) : -1;
+	if (gpu_buffer >= 0 && lfbmode.enable_pixel_pipeline())
+	{
+		// the pipeline works on the buffer contents: use the shadow, unless depth testing needs the GPU depth buffer
+		if (m_reg.fbz_mode().enable_depthbuf())
+		{
+			gpu_latch("LFB write with depth testing");
+			gpu_buffer = gpu_draw_buffer = -1;
+		}
+	}
 	u16 *depth = aux_buffer();
 	u16 *end = ram_end();
 
@@ -1667,11 +1709,19 @@ void voodoo_1_device::internal_lfb_w(offs_t offset, u32 data, u32 mem_mask)
 				// write to the RGB buffer
 				rgb_t pixel = src_color[pix];
 				if ((mask & LFB_RGB_PRESENT_0) != 0 && dest + pix < end)
+				{
 					dest[pix] = dither.pixel(x, pixel.r(), pixel.g(), pixel.b());
+					if (gpu_buffer >= 0)
+						m_gpu->batch().add_lfb_pixel(gpu_buffer, x, scry, 0xff000000 | m_shared->rgb565[dest[pix]]);
+				}
 
 				// make sure we have an aux buffer to write to
 				if (depth != nullptr && depth + pix < end)
 				{
+					if (m_gpu && fbzmode.enable_alpha_planes() && (mask & LFB_ALPHA_PRESENT_0) != 0)
+						m_gpu->latch("LFB alpha plane write");
+					else if (gpu_draw_buffer >= 0 && !fbzmode.enable_alpha_planes() && (mask & (LFB_DEPTH_PRESENT_0 | LFB_DEPTH_PRESENT_MSW_0)) != 0)
+						m_gpu->batch().add_lfb_depth(gpu_draw_buffer, x, scry, src_depth[pix]);
 					if (fbzmode.enable_alpha_planes())
 					{
 						// write to the alpha buffer
@@ -1707,6 +1757,10 @@ void voodoo_1_device::internal_lfb_w(offs_t offset, u32 data, u32 mem_mask)
 		if (fbzmode.y_origin())
 			scry = m_renderer->yorigin() - y;
 
+		// the pipeline reads the destination, which the GPU may have drawn into
+		if (gpu_buffer >= 0)
+			gpu_sync_down(gpu_buffer, scry, scry);
+
 		// advance pointers to the proper row
 		dest += scry * m_renderer->rowpixels();
 		if (depth != nullptr)
@@ -1723,7 +1777,17 @@ void voodoo_1_device::internal_lfb_w(offs_t offset, u32 data, u32 mem_mask)
 		{
 			// make sure we care about this pixel
 			if ((mask & LFB_PIXEL0_MASK) != 0)
+			{
 				m_renderer->pixel_pipeline(threadstats, dest, depth, x, y, src_color[pix], src_depth[pix]);
+
+				// the host-GPU path takes the result of the software pipeline
+				if (gpu_buffer >= 0 && dest + x < end)
+				{
+					m_gpu->batch().add_lfb_pixel(gpu_buffer, x, scry, 0xff000000 | m_shared->rgb565[dest[x]]);
+					if (gpu_draw_buffer >= 0 && depth != nullptr && depth + x < end && fbzmode.aux_buffer_mask() && !fbzmode.enable_alpha_planes())
+						m_gpu->batch().add_lfb_depth(gpu_draw_buffer, x, scry, depth[x]);
+				}
+			}
 
 			// advance our pointers
 			x++;
@@ -1946,6 +2010,10 @@ void voodoo_1_device::internal_texture_w(offs_t offset, u32 data)
 	if (lod > 8)
 		return;
 	u8 *dest = texture.write_ptr(lod, ts, tt, bytes_per_texel);
+
+	// the host-GPU path reads texture RAM when it submits a frame
+	if (m_gpu)
+		m_gpu->texture_write(tmunum, dest - m_tmu[tmunum].ram(), 4);
 
 	// wait for any outstanding work to finish
 	m_renderer->wait("internal_texture_w");
@@ -2344,6 +2412,28 @@ u32 voodoo_1_device::reg_fastfill_w(u32 chipmask, u32 regnum, u32 data)
 	poly.clipbottom = m_reg.clip_bottom();
 	poly.color1 = m_reg.color1().argb();
 	poly.zacolor = m_reg.za_color();
+	if (m_gpu && m_gpu->usable())
+	{
+		int const buffer = gpu_buffer_index(poly.destbase, true);
+		if (buffer < 0)
+			gpu_latch("fast fill outside the colour buffers");
+		else
+		{
+			if (m_gpu->batch().needs_flush())
+			{
+				m_gpu->why("pool full");
+				m_gpu->flush();
+			}
+			m_gpu->batch().add_fastfill(poly, buffer, m_reg.fbz_mode().y_origin(), m_renderer->yorigin());
+			if (!m_gpu_parallel)
+			{
+				bool const flip = m_reg.fbz_mode().y_origin();
+				s32 const yo = m_renderer->yorigin();
+				gpu_mark_rows(buffer, flip ? yo - (poly.clipbottom - 1) : poly.cliptop, flip ? yo - poly.cliptop : poly.clipbottom - 1);
+				return m_renderer->count_fastfill(poly) / 2;
+			}
+		}
+	}
 
 	// 2 pixels per clock
 	return m_renderer->enqueue_fastfill(poly) / 2;
@@ -2356,6 +2446,14 @@ u32 voodoo_1_device::reg_fastfill_w(u32 chipmask, u32 regnum, u32 data)
 
 u32 voodoo_1_device::reg_swapbuffer_w(u32 chipmask, u32 regnum, u32 data)
 {
+	// the host-GPU frame is drawn from the texture memory as it stands when the game issues the swap;
+	// the swap itself can complete later, after the game has loaded the next frame's textures
+	if (m_gpu && m_gpu->usable() && m_gpu->batch().triangle_count() + m_gpu->batch().fastfill_count() != 0)
+	{
+		m_gpu->why("swap command");
+		m_gpu->flush();
+	}
+
 	// the don't swap value is Voodoo 2-only, masked off by the register engine
 	m_vblank_swap_pending = true;
 	m_vblank_swap = BIT(data, 1, 8);
@@ -2634,6 +2732,13 @@ void voodoo_1_device::vblank_stop(s32 param)
 
 void voodoo_1_device::swap_buffers()
 {
+	// the software renderer keeps drawing alongside the GPU until the game is past its start-up
+	// self-tests, which compare framebuffer contents against exact values
+	if (m_gpu_parallel && !m_gpu_compare && ++m_gpu_swap_count >= GPU_PARALLEL_SWAPS)
+	{
+		m_gpu_parallel = false;
+		osd_printf_info("Voodoo GPU path: software rendering stopped\n");
+	}
 	if (LOG_VBLANK_SWAP)
 		logerror("--- swap_buffers @ %d\n", screen().vpos());
 
@@ -2888,14 +2993,16 @@ int voodoo_1_device::update_common(bitmap_rgb32 &bitmap, const rectangle &clipre
 	u16 *buffer_base = draw_buffer(drawbuf);
 	if (LOG_VBLANK_SWAP) logerror("--- update_common %d-%d @ %d from %08X\n", cliprect.min_y, cliprect.max_y, screen().vpos(), u32((u8 *)buffer_base - m_fbram));
 	bool const use_aa = m_edge_aa && m_aa_map_offs == m_rgboffs[drawbuf];
-	for (s32 y = cliprect.min_y; y <= cliprect.max_y; y++)
+	bool const gpu_shown = !DEBUG_BACKBUF && gpu_present(bitmap, cliprect, pens);
+	s32 const os = m_output_scale;
+	for (s32 y = cliprect.min_y; y <= cliprect.max_y && !gpu_shown; y++)
 	{
-		if (y < m_yoffs)
+		if (y / os < m_yoffs)
 			continue;
-		u16 const *const src = buffer_base + (y - m_yoffs) * rowpixels - m_xoffs;
+		u16 const *const src = buffer_base + (y / os - m_yoffs) * rowpixels - m_xoffs;
 		u32 *dst = &bitmap.pix(y);
 		for (s32 x = cliprect.min_x; x <= cliprect.max_x; x++)
-			dst[x] = pens[src[x]];
+			dst[x] = pens[src[x / os]];
 
 		// edge AA enhancement: blend edge pixels toward the neighbour across
 		// the edge, as computed at swap time
@@ -2975,6 +3082,14 @@ void voodoo_1_device::recompute_video_timing(u32 hsyncon, u32 hsyncoff, u32 hvis
 	logerror("hSync=%d-%d, bp=%d, vis=%d  vSync=%d-%d, bp=%d, vis=%d\n", hsyncon, hsyncoff, hbp, hvis, vsyncon, vsyncoff, vbp, vvis);
 	logerror("Horiz: %d-%d (%d total)  Vert: %d-%d (%d total) -- ", visarea.min_x, visarea.max_x, htotal, visarea.min_y, visarea.max_y, vtotal);
 
+	// the host-GPU path can present the screen at the render scale (the mame_3d_output_scale option)
+	m_output_scale = (m_gpu && machine().osd().supersample_output()) ? std::clamp(machine().osd().supersample(), 1, 4) : 1;
+	int const os = m_output_scale;
+	rectangle const native_visarea = visarea;
+	visarea = rectangle(native_visarea.min_x * os, (native_visarea.max_x + 1) * os - 1, native_visarea.min_y * os, (native_visarea.max_y + 1) * os - 1);
+	htotal *= os;
+	vtotal *= os;
+
 	// configure the screen based on which one matches the closest
 	if (stddiff < meddiff && stddiff < vgadiff)
 	{
@@ -2995,9 +3110,11 @@ void voodoo_1_device::recompute_video_timing(u32 hsyncon, u32 hsyncoff, u32 hvis
 	// configure the new framebuffer info
 	m_width = hvis;
 	m_height = vvis;
+	if (gpu_shared_memory())
+		gpu_configure();
 	m_xoffs = hbp;
 	m_yoffs = vbp;
-	m_vsyncstart = vsyncoff;
+	m_vsyncstart = vsyncoff * os;
 	m_vsyncstop = 0;
 	logerror("yoffs: %d vsyncstart: %d vsyncstop: %d\n", vbp, m_vsyncstart, m_vsyncstop);
 
@@ -3084,6 +3201,512 @@ void voodoo_1_device::recompute_video_memory_common(u32 config, u32 rowpixels)
 	if (front_buffer() != starting_front || rowpixels != starting_rowpix)
 		m_video_changed = true;
 	m_renderer->set_rowpixels(rowpixels);
+	gpu_configure();
+}
+
+
+//-------------------------------------------------
+//  gpu_buffer_index - colour buffer a draw
+//  destination pointer belongs to, or -1
+//-------------------------------------------------
+
+int voodoo_1_device::gpu_buffer_index(u16 const *buffer, bool create)
+{
+	if (!gpu_shared_memory())
+	{
+		for (int i = 0; i < 3; i++)
+			if (m_rgboffs[i] != ~0U && buffer == draw_buffer(i))
+				return i;
+		return -1;
+	}
+
+	// shared memory models place the buffers anywhere, so a slot follows the buffer's RAM offset
+	u32 const offs = u32(reinterpret_cast<u8 const *>(buffer) - m_fbram);
+	for (int i = 0; i < GPU_SLOTS; i++)
+		if (m_gpu_slot_offs[i] == offs)
+			return i;
+	if (!create)
+		return -1;
+	for (int i = 0; i < GPU_SLOTS; i++)
+		if (m_gpu_slot_offs[i] == ~0U)
+		{
+			m_gpu_slot_offs[i] = offs;
+			return i;
+		}
+	return -1;
+}
+
+
+//-------------------------------------------------
+//  gpu_slot_offset - RAM offset of the buffer in
+//  a slot, or ~0 when the slot is unused
+//-------------------------------------------------
+
+u32 voodoo_1_device::gpu_slot_offset(int slot) const
+{
+	return gpu_shared_memory() ? m_gpu_slot_offs[slot] : (slot < 3 ? m_rgboffs[slot] : ~0U);
+}
+
+
+//-------------------------------------------------
+//  gpu_front_slot - slot of the buffer on screen
+//-------------------------------------------------
+
+int voodoo_1_device::gpu_front_slot()
+{
+	return gpu_shared_memory() ? gpu_buffer_index(front_buffer(), true) : m_frontbuf;
+}
+
+
+//-------------------------------------------------
+//  gpu_ram_read - the software side reads video
+//  RAM directly (a blit from the screen, for
+//  example): rows of a colour buffer the GPU drew
+//  into must reach m_fbram first
+//-------------------------------------------------
+
+void voodoo_1_device::gpu_ram_read(u32 offs, u32 bytes)
+{
+	if (!m_gpu || !m_gpu->usable() || m_gpu->rows() == 0 || m_gpu_parallel)
+		return;
+	u32 const stride = m_gpu->rowpixels() * 2;
+	u32 const size = stride * m_gpu->rows();
+	for (int i = 0; i < GPU_SLOTS; i++)
+	{
+		u32 const base = gpu_slot_offset(i);
+		if (base == ~0U || !m_gpu_shadow_dirty[i] || offs >= base + size || offs + bytes <= base)
+			continue;
+		m_gpu->why("RAM read/write overlap");
+		m_gpu->flush();
+		u32 const first = (offs > base) ? (offs - base) / stride : 0;
+		u32 const last = std::min<u32>((offs + bytes - 1 - base) / stride, m_gpu->rows() - 1);
+		gpu_sync_down(i, first, last);
+	}
+}
+
+
+//-------------------------------------------------
+//  gpu_ram_write - the software side wrote video
+//  RAM directly: textures read it, and a write
+//  into a colour buffer cannot be reflected on
+//  the GPU
+//-------------------------------------------------
+
+void voodoo_1_device::gpu_ram_write(u32 offs, u32 bytes)
+{
+	if (!m_gpu || !m_gpu->usable())
+		return;
+	m_gpu->texture_write(0, offs, bytes);
+	if (m_gpu->rows() == 0)
+		return;
+	u32 const size = m_gpu->rowpixels() * m_gpu->rows() * 2;
+	for (int i = 0; i < GPU_SLOTS; i++)
+	{
+		u32 const base = gpu_slot_offset(i);
+		if (base != ~0U && offs < base + size && offs + bytes > base)
+		{
+			gpu_latch("direct write to a colour buffer");
+			return;
+		}
+	}
+}
+
+
+//-------------------------------------------------
+//  gpu_configure - size the host-GPU buffer stack
+//  from the video memory layout
+//-------------------------------------------------
+
+void voodoo_1_device::gpu_configure()
+{
+	u32 const rowpixels = m_renderer->rowpixels();
+	if (!m_gpu || rowpixels == 0)
+		return;
+	if (gpu_shared_memory())
+	{
+		// buffers sit wherever the game puts them: size the slots for the visible picture
+		if (m_height == 0)
+			return;
+		m_gpu->flush();
+		m_gpu->configure(rowpixels, std::clamp<u32>(m_height, 1, 1024), GPU_SLOTS);
+		return;
+	}
+	u32 const bytes = m_rgboffs[1] - m_rgboffs[0];
+	if (bytes == 0)
+		return;
+	m_gpu->flush();
+	m_gpu->configure(rowpixels, std::clamp<u32>(bytes / (rowpixels * 2), 1, 1024), (m_rgboffs[2] != ~0U) ? 3 : 2);
+}
+
+
+//-------------------------------------------------
+//  gpu_sync_down - bring m_fbram up to date with
+//  what the GPU drew into a colour buffer (read
+//  back at the render scale, averaged, packed to
+//  RGB565 without dither)
+//-------------------------------------------------
+
+void voodoo_1_device::gpu_mark_rows(int buffer, s32 first_row, s32 last_row)
+{
+	first_row = std::max<s32>(first_row, 0);
+	last_row = std::min<s32>(last_row, 1023);
+	for (s32 row = first_row; row <= last_row; row++)
+		m_gpu_dirty_row[buffer][row] = true;
+	if (first_row <= last_row)
+		m_gpu_shadow_dirty[buffer] = true;
+}
+
+void voodoo_1_device::gpu_sync_down(int buffer, u32 first_row, u32 last_row)
+{
+	if (!m_gpu || !m_gpu->usable() || buffer < 0 || !m_gpu_shadow_dirty[buffer])
+		return;
+	int const scale = m_gpu->scale();
+	u32 const rowpixels = m_gpu->rowpixels();
+	u32 const rows = m_gpu->rows();
+	u32 const stride = rowpixels * scale;
+	u32 const area = scale * scale;
+	u16 *dest = gpu_slot_buffer(buffer);
+	last_row = std::min(last_row, rows - 1);
+
+	// read back each 16-row group in the range that holds a stale row
+	bool any_left = false;
+	for (u32 group = 0; group < rows; group += 16)
+	{
+		u32 const group_end = std::min(group + 16, rows);
+		bool dirty = false;
+		for (u32 y = group; y < group_end; y++)
+			dirty |= m_gpu_dirty_row[buffer][y];
+		if (!dirty)
+			continue;
+		if (group_end <= first_row || group > last_row)
+		{
+			any_left = true;
+			continue;
+		}
+
+		std::vector<u32> image(size_t(stride) * (group_end - group) * scale);
+		m_gpu->why("sync down");
+		if (!m_gpu->flush(buffer, image.data(), group, group_end - group))
+			return;
+		for (u32 y = group; y < group_end; y++)
+		{
+			for (u32 x = 0; x < rowpixels; x++)
+			{
+				u32 r = 0, g = 0, b = 0;
+				for (int sy = 0; sy < scale; sy++)
+				{
+					u32 const *src = &image[size_t((y - group) * scale + sy) * stride + x * scale];
+					for (int sx = 0; sx < scale; sx++)
+					{
+						r += (src[sx] >> 16) & 0xff;
+						g += (src[sx] >> 8) & 0xff;
+						b += src[sx] & 0xff;
+					}
+				}
+				dest[y * rowpixels + x] = ((r / area) >> 3 << 11) | ((g / area) >> 2 << 5) | ((b / area) >> 3);
+			}
+			m_gpu_dirty_row[buffer][y] = false;
+		}
+	}
+	m_gpu_shadow_dirty[buffer] = any_left;
+}
+
+
+//-------------------------------------------------
+//  gpu_sync_up - draw the colour buffers in
+//  m_fbram into the GPU target
+//-------------------------------------------------
+
+void voodoo_1_device::gpu_sync_up()
+{
+	if (!m_gpu || !m_gpu->usable() || m_gpu->rows() == 0)
+		return;
+	u32 const rowpixels = m_gpu->rowpixels();
+	u32 const rows = m_gpu->rows();
+	if (gpu_shared_memory())
+	{
+		// the slots are assigned again from the buffers the registers name
+		std::fill(std::begin(m_gpu_slot_offs), std::end(m_gpu_slot_offs), ~0U);
+		for (int i = 0; i < 2; i++)
+			gpu_buffer_index(draw_buffer(i), true);
+	}
+	for (int buffer = 0; buffer < GPU_SLOTS; buffer++)
+	{
+		if (gpu_slot_offset(buffer) == ~0U)
+			continue;
+		u16 const *src = gpu_slot_buffer(buffer);
+		for (u32 y = 0; y < rows; y++)
+			for (u32 x = 0; x < rowpixels; x++)
+				m_gpu->batch().add_lfb_pixel(buffer, x, y, 0xff000000 | m_shared->rgb565[src[y * rowpixels + x]]);
+		m_gpu->batch().close_stamp();
+		m_gpu_shadow_dirty[buffer] = false;
+		std::fill(std::begin(m_gpu_dirty_row[buffer]), std::end(m_gpu_dirty_row[buffer]), false);
+	}
+}
+
+
+//-------------------------------------------------
+//  gpu_latch - stop using the host GPU: update
+//  m_fbram from it first so the software
+//  renderer carries on from the same picture
+//-------------------------------------------------
+
+void voodoo_1_device::gpu_latch(char const *reason)
+{
+	if (!m_gpu || !m_gpu->usable())
+		return;
+	for (int buffer = 0; buffer < GPU_SLOTS; buffer++)
+		if (gpu_slot_offset(buffer) != ~0U)
+			gpu_sync_down(buffer);
+	m_gpu->latch(reason);
+	m_renderer->wait("gpu_latch");
+}
+
+
+//-------------------------------------------------
+//  gpu_present - fill the bitmap from the host-GPU
+//  front buffer, averaging the render scale down
+//  to the native resolution; false if the GPU
+//  cannot provide the picture
+//-------------------------------------------------
+
+bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprect, rgb_t const *pens)
+{
+	if (!m_gpu || !m_gpu->usable() || m_gpu->rows() == 0)
+		return false;
+	int const scale = m_gpu->scale();
+	u32 const rowpixels = m_gpu->rowpixels();
+	u32 const rows = m_gpu->rows();
+	int const front = gpu_front_slot();
+	if (front < 0)
+		return false;
+	bool const new_frame = !m_gpu->batch().commands().empty() || m_gpu->serial() != m_gpu_seen_serial || front != m_gpu_seen_front;
+	s32 const os_direct = m_output_scale;
+
+	// The picture is read straight into the screen bitmap, through the output pass (which also averages the render
+	// scale down to the output scale), when the update covers the whole picture. The bitmap that already holds the current picture needs nothing, another one is copied.
+	s32 const ox = m_xoffs * os_direct, oy = m_yoffs * os_direct;
+	bool const direct = !m_gpu_compare && (scale % os_direct) == 0 && m_xoffs >= 0 && m_yoffs >= 0
+			&& cliprect.min_x == ox && cliprect.min_y == oy && cliprect.width() > 0 && cliprect.width() <= s32(rowpixels) * os_direct && (cliprect.width() % os_direct) == 0
+			&& cliprect.height() == s32(rows) * os_direct
+			&& bitmap.width() > cliprect.max_x && bitmap.height() > cliprect.max_y;
+	if (direct)
+	{
+		gpu_direct_copy want;
+		want.bitmap = &bitmap;
+		want.pixels = &bitmap.pix(oy, ox);
+		want.pen_generation = m_pen_generation;
+		want.pens = pens;
+		want.front = front;
+		want.width = cliprect.width();
+		want.height = cliprect.height();
+		want.epoch = m_gpu_epoch;
+		auto const profiling = voodoo::gpu_renderer::profiling();
+		auto const prof_start = profiling ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+		if (!new_frame)
+		{
+			want.serial = m_gpu->serial();
+			for (gpu_direct_copy const &have : m_gpu_direct)
+				if (have.bitmap == &bitmap && have.pixels == want.pixels && have.same_picture(want))
+				{
+					if (profiling)
+						m_gpu->profile_count("direct_have");
+					return true;
+				}
+			for (gpu_direct_copy &src : m_gpu_direct)
+				if (src.bitmap && src.bitmap != &bitmap && src.same_picture(want))
+				{
+					for (s32 y = 0; y < want.height; y++)
+						memcpy(&bitmap.pix(oy + y, ox), &src.bitmap->pix(oy + y, ox), size_t(want.width) * sizeof(u32));
+					m_gpu_direct[1] = m_gpu_direct[0];
+					m_gpu_direct[0] = want;
+					if (profiling)
+					{
+						m_gpu->profile_count("direct_copy");
+						m_gpu->profile_present(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prof_start).count());
+						m_gpu->profile_report();
+					}
+					return true;
+				}
+		}
+
+		// a new frame, or no bitmap holds the picture: read the front buffer into this bitmap
+		u8 lut[128];
+		bool const gamma = pens != m_shared->rgb565;
+		if (gamma)
+		{
+			for (u32 i = 0; i < 32; i++)
+			{
+				lut[i] = pens[i << 11].r();
+				lut[96 + i] = pens[i].b();
+			}
+			for (u32 i = 0; i < 64; i++)
+				lut[32 + i] = pens[i << 5].g();
+		}
+		m_gpu->why("present");
+		bool const read_first = !m_gpu->batch().commands().empty() && !m_gpu->batch_writes_buffer(front);
+		if (!m_gpu->flush(front, &bitmap.pix(oy, ox), 0, 0, read_first, bitmap.rowpixels(), true, gamma ? lut : nullptr, scale / os_direct, cliprect.width() / os_direct))
+			return false;
+		m_gpu_seen_serial = m_gpu->serial();
+		m_gpu_seen_front = front;
+		want.serial = m_gpu_seen_serial;
+		m_gpu_direct[0] = want;
+		m_gpu_direct[1] = gpu_direct_copy();
+		if (profiling)
+		{
+			m_gpu->profile_count("direct_read");
+			m_gpu->profile_present(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prof_start).count());
+			m_gpu->profile_report();
+		}
+		return true;
+	}
+
+	// the other paths average and map the picture on the CPU from m_gpu_image
+	for (gpu_direct_copy &d : m_gpu_direct)
+		d = gpu_direct_copy();
+	if (new_frame || m_gpu_image_serial != m_gpu->serial() || m_gpu_image_front != front || m_gpu_image.size() != size_t(rowpixels) * scale * rows * scale)
+	{
+		m_gpu_image.resize(size_t(rowpixels) * scale * rows * scale);
+		m_gpu->why("present");
+		bool const read_first = !m_gpu->batch().commands().empty() && !m_gpu->batch_writes_buffer(front);
+		if (!m_gpu->flush(front, m_gpu_image.data(), 0, 0, read_first))
+			return false;
+		m_gpu_seen_serial = m_gpu->serial();
+		m_gpu_seen_front = front;
+		m_gpu_image_serial = m_gpu_seen_serial;
+		m_gpu_image_front = front;
+	}
+
+	auto const prof_start = voodoo::gpu_renderer::profiling() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+	u32 const stride = rowpixels * scale;
+	s32 const os = m_output_scale;
+	s32 const block = (scale % os == 0) ? scale / os : 1;
+	u64 error = 0, big = 0, count = 0;
+	u16 const *const soft = m_gpu_compare ? draw_buffer(m_frontbuf) : nullptr;
+	if (m_gpu_compare)
+		m_renderer->wait("gpu_compare");
+
+	// the finished picture only changes with a new GPU frame, so rows are kept for the refreshes in between
+	bool const use_cache = !soft;
+	size_t const span = size_t(cliprect.max_x - cliprect.min_x + 1) * sizeof(u32);
+	u64 const key = (u64(m_gpu_seen_serial) << 32) ^ (u64(m_pen_generation) << 12) ^ (u64(front) << 8) ^ u64(uintptr_t(pens) >> 4) ^ (u64(bitmap.width()) << 20) ^ (u64(bitmap.height()) << 40) ^ u64(os) ^ (u64(u32(m_xoffs)) << 52) ^ (u64(u32(m_yoffs)) << 56) ^ (u64(scale) << 60) ^ (u64(rows) * 0x9e3779b97f4a7c15ULL) ^ (u64(cliprect.min_x) << 24) ^ (u64(cliprect.max_x) << 34);
+	if (use_cache && (key != m_gpu_out_key || m_gpu_out.size() != size_t(bitmap.width()) * bitmap.height()))
+	{
+		m_gpu_out.resize(size_t(bitmap.width()) * bitmap.height());
+		m_gpu_out_valid.assign(bitmap.height(), 0);
+		m_gpu_out_key = key;
+	}
+	bool const gamma = pens != m_shared->rgb565;
+
+	// the output pens map each channel separately, so three small tables replace the 64K-entry lookup
+	u32 rtab[32], gtab[64], btab[32];
+	if (gamma)
+	{
+		for (u32 i = 0; i < 32; i++)
+		{
+			rtab[i] = u32(pens[i << 11]) & 0xff0000;
+			btab[i] = u32(pens[i]) & 0x0000ff;
+		}
+		for (u32 i = 0; i < 64; i++)
+			gtab[i] = u32(pens[i << 5]) & 0x00ff00;
+	}
+	for (s32 y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		u32 *dst = &bitmap.pix(y);
+		if (voodoo::gpu_renderer::profiling())
+			m_gpu->profile_count(use_cache ? (m_gpu_out_valid[y] ? "rowhit" : "rowmiss") : "nocache");
+		if (use_cache && m_gpu_out_valid[y])
+		{
+			memcpy(dst + cliprect.min_x, &m_gpu_out[size_t(y) * bitmap.width() + cliprect.min_x], span);
+			continue;
+		}
+
+		// image row of this bitmap row: the screen is presented at os times the native size
+		s32 const nat_y = y / os - m_yoffs;
+		s32 const img_y = (scale % os == 0) ? (nat_y * os + y % os) * block : nat_y * scale + ((y % os) * scale) / os;
+		if (!soft && block == 1 && scale == os && nat_y >= 0 && nat_y < s32(rows))
+		{
+			// the picture is presented at the render scale: one image pixel per output pixel
+			s32 const x_first = std::max<s32>(cliprect.min_x, m_xoffs * os);
+			s32 const x_last = std::min<s32>(cliprect.max_x, (m_xoffs + s32(rowpixels)) * os - 1);
+			for (s32 x = cliprect.min_x; x < x_first && x <= cliprect.max_x; x++)
+				dst[x] = 0xff000000;
+			u32 const *const src = &m_gpu_image[size_t(img_y) * stride];
+			s32 const shift = m_xoffs * os;
+			if (gamma)
+			{
+				for (s32 x = x_first; x <= x_last; x++)
+				{
+					u32 const c = src[x - shift];
+					dst[x] = 0xff000000 | rtab[(c >> 19) & 0x1f] | gtab[(c >> 10) & 0x3f] | btab[(c >> 3) & 0x1f];
+				}
+			}
+			else
+			{
+				for (s32 x = x_first; x <= x_last; x++)
+					dst[x] = 0xff000000 | (src[x - shift] & 0xffffff);
+			}
+			for (s32 x = std::max(x_last + 1, cliprect.min_x); x <= cliprect.max_x; x++)
+				dst[x] = 0xff000000;
+		}
+		else
+		for (s32 x = cliprect.min_x; x <= cliprect.max_x; x++)
+		{
+			s32 const nat_x = x / os - m_xoffs;
+			if (nat_y < 0 || nat_y >= s32(rows) || nat_x < 0 || nat_x >= s32(rowpixels))
+			{
+				dst[x] = 0xff000000;
+				continue;
+			}
+			s32 const img_x = (scale % os == 0) ? (nat_x * os + x % os) * block : nat_x * scale + ((x % os) * scale) / os;
+			if (block == 1)
+				dst[x] = 0xff000000 | (m_gpu_image[size_t(img_y) * stride + img_x] & 0xffffff);
+			else
+			{
+				// average the block of render pixels behind this output pixel
+				u32 r = 0, g = 0, b = 0;
+				for (s32 sy = 0; sy < block; sy++)
+				{
+					u32 const *src = &m_gpu_image[size_t(img_y + sy) * stride + img_x];
+					for (s32 sx = 0; sx < block; sx++)
+					{
+						r += (src[sx] >> 16) & 0xff;
+						g += (src[sx] >> 8) & 0xff;
+						b += src[sx] & 0xff;
+					}
+				}
+				u32 const area = block * block;
+				dst[x] = 0xff000000 | ((r / area) << 16) | ((g / area) << 8) | (b / area);
+			}
+			if (gamma)
+			{
+				// the colour lookup table of the video output (gamma) applies to the 565 value
+				u32 const c = dst[x];
+				dst[x] = pens[(((c >> 19) & 0x1f) << 11) | (((c >> 10) & 0x3f) << 5) | ((c >> 3) & 0x1f)];
+			}
+			if (soft)
+			{
+				rgb_t const ref = pens[soft[nat_y * rowpixels + nat_x]];
+				u32 const e = std::abs(s32(ref.r()) - s32((dst[x] >> 16) & 0xff)) + std::abs(s32(ref.g()) - s32((dst[x] >> 8) & 0xff)) + std::abs(s32(ref.b()) - s32(dst[x] & 0xff));
+				error += e;
+				big += e > 24;
+				count++;
+			}
+		}
+		if (use_cache)
+		{
+			memcpy(&m_gpu_out[size_t(y) * bitmap.width() + cliprect.min_x], dst + cliprect.min_x, span);
+			m_gpu_out_valid[y] = 1;
+		}
+	}
+	if (soft && count != 0 && (++m_gpu_compare_count % 60) == 0)
+		osd_printf_info("Voodoo GPU compare: mean error %.2f/765, %.2f%% of pixels differ by more than 24\n", double(error) / count, 100.0 * big / count);
+	if (voodoo::gpu_renderer::profiling())
+	{
+		m_gpu->profile_present(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prof_start).count());
+		m_gpu->profile_report();
+	}
+	return true;
 }
 
 
@@ -3217,8 +3840,49 @@ s32 voodoo_1_device::triangle()
 	vert[2].x = float(m_reg.cx()) * (1.0f / 16.0f);
 	vert[2].y = float(m_reg.cy()) * (1.0f / 16.0f);
 
-	// enqueue a triangle
-	s32 pixels = m_renderer->enqueue_triangle(poly, vert);
+	// draw the triangle on the host GPU when it can; the busy time still needs the pixel count
+	s32 pixels;
+	int gpu_buffer = -1;
+	if (m_gpu && m_gpu->usable())
+	{
+		if (char const *why = voodoo::gpu_batch::check(poly))
+			gpu_latch(why);
+		else if ((gpu_buffer = gpu_buffer_index(poly.destbase, true)) < 0)
+			gpu_latch("triangle outside the colour buffers");
+	}
+	if (gpu_buffer >= 0)
+	{
+		if (m_gpu->batch().needs_flush())
+		{
+			m_gpu->why("pool full");
+			m_gpu->flush();
+		}
+		auto const prof_start = voodoo::gpu_renderer::profiling() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+		float const x[3] = { vert[0].x, vert[1].x, vert[2].x };
+		float const y[3] = { vert[0].y, vert[1].y, vert[2].y };
+		voodoo::gpu_batch::globals g = { m_reg.chroma_range().raw(), m_renderer->fogblend(), m_renderer->fogdelta(), m_renderer->fogdelta_mask(), m_renderer->bilinear_mask(), m_shared->argb1555, m_shared->argb4444 };
+		m_gpu->batch().add_triangle(poly, gpu_buffer, poly.raster.fbzmode().y_origin(), m_renderer->yorigin(), x, y, g);
+		if (!m_gpu_parallel)
+		{
+			float ymin = y[0], ymax = y[0];
+			for (int i = 1; i < 3; i++)
+			{
+				ymin = std::min(ymin, y[i]);
+				ymax = std::max(ymax, y[i]);
+			}
+			bool const flip = poly.raster.fbzmode().y_origin();
+			s32 const yo = m_renderer->yorigin();
+			gpu_mark_rows(gpu_buffer, s32(std::floor(flip ? yo + 1 - ymax : ymin)) - 1, s32(std::ceil(flip ? yo + 1 - ymin : ymax)) + 1);
+		}
+		auto const count_start = voodoo::gpu_renderer::profiling() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+		pixels = m_gpu_parallel ? m_renderer->enqueue_triangle(poly, vert) : m_renderer->count_triangle(vert);
+		if (voodoo::gpu_renderer::profiling())
+			m_gpu->profile_count("count_us", u32(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - count_start).count()));
+		if (voodoo::gpu_renderer::profiling())
+			m_gpu->profile_capture(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prof_start).count());
+	}
+	else
+		pixels = m_renderer->enqueue_triangle(poly, vert);
 
 	// update stats
 	m_reg.add(voodoo_regs::reg_fbiTrianglesOut, 1);

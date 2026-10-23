@@ -17,7 +17,6 @@
 
 #include "bitmap.h"
 #include "interface/audio.h"
-#include "interface/gpurender.h"
 #include "interface/midiport.h"
 #include "interface/nethandler.h"
 
@@ -30,7 +29,7 @@
 
 // forward references
 class input_type_entry;
-namespace osd { class midi_input_port; class midi_output_port; }
+namespace osd { class midi_input_port; class midi_output_port; class gpu_engine; }
 namespace ui { class menu_item; }
 
 
@@ -116,7 +115,7 @@ public:
 	virtual std::unique_ptr<osd::network_device> open_network_device(int id, osd::network_handler &handler) = 0;
 	virtual std::vector<osd::network_device_info> list_network_devices() = 0;
 
-	// GPU render interface - get_gpu_render_target() returns nullptr if
+	// GPU render interface - get_gpu_engine() returns nullptr if
 	// this OSD/build doesn't support it, or if it does but the user has
 	// disabled it (e.g. via a frontend core option); callers must always
 	// have a software fallback. gpu_render_available() is a cheap query -
@@ -128,7 +127,13 @@ public:
 	// both build-time support AND the user's current on/off choice, so a
 	// caller only needs this one check.
 	virtual bool gpu_render_available() const { return false; }
-	virtual osd::gpu_render_target *get_gpu_render_target() = 0;
+
+	// Frame-based GPU engine (interface/gpuengine.h). `system` names the
+	// requesting emulated system (for example "model2") so the OSD can apply
+	// that system's enable option. Returns nullptr when the OSD has no engine,
+	// the system's option is off, no GPU context could be created, or the
+	// engine latched to failed; callers keep their software renderer then.
+	virtual osd::gpu_engine *get_gpu_engine(const char *system) { return nullptr; }
 
 	// The resolution multiplier a caller should scale by when
 	// gpu_render_available() is true (e.g. 2 or 4 for 2x/4x internal
@@ -165,7 +170,7 @@ public:
 	// MSAA sample count the GPU render target should use (e.g. 4 for 4x
 	// MSAA, 0 to disable) - user-selectable where the OSD supports it (see
 	// the retro OSD's mame_psx_gpu_msaa core option). Read once, at
-	// get_gpu_render_target()'s first (lazy) construction of the target -
+	// the first (lazy) construction of the engine target -
 	// changing it takes effect on the next restart, same as
 	// gpu_render_scale()/gpu_render_pgxp_enabled(). Meaningless/
 	// unspecified when gpu_render_available() is false; default of 0
@@ -175,8 +180,8 @@ public:
 	// Texture filtering mode for the GPU render target (0 = disabled/
 	// nearest, PS1-accurate; 1 = bilinear; 2 = trilinear) - user-selectable
 	// where the OSD supports it (see the retro OSD's mame_psx_gpu_texfilter
-	// core option). Read once, at get_gpu_render_target()'s first (lazy)
-	// construction of the target, same as gpu_render_msaa_samples().
+	// core option). Read once, at the first (lazy)
+	// construction of the engine target, same as gpu_render_msaa_samples().
 	// Meaningless/unspecified when gpu_render_available() is false;
 	// default of 0 covers that case safely.
 	virtual int gpu_render_texfilter() const { return 0; }

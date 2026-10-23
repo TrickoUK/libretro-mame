@@ -23,6 +23,7 @@ namespace voodoo
 // forward declarations
 struct rasterizer_info;
 struct poly_data;
+class gpu_batch;
 class dither_helper;
 
 // base class for our renderer
@@ -379,6 +380,9 @@ public:
 	// texture-specific color combination unit
 	rgbaint_t combine_texture(voodoo::reg_texture_mode const texmode, rgbaint_t const &c_local, rgbaint_t const &c_other, s32 lod);
 
+	// the host-GPU frame batch reads the decoded texture state
+	friend class gpu_batch;
+
 	// return a write pointer based on the LOD, s/t coordinates, and format
 	u8 *write_ptr(u32 lod, u32 s, u32 t, u32 scale) const
 	{
@@ -541,6 +545,10 @@ public:
 	u32 rowpixels() const { return m_rowpixels; }
 	u16 tmu_config() const { return m_tmu_config; }
 	std::vector<thread_stats_block> &thread_stats() { return m_thread_stats; }
+	u8 const *fogblend() const { return m_fogblend; }
+	u8 const *fogdelta() const { return m_fogdelta; }
+	u8 fogdelta_mask() const { return m_fogdelta_mask; }
+	u8 bilinear_mask() const { return m_bilinear_mask; }
 
 	// simple setters
 	void set_tmu_config(u16 value) { m_tmu_config = value; }
@@ -561,6 +569,10 @@ public:
 	// enqueue operations
 	u32 enqueue_fastfill(poly_data &poly);
 	u32 enqueue_triangle(poly_data &poly, vertex_t const *vert);
+
+	// host-GPU path: pixel counts for the busy timing without rasterizing
+	u32 count_fastfill(poly_data &poly);
+	u32 count_triangle(vertex_t const *vert);
 
 	// core triangle rasterizer
 	template<u32 GenericFlags, u32 FbzCp, u32 FbzMode, u32 AlphaMode, u32 FogMode, u32 TexMode0, u32 TexMode1>
@@ -622,6 +634,9 @@ private:
 	void apply_fogging(rgbaint_t &color, rgb_t fogcolor, u32 depthbias, voodoo::reg_fbz_mode const fbzmode, voodoo::reg_fog_mode const fogmode, voodoo::reg_fbz_colorpath const fbzcp, s32 x, voodoo::dither_helper const &dither, s32 wfloat, s32 iterz, s64 iterw, const rgbaint_t &iterargb);
 	void alpha_blend(rgbaint_t &color, voodoo::reg_fbz_mode const fbzmode, voodoo::reg_alpha_mode const alphamode, s32 x, voodoo::dither_helper const &dither, int dpix, u16 *depth, rgbaint_t const &prefog);
 	void write_pixel(thread_stats_block &threadstats, voodoo::reg_fbz_mode const fbzmode, voodoo::dither_helper const &dither, u16 *destbase, u16 *depthbase, s32 x, rgbaint_t const &color, s32 depthval);
+
+	// scanline callback that draws nothing
+	void rasterizer_null(s32 scanline, const voodoo::voodoo_renderer::extent_t &extent, const voodoo::poly_data &extradata, int threadid) { }
 
 	// fastfill rasterizer
 	void rasterizer_fastfill(s32 scanline, const voodoo::voodoo_renderer::extent_t &extent, const voodoo::poly_data &extradata, int threadid);

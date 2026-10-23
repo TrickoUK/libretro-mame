@@ -26,6 +26,8 @@
 #include "sound/scsp.h"
 #include "video/poly.h"
 
+#include "interface/gpuengine.h"
+
 #include "emupal.h"
 #include "screen.h"
 
@@ -33,6 +35,14 @@
 
 
 class model2_renderer;
+
+// vertex layout of the host-GPU path (see osd/interface/gpuengine.h)
+struct m2_gpu_vertex
+{
+	float x, y, z, w;
+	u32 prim;
+	float ooz, uoz, voz;
+};
 
 class model2_state : public driver_device
 {
@@ -155,6 +165,27 @@ protected:
 	std::unique_ptr<geo_state> m_geo;
 	bitmap_rgb32 m_sys24_bitmap;
 	int m_output_scale = 1;
+
+	// host-GPU renderer (see model2_shader.h); the engine is null when the path is off or has failed
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	bool m_gpu_checked = false;
+	bool m_gpu_full_upload = true;
+	bool m_gpu_layer_pending = false;   // a layer was submitted at the start of screen_update() and not collected
+	bool m_gpu_layer_ready = false;     // the GPU layer is already in destmap (no polygons)
+	bool m_layer_from_gpu = false;      // the 3D layer holds its coverage in alpha, fillmap is not written
+	bool m_layer_native = false;        // the GPU layer was averaged to native size into m_gpu_layer, destmap is not written
+	bitmap_rgb32 m_gpu_layer;           // native-size GPU layer, zero where no polygon covers the pixel
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tex_sheets = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_luma = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_xlat = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_gamma = osd::GPU_NULL_HANDLE;
+	std::unique_ptr<u16[]> m_gpu_shadow_tex;    // last uploaded texture sheets (2 x 512 x 1024 words)
+	std::unique_ptr<u8[]> m_gpu_shadow_luma;
+	std::unique_ptr<u16[]> m_gpu_shadow_xlat;
+	u8 m_gpu_shadow_gamma[256]{};
+	std::vector<u32> m_gpu_state;
+	std::vector<m2_gpu_vertex> m_gpu_vertices;
 	u8 m_gearsel = 0;
 	u8 m_lightgun_mux = 0;
 
@@ -242,6 +273,9 @@ protected:
 	void render_frame_start();
 	void geo_parse();
 	void render_polygons(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	bool gpu_init();
+	bool gpu_layer_submit(const rectangle &ss_cliprect);
+	bool gpu_layer_collect();
 	void downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void enlarge_layer(bitmap_rgb32 &bitmap, const bitmap_rgb32 &layer, const rectangle &cliprect, bool opaque);
 	void draw_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
@@ -695,6 +729,7 @@ public:
 	bitmap_ind8 &fillmap() { return m_fillmap; }
 
 	void model2_3d_render(polygon *poly, const rectangle &cliprect);
+	bool gpu_add_polygon(polygon *poly, const rectangle &cliprect, std::vector<u32> &state, std::vector<m2_gpu_vertex> &verts);
 	void set_xoffset(int16_t xoffs) { m_xoffs = xoffs; }
 	void set_yoffset(int16_t yoffs) { m_yoffs = yoffs; }
 

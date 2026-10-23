@@ -752,6 +752,67 @@ void hng64_state::mixsprites_test(screen_device& screen, bitmap_rgb32& bitmap, c
 	}
 }
 
+// Draws the native-size screen layer m_native at the screen size with sharp pixels.
+void hng64_state::enlarge_native(bitmap_rgb32 &bitmap, const rectangle &cliprect) const
+{
+	const int os = m_output_scale;
+	for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
+	{
+		const u32 *const src = &m_native.pix(y / os, 0);
+		u32 *const dst = &bitmap.pix(y);
+		for (int x = cliprect.left(); x <= cliprect.right(); x++)
+			dst[x] = src[x / os];
+	}
+}
+
+// Averages each block of screen pixels into one native pixel of m_native.
+void hng64_state::reduce_to_native(const bitmap_rgb32 &bitmap, const rectangle &cliprect)
+{
+	const int os = m_output_scale;
+	const int count = os * os;
+	for (int ny = cliprect.top() / os; ny <= cliprect.bottom() / os; ny++)
+	{
+		u32 *const dst = &m_native.pix(ny, 0);
+		for (int nx = cliprect.left() / os; nx <= cliprect.right() / os; nx++)
+		{
+			u32 r = 0, g = 0, b = 0;
+			for (int sy = 0; sy < os; sy++)
+			{
+				const u32 *const src = &bitmap.pix(ny * os + sy, nx * os);
+				for (int sx = 0; sx < os; sx++)
+				{
+					r += (src[sx] >> 16) & 0xff;
+					g += (src[sx] >> 8) & 0xff;
+					b += src[sx] & 0xff;
+				}
+			}
+			dst[nx] = rgb_t(r / count, g / count, b / count);
+		}
+	}
+}
+
+// Draws the pixels of m_native that differ from the snapshot m_native_before at the screen size.
+void hng64_state::enlarge_changed(bitmap_rgb32 &bitmap, const rectangle &cliprect) const
+{
+	const int os = m_output_scale;
+	for (int ny = cliprect.top() / os; ny <= cliprect.bottom() / os; ny++)
+	{
+		const u32 *const now = &m_native.pix(ny, 0);
+		const u32 *const before = &m_native_before.pix(ny, 0);
+		for (int nx = cliprect.left() / os; nx <= cliprect.right() / os; nx++)
+		{
+			if (now[nx] == before[nx])
+				continue;
+			for (int sy = 0; sy < os; sy++)
+			{
+				u32 *const dst = &bitmap.pix(ny * os + sy, nx * os);
+				for (int sx = 0; sx < os; sx++)
+					dst[sx] = now[nx];
+			}
+		}
+	}
+}
+
 u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
 #if 0
@@ -769,20 +830,27 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 	}
 #endif
 
-	// Initialize some buffers
-	if (m_fbcontrol[0] & 0x01) //FIXME: Is the register correct? check with HW tests
-		bitmap.fill(m_palette->pen(0), cliprect);
-	else
-		bitmap.fill(m_palette->black_pen(), cliprect);
+	// With the 3D output scale the screen is presented at the supersampling factor times its native size.
+	// The 2D layers draw at native size into m_native, the 3D layer is composited at screen size.
+	const int os = m_output_scale;
+	bitmap_rgb32 &canvas = (os > 1) ? m_native : bitmap;
+	const rectangle clip = (os > 1) ? rectangle(cliprect.min_x / os, cliprect.max_x / os, cliprect.min_y / os, cliprect.max_y / os) : cliprect;
+	bool scaled_3d = false;
 
-	screen.priority().fill(0x00, cliprect);
+	// Initialize some buffers
+	const pen_t background = (m_fbcontrol[0] & 0x01) ? m_palette->pen(0) : m_palette->black_pen(); //FIXME: Is the register correct? check with HW tests
+	canvas.fill(background, clip);
+	if (os > 1)
+		bitmap.fill(background, cliprect);
+
+	screen.priority().fill(0x00, clip);
 
 	// If the screen is disabled, don't draw anything (m_screen_dis is a shady variable at best)
 	if (m_screen_dis)
 		return 0;
 
 	// Draw sprites to buffer for later mixing
-	draw_sprites_buffer(screen, cliprect);
+	draw_sprites_buffer(screen, clip);
 
 	// set during transitions, could be 'disable all palette output'?
 	if (BIT(m_tcram[0x24 / 4], 17))
@@ -846,8 +914,11 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 	// while the 3D is currently positioned badly due to unhandled 3D packet registers, it should still go behind the shutters, not in front
 	// it could also be a unique mixing case
 
+	// the polygons are complete: the host GPU draws them while the tilemaps behind the 3D are drawn
+	m_poly_renderer->gpu_submit();
+
 	// tilemaps with 'priority' 0x10 - 0x1f are always behind the 3d?
-	for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
+	for (int y = clip.top(); y <= clip.bottom(); y++)
 	{
 		for (int i = 0x1f; i >= 0x10; i--)
 		{
@@ -856,11 +927,11 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 				const u16 pri = get_tileregs(j) & 0x1f;
 
 				if (pri == i)
-					draw_tilemap(screen, bitmap, cliprect, j, 0, y);
+					draw_tilemap(screen, canvas, clip, j, 0, y);
 			}
 
 			if ((i & 3) == 0)
-				mixsprites_test(screen, bitmap, cliprect, (i/4)<<12, y);
+				mixsprites_test(screen, canvas, clip, (i/4)<<12, y);
 		}
 	}
 
@@ -875,11 +946,18 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 	            8 bit depth?
 	*/
 
+	if (os > 1)
+		enlarge_native(bitmap, cliprect);
+
 	// 3d gets drawn next
+	m_poly_renderer->gpu_collect();
+
 	// 3D palette half, same bit as spriteblendtype
 	const u16 palbase = BIT(m_tcram[0x4c / 4], 16) ? 0x800 : 0x000;
 
 	rectangle visarea = m_screen->visible_area();
+	if (os > 1)
+		visarea.set(visarea.min_x / os, visarea.max_x / os, visarea.min_y / os, visarea.max_y / os);
 	const int ysize = visarea.bottom() - visarea.top();
 
 	if (ysize)
@@ -898,24 +976,73 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 			xscroll += 256;
 
 			const int ss = m_poly_renderer->supersample();
-			if (ss > 1)
+			if (os > 1)
+			{
+				// Presented at the sample size: every screen pixel resolves the samples of one 3D buffer column
+				// through the palette, over the rows the vertical squash from the 512 line buffer maps to it.
+				const int size = m_poly_renderer->bufferSize();
+				const int screen_top = visarea.top() * os;
+				const int screen_ysize = ysize * os;
+				const u16 *const buffer = m_poly_renderer->colorBuffer3d();
+				for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
+				{
+					const int ytop = y - screen_top;
+					const int row0 = std::clamp((ytop * size) / screen_ysize, 0, size - 1);
+					const int row1 = std::clamp(((ytop + 1) * size) / screen_ysize, row0 + 1, size);
+					const int count = row1 - row0;
+					u32 *dst = &bitmap.pix(y, cliprect.left());
+
+					for (int x = cliprect.left(); x <= cliprect.right(); x++)
+					{
+						const int sx = ((((clip.left() + (x / os)) + xscroll) & 0x1ff) * ss) + (x % os);
+						const rgb_t under = *dst;
+						int opaque = 0;
+						int r = 0;
+						int g = 0;
+						int b = 0;
+
+						for (int row = row0; row < row1; row++)
+						{
+							const u16 srcpix = buffer[(row * size) + sx];
+							rgb_t color = under;
+							if (srcpix & 0x07ff)
+							{
+								color = clut_3d[(srcpix & 0xf7ff) | palbase];
+								if (srcpix & 0x0800)
+									color = alpha_blend_r32(under, color, 0x80);
+								opaque++;
+							}
+							r += color.r();
+							g += color.g();
+							b += color.b();
+						}
+
+						if (opaque)
+							*dst = rgb_t(r / count, g / count, b / count);
+
+						dst++;
+					}
+				}
+				scaled_3d = true;
+			}
+			else if (ss > 1)
 			{
 				// Supersampled: resolve every sample covered by the output pixel through the palette and average
 				// them.  Samples with no 3D pixel count as whatever is already on screen.  The vertical squash
 				// from the 512 line buffer to the screen is a box filter over the true span, not a row pick.
 				const int size = m_poly_renderer->bufferSize();
 				const u16 *const buffer = m_poly_renderer->colorBuffer3d();
-				for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
+				for (int y = clip.top(); y <= clip.bottom(); y++)
 				{
 					const int ytop = y - visarea.top();
 					const int row0 = std::min((ytop * size) / ysize, size - 1);
 					const int row1 = std::clamp(((ytop + 1) * size) / ysize, row0 + 1, size);
 					const int count = (row1 - row0) * ss;
-					u32 *dst = &bitmap.pix(y, cliprect.left());
+					u32 *dst = &canvas.pix(y, clip.left());
 
-					for (int x = cliprect.left(); x <= cliprect.right(); x++)
+					for (int x = clip.left(); x <= clip.right(); x++)
 					{
-						const int sx = ((((cliprect.left() + x) + xscroll) & 0x1ff) * ss);
+						const int sx = ((((clip.left() + x) + xscroll) & 0x1ff) * ss);
 						const rgb_t under = *dst;
 						int opaque = 0;
 						int r = 0;
@@ -950,17 +1077,17 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 				}
 			}
 			else
-			// Blit the color buffer into the primary bitmap
-			for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
+			// Blit the color buffer into the primary canvas
+			for (int y = clip.top(); y <= clip.bottom(); y++)
 			{
 				const int realy = (((y-visarea.top()) * yinc) >> 16);
 
 				const u16 *src = &m_poly_renderer->colorBuffer3d()[((realy) & 0x1ff) * 512];
-				u32 *dst = &bitmap.pix(y, cliprect.left());
+				u32 *dst = &canvas.pix(y, clip.left());
 
-				for (int x = cliprect.left(); x <= cliprect.right(); x++)
+				for (int x = clip.left(); x <= clip.right(); x++)
 				{
-					const u16 srcpix = src[((cliprect.left() + x) + xscroll) & 0x1ff];
+					const u16 srcpix = src[((clip.left() + x) + xscroll) & 0x1ff];
 					if (srcpix & 0x07ff)
 					{
 						// format in our framebuffer is llll appp pppp pppp
@@ -982,8 +1109,16 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 		}
 	}
 
+	// The layers above the 3D draw at native size over the 3D layer averaged down to native size. Only the pixels
+	// they change are enlarged onto the screen, the rest keeps the full-size 3D layer.
+	if (scaled_3d)
+	{
+		reduce_to_native(bitmap, cliprect);
+		copybitmap(m_native_before, m_native, 0, 0, 0, 0, clip);
+	}
+
 	// tilemaps with 'priority' 0x00 - 0x0f are always above the 3d? - could bit 0x10 really be a 'relative to 3d' bit, rather than a 'relative to other tilemaps' bit?
-	for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
+	for (int y = clip.top(); y <= clip.bottom(); y++)
 	{
 		for (int i = 0x0f; i >= 0x00; i--)
 		{
@@ -992,12 +1127,20 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 				const u16 pri = get_tileregs(j) & 0x1f;
 
 				if (pri == i)
-					draw_tilemap(screen, bitmap, cliprect, j, 0, y);
+					draw_tilemap(screen, canvas, clip, j, 0, y);
 			}
 
 			if ((i & 3) == 0)
-				mixsprites_test(screen, bitmap, cliprect, (i/4)<<12, y);
+				mixsprites_test(screen, canvas, clip, (i/4)<<12, y);
 		}
+	}
+
+	if (os > 1)
+	{
+		if (scaled_3d)
+			enlarge_changed(bitmap, cliprect);
+		else
+			enlarge_native(bitmap, cliprect);
 	}
 
 #if HNG64_VIDEO_DEBUG
@@ -1471,7 +1614,10 @@ void hng64_state::tcram_w(offs_t offset, u32 data, u32 mem_mask)
 		else
 			period = attotime::from_hz(61.651673); // fatfurwa uses 512x432, sync frequency not verified
 
-		m_screen->configure(HTOTAL, VTOTAL, visarea, period);
+		if (m_output_scale > 1)
+			visarea.set(visarea.min_x * m_output_scale, (visarea.max_x + 1) * m_output_scale - 1, visarea.min_y * m_output_scale, (visarea.max_y + 1) * m_output_scale - 1);
+
+		m_screen->configure(HTOTAL * m_output_scale, VTOTAL * m_output_scale, visarea, period);
 	}
 
 	if ((offset >= (0x28 / 4)) && (offset < (0x48 / 4)))
@@ -1560,6 +1706,18 @@ void hng64_state::video_start()
 
 	m_screen->register_screen_bitmap(m_sprite_bitmap);
 	m_screen->register_screen_bitmap(m_sprite_zbuffer);
+
+	// The 2D layers draw at native size, so the scaled screen gets them enlarged from native-size bitmaps
+	if (machine().osd().supersample_output() && m_poly_renderer->supersample() > 1)
+	{
+		m_output_scale = m_poly_renderer->supersample();
+		m_native.allocate(HTOTAL, VTOTAL);
+		m_native_before.allocate(HTOTAL, VTOTAL);
+
+		rectangle visarea = m_screen->visible_area();
+		visarea.set(visarea.min_x * m_output_scale, (visarea.max_x + 1) * m_output_scale - 1, visarea.min_y * m_output_scale, (visarea.max_y + 1) * m_output_scale - 1);
+		m_screen->configure(HTOTAL * m_output_scale, VTOTAL * m_output_scale, visarea, m_screen->frame_period());
+	}
 }
 
 

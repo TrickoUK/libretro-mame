@@ -428,7 +428,8 @@ end
 				"HAVE_RETRO_GPU_TARGET",
 			}
 			files {
-				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_target.cpp",
+				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.cpp",
+				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gl_loader.cpp",
 			}
 		end
 	end

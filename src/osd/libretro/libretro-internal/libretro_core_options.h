@@ -725,7 +725,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_3d_output_scale",
       "3D Output Scale",
       NULL,
-      "Sega Model 2. Normally 3D Supersampling renders the 3D layer larger and averages it back down to the native screen size. With this set to 'Match supersampling' the screen is presented at the supersampling size instead (for example 2x of 496x384), so the 3D layer keeps all its extra detail; the 2D layers (tilemaps, sprites, text) are enlarged with sharp pixels. Needs 3D Supersampling set to 2x or higher; it has no effect otherwise. Requires restarting content to take effect.",
+      "Sega Model 2, Konami GTI Club hardware, SNK Hyper Neo Geo 64 and 3dfx Voodoo boards drawn on the host GPU (Midway Seattle/Vegas, Konami Viper). Normally 3D Supersampling renders the 3D layer larger and averages it back down to the native screen size. With this set to 'Match supersampling' the screen is presented at the supersampling size instead (for example 2x of 496x384), so the 3D layer keeps all its extra detail; the 2D layers (tilemaps, sprites, text) are enlarged with sharp pixels. Needs 3D Supersampling set to 2x or higher; it has no effect otherwise. Requires restarting content to take effect.",
       NULL,
       "video",
       {
@@ -734,6 +734,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          { NULL, NULL },
       },
       "native"
+   },
+   {
+      CORE_NAME "_3d_gpu",
+      "3D GPU Rendering",
+      NULL,
+      "Sega Model 2, Konami GTI Club hardware (GTI Club, Thunder Hurricane, Solar Assault, Midnight Run), SNK Hyper Neo Geo 64 and 3dfx Voodoo 1/2/3 boards (Midway Seattle and Vegas games: San Francisco Rush, California Speed, Gauntlet Legends and others; Konami Viper games). Renders the 3D layer on the host GPU instead of the CPU. The picture matches the software renderer closely; 3D Supersampling sets the resolution (3D Output Scale presents it at that size). On Voodoo boards the software renderer runs alongside for the first seconds of start-up, and the GPU path falls back to it for features it does not cover. If no GPU context can be created the software renderer is used. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "enabled",  "Enabled" },
+         { NULL, NULL },
+      },
+      "disabled"
    },
    {
       CORE_NAME "_3d_edge_aa",

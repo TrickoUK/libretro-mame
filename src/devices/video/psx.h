@@ -14,16 +14,14 @@
 
 #include <vector>
 
-// GPU-accelerated rendering (see CLAUDE.md "Chosen first target" /
-// /home/bazzite/.claude/plans/glowing-conjuring-raven.md Phase 2).
-// gpu_queued_cmd (below) embeds osd::gpu_vertex/gpu_blend_mode by value, so
-// this needs the full interface, not just a forward declaration of
-// osd::gpu_render_target - still a small, OSD-agnostic header (no EGL/GL),
-// so no build-time cost for OSDs/builds without the feature.
-// osd_interface::get_gpu_render_target() (declared in osdepend.h, which
-// psx.cpp includes) returns nullptr when unavailable, so m_gpu_render_target
-// below is always safe to store either way.
+// Host-GPU rendering through osd::gpu_engine (see CLAUDE.md "Chosen first
+// target"). gpu_queued_cmd (below) embeds osd::gpu_vertex/gpu_blend_mode by
+// value, and the frame being built holds osd::gpu_command values. Both
+// headers are OSD-agnostic (no EGL/GL). osd_interface::get_gpu_engine()
+// returns nullptr when the path is off or unavailable, so m_gpu_engine below
+// is always safe to store either way.
 #include "interface/gpurender.h"
+#include "interface/gpuengine.h"
 
 #include "machine/ram.h"
 
@@ -261,20 +259,20 @@ private:
 	// to MAME/RetroArch's scheduler in between (see CLAUDE.md/plan file
 	// Phase 2 status) - primitive submission is deferred: gpu_submit_
 	// triangle_pair()/gpu_maybe_set_texture_page()/gpu_maybe_set_clip_
-	// rect() queue commands here instead of calling m_gpu_render_target
-	// directly. gpu_update_screen() then replays the whole queue in one
-	// tight, synchronous loop bracketed by begin_batch()/end_batch() -
-	// control never returns to the scheduler during that loop, so the
-	// risky interleaving is structurally impossible, not just unlikely,
-	// while still paying only one context acquisition for the whole frame.
+	// rect() queue commands here instead of calling the engine directly.
+	// gpu_update_screen() then turns the whole queue into one frame
+	// description and submits it in a single synchronous call - control
+	// never returns to the scheduler while the engine's context is current,
+	// so the risky interleaving is structurally impossible, not just
+	// unlikely, while still paying only one context acquisition for the
+	// whole frame.
 	//
 	// A structured list (not opaque closures) so gpu_update_screen() can
 	// also merge consecutive TRIANGLE commands that share the same
-	// textured/blend/filterable state into one larger osd::gpu_render_target::
-	// submit_triangles() call instead of replaying them one triangle (one
-	// GL draw call) at a time - per-draw-call overhead, independent of the
-	// EGL context-switching problem above, is itself significant for a
-	// real polygon-heavy scene.
+	// textured/blend/filterable state into one draw instead of one draw per
+	// triangle - per-draw-call overhead, independent of the EGL
+	// context-switching problem above, is itself significant for a real
+	// polygon-heavy scene.
 	struct gpu_queued_cmd
 	{
 		enum class kind_t { TRIANGLE, TEXPARAM, CLIP, COPY, TEXWIN } kind;
@@ -294,6 +292,7 @@ private:
 	void gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable = true, int cull_mask = 0 );
 	static int gpu_polygon_cull_mask( const PAIR *n_coord, int n_points );
 	void gpu_force_no_clip();
+	void gpu_restore_from_vram();
 	bool gpu_submit_flat_polygon( int n_points );
 	static void gpu_set_polygon_uv_clamp( osd::gpu_vertex *v, int n_points, bool may_be_2d = false, bool window_active = false );
 	static void gpu_apply_uv_offsets( const PAIR *n_coord, osd::gpu_vertex *v, int n_points, bool &may_be_2d );
@@ -312,7 +311,32 @@ private:
 	bool gpu_queue_copy_rect( int32_t n_sx, int32_t n_sy, int32_t n_dx, int32_t n_dy, int32_t n_w, int32_t n_h );
 	uint32_t gpu_update_screen( bitmap_rgb32 &bitmap );
 
-	osd::gpu_render_target *m_gpu_render_target = nullptr;
+	// Host-GPU engine (null when the path is off or unavailable). The shader
+	// module and the VRAM texture are created with the engine on first use.
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_vram_tex = osd::GPU_NULL_HANDLE;
+	int m_gpu_texfilter_mode = 0;
+
+	// State the queued commands leave behind. Texture page, window and draw
+	// area persist from frame to frame like the PS1 GPU's own registers; each
+	// primitive's copy of them goes into the frame's state table.
+	struct gpu_replay_state
+	{
+		int tx = 0, ty = 0, tp = 0, clutx = 0, cluty = 0;
+		int tw_and_u = 255, tw_and_v = 255, tw_off_u = 0, tw_off_v = 0, interleave = 0;
+		bool clip_valid = false;
+		int clip_x1 = 0, clip_y1 = 0, clip_x2 = 0, clip_y2 = 0;
+	};
+	gpu_replay_state m_gpu_replay;
+
+	// The frame being assembled from the queue by gpu_build_frame()
+	std::vector<float> m_gpu_frame_vertices;
+	std::vector<uint32_t> m_gpu_frame_state;
+	std::vector<osd::gpu_command> m_gpu_frame_commands;
+	uint32_t m_gpu_frame_vertex_count = 0;
+	void gpu_build_frame();
+	bool gpu_submit_frame( const osd::gpu_readback_rect *rects, int count );
 
 	// The user-selectable internal-resolution multiplier (mame_psx_gpu_hle
 	// core option on the retro OSD - "disabled"/"2x"/"4x", read once at
@@ -374,8 +398,8 @@ private:
 	// >= 0). Texture *data* itself is no longer decoded/cached here at all -
 	// upload_vram() in gpu_update_screen() uploads the device's whole raw
 	// VRAM once per frame and the GPU shader decodes CLUT/bpp addressing
-	// directly from it (see retro_gpu_target's fragment shader) - this
-	// cache is now purely about skipping a handful of uniform updates.
+	// directly from it (see psxgpu_shader.h) - this
+	// cache is now purely about skipping redundant queued commands.
 	int32_t m_gpu_last_tx = -1;
 	int32_t m_gpu_last_ty = -1;
 	int32_t m_gpu_last_tp = -1;
@@ -407,7 +431,7 @@ private:
 
 	uint16_t *p_vram = nullptr; // m_ram's storage
 	// Row count of p_vram (width is always 1024 words) - passed to
-	// osd::gpu_render_target::upload_vram() so its shader can wrap texture-
+	// the engine's VRAM texture so its shader can wrap texture-
 	// page row addressing by the actual VRAM height, exactly like
 	// p_p_vram's row lookup table already does for the CPU path (see
 	// psx_gpu_init()).

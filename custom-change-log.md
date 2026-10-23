@@ -439,3 +439,91 @@ builds get them straight from here.
 - New core option "3D Output Scale". With 3D Supersampling on and this set to "Match supersampling", Model 2 games show
   the 3D layer at the supersampled size (992x768 at 2x) instead of averaging it down, so the picture keeps the extra
   detail. The tilemaps, sprites and text are enlarged with sharp pixels. Off by default.
+
+### PS1 GPU path (Sony ZN, Namco System 10/11/12, Konami GQ/GV, Taito G-NET): loading a save state
+- With the GPU option on, loading a state no longer leaves the picture from before the load on screen. The screen goes
+  blank and fills in as the game draws its next frames.
+
+### PS1 GPU path (Sony ZN, Namco System 10/11/12, Konami GQ/GV, Taito G-NET): faster at high resolution
+- The 4x setting runs much faster: a Brave Blade attract scene went from about 28 fps to about 90 fps on the dev PC
+  (uncapped). 2x is also a little faster. The picture is the same as before.
+
+### Sega Model 2: GPU rendering option
+- New core option "3D GPU Rendering" (off by default). The 3D layer is drawn on the host GPU at the 3D Supersampling
+  resolution and matches the software picture closely. It falls back to the software renderer if no GPU context can be
+  created. Checked on Daytona USA, House of the Dead and Virtua Fighter 2 (attract mode).
+
+### Konami GTI Club hardware: GPU rendering option
+- "3D GPU Rendering" now also covers the K001005 boards (GTI Club, Thunder Hurricane, Hang Pilot, Winding Heat, Midnight Run).
+  The 3D layer is drawn on the host GPU at the 3D Supersampling resolution with the same lighting, fog, texture mirroring
+  and filtering as the software renderer. Checked on Thunder Hurricane (attract mode), where it looks the same as software.
+
+### SNK Hyper Neo Geo 64: GPU rendering option
+- "3D GPU Rendering" now also covers Hyper Neo Geo 64 (Fatal Fury: Wild Ambition, Xtreme Rally, Beast Busters 2 and the rest).
+  The 3D polygons are drawn on the host GPU at the 3D Supersampling resolution; the palette, fade and blend handling is unchanged.
+  Checked on Fatal Fury: Wild Ambition, Xtreme Rally and Beast Busters 2 (attract mode). Off by default.
+
+### Midway Seattle and Vegas (3dfx Voodoo 1/2): GPU rendering option
+- "3D GPU Rendering" now also covers the Voodoo 1/2 boards (San Francisco Rush, California Speed, Gauntlet Legends,
+  Rush 2049 and the rest). Triangles are drawn on the host GPU at the 3D Supersampling resolution, with the texture
+  formats, fog, alpha blending and depth tests done in a shader. With 3D Output Scale on, the screen is presented at
+  that size instead of being averaged down. The software renderer runs alongside for the first seconds so the boot
+  self-tests pass, then stops; any feature the GPU path does not cover (alpha planes, rotating stipple, depth-tested
+  framebuffer writes) hands the game back to software without a glitch. Voodoo 3 / Banshee boards (Konami Viper) are
+  unchanged. Checked on San Francisco Rush and California Speed (attract mode); off by default.
+
+### Konami Viper (3dfx Voodoo 3 / Banshee): GPU rendering option
+- "3D GPU Rendering" now also covers the Viper boards (GTI Club 2, X-Trial Racing, Thrill Drive 2, Jurassic Park 3 and
+  the rest). The frame buffers and textures share one video memory on these chips, so the GPU path follows the buffers
+  by address, keeps the textures in step with every kind of write the game uses, and applies the video output gamma
+  table. Alpha-blended and cut-out textures (billboards, explosions, car reflections, water) use the ARGB4444 and
+  ARGB1555 formats and show correctly. Checked on GTI Club 2 over a 90 s attract run (the GPU picture stays within
+  about 8/765 of the software one), plus X-Trial Racing, Thrill Drive 2 and Jurassic Park 3 (attract mode). Off by default.
+
+### Konami Viper: GPU path after a save-state load, faster picture copy
+- The host-GPU path now works after a save state is loaded (before, it silently did nothing until the game reset the video mode).
+- The picture copy to the screen is cached between new GPU frames and uses a tighter loop; GTI Club 2 at 2x runs about
+  6-8% faster with the GPU path on (still about 85-91% of software speed).
+
+## 2026-10-23
+
+### Konami Viper: GPU path no longer waits for the GPU draw
+- With 3D GPU Rendering on, the emulation no longer stalls while the GPU draws a frame; the finished picture is read
+  first and the new frame's drawing runs on the GPU while the game keeps going. The picture is unchanged and shown at
+  the same time as before.
+- The finished picture is now averaged to the screen size and mapped through the video gamma table on the GPU and read
+  straight into the screen image, instead of being converted pixel by pixel on the CPU (identical pixels). GTI Club 2 at
+  2x with the screen at native size now runs at about 91-97% of software speed on this machine (was 85-91%).
+
+### Model 2, K001005 boards, Hyper Neo Geo 64: GPU path overlaps with the game
+- With 3D GPU Rendering on, the frame is started on the host GPU earlier and picked up later in the same frame, so the
+  emulation no longer waits for the GPU. Model 2 starts the 3D layer before the tilemaps are drawn, K001005 boards at the
+  buffer swap, and Hyper Neo Geo 64 before the background tilemaps; the picture appears at the same time as before.
+  Hyper Neo Geo 64 now reads its 16-bit colour words straight from the GPU. Measured with the screen at native size and
+  4x supersampling: Model 2 (Daytona USA) about 3% faster, Operation Thunder Hurricane about 1% faster (23% faster than software),
+  Xtreme Rally unchanged (limited by the CPU composite, same speed as software).
+
+### Model 2: GPU path averages the supersampled layer on the GPU
+- With 3D GPU Rendering on and the screen at native size, the supersampled 3D layer is averaged down to the screen size on
+  the GPU (only the pixels a polygon covers count, as before) and read at screen size, instead of reading the full
+  supersampled image and averaging it on the CPU. The picture is pixel-identical (checked on Daytona USA at 4x over
+  four frames). Daytona USA at 4x supersampling runs at about 1.50x real time instead of 1.04x on this machine.
+
+### Seattle and Vegas Voodoo boards: GPU picture read straight into the screen
+- With 3D GPU Rendering on, San Francisco Rush, California Speed and the other Voodoo 1/2 boards now get the finished picture
+  from the GPU already averaged to the screen size and written into the screen image at its position, as the Viper boards
+  already did, instead of converting it pixel by pixel on the CPU. The picture is pixel-identical (checked on San Francisco
+  Rush and California Speed, four frames each, against the CPU conversion).
+
+### Hyper Neo Geo 64: faster 3D buffer clear with GPU rendering
+- With 3D GPU Rendering on, the 3D buffers are no longer cleared on the CPU every frame (about 5.6 ms at 4x supersampling);
+  the unused software depth buffer is only cleared if the game falls back to software rendering. Xtreme Rally at 4x
+  supersampling runs about 11% faster (0.78x against 0.70x real time, same-core comparison). The picture is unchanged.
+
+### Viper, GTI Club boards and Hyper Neo Geo 64: 3D Output Scale
+- 3D Output Scale ("match") now works on every system that has 3D Supersampling, not only Model 2 and the Seattle/Vegas
+  Voodoo boards: Viper games (GTI Club 2 and others, on the GPU path), the GTI Club boards (GTI Club, Operation Thunder
+  Hurricane, Solar Assault, Midnight Run, Jet Wave) and Hyper Neo Geo 64. The screen is shown at the supersample size, so
+  the 3D layer keeps its extra detail while tilemaps, sprites and text are enlarged with sharp pixels.
+- Fixed the vertical-blank position of the Voodoo boards at an output scale above 1: it sat halfway down the scaled
+  frame, which tore the picture in the middle of the screen.
