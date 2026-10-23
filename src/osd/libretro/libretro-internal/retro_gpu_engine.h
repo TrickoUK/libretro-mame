@@ -55,6 +55,7 @@ public:
 	virtual void destroy_shader_module(osd::gpu_handle module) override;
 
 	virtual bool submit_frame(const osd::gpu_frame &frame) override;
+	virtual bool collect_frame() override;
 
 	virtual const osd::gpu_engine_stats &last_frame_stats() const override { return m_stats; }
 
@@ -137,6 +138,21 @@ private:
 	uint32_t m_vao = 0;
 	uint32_t m_vbo = 0;
 
+	// deferred read-backs: one pixel-pack buffer holding every rectangle, and a fence after the reads
+	struct pending_readback
+	{
+		uint32_t *out = nullptr;
+		uint16_t *out16 = nullptr;
+		int stride = 0;                 // of the destination, in its own pixels
+		int w = 0, h = 0;               // output size
+		size_t offset = 0;
+	};
+	std::vector<pending_readback> m_pending;
+	uint32_t m_pbo = 0;
+	size_t m_pbo_size = 0;
+	size_t m_pending_bytes = 0;
+	void *m_fence = nullptr;
+
 	// final pass of a read-back (lookup, downsample, opaque alpha)
 	uint32_t m_op_program = 0;
 	int m_op_u_ds = -1, m_op_u_flags = -1, m_op_u_lut = -1;
@@ -154,9 +170,10 @@ private:
 
 	void poll_gpu_timer(bool wait);
 	bool valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg);
-	void output_pass(const osd::gpu_readback_rect &r);
+	void output_pass(const osd::gpu_readback_rect &r, void *dest, int row_length);
 	bool ensure_output_program();
-	void do_readback(const osd::gpu_readback_rect &r);
+	void do_readback(const osd::gpu_readback_rect &r, void *dest, int row_length);
+	void drop_pending();
 
 	int m_problem_count = 0;
 };

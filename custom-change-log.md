@@ -494,3 +494,11 @@ builds get them straight from here.
 - The finished picture is now averaged to the screen size and mapped through the video gamma table on the GPU and read
   straight into the screen image, instead of being converted pixel by pixel on the CPU (identical pixels). GTI Club 2 at
   2x with the screen at native size now runs at about 91-97% of software speed on this machine (was 85-91%).
+
+### Model 2, K001005 boards, Hyper Neo Geo 64: GPU path overlaps with the game
+- With 3D GPU Rendering on, the frame is started on the host GPU earlier and picked up later in the same frame, so the
+  emulation no longer waits for the GPU. Model 2 starts the 3D layer before the tilemaps are drawn, K001005 boards at the
+  buffer swap, and Hyper Neo Geo 64 before the background tilemaps; the picture appears at the same time as before.
+  Hyper Neo Geo 64 now reads its 16-bit colour words straight from the GPU. Measured with the screen at native size and
+  4x supersampling: Model 2 (Daytona USA) about 3% faster, Operation Thunder Hurricane about 1% faster (23% faster than software),
+  Xtreme Rally unchanged (limited by the CPU composite, same speed as software).

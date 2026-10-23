@@ -846,6 +846,9 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 	// while the 3D is currently positioned badly due to unhandled 3D packet registers, it should still go behind the shutters, not in front
 	// it could also be a unique mixing case
 
+	// the polygons are complete: the host GPU draws them while the tilemaps behind the 3D are drawn
+	m_poly_renderer->gpu_submit();
+
 	// tilemaps with 'priority' 0x10 - 0x1f are always behind the 3d?
 	for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
 	{
@@ -876,7 +879,7 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 	*/
 
 	// 3d gets drawn next
-	m_poly_renderer->gpu_flush();
+	m_poly_renderer->gpu_collect();
 
 	// 3D palette half, same bit as spriteblendtype
 	const u16 palbase = BIT(m_tcram[0x4c / 4], 16) ? 0x800 : 0x000;

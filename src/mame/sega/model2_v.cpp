@@ -755,10 +755,12 @@ bool model2_state::gpu_init()
 	return m_gpu_engine != nullptr && !m_gpu_engine->failed();
 }
 
-// Renders the 3D layer on the host GPU into destmap, with the coverage in alpha. Returns false when the GPU cannot produce the
-// frame; the caller then renders it in software.
-bool model2_state::render_polygons_gpu(const rectangle &ss_cliprect)
+// Starts drawing the 3D layer on the host GPU; gpu_layer_collect() delivers it into destmap, with the coverage in alpha.
+// Returns false when the GPU cannot produce the frame; the caller then renders it in software.
+bool model2_state::gpu_layer_submit(const rectangle &ss_cliprect)
 {
+	m_gpu_layer_pending = false;
+	m_gpu_layer_ready = false;
 	if (!gpu_init())
 		return false;
 
@@ -786,6 +788,7 @@ bool model2_state::render_polygons_gpu(const rectangle &ss_cliprect)
 	{
 		destmap.fill(0x00000000, ss_cliprect);
 		m_layer_from_gpu = true;
+		m_gpu_layer_ready = true;
 		return true;
 	}
 
@@ -881,6 +884,7 @@ bool model2_state::render_polygons_gpu(const rectangle &ss_cliprect)
 	frame.command_count = 1;
 	frame.readbacks = &readback;
 	frame.readback_count = 1;
+	frame.defer_readback = true;
 	if (!m_gpu_engine->submit_frame(frame))
 	{
 		// the textures may not have reached the GPU
@@ -888,6 +892,26 @@ bool model2_state::render_polygons_gpu(const rectangle &ss_cliprect)
 		return false;
 	}
 
+	m_gpu_layer_pending = true;
+	return true;
+}
+
+// Waits for the layer started by gpu_layer_submit(); false if it could not be delivered.
+bool model2_state::gpu_layer_collect()
+{
+	if (m_gpu_layer_ready)
+	{
+		m_gpu_layer_ready = false;
+		return true;
+	}
+	if (!m_gpu_layer_pending)
+		return false;
+	m_gpu_layer_pending = false;
+	if (!m_gpu_engine->collect_frame())
+	{
+		m_gpu_full_upload = true;
+		return false;
+	}
 	m_layer_from_gpu = true;
 	return true;
 }
@@ -985,7 +1009,7 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	if (raster->poly_list_index == 0)
 		return;
 
-	if (render_polygons_gpu(ss_cliprect))
+	if (gpu_layer_collect())
 	{
 		downsample_3d_layer(bitmap, cliprect);
 		m_render_done = true;
@@ -2828,6 +2852,18 @@ u32 model2_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, con
 			cliprect.min_x / scale, cliprect.max_x / scale,
 			cliprect.min_y / scale, cliprect.max_y / scale);
 	rectangle const &clip = (scale > 1) ? native_cliprect : cliprect;
+
+	// The polygon list is complete, so the GPU can start on the 3D layer while the tilemaps are drawn.
+	m_gpu_layer_pending = false;
+	m_gpu_layer_ready = false;
+	if (!m_render_test_mode && !m_render_done && m_raster->poly_list_index != 0)
+	{
+		int const ss = m_renderer->supersample();
+		rectangle const ss_cliprect(
+				clip.min_x * ss, (clip.max_x + 1) * ss - 1,
+				clip.min_y * ss, (clip.max_y + 1) * ss - 1);
+		gpu_layer_submit(ss_cliprect);
+	}
 
 	//logerror("--- frame ---\n");
 	bitmap.fill(m_palette->pen(0), cliprect);

@@ -74,11 +74,20 @@ enum class gpu_blend_mode
 // By default the pixels come back as they are in the target. The optional
 // fields run a final pass on the GPU before the copy: the output is then
 // (w / downsample) x (h / downsample) pixels.
+enum class gpu_readback_format : uint8_t
+{
+	BGRA8,      // out: 32-bit pixels
+	RG8         // out16: the red byte is the low byte and the green byte the high byte of a 16-bit value
+};
+
 struct gpu_readback_rect
 {
 	int x = 0, y = 0, w = 0, h = 0;
 	uint32_t *out = nullptr;
 	int stride = 0;
+
+	gpu_readback_format format = gpu_readback_format::BGRA8;
+	uint16_t *out16 = nullptr;              // RG8 only, in place of out; stride counts 16-bit values; no output pass
 
 	int downsample = 1;                     // average this many target pixels (each way) into one output pixel; w and h must be multiples
 	bool opaque = false;                    // force alpha to 1

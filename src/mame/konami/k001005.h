@@ -125,11 +125,13 @@ private:
 	bool gpu_init();
 	void gpu_add_polygon(k001005_polydata const &extra, rectangle const &cliprect, bool textured, bool vertex_color, bool is_quad, int v0, int v1, int v2, int v3);
 	void gpu_submit();
+	void gpu_collect();
 
 	running_machine &m_gpu_machine;
 	osd::gpu_engine *m_gpu_engine = nullptr;
 	bool m_gpu_checked = false;
 	bool m_gpu_full_upload = true;
+	bool m_gpu_pending = false;             // a submitted frame has not been collected
 	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_tex_rom = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_palette = osd::GPU_NULL_HANDLE;

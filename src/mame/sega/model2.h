@@ -170,6 +170,8 @@ protected:
 	osd::gpu_engine *m_gpu_engine = nullptr;
 	bool m_gpu_checked = false;
 	bool m_gpu_full_upload = true;
+	bool m_gpu_layer_pending = false;   // a layer was submitted at the start of screen_update() and not collected
+	bool m_gpu_layer_ready = false;     // the GPU layer is already in destmap (no polygons)
 	bool m_layer_from_gpu = false;      // the 3D layer in destmap holds its coverage in alpha, fillmap is not written
 	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_tex_sheets = osd::GPU_NULL_HANDLE;
@@ -270,7 +272,8 @@ protected:
 	void geo_parse();
 	void render_polygons(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	bool gpu_init();
-	bool render_polygons_gpu(const rectangle &ss_cliprect);
+	bool gpu_layer_submit(const rectangle &ss_cliprect);
+	bool gpu_layer_collect();
 	void downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void enlarge_layer(bitmap_rgb32 &bitmap, const bitmap_rgb32 &layer, const rectangle &cliprect, bool opaque);
 	void draw_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect);

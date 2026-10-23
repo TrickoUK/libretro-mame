@@ -198,6 +198,14 @@ typedef void (*PFNGLENDQUERYPROC)(GLenum);
 typedef void (*PFNGLGETQUERYOBJECTUI64VPROC)(GLuint, GLenum, uint64_t *);
 typedef void (*PFNGLGETQUERYOBJECTIVPROC)(GLuint, GLenum, GLint *);
 typedef void (*PFNGLFLUSHPROC)(void);
+typedef void *GLsync;
+typedef ptrdiff_t GLintptr;
+typedef uint64_t GLuint64;
+typedef GLsync (*PFNGLFENCESYNCPROC)(GLenum, GLbitfield);
+typedef GLenum (*PFNGLCLIENTWAITSYNCPROC)(GLsync, GLbitfield, GLuint64);
+typedef void (*PFNGLDELETESYNCPROC)(GLsync);
+typedef void *(*PFNGLMAPBUFFERRANGEPROC)(GLenum, GLintptr, GLsizeiptr, GLbitfield);
+typedef GLboolean (*PFNGLUNMAPBUFFERPROC)(GLenum);
 #define GL_VENDOR 0x1F00
 #define GL_RENDERER 0x1F01
 #define GL_VERSION 0x1F02
@@ -245,6 +253,16 @@ typedef void (*PFNGLFLUSHPROC)(void);
 #define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
 #define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
 #define GL_TIME_ELAPSED 0x88BF
+#define GL_PIXEL_PACK_BUFFER 0x88EB
+#define GL_STREAM_READ 0x88E1
+#define GL_SYNC_GPU_COMMANDS_COMPLETE 0x9117
+#define GL_SYNC_FLUSH_COMMANDS_BIT 0x00000001
+#define GL_MAP_READ_BIT 0x0001
+#define GL_ALREADY_SIGNALED 0x911A
+#define GL_TIMEOUT_EXPIRED 0x911B
+#define GL_CONDITION_SATISFIED 0x911C
+#define GL_WAIT_FAILED 0x911D
+#define GL_RG 0x8227
 #define GL_QUERY_RESULT 0x8866
 #define GL_QUERY_RESULT_AVAILABLE 0x8867
 
@@ -328,6 +346,11 @@ struct gl_dispatch
 	PFNGLGETQUERYOBJECTUI64VPROC GetQueryObjectui64v = nullptr;
 	PFNGLGETQUERYOBJECTIVPROC GetQueryObjectiv = nullptr;
 	PFNGLFLUSHPROC Flush = nullptr;
+	PFNGLFENCESYNCPROC FenceSync = nullptr;
+	PFNGLCLIENTWAITSYNCPROC ClientWaitSync = nullptr;
+	PFNGLDELETESYNCPROC DeleteSync = nullptr;
+	PFNGLMAPBUFFERRANGEPROC MapBufferRange = nullptr;
+	PFNGLUNMAPBUFFERPROC UnmapBuffer = nullptr;
 };
 
 struct egl_dispatch

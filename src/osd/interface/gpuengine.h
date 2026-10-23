@@ -30,12 +30,14 @@
       bad frame description). The device then renders the frame in
       software and stops submitting once failed() is true.
     - The engine makes its GPU context current only inside submit_frame()
-      and releases it before returning, so it never stays current across
-      separately scheduled emulator calls. A frame with read-backs (at the
-      end, or READBACK commands) returns with their pixels written; a frame
-      without any returns once its commands are issued, and the GPU executes
-      them while emulation runs. Later work on the same engine is ordered
-      after it.
+      and collect_frame() and releases it before returning, so it never stays
+      current across separately scheduled emulator calls. A frame with
+      read-backs (at the end, or READBACK commands) returns with their pixels
+      written; a frame without any, or with defer_readback, returns once its
+      commands are issued and the GPU executes them while emulation runs.
+      Later work on the same engine is ordered after it. The pixels of a
+      deferred read-back are written by collect_frame(), in the same emulated
+      frame as the submit; the buffers they go to must stay alive until then.
 
     Vertex layout (gpu_frame::vertices), per vertex, tightly packed:
         float x, y   target pixels, (0,0) = top-left of the target
@@ -283,6 +285,11 @@ struct gpu_frame
 	const gpu_command *commands = nullptr;
 	int command_count = 0;
 
+	// With defer_readback the read-backs of readbacks[] are started but not waited for: submit_frame()
+	// returns once the commands are issued, and collect_frame() later waits and writes the pixels.
+	// READBACK commands inside the command list are always completed before submit_frame() returns.
+	bool defer_readback = false;
+
 	// regions read back after the last command (target pixels, row 0 = top).
 	// A frame without any (and without READBACK commands) is not waited for:
 	// the commands are flushed to the GPU and the call returns, so the GPU
@@ -309,6 +316,7 @@ struct gpu_engine_stats
 	uint64_t uploaded_bytes = 0;
 	uint32_t draw_calls = 0;
 	uint32_t program_compiles = 0;      // programs built during this frame
+	double collect_ms = 0.0;            // collect_frame(): time spent waiting for the GPU and copying
 };
 
 class gpu_engine
@@ -335,6 +343,12 @@ public:
 
 	// run one frame; see the file header for the lifecycle rules
 	virtual bool submit_frame(const gpu_frame &frame) = 0;
+
+	// Completes the deferred read-backs of the last submit_frame() and writes their pixels, waiting for the GPU
+	// if it is not done. Call it in the same emulated frame as the submit. A frame submitted after a submit
+	// whose read-backs were never collected discards them. Returns false if the pixels could not be delivered
+	// (the device then renders the frame in software). Does nothing and returns true if nothing is pending.
+	virtual bool collect_frame() { return true; }
 
 	virtual const gpu_engine_stats &last_frame_stats() const = 0;
 };

@@ -118,9 +118,10 @@ public:
 	void render_texture_scanline(s32 scanline, const extent_t &extent, const hng64_poly_data &renderData, int threadid);
 	void render_flat_scanline(s32 scanline, const extent_t &extent, const hng64_poly_data &renderData, int threadid);
 
-	// Host-GPU rendering: drawShaded() queues polygons while the engine is usable, gpu_flush() draws them
-	// and reads the 16-bit colour words into colorBuffer3d(), gpu_clear() empties the GPU buffers
-	void gpu_flush();
+	// Host-GPU rendering: drawShaded() queues polygons while the engine is usable, gpu_submit() starts drawing
+	// them and gpu_collect() delivers the 16-bit colour words into colorBuffer3d(); gpu_clear() empties the GPU buffers
+	void gpu_submit();
+	void gpu_collect();
 	void gpu_clear();
 
 	hng64_state &state() { return m_state; }
@@ -149,7 +150,7 @@ private:
 	osd::gpu_handle m_gpu_tex_rom = osd::GPU_NULL_HANDLE;
 	std::vector<u32> m_gpu_state;
 	std::vector<hng64_gpu_vertex> m_gpu_vertices;
-	std::vector<u32> m_gpu_pixels;
+	bool m_gpu_pending = false;             // a submitted frame has not been collected
 
 	// (Temporarily class members - someday they will live in the memory map)
 	std::unique_ptr<float[]> m_depthBuffer3d;

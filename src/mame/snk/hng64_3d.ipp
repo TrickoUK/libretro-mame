@@ -1537,8 +1537,8 @@ void hng64_poly_renderer::gpu_add_polygon(polygon *p)
 	}
 }
 
-// Draws the queued polygons and reads the colour words back into the software colour buffer.
-void hng64_poly_renderer::gpu_flush()
+// Starts drawing the queued polygons; gpu_collect() delivers the colour words into the software colour buffer.
+void hng64_poly_renderer::gpu_submit()
 {
 	if (m_gpu_vertices.empty())
 		return;
@@ -1562,13 +1562,14 @@ void hng64_poly_renderer::gpu_flush()
 	draw.depth_func = osd::gpu_depth_func::LESS;
 	draw.depth_write = true;
 
-	m_gpu_pixels.resize(size * size);
+	// red holds the low byte of the colour word and green the high byte
 	osd::gpu_readback_rect readback;
 	readback.x = 0;
 	readback.y = 0;
 	readback.w = size;
 	readback.h = size;
-	readback.out = m_gpu_pixels.data();
+	readback.format = osd::gpu_readback_format::RG8;
+	readback.out16 = m_colorBuffer3d.get();
 	readback.stride = size;
 
 	osd::gpu_frame frame;
@@ -1589,16 +1590,9 @@ void hng64_poly_renderer::gpu_flush()
 	frame.command_count = 1;
 	frame.readbacks = &readback;
 	frame.readback_count = 1;
+	frame.defer_readback = true;
 	if (m_gpu_engine->submit_frame(frame))
-	{
-		// red holds the low byte of the colour word and green the high byte
-		u16 *const colorBuffer = m_colorBuffer3d.get();
-		for (int i = 0; i < size * size; i++)
-		{
-			const u32 pixel = m_gpu_pixels[i];
-			colorBuffer[i] = ((pixel >> 16) & 0xff) | (((pixel >> 8) & 0xff) << 8);
-		}
-	}
+		m_gpu_pending = true;
 	else
 	{
 		// the texture ROM may not have reached the GPU, and the target no longer matches the colour buffer
@@ -1610,9 +1604,23 @@ void hng64_poly_renderer::gpu_flush()
 	m_gpu_vertices.clear();
 }
 
+// Waits for the frame started by gpu_submit() and fills the colour buffer.
+void hng64_poly_renderer::gpu_collect()
+{
+	if (!m_gpu_pending)
+		return;
+	m_gpu_pending = false;
+	if (!m_gpu_engine->collect_frame())
+	{
+		m_gpu_full_upload = true;
+		m_gpu_generation++;
+	}
+}
+
 // The buffers were cleared: forget queued polygons and have the GPU buffers cleared with the next frame.
 void hng64_poly_renderer::gpu_clear()
 {
+	m_gpu_pending = false;
 	m_gpu_state.clear();
 	m_gpu_vertices.clear();
 	m_gpu_generation++;

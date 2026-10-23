@@ -89,6 +89,7 @@ bool load_gl_dispatch()
 	LOAD_GL(Uniform1f); LOAD_GL(Uniform2i); LOAD_GL(GetIntegerv);
 	LOAD_GL(GenQueries); LOAD_GL(DeleteQueries); LOAD_GL(BeginQuery); LOAD_GL(EndQuery);
 	LOAD_GL(GetQueryObjectui64v); LOAD_GL(GetQueryObjectiv); LOAD_GL(Flush); LOAD_GL(Uniform1iv);
+	LOAD_GL(FenceSync); LOAD_GL(ClientWaitSync); LOAD_GL(DeleteSync); LOAD_GL(MapBufferRange); LOAD_GL(UnmapBuffer);
 #undef LOAD_GL
 	return true;
 }

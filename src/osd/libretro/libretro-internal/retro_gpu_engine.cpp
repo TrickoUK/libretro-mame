@@ -275,6 +275,9 @@ void retro_gpu_engine::shutdown()
 				g_gl.DeleteVertexArrays(1, &m_vao);
 			if (m_query)
 				g_gl.DeleteQueries(1, &m_query);
+			drop_pending();
+			if (m_pbo)
+				g_gl.DeleteBuffers(1, &m_pbo);
 			if (m_op_program)
 				g_gl.DeleteProgram(m_op_program);
 			if (m_op_vao)
@@ -859,7 +862,8 @@ bool retro_gpu_engine::validate_frame(const osd::gpu_frame &frame)
 bool retro_gpu_engine::valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg)
 {
 	const int ds = std::max(r.downsample, 1);
-	if (!r.out || r.w <= 0 || r.h <= 0 || r.x < 0 || r.y < 0 || r.x + r.w > tg.width || r.y + r.h > tg.height
+	const bool rg8 = r.format == osd::gpu_readback_format::RG8;
+	if ((rg8 ? (!r.out16 || !r.plain()) : !r.out) || r.w <= 0 || r.h <= 0 || r.x < 0 || r.y < 0 || r.x + r.w > tg.width || r.y + r.h > tg.height
 			|| r.w % ds != 0 || r.h % ds != 0 || r.stride < r.w / ds)
 	{
 		log_problem("readback", "rectangle outside the target or bad buffer");
@@ -967,7 +971,7 @@ bool retro_gpu_engine::ensure_output_program()
 
 // Read-back through a final pass: the rectangle (resolved if multisampled) is copied into a texture, a
 // full-screen pass averages and maps it into a second texture of the output size, and that is read.
-void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r)
+void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r, void *dest, int row_length)
 {
 	if (!ensure_output_program())
 		return;
@@ -1026,8 +1030,8 @@ void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r)
 	g_gl.DrawArrays(GL_TRIANGLES, 0, 3);
 
 	g_gl.PixelStorei(GL_PACK_ALIGNMENT, 4);
-	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, r.stride);
-	g_gl.ReadPixels(0, 0, ow, oh, GL_BGRA, GL_UNSIGNED_BYTE, r.out);
+	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, row_length);
+	g_gl.ReadPixels(0, 0, ow, oh, GL_BGRA, GL_UNSIGNED_BYTE, dest);
 	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, 0);
 
 	// back to the state the frame's commands expect
@@ -1038,12 +1042,14 @@ void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r)
 		g_gl.Enable(GL_DEPTH_TEST);
 }
 
-// Reads one target rectangle into the caller's buffer. A multisampled target is resolved for that rectangle first.
-void retro_gpu_engine::do_readback(const osd::gpu_readback_rect &r)
+// Reads one target rectangle to dest, which is a memory address or, with a pixel-pack buffer bound, an offset into
+// it; row_length is the distance between destination rows in pixels. A multisampled target is resolved for that
+// rectangle first.
+void retro_gpu_engine::do_readback(const osd::gpu_readback_rect &r, void *dest, int row_length)
 {
 	if (!r.plain())
 	{
-		output_pass(r);
+		output_pass(r, dest, row_length);
 		return;
 	}
 	if (m_resolve_fbo)
@@ -1055,11 +1061,95 @@ void retro_gpu_engine::do_readback(const osd::gpu_readback_rect &r)
 	}
 	else
 		g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-	g_gl.PixelStorei(GL_PACK_ALIGNMENT, 4);
-	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, r.stride);
-	g_gl.ReadPixels(r.x, r.y, r.w, r.h, GL_BGRA, GL_UNSIGNED_BYTE, r.out);
+	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, row_length);
+	if (r.format == osd::gpu_readback_format::RG8)
+	{
+		g_gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
+		g_gl.ReadPixels(r.x, r.y, r.w, r.h, GL_RG, GL_UNSIGNED_BYTE, dest);
+		g_gl.PixelStorei(GL_PACK_ALIGNMENT, 4);
+	}
+	else
+	{
+		g_gl.PixelStorei(GL_PACK_ALIGNMENT, 4);
+		g_gl.ReadPixels(r.x, r.y, r.w, r.h, GL_BGRA, GL_UNSIGNED_BYTE, dest);
+	}
 	g_gl.PixelStorei(GL_PACK_ROW_LENGTH, 0);
 	g_gl.BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+}
+
+// Forgets read-backs that were never collected.
+void retro_gpu_engine::drop_pending()
+{
+	if (m_fence)
+	{
+		g_gl.DeleteSync(m_fence);
+		m_fence = nullptr;
+	}
+	m_pending.clear();
+}
+
+// Waits for the deferred read-backs of the last frame and writes their pixels.
+bool retro_gpu_engine::collect_frame()
+{
+	if (m_pending.empty())
+		return true;
+	if (!m_valid || m_failed)
+	{
+		m_pending.clear();
+		return false;
+	}
+	const auto start = clock_type::now();
+	scoped_context ctx(m_display, m_surface, m_context);
+	if (!ctx.active)
+	{
+		m_pending.clear();
+		return false;
+	}
+
+	bool ok = true;
+	if (m_fence)
+	{
+		// one second is far beyond any frame; a longer wait means the GPU is lost
+		const GLenum wait = g_gl.ClientWaitSync(m_fence, GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ULL);
+		if (wait == GL_TIMEOUT_EXPIRED || wait == GL_WAIT_FAILED)
+		{
+			log_problem("collect", "waiting for the GPU timed out");
+			ok = false;
+		}
+		g_gl.DeleteSync(m_fence);
+		m_fence = nullptr;
+	}
+	if (ok)
+	{
+		g_gl.BindBuffer(GL_PIXEL_PACK_BUFFER, m_pbo);
+		const uint8_t *src = static_cast<const uint8_t *>(g_gl.MapBufferRange(GL_PIXEL_PACK_BUFFER, 0, GLsizeiptr(m_pending_bytes), GL_MAP_READ_BIT));
+		if (src)
+		{
+			for (const pending_readback &p : m_pending)
+			{
+				if (p.out16)
+				{
+					for (int y = 0; y < p.h; y++)
+						memcpy(p.out16 + size_t(y) * p.stride, src + p.offset + size_t(y) * p.w * 2, size_t(p.w) * 2);
+				}
+				else
+				{
+					for (int y = 0; y < p.h; y++)
+						memcpy(p.out + size_t(y) * p.stride, src + p.offset + size_t(y) * p.w * 4, size_t(p.w) * 4);
+				}
+			}
+			g_gl.UnmapBuffer(GL_PIXEL_PACK_BUFFER);
+		}
+		else
+		{
+			log_problem("collect", "could not map the read-back buffer");
+			ok = false;
+		}
+		g_gl.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+	}
+	m_pending.clear();
+	m_stats.collect_ms = elapsed_ms(start);
+	return ok;
 }
 
 bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
@@ -1077,6 +1167,9 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 		return false;
 
 	while (g_gl.GetError() != GL_NO_ERROR) { }
+
+	// read-backs of an earlier frame that were never collected
+	drop_pending();
 
 	// result of an earlier frame's query that was still running when it returned
 	if (m_timers && m_query_pending)
@@ -1219,7 +1312,7 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 		{
 			const auto rb_start = clock_type::now();
 			g_gl.Disable(GL_SCISSOR_TEST);
-			do_readback(c.readback);
+			do_readback(c.readback, c.readback.format == osd::gpu_readback_format::RG8 ? static_cast<void *>(c.readback.out16) : static_cast<void *>(c.readback.out), c.readback.stride);
 			if (scissor_on)
 				g_gl.Enable(GL_SCISSOR_TEST);
 			m_stats.readback_ms += elapsed_ms(rb_start);
@@ -1256,7 +1349,7 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 	}
 	// A frame that reads nothing back is not waited for. The commands are flushed (the context
 	// release would do it too) and the GPU works on while emulation continues.
-	const bool waits = frame.readback_count > 0;
+	const bool waits = frame.readback_count > 0 && !frame.defer_readback;
 	if (waits)
 		g_gl.Finish();
 	else
@@ -1271,8 +1364,45 @@ bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 	if (frame.readback_count > 0)
 	{
 		const auto read_start = clock_type::now();
-		for (int i = 0; i < frame.readback_count; i++)
-			do_readback(frame.readbacks[i]);
+		if (frame.defer_readback)
+		{
+			// every rectangle goes tightly packed into one pixel-pack buffer; collect_frame() copies the rows out
+			m_pending.clear();
+			size_t total = 0;
+			for (int i = 0; i < frame.readback_count; i++)
+			{
+				const osd::gpu_readback_rect &r = frame.readbacks[i];
+				const bool rg8 = r.format == osd::gpu_readback_format::RG8;
+				pending_readback p;
+				p.out = r.out;
+				p.out16 = rg8 ? r.out16 : nullptr;
+				p.stride = r.stride;
+				p.w = r.w / std::max(r.downsample, 1);
+				p.h = r.h / std::max(r.downsample, 1);
+				p.offset = total;
+				total += size_t(p.w) * p.h * (rg8 ? 2 : 4);
+				m_pending.push_back(p);
+			}
+			if (!m_pbo)
+				g_gl.GenBuffers(1, &m_pbo);
+			g_gl.BindBuffer(GL_PIXEL_PACK_BUFFER, m_pbo);
+			g_gl.BufferData(GL_PIXEL_PACK_BUFFER, GLsizeiptr(total), nullptr, GL_STREAM_READ);
+			m_pbo_size = total;
+			m_pending_bytes = total;
+			for (int i = 0; i < frame.readback_count; i++)
+				do_readback(frame.readbacks[i], reinterpret_cast<void *>(uintptr_t(m_pending[i].offset)), m_pending[i].w);
+			g_gl.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+			m_fence = g_gl.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+			g_gl.Flush();
+		}
+		else
+		{
+			for (int i = 0; i < frame.readback_count; i++)
+			{
+				const osd::gpu_readback_rect &r = frame.readbacks[i];
+				do_readback(r, r.format == osd::gpu_readback_format::RG8 ? static_cast<void *>(r.out16) : static_cast<void *>(r.out), r.stride);
+			}
+		}
 		m_stats.readback_ms += elapsed_ms(read_start);
 	}
 

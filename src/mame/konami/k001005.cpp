@@ -141,6 +141,9 @@ void k001005_renderer::push_data(uint32_t data)
 
 void k001005_renderer::swap_buffers()
 {
+	// a frame still in flight belongs to the page about to be reused
+	gpu_collect();
+
 	// the polygons of the finished frame go to the GPU now, into the buffer they were drawn for
 	if (!m_gpu_runs.empty())
 		gpu_submit();
@@ -357,7 +360,10 @@ void k001005_renderer::gpu_submit()
 	frame.command_count = commands.size();
 	frame.readbacks = &readback;
 	frame.readback_count = 1;
-	if (!m_gpu_engine->submit_frame(frame))
+	frame.defer_readback = true;
+	if (m_gpu_engine->submit_frame(frame))
+		m_gpu_pending = true;
+	else
 	{
 		// the textures may not have reached the GPU, and this frame stays empty
 		m_gpu_full_upload = true;
@@ -366,6 +372,16 @@ void k001005_renderer::gpu_submit()
 	m_gpu_state.clear();
 	m_gpu_vertices.clear();
 	m_gpu_runs.clear();
+}
+
+// Waits for the frame submitted at the last buffer swap and fills the page it was drawn for.
+void k001005_renderer::gpu_collect()
+{
+	if (!m_gpu_pending)
+		return;
+	m_gpu_pending = false;
+	if (!m_gpu_engine->collect_frame())
+		m_gpu_full_upload = true;
 }
 
 
@@ -941,6 +957,8 @@ void k001005_renderer::render_polygons()
 
 void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
+	gpu_collect();
+
 	int const ss = m_ss;
 	int const samples = ss * ss;
 
