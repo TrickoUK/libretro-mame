@@ -753,7 +753,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_3d_edge_aa",
       "3D Edge Anti-Aliasing",
       NULL,
-      "3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others). Smooths the stair-stepped outlines of 3D objects. Only edges of depth-tested 3D geometry are touched; textures, HUD and text stay sharp, and emulation is unaffected. Low CPU cost. Other 3D hardware is unaffected (3D Supersampling already smooths edges on GTI Club hardware). Requires restarting content to take effect.",
+      "3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others), software rendering only. Smooths the stair-stepped outlines of 3D objects. Only edges of depth-tested 3D geometry are touched; textures, HUD and text stay sharp, and emulation is unaffected. Low CPU cost. It has no effect while 3D GPU Rendering is enabled: on the GPU path, 3D Supersampling smooths the edges instead. Other 3D hardware is unaffected (3D Supersampling already smooths edges on GTI Club hardware). Requires restarting content to take effect.",
       NULL,
       "video",
       {
