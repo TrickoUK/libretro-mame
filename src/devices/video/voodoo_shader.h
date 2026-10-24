@@ -423,7 +423,7 @@ constexpr char VOODOO_FRAGMENT_SOURCE[] =
 	"	ivec4 res = clamp8(((bc * bf) >> 8) + av);\n"
 	"	if (bitsof(fbzcp, 25, 1) != 0) res.a ^= 255;\n"
 	"	if (bitsof(fbzcp, 16, 1) != 0) res.rgb ^= ivec3(255);\n"
-	"	if (bitsof(alphamode, 0, 1) != 0 && !cmp_func(bitsof(alphamode, 1, 3), res.a, bitsof(alphamode, 24, 8)))\n"
+	"	if (bitsof(alphamode, 0, 1) != 0 && !cmp_func(bitsof(alphamode, 1, 3), res.a, state(12) & 255))\n"
 	"		return false;\n"
 	"	if (bitsof(fogmode, 0, 1) != 0) {\n"
 	"		ivec4 fogc = unpack_argb(state(9));\n"

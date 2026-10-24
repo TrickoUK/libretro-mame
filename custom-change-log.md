@@ -575,3 +575,8 @@ builds get them straight from here.
   showed a red patterned block over the lower part of both screens, Thrill Drive repeated its "INSERT COIN" box and showed misplaced text,
   and Gradius 4's score and credit text was tiny and scattered. The layer is now drawn at the normal size and enlarged with sharp pixels, so
   it sits where it does at native output scale.
+
+### Thrill Drive, GTI Club 2 and other Voodoo games: see-through textures on the GPU path
+- With 3D GPU Rendering on, textures that are meant to be see-through (the trees along the road in Thrill Drive, car windows) were drawn
+  as solid blocks: the tree billboards had flat green backgrounds and the windows were opaque. The GPU path now rejects those texels
+  as the software renderer does, so trees, windows and similar cut-out textures look the same as in software.
