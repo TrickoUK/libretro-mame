@@ -565,6 +565,6 @@ builds get them straight from here.
   The picture is the same to within one colour level.
 
 ### Operation Thunder Hurricane, Solar Assault: cut-out texture edges
-- Cut-out parts of textures (fences, foliage, HUD-like shapes) on Operation Thunder Hurricane and Solar Assault keep a clean edge with
+- Cut-out parts of textures on Operation Thunder Hurricane and Solar Assault keep a clean edge with
   every option off, as they have since the 2026-10-17 filtering change: transparent texels beside a visible one borrow its colour
   instead of bleeding dark lines. This is assumed hardware behaviour; it has not been compared with a real board.
