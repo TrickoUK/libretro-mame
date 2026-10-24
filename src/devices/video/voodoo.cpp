@@ -849,7 +849,7 @@ void voodoo_1_device::set_init_enable(u32 newval)
 
 int voodoo_1_device::update(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-		// if we are blank, just fill with black
+	// if we are blank, just fill with black
 	if (m_reg.fbi_init1().software_blank())
 	{
 		bitmap.fill(0, cliprect);
@@ -2855,9 +2855,12 @@ void voodoo_1_device::compute_edge_aa()
 	rgb_t const *const rgb565 = m_shared->rgb565;
 
 	// gather luma, depth and the 3D flag for the area
-	std::vector<float> luma(w * h);
-	std::vector<u16> depth(w * h);
-	std::vector<u8> is3d(w * h);
+	std::vector<float> &luma = m_aa_luma;
+	std::vector<u16> &depth = m_aa_depth;
+	std::vector<u8> &is3d = m_aa_is3d;
+	luma.resize(w * h);
+	depth.resize(w * h);
+	is3d.resize(w * h);
 	for (s32 y = 0; y < h; y++)
 	{
 		s32 const base = (rect.min_y + y - m_yoffs) * rowpixels + rect.min_x - m_xoffs;
