@@ -418,6 +418,10 @@ public:
 	// video update
 	virtual int update(bitmap_rgb32 &bitmap, const rectangle &cliprect) = 0;
 
+	// the screen is presented at this multiple of its native size (1 = native); the layers a driver draws
+	// itself must be enlarged to match
+	virtual int output_scale() const { return 1; }
+
 protected:
 	// internal construction
 	generic_voodoo_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, voodoo::voodoo_model model);
@@ -501,6 +505,7 @@ public:
 
 	// video update
 	virtual int update(bitmap_rgb32 &bitmap, const rectangle &cliprect) override;
+	virtual int output_scale() const override { return m_output_scale; }
 
 protected:
 	// device-level overrides

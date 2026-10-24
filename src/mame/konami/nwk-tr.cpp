@@ -336,7 +336,7 @@ uint32_t nwktr_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap,
 	int const board = m_exrgb ? 1 : 0;
 
 	m_voodoo[board]->update(bitmap, cliprect);
-	m_k001604[0]->draw_front_layer(screen, bitmap, cliprect); // K001604 on slave board doesn't seem to output anything. Bug or intended?
+	m_k001604[0]->draw_front_layer_enlarged(screen, bitmap, cliprect, m_voodoo[board]->output_scale()); // K001604 on slave board doesn't seem to output anything. Bug or intended?
 
 	return 0;
 }

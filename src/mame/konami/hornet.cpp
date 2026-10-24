@@ -626,7 +626,7 @@ uint32_t hornet_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap
 {
 	m_voodoo[Which]->update(bitmap, cliprect);
 
-	m_k037122[Which]->tile_draw(screen, bitmap, cliprect);
+	m_k037122[Which]->tile_draw_enlarged(screen, bitmap, cliprect, m_voodoo[Which]->output_scale());
 
 	return 0;
 }

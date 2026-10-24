@@ -568,3 +568,10 @@ builds get them straight from here.
 - Cut-out parts of textures on Operation Thunder Hurricane and Solar Assault keep a clean edge with
   every option off, as they have since the 2026-10-17 filtering change: transparent texels beside a visible one borrow its colour
   instead of bleeding dark lines. This is assumed hardware behaviour; it has not been compared with a real board.
+
+### Hang Pilot, Thrill Drive, Gradius 4 and the other Konami Voodoo boards: 2D layers at 3D Output Scale "match"
+- With 3D Output Scale set to "Match supersampling" the Konami boards that draw their text and HUD tile layer themselves (Hang Pilot,
+  Thrill Drive, Gradius 4, Silent Scope and the other Hornet boards) drew that layer at the normal size on the enlarged screen. Hang Pilot
+  showed a red patterned block over the lower part of both screens, Thrill Drive repeated its "INSERT COIN" box and showed misplaced text,
+  and Gradius 4's score and credit text was tiny and scattered. The layer is now drawn at the normal size and enlarged with sharp pixels, so
+  it sits where it does at native output scale.
