@@ -182,6 +182,7 @@ private:
 	bool m_gpu_checked = false;
 	bool m_gpu_collecting = false;      // the scene is being turned into GPU primitives instead of being rasterised
 	bool m_gpu_full_upload = true;
+	int m_gpu_scale = 1;                // render scale of the GPU target (supersampling)
 	namcos22_object_data m_gpu_extra;
 	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_tile_data = osd::GPU_NULL_HANDLE;

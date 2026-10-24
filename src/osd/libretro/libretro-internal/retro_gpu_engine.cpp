@@ -987,10 +987,13 @@ bool retro_gpu_engine::ensure_output_program(bool per_sample)
 			"\tivec2 base = ivec2(gl_FragCoord.xy) * u_ds + ORIGIN;\n"
 			"\tivec4 sum = ivec4(0);\n"
 			"\tint count = 0;\n"
+			"\tint drawn = 0;\n"
+			"\tint high = 0;\n"
 			"\tfor (int y = 0; y < u_ds; y++)\n\t{\n"
 			"\t\tfor (int x = 0; x < u_ds; x++)\n\t\t{\n"
 			"\t\t\tfor (int s = 0; s < SAMPLES; s++)\n\t\t\t{\n"
 			"\t\t\t\tivec4 t = ivec4(FETCH(base + ivec2(x, y), s) * 255.0 + 0.5);\n"
+			"\t\t\t\tif (t.a != 0)\n\t\t\t\t{\n\t\t\t\t\tdrawn++;\n\t\t\t\t\tif (t.a == 255)\n\t\t\t\t\t\thigh++;\n\t\t\t\t}\n"
 			"\t\t\t\tif ((u_flags & 4) == 0 || t.a != 0)\n\t\t\t\t{\n"
 			"\t\t\t\t\tsum += t;\n\t\t\t\t\tcount++;\n"
 			"\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n"
@@ -999,6 +1002,7 @@ bool retro_gpu_engine::ensure_output_program(bool per_sample)
 			"\t\tv.r = u_lut[v.r >> 3];\n\t\tv.g = u_lut[32 + (v.g >> 2)];\n\t\tv.b = u_lut[96 + (v.b >> 3)];\n"
 			"\t}\n"
 			"\tif ((u_flags & 2) != 0)\n\t\tv.a = 255;\n"
+			"\tif ((u_flags & 16) != 0)\n\t\tv.a = (drawn == 0) ? 0 : (high * 2 > drawn) ? 255 : 128;\n"
 			"\tif ((u_flags & 4) != 0)\n\t{\n"
 			"\t\tint total = u_ds * u_ds * SAMPLES;\n"
 			"\t\tv.a = (count == 0) ? 0 : ((u_flags & 8) != 0) ? max(1, (255 * count + total / 2) / total) : 255;\n"
@@ -1070,7 +1074,7 @@ bool retro_gpu_engine::ensure_output_program(bool per_sample)
 void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r, void *dest, int row_length)
 {
 	// a coverage read-back of a multisample target looks at its samples; any other is resolved first
-	const bool per_sample = m_color_tex && r.coverage;
+	const bool per_sample = m_color_tex && (r.coverage || r.priority_bits);
 	if (!ensure_output_program(per_sample))
 		return;
 	const output_program &op = m_op[per_sample ? 1 : 0];
@@ -1118,7 +1122,7 @@ void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r, void *dest, 
 	g_gl.ColorMask(1, 1, 1, 1);
 	g_gl.UseProgram(op.id);
 	g_gl.Uniform1i(op.u_ds, ds);
-	g_gl.Uniform1i(op.u_flags, (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0) | (r.coverage ? 4 : 0) | (r.coverage_share ? 8 : 0));
+	g_gl.Uniform1i(op.u_flags, (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0) | (r.coverage ? 4 : 0) | (r.coverage_share ? 8 : 0) | (r.priority_bits ? 16 : 0));
 	if (per_sample)
 	{
 		g_gl.Uniform1i(op.u_samples, m_target.msaa_samples);

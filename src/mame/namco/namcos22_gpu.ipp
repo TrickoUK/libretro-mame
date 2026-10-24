@@ -89,7 +89,7 @@ void namcos22_renderer::gpu_add_vertices(const vertex_t *verts, int count, int v
 	gpu_vertex vv[12];
 	for (int i = 0; i < count; i++)
 	{
-		vv[i] = { float(verts[i].x), float(verts[i].y), 0.0f, 1.0f, prim, {} };
+		vv[i] = { float(verts[i].x) * m_gpu_scale, float(verts[i].y) * m_gpu_scale, 0.0f, 1.0f, prim, {} };
 		for (int j = 0; j < varyings; j++)
 			vv[i].v[j] = float(verts[i].p[j]);
 	}
@@ -141,10 +141,10 @@ void namcos22_renderer::gpu_add_quad(const namcos22_object_data &extra, int clip
 	d[15] = extra.polycolor.get_b();
 	d[16] = 0xff - extra.alpha;
 	d[17] = m_state.m_poly_alpha_pen;
-	d[18] = m_cliprect.min_x;
-	d[19] = m_cliprect.min_y;
-	d[20] = m_cliprect.max_x + 1;
-	d[21] = m_cliprect.max_y + 1;
+	d[18] = m_cliprect.min_x * m_gpu_scale;
+	d[19] = m_cliprect.min_y * m_gpu_scale;
+	d[20] = (m_cliprect.max_x + 1) * m_gpu_scale;
+	d[21] = (m_cliprect.max_y + 1) * m_gpu_scale;
 	d[25] = extra.prioverchar & 1;
 
 	const u32 prim = m_gpu_state.size() / NAMCOS22_SHADER_STATE_WORDS;
@@ -220,10 +220,10 @@ void namcos22_renderer::gpu_add_sprite(const namcos22_object_data &extra, vertex
 	d[12] = extra.fadecolor.get_b();
 	d[16] = extra.alpha;
 	d[17] = m_state.m_poly_alpha_pen;
-	d[18] = m_cliprect.min_x;
-	d[19] = m_cliprect.min_y;
-	d[20] = m_cliprect.max_x + 1;
-	d[21] = m_cliprect.max_y + 1;
+	d[18] = m_cliprect.min_x * m_gpu_scale;
+	d[19] = m_cliprect.min_y * m_gpu_scale;
+	d[20] = (m_cliprect.max_x + 1) * m_gpu_scale;
+	d[21] = (m_cliprect.max_y + 1) * m_gpu_scale;
 	d[22] = extra.source - gfx->get_data(0);
 	d[23] = extra.line_modulo;
 	d[24] = (extra.flipx ? 1 : 0) | (extra.flipy ? 2 : 0);
@@ -299,6 +299,12 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 	if (stamp && (!m_gpu_picture || bitmap.width() != m_gpu_picture_size.first || bitmap.height() != m_gpu_picture_size.second))
 		return false;
 
+	// supersampling: the target is scale times the bitmap in each direction, averaged down on the way back
+	const int max_size = m_gpu_engine->caps().max_texture_size;
+	m_gpu_scale = std::clamp(m_state.machine().osd().supersample(), 1, 4);
+	while (m_gpu_scale > 1 && (bitmap.width() * m_gpu_scale > max_size || bitmap.height() * m_gpu_scale > max_size))
+		m_gpu_scale--;
+
 	m_gpu_state.clear();
 	m_gpu_vertices.clear();
 
@@ -307,11 +313,12 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 	{
 		u32 d[NAMCOS22_SHADER_STATE_WORDS] = {};
 		d[0] = 64;
-		d[20] = bitmap.width();
-		d[21] = bitmap.height();
+		d[20] = bitmap.width() * m_gpu_scale;
+		d[21] = bitmap.height() * m_gpu_scale;
+		d[22] = m_gpu_scale;
 		m_gpu_state.insert(m_gpu_state.end(), d, d + NAMCOS22_SHADER_STATE_WORDS);
-		const float w = bitmap.width();
-		const float h = bitmap.height();
+		const float w = bitmap.width() * m_gpu_scale;
+		const float h = bitmap.height() * m_gpu_scale;
 		const gpu_vertex corners[4] = { { 0, 0, 0, 1, 0, {} }, { w, 0, 0, 1, 0, {} }, { w, h, 0, 1, 0, {} }, { 0, h, 0, 1, 0, {} } };
 		for (int i : { 0, 1, 2, 0, 2, 3 })
 			m_gpu_vertices.push_back(corners[i]);
@@ -400,16 +407,21 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 		}
 
 		osd::gpu_readback_rect readback;
-		readback.x = cliprect.min_x;
-		readback.y = cliprect.min_y;
-		readback.w = cliprect.width();
-		readback.h = cliprect.height();
+		readback.x = cliprect.min_x * m_gpu_scale;
+		readback.y = cliprect.min_y * m_gpu_scale;
+		readback.w = cliprect.width() * m_gpu_scale;
+		readback.h = cliprect.height() * m_gpu_scale;
 		readback.out = &bitmap.pix(cliprect.min_y, cliprect.min_x);
 		readback.stride = bitmap.rowpixels();
+		if (m_gpu_scale > 1)
+		{
+			readback.downsample = m_gpu_scale;
+			readback.priority_bits = true;
+		}
 
 		osd::gpu_frame frame;
-		frame.target.width = bitmap.width();
-		frame.target.height = bitmap.height();
+		frame.target.width = bitmap.width() * m_gpu_scale;
+		frame.target.height = bitmap.height() * m_gpu_scale;
 		frame.target.depth = osd::gpu_depth_mode::NONE;
 		frame.target.clear_color[0] = background.r() / 255.0f;
 		frame.target.clear_color[1] = background.g() / 255.0f;

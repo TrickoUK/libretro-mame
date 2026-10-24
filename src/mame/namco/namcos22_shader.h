@@ -115,7 +115,7 @@ constexpr char NAMCOS22_FRAGMENT_SOURCE[] =
 	"	int flags = state(S_FLAGS);\n"
 	"	if ((flags & F_STAMP) != 0)\n"
 	"	{\n"
-	"		color = vec4(texelFetch(picture, p, 0).zyx, 0.0);\n"
+	"		color = vec4(texelFetch(picture, p / max(state(S_SPRITE), 1), 0).zyx, 0.0);\n"
 	"		return true;\n"
 	"	}\n"
 	"	int pen = 0;\n"
