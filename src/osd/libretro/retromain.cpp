@@ -369,6 +369,11 @@ void retro_osd_interface::init(running_machine &machine)
 	// call our parent
 	osd_common_t::init(machine);
 
+	// the previous machine (before a hard reset) is gone, and with it every
+	// device that held one of the GPU engines
+	m_gpu_engines.clear();
+	m_gpu_engine_failed = false;
+
 #if 0
 	const char *stemp;
 

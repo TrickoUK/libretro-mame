@@ -106,6 +106,7 @@ private:
 	void log_problem(const char *what, const char *detail);
 
 	void *m_display = nullptr;
+	bool m_display_used = false;        // counted in g_display_users
 	void *m_context = nullptr;
 	void *m_surface = nullptr;
 	bool m_valid = false;
