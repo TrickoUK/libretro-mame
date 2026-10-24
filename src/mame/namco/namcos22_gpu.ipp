@@ -137,7 +137,8 @@ void namcos22_renderer::gpu_add_quad(const namcos22_object_data &extra, int clip
 	}
 
 	d[0] = (extra.texture_enabled ? 2 : 0) | (extra.shade_enabled ? 4 : 0) | (m_state.m_is_ss22 ? 8 : 0)
-			| (extra.pfade_enabled ? 16 : 0) | (extra.alpha_enabled ? 32 : 0);
+			| (extra.pfade_enabled ? 16 : 0) | (extra.alpha_enabled ? 32 : 0)
+			| ((extra.texture_enabled && m_state.machine().osd().texture_filter()) ? 128 : 0);
 	d[1] = penbase;
 	d[2] = penmask;
 	d[3] = penshift;

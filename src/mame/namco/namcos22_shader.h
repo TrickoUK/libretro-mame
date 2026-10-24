@@ -21,7 +21,7 @@
     for polygons; v0 and v1 are the texel position for sprites.
 
     State record, NAMCOS22_SHADER_STATE_WORDS words: flags (1 sprite, 2
-    texture, 4 shade, 8 Super System 22, 16 polygon fade, 32 alpha, 64 stamp), pen
+    texture, 4 shade, 8 Super System 22, 16 polygon fade, 32 alpha, 64 stamp, 128 texture filter), pen
     base, pen mask and shift, texture bank, fog mix (255 = none) and colour,
     fade mix and colour, polygon fade colour, alpha mix and pen, the clip
     rectangle (min x, min y, max x + 1, max y + 1 in target pixels), sprite
@@ -67,6 +67,7 @@ constexpr char NAMCOS22_FRAGMENT_SOURCE[] =
 	"#define F_PFADE 16\n"
 	"#define F_ALPHA 32\n"
 	"#define F_STAMP 64\n"
+	"#define F_FILTER 128\n"
 	"ivec3 mix_color(ivec3 a, ivec3 b, int factor)\n"
 	"{\n"
 	"	return (a * factor + b * (256 - factor)) >> 8;\n"
@@ -107,6 +108,23 @@ constexpr char NAMCOS22_FRAGMENT_SOURCE[] =
 	"		return mix_color(rgb, ivec3(state(S_FADER), state(S_FADEG), state(S_FADEB)), state(S_FADEMIX));\n"
 	"	return rgb;\n"
 	"}\n"
+	"ivec3 tap_rgb(int tx, int ty)\n"
+	"{\n"
+	"	int pen = tile_pixel(tx & 0xfff, (ty & 0xfff) | state(S_BANK));\n"
+	"	return palette_rgb(state(S_PENBASE) + ((pen >> state(S_PENSHIFT)) & state(S_PENMASK)));\n"
+	"}\n"
+	"ivec3 filtered_rgb(float u, float v)\n"
+	"{\n"
+	"	float fu = u - 0.5;\n"
+	"	float fv = v - 0.5;\n"
+	"	int x0 = int(floor(fu));\n"
+	"	int y0 = int(floor(fv));\n"
+	"	float fx = fu - floor(fu);\n"
+	"	float fy = fv - floor(fv);\n"
+	"	vec3 top = mix(vec3(tap_rgb(x0, y0)), vec3(tap_rgb(x0 + 1, y0)), fx);\n"
+	"	vec3 bottom = mix(vec3(tap_rgb(x0, y0 + 1)), vec3(tap_rgb(x0 + 1, y0 + 1)), fx);\n"
+	"	return ivec3(mix(top, bottom, fy) + 0.5);\n"
+	"}\n"
 	"bool shade(out vec4 color)\n"
 	"{\n"
 	"	ivec2 p = ivec2(frag_pos());\n"
@@ -142,6 +160,8 @@ constexpr char NAMCOS22_FRAGMENT_SOURCE[] =
 	"			pen = tile_pixel(tx, ty);\n"
 	"		}\n"
 	"		rgb = palette_rgb(state(S_PENBASE) + ((pen >> state(S_PENSHIFT)) & state(S_PENMASK)));\n"
+	"		if ((flags & (F_TEXTURE | F_FILTER)) == (F_TEXTURE | F_FILTER))\n"
+	"			rgb = filtered_rgb(v1 * ooz, v2 * ooz);\n"
 	"		int shade_level = ((flags & F_SHADE) != 0) ? int(v3 * ooz) : 0;\n"
 	"		if ((flags & F_SUPER) == 0)\n"
 	"		{\n"
