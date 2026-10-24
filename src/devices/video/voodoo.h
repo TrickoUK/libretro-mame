@@ -689,7 +689,15 @@ protected:
 	u32 m_pen_generation = 0;                // changes whenever m_pen is recomputed
 	std::vector<u32> m_gpu_out;              // the finished picture (scaled to the output, through the pens), by bitmap row
 	std::vector<u8> m_gpu_out_valid;         // per bitmap row: m_gpu_out holds the finished row
-	u64 m_gpu_out_key = 0;                   // what m_gpu_out was built from
+	struct gpu_out_key
+	{
+		u32 serial = 0, pen_generation = 0, xoffs = 0, yoffs = 0;
+		s32 front = 0, os = 0, scale = 0;
+		u32 rows = 0, min_x = 0, max_x = 0, width = 0, height = 0;
+		uintptr_t pens = 0;
+		bool operator==(gpu_out_key const &o) const { return serial == o.serial && pen_generation == o.pen_generation && xoffs == o.xoffs && yoffs == o.yoffs && front == o.front && os == o.os && scale == o.scale && rows == o.rows && min_x == o.min_x && max_x == o.max_x && width == o.width && height == o.height && pens == o.pens; }
+	};
+	gpu_out_key m_gpu_out_key;               // what m_gpu_out was built from
 	bool m_gpu_compare = false;              // log the difference to the software picture
 	int m_output_scale = 1;                  // the screen is presented at this multiple of the native size
 	bool m_gpu_parallel = false;             // the software renderer still draws every triangle and fill
