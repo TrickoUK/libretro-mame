@@ -125,6 +125,8 @@ GLenum blend_factor_enum(osd::gpu_blend_factor f)
 	case osd::gpu_blend_factor::ONE_MINUS_SRC_COLOR:        return GL_ONE_MINUS_SRC_COLOR;
 	case osd::gpu_blend_factor::DST_COLOR:                  return GL_DST_COLOR;
 	case osd::gpu_blend_factor::ONE_MINUS_DST_COLOR:        return GL_ONE_MINUS_DST_COLOR;
+	case osd::gpu_blend_factor::SRC1_ALPHA:                 return GL_SRC1_ALPHA;
+	case osd::gpu_blend_factor::ONE_MINUS_SRC1_ALPHA:       return GL_ONE_MINUS_SRC1_ALPHA;
 	case osd::gpu_blend_factor::SRC_ALPHA_SATURATE:         break;
 	}
 	return GL_SRC_ALPHA_SATURATE;
@@ -463,6 +465,7 @@ osd::gpu_handle retro_gpu_engine::create_shader_module(const osd::gpu_shader_mod
 	std::copy(std::begin(desc.varying_mode), std::end(desc.varying_mode), std::begin(m.varying_mode));
 	m.state_stride = desc.state_stride;
 	m.writes_depth = desc.writes_depth;
+	m.blend_factor_output = desc.blend_factor_output;
 	m.binding_count = desc.binding_count;
 	for (int i = 0; i < desc.binding_count; i++)
 	{
@@ -531,7 +534,10 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 	fs += "flat in uint g_prim;\n";
 	for (int i = 0; i < m.varying_count; i++)
 		fs += interpolation_qualifier(m.varying_mode[i], (((m.centroid_mask >> i) & 1) != 0)) + "in float v" + std::to_string(i) + ";\n";
-	fs += "out vec4 o_color;\n";
+	if (m.blend_factor_output)
+		fs += "layout(location = 0, index = 0) out vec4 o_color;\nlayout(location = 0, index = 1) out vec4 o_blend;\nfloat blend_factor = 1.0;\n";
+	else
+		fs += "out vec4 o_color;\n";
 	fs += "uniform vec2 u_target_size;\nuniform int u_rec_texels;\nuniform isampler2D u_state_tex;\n";
 	fs += "int state(int k)\n{\n";
 	fs += "\tint idx = int(g_prim) * u_rec_texels + (k >> 2);\n";
@@ -548,7 +554,7 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 	if (m.writes_depth)
 		fs += "float frag_depth = 0.0;\n";
 	fs += m.source + "\n";
-	fs += std::string("void main()\n{\n\tvec4 c;\n\tif (!shade(c))\n\t\tdiscard;\n\to_color = c;\n") + (m.writes_depth ? "\tgl_FragDepth = frag_depth;\n" : "") + "}\n";
+	fs += std::string("void main()\n{\n\tvec4 c;\n\tif (!shade(c))\n\t\tdiscard;\n\to_color = c;\n") + (m.blend_factor_output ? "\to_blend = vec4(blend_factor);\n" : "") + (m.writes_depth ? "\tgl_FragDepth = frag_depth;\n" : "") + "}\n";
 
 	program p;
 	GLuint shaders[2] = { 0, 0 };
@@ -820,7 +826,10 @@ void retro_gpu_engine::apply_blend(const osd::gpu_blend_state &blend)
 	case osd::gpu_blend_op::REVERSE_SUBTRACT:   g_gl.BlendEquation(GL_FUNC_REVERSE_SUBTRACT); break;
 	}
 	g_gl.BlendColor(0.0f, 0.0f, 0.0f, blend.constant_alpha);
-	g_gl.BlendFunc(blend_factor_enum(blend.src), blend_factor_enum(blend.dst));
+	if (blend.separate_alpha)
+		g_gl.BlendFuncSeparate(blend_factor_enum(blend.src), blend_factor_enum(blend.dst), blend_factor_enum(blend.src_alpha), blend_factor_enum(blend.dst_alpha));
+	else
+		g_gl.BlendFunc(blend_factor_enum(blend.src), blend_factor_enum(blend.dst));
 }
 
 
@@ -978,10 +987,13 @@ bool retro_gpu_engine::ensure_output_program(bool per_sample)
 			"\tivec2 base = ivec2(gl_FragCoord.xy) * u_ds + ORIGIN;\n"
 			"\tivec4 sum = ivec4(0);\n"
 			"\tint count = 0;\n"
+			"\tint drawn = 0;\n"
+			"\tint high = 0;\n"
 			"\tfor (int y = 0; y < u_ds; y++)\n\t{\n"
 			"\t\tfor (int x = 0; x < u_ds; x++)\n\t\t{\n"
 			"\t\t\tfor (int s = 0; s < SAMPLES; s++)\n\t\t\t{\n"
 			"\t\t\t\tivec4 t = ivec4(FETCH(base + ivec2(x, y), s) * 255.0 + 0.5);\n"
+			"\t\t\t\tif (t.a != 0)\n\t\t\t\t{\n\t\t\t\t\tdrawn++;\n\t\t\t\t\tif (t.a == 255)\n\t\t\t\t\t\thigh++;\n\t\t\t\t}\n"
 			"\t\t\t\tif ((u_flags & 4) == 0 || t.a != 0)\n\t\t\t\t{\n"
 			"\t\t\t\t\tsum += t;\n\t\t\t\t\tcount++;\n"
 			"\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n"
@@ -990,6 +1002,7 @@ bool retro_gpu_engine::ensure_output_program(bool per_sample)
 			"\t\tv.r = u_lut[v.r >> 3];\n\t\tv.g = u_lut[32 + (v.g >> 2)];\n\t\tv.b = u_lut[96 + (v.b >> 3)];\n"
 			"\t}\n"
 			"\tif ((u_flags & 2) != 0)\n\t\tv.a = 255;\n"
+			"\tif ((u_flags & 16) != 0)\n\t\tv.a = (drawn == 0) ? 0 : (high * 2 > drawn) ? 255 : 128;\n"
 			"\tif ((u_flags & 4) != 0)\n\t{\n"
 			"\t\tint total = u_ds * u_ds * SAMPLES;\n"
 			"\t\tv.a = (count == 0) ? 0 : ((u_flags & 8) != 0) ? max(1, (255 * count + total / 2) / total) : 255;\n"
@@ -1061,7 +1074,7 @@ bool retro_gpu_engine::ensure_output_program(bool per_sample)
 void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r, void *dest, int row_length)
 {
 	// a coverage read-back of a multisample target looks at its samples; any other is resolved first
-	const bool per_sample = m_color_tex && r.coverage;
+	const bool per_sample = m_color_tex && (r.coverage || r.priority_bits);
 	if (!ensure_output_program(per_sample))
 		return;
 	const output_program &op = m_op[per_sample ? 1 : 0];
@@ -1109,7 +1122,7 @@ void retro_gpu_engine::output_pass(const osd::gpu_readback_rect &r, void *dest, 
 	g_gl.ColorMask(1, 1, 1, 1);
 	g_gl.UseProgram(op.id);
 	g_gl.Uniform1i(op.u_ds, ds);
-	g_gl.Uniform1i(op.u_flags, (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0) | (r.coverage ? 4 : 0) | (r.coverage_share ? 8 : 0));
+	g_gl.Uniform1i(op.u_flags, (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0) | (r.coverage ? 4 : 0) | (r.coverage_share ? 8 : 0) | (r.priority_bits ? 16 : 0));
 	if (per_sample)
 	{
 		g_gl.Uniform1i(op.u_samples, m_target.msaa_samples);

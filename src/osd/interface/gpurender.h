@@ -93,9 +93,10 @@ struct gpu_readback_rect
 	bool opaque = false;                    // force alpha to 1
 	bool coverage = false;                  // average only the target pixels with non-zero alpha; an output pixel with none is zero (alpha 0), otherwise alpha 1
 	bool coverage_share = false;            // with coverage: alpha is the share of the covered pixels (1..255, 255 = all), not 1
+	bool priority_bits = false;             // the alpha channel holds priority bits (0 = none, 128 = set, 255 = set and high): the colour is the average of every pixel, the alpha is 0 if no pixel had bits, else 255 if most of the pixels that had them were high, else 128
 	const uint8_t *channel_lut = nullptr;   // 128 bytes: output levels for the 5-bit red (32), 6-bit green (64) and 5-bit blue (32) value of the averaged colour
 
-	bool plain() const { return downsample == 1 && !opaque && !coverage && !channel_lut; }
+	bool plain() const { return downsample == 1 && !opaque && !coverage && !priority_bits && !channel_lut; }
 };
 
 } // namespace osd

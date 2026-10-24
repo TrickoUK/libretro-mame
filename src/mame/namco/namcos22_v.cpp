@@ -11,6 +11,8 @@
 
 #include "video.h"
 
+#include "osdepend.h"
+
 
 // poly constructor
 
@@ -355,7 +357,7 @@ void namcos22_renderer::poly3d_drawquad(screen_device &screen, bitmap_rgb32 &bit
 	const int cz_adjust = node->data.quad.cz_adjust;
 	const int objectflags = node->data.quad.objectflags;
 
-	namcos22_object_data &extra = object_data().next();
+	namcos22_object_data &extra = m_gpu_collecting ? m_gpu_extra : object_data().next();
 
 	extra.destbase = &bitmap;
 	extra.pfade_enabled = false;
@@ -446,6 +448,12 @@ void namcos22_renderer::poly3d_drawquad(screen_device &screen, bitmap_rgb32 &bit
 		extra.fogfactor = 0;
 	}
 
+	if (m_gpu_collecting)
+	{
+		gpu_add_quad(extra, clipverts, clipv);
+		return;
+	}
+
 	if (m_state.m_is_ss22)
 		dispatch_scanline_poly(&namcos22_renderer::renderscanline_poly_ss22, clipverts, clipv);
 	else
@@ -479,7 +487,7 @@ void namcos22_renderer::poly3d_drawsprite(
 		const poly3d_t fsw = sprite_screen_width;
 		const poly3d_t fsh = sprite_screen_height;
 
-		namcos22_object_data &extra = object_data().next();
+		namcos22_object_data &extra = m_gpu_collecting ? m_gpu_extra : object_data().next();
 		vertex_t vert[4];
 
 		extra.fadefactor = 0;
@@ -528,7 +536,10 @@ void namcos22_renderer::poly3d_drawsprite(
 		extra.alpha = alpha;
 		extra.alpha_enabled = (color & 0x7f) != m_state.m_poly_alpha_color;
 
-		render_polygon<4, 2>(m_cliprect, render_delegate(&namcos22_renderer::renderscanline_sprite, this), vert);
+		if (m_gpu_collecting)
+			gpu_add_sprite(extra, vert);
+		else
+			render_polygon<4, 2>(m_cliprect, render_delegate(&namcos22_renderer::renderscanline_sprite, this), vert);
 	}
 }
 
@@ -2550,7 +2561,8 @@ u32 namcos22s_state::screen_update_namcos22s(screen_device &screen, bitmap_rgb32
 	if (BIT(layer, 2)) draw_text_layer(screen, bitmap, cliprect);
 	if (BIT(layer, 1)) draw_sprites();
 	if (BIT(layer, 0)) draw_polygons();
-	m_poly->render_scene(screen, bitmap);
+	if (!m_poly->gpu_render_scene(screen, bitmap, cliprect, bg_color.to_rgba(), true))
+		m_poly->render_scene(screen, bitmap);
 	if (BIT(layer, 2)) namcos22s_mix_text_layer(screen, bitmap, cliprect, 6);
 
 	// apply gamma
@@ -2586,7 +2598,8 @@ u32 namcos22_state::screen_update_namcos22(screen_device &screen, bitmap_rgb32 &
 
 	// layers
 	draw_polygons();
-	m_poly->render_scene(screen, bitmap);
+	if (!m_poly->gpu_render_scene(screen, bitmap, cliprect, rgb_t(m_palette->pen(bg_color)), false))
+		m_poly->render_scene(screen, bitmap);
 	draw_text_layer(screen, bitmap, cliprect); // text layer + final mix
 
 	return 0;
@@ -2737,3 +2750,5 @@ void namcos22_state::video_start()
 
 	m_poly = std::make_unique<namcos22_renderer>(*this);
 }
+
+#include "namcos22_gpu.ipp"

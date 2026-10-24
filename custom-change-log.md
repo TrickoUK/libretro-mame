@@ -542,3 +542,14 @@ builds get them straight from here.
 - HUD, text, logos and 2D layers stay sharp (only depth-tested 3D geometry is smoothed), and edges over the 2D background show no dark
   fringe on the GTI Club boards and Model 2. It does nothing with the software renderer, and Hyper Neo Geo 64 is not covered.
   Checked on GTI Club 2, San Francisco Rush, Daytona USA and Operation Thunder Hurricane. Cut-out textures (fences, foliage) are not smoothed.
+
+## 2026-10-24
+
+### Ridge Racer, Time Crisis, Prop Cycle and the other Namco System 22 / Super System 22 games: 3D GPU Rendering, Supersampling, MSAA and Texture Filtering
+- The polygons and sprites of every System 22 and Super System 22 game can now be drawn on the host GPU (3D GPU Rendering). The picture
+  matches the software renderer closely (Ridge Racer, Time Crisis and Prop Cycle checked frame for frame), and it runs about 1.3 times
+  faster than software at normal resolution on this machine.
+- 3D Supersampling (2x to 4x) and 3D Multisample Anti-Aliasing now work on these games: polygon edges and shrunk textures smooth out, while
+  the HUD, text and logos stay sharp. 3D Texture Filtering (bilinear) smooths polygon textures. All are off by default.
+- 3D Output Scale "match" does not apply to these games; the picture is always averaged to the normal screen size.
+

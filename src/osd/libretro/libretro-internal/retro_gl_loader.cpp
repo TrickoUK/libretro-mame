@@ -75,7 +75,7 @@ bool load_gl_dispatch()
 	LOAD_GL(GenVertexArrays); LOAD_GL(BindVertexArray);
 	LOAD_GL(GenBuffers); LOAD_GL(BindBuffer); LOAD_GL(BufferData);
 	LOAD_GL(EnableVertexAttribArray); LOAD_GL(VertexAttribPointer);
-	LOAD_GL(ActiveTexture); LOAD_GL(BlendEquation); LOAD_GL(BlendFunc); LOAD_GL(BlendColor);
+	LOAD_GL(ActiveTexture); LOAD_GL(BlendEquation); LOAD_GL(BlendFunc); LOAD_GL(BlendFuncSeparate); LOAD_GL(BlendColor);
 	LOAD_GL(GenTextures); LOAD_GL(BindTexture); LOAD_GL(TexImage2D); LOAD_GL(TexParameteri);
 	LOAD_GL(Viewport); LOAD_GL(ClearColor); LOAD_GL(Clear); LOAD_GL(DrawArrays);
 	LOAD_GL(ReadPixels); LOAD_GL(PixelStorei); LOAD_GL(Finish); LOAD_GL(Enable); LOAD_GL(Disable); LOAD_GL(Scissor);
