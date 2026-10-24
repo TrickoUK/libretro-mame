@@ -778,8 +778,10 @@ bool model2_state::gpu_layer_submit(const rectangle &ss_cliprect)
 			{
 				if (poly->window == window)
 				{
-					model2_3d_project(poly);
-					m_renderer->gpu_add_polygon(poly, ss_cliprect, m_gpu_state, m_gpu_vertices);
+					// the GPU path works on a copy, so a frame it cannot produce can still be rendered from the original
+					polygon gpu_poly = *poly;
+					model2_3d_project(&gpu_poly);
+					m_renderer->gpu_add_polygon(&gpu_poly, ss_cliprect, m_gpu_state, m_gpu_vertices);
 				}
 			}
 		}
