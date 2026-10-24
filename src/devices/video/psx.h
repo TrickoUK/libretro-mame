@@ -309,11 +309,12 @@ private:
 	bool gpu_submit_textured_dot( int32_t n_x, int32_t n_y, uint8_t n_u0, uint8_t n_v0, PAIR n_bgr, int32_t n_tx, int32_t n_ty, int32_t n_tp, uint32_t n_clutx, uint32_t n_cluty );
 	bool gpu_submit_line( int32_t n_x0, int32_t n_y0, int32_t n_x1, int32_t n_y1, float r0, float g0, float b0, float r1, float g1, float b1, uint8_t n_cmd );
 	bool gpu_queue_copy_rect( int32_t n_sx, int32_t n_sy, int32_t n_dx, int32_t n_dy, int32_t n_w, int32_t n_h );
-	uint32_t gpu_update_screen( bitmap_rgb32 &bitmap );
+	bool gpu_update_screen( bitmap_rgb32 &bitmap );
 
 	// Host-GPU engine (null when the path is off or unavailable). The shader
 	// module and the VRAM texture are created with the engine on first use.
 	osd::gpu_engine *m_gpu_engine = nullptr;
+	bitmap_rgb32 m_gpu_fallback;    // the native-size picture drawn by the software path while the screen is scaled
 	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_vram_tex = osd::GPU_NULL_HANDLE;
 	int m_gpu_texfilter_mode = 0;
@@ -523,6 +524,7 @@ private:
 
 	void vblank(screen_device &screen, bool vblank_state);
 	uint32_t update_screen(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	uint32_t update_screen_software(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
 #if defined(PSXGPU_DEBUG_VIEWER) && PSXGPU_DEBUG_VIEWER
 	void DebugMeshInit();

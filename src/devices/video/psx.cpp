@@ -150,6 +150,17 @@ bool psxgpu_device::gpu_active()
 		// m_gpu_queue comment in psx.h), not incrementally as primitives
 		// are submitted.
 	}
+	if( m_gpu_engine != nullptr && m_gpu_engine->failed() )
+	{
+		// The engine stopped producing frames; the software renderer takes over
+		// from the next primitive on.
+		m_gpu_engine = nullptr;
+		m_gpu_queue.clear();
+		m_gpu_frame_vertices.clear();
+		m_gpu_frame_state.clear();
+		m_gpu_frame_commands.clear();
+		m_gpu_frame_vertex_count = 0;
+	}
 	return m_gpu_engine != nullptr;
 }
 
@@ -744,11 +755,32 @@ void psxgpu_device::gpu_restore_from_vram()
 
 uint32_t psxgpu_device::update_screen(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	if (gpu_active())
-	{
-		return gpu_update_screen(bitmap);
-	}
+	if (gpu_active() && gpu_update_screen(bitmap))
+		return 0;
 
+	// The screen is declared at gpu_scale() times the native size while the GPU path is
+	// selected, so the native picture from VRAM is drawn at 1x and replicated.
+	const int scale = machine().osd().gpu_render_available() ? gpu_scale() : 1;
+	if (scale == 1)
+		return update_screen_software(bitmap, cliprect);
+
+	const int native_width = bitmap.width() / scale;
+	const int native_height = bitmap.height() / scale;
+	if (m_gpu_fallback.width() != native_width || m_gpu_fallback.height() != native_height)
+		m_gpu_fallback.resize(native_width, native_height);
+	update_screen_software(m_gpu_fallback, rectangle(0, native_width - 1, 0, native_height - 1));
+	for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
+	{
+		const uint32_t *src = &m_gpu_fallback.pix(std::min(y / scale, native_height - 1));
+		uint32_t *dst = &bitmap.pix(y);
+		for (int x = cliprect.left(); x <= cliprect.right(); x++)
+			dst[x] = src[std::min(x / scale, native_width - 1)];
+	}
+	return 0;
+}
+
+uint32_t psxgpu_device::update_screen_software(bitmap_rgb32 &bitmap, const rectangle &cliprect)
+{
 	uint32_t n_x;
 	uint32_t n_y;
 	int n_top;
@@ -2644,7 +2676,7 @@ bool psxgpu_device::gpu_submit_frame( const osd::gpu_readback_rect *rects, int c
 // clearing the rest via their own fill-rectangle GP0 command) still shows
 // correctly-persisted content from prior frames instead of the
 // un-resubmitted parts going black.
-uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
+bool psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 {
 
 	int w = n_screenwidth * gpu_scale();
@@ -2683,9 +2715,10 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 	if( ( n_gpustatus & ( 1 << 0x17 ) ) != 0 )
 	{
 		/* display disabled */
-		gpu_submit_frame( nullptr, 0 );
+		if( !gpu_submit_frame( nullptr, 0 ) )
+			return false;
 		bitmap.fill( 0 );
-		return 0;
+		return true;
 	}
 
 	int scale = gpu_scale();
@@ -2765,7 +2798,8 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 	if( ( n_gpustatus & ( 1 << 0x15 ) ) != 0 )
 	{
 		// The picture comes from p_p_vram, not the render target.
-		gpu_submit_frame( nullptr, 0 );
+		if( !gpu_submit_frame( nullptr, 0 ) )
+			return false;
 		if( n_lines > 0 && n_columns > 0 )
 		{
 			int dst_y0 = ( n_y + n_top ) * scale;
@@ -2803,7 +2837,7 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 				}
 			}
 		}
-		return 0;
+		return true;
 	}
 
 	if( n_lines > 0 && n_columns > 0 )
@@ -2848,14 +2882,10 @@ uint32_t psxgpu_device::gpu_update_screen( bitmap_rgb32 &bitmap )
 				}
 			}
 		}
-		gpu_submit_frame( rects, count );
-	}
-	else
-	{
-		gpu_submit_frame( nullptr, 0 );
+		return gpu_submit_frame( rects, count );
 	}
 
-	return 0;
+	return gpu_submit_frame( nullptr, 0 );
 }
 
 void psxgpu_device::FlatPolygon( int n_points )
