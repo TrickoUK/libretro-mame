@@ -195,6 +195,7 @@ private:
 	std::unique_ptr<u32[]> m_gpu_shadow_palette;
 	std::vector<u32> m_gpu_state;
 	std::vector<gpu_vertex> m_gpu_vertices;
+	std::vector<std::array<u32, 3>> m_gpu_runs;     // first vertex, vertex count and single-sample flag of each run of one kind of primitive
 
 	static u8 nthbyte(const u32 *src, int n) { return util::big_endian_cast<u8>(src)[n]; }
 	static u16 nthword(const u32 *src, int n) { return util::big_endian_cast<u16>(src)[n]; }
@@ -211,6 +212,7 @@ private:
 	void gpu_collect_nodes(screen_device &screen, bitmap_rgb32 &bitmap, struct namcos22_scenenode *node);
 	void gpu_release_nodes(struct namcos22_scenenode *node);
 	void gpu_add_vertices(const vertex_t *verts, int count, int varyings, u32 prim);
+	void gpu_end_run(size_t first_vertex, bool single_sample);
 	void gpu_add_quad(const namcos22_object_data &extra, int clipverts, vertex_t const *clipv);
 	void gpu_add_sprite(const namcos22_object_data &extra, vertex_t const *vert);
 	u32 gpu_pen_index(const pen_t *pens) const;

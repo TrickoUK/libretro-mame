@@ -25,6 +25,8 @@ bool namcos22_renderer::gpu_init()
 			module.name = "namcos22";
 			module.fragment_source = NAMCOS22_FRAGMENT_SOURCE;
 			module.blend_factor_output = true;
+			if (m_state.machine().osd().msaa() > 0)
+				module.centroid_mask = 0xf;
 			module.varying_count = NAMCOS22_SHADER_VARYINGS;
 			for (int i = 0; i < NAMCOS22_SHADER_VARYINGS; i++)
 				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
@@ -99,6 +101,18 @@ void namcos22_renderer::gpu_add_vertices(const vertex_t *verts, int count, int v
 		m_gpu_vertices.push_back(vv[i]);
 		m_gpu_vertices.push_back(vv[i + 1]);
 	}
+}
+
+// Extends or starts the run of primitives of one kind that the vertices added since first_vertex belong to.
+void namcos22_renderer::gpu_end_run(size_t first_vertex, bool single_sample)
+{
+	const u32 count = m_gpu_vertices.size() - first_vertex;
+	if (count == 0)
+		return;
+	if (!m_gpu_runs.empty() && m_gpu_runs.back()[2] == u32(single_sample))
+		m_gpu_runs.back()[1] += count;
+	else
+		m_gpu_runs.push_back({ u32(first_vertex), count, u32(single_sample) });
 }
 
 // Appends one quad (3 to 6 vertices after the near-plane clip) to the GPU frame.
@@ -199,7 +213,11 @@ void namcos22_renderer::gpu_add_quad(const namcos22_object_data &extra, int clip
 		cur ^= 1;
 	}
 	if (count >= 3)
+	{
+		const size_t first = m_gpu_vertices.size();
 		gpu_add_vertices(poly[cur], count, 4, prim);
+		gpu_end_run(first, false);
+	}
 }
 
 // Appends one scaled sprite (Super System 22) to the GPU frame.
@@ -231,7 +249,9 @@ void namcos22_renderer::gpu_add_sprite(const namcos22_object_data &extra, vertex
 
 	const u32 prim = m_gpu_state.size() / NAMCOS22_SHADER_STATE_WORDS;
 	m_gpu_state.insert(m_gpu_state.end(), d, d + NAMCOS22_SHADER_STATE_WORDS);
+	const size_t first = m_gpu_vertices.size();
 	gpu_add_vertices(vert, 4, 2, prim);
+	gpu_end_run(first, true);
 }
 
 // Turns the scene nodes into GPU primitives without consuming them, far to near like render_scene_nodes().
@@ -307,6 +327,7 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 
 	m_gpu_state.clear();
 	m_gpu_vertices.clear();
+	m_gpu_runs.clear();
 
 	// Polygons and sprites blend with the picture the text layer already made, so it is the first primitive.
 	if (stamp)
@@ -322,6 +343,7 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 		const gpu_vertex corners[4] = { { 0, 0, 0, 1, 0, {} }, { w, 0, 0, 1, 0, {} }, { w, h, 0, 1, 0, {} }, { 0, h, 0, 1, 0, {} } };
 		for (int i : { 0, 1, 2, 0, 2, 3 })
 			m_gpu_vertices.push_back(corners[i]);
+		gpu_end_run(0, true);
 	}
 	const u32 stamp_prims = m_gpu_state.size() / NAMCOS22_SHADER_STATE_WORDS;
 
@@ -388,7 +410,8 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 			picture.pitch_bytes = bitmap.rowpixels() * sizeof(u32);
 		}
 
-		osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, 0, m_gpu_vertices.size());
+		// Polygons are multisampled; sprites and the stamp are drawn at the pixel centre into every sample.
+		osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, 0, 0);
 		draw.bindings[0] = m_gpu_tile_data;
 		draw.bindings[1] = m_gpu_tile_map;
 		draw.bindings[2] = m_gpu_tile_attr;
@@ -405,6 +428,15 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 			draw.blend.src_alpha = osd::gpu_blend_factor::ONE;
 			draw.blend.dst_alpha = osd::gpu_blend_factor::ZERO;
 		}
+		std::vector<osd::gpu_command> draws;
+		draws.reserve(m_gpu_runs.size());
+		for (const auto &run : m_gpu_runs)
+		{
+			draw.first_vertex = run[0];
+			draw.vertex_count = run[1];
+			draw.multisample = run[2] == 0;
+			draws.push_back(draw);
+		}
 
 		osd::gpu_readback_rect readback;
 		readback.x = cliprect.min_x * m_gpu_scale;
@@ -413,7 +445,8 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 		readback.h = cliprect.height() * m_gpu_scale;
 		readback.out = &bitmap.pix(cliprect.min_y, cliprect.min_x);
 		readback.stride = bitmap.rowpixels();
-		if (m_gpu_scale > 1)
+		const int msaa = m_state.machine().osd().msaa();
+		if (m_gpu_scale > 1 || msaa > 0)
 		{
 			readback.downsample = m_gpu_scale;
 			readback.priority_bits = true;
@@ -423,6 +456,8 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 		frame.target.width = bitmap.width() * m_gpu_scale;
 		frame.target.height = bitmap.height() * m_gpu_scale;
 		frame.target.depth = osd::gpu_depth_mode::NONE;
+		frame.target.msaa_samples = msaa;
+		frame.target.msaa_per_sample = msaa > 0;
 		frame.target.clear_color[0] = background.r() / 255.0f;
 		frame.target.clear_color[1] = background.g() / 255.0f;
 		frame.target.clear_color[2] = background.b() / 255.0f;
@@ -435,8 +470,8 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 		frame.prim_state = m_gpu_state.data();
 		frame.prim_count = prim_count;
 		frame.state_stride = NAMCOS22_SHADER_STATE_WORDS;
-		frame.commands = &draw;
-		frame.command_count = 1;
+		frame.commands = draws.data();
+		frame.command_count = draws.size();
 		frame.readbacks = &readback;
 		frame.readback_count = 1;
 		if (!m_gpu_engine->submit_frame(frame))
