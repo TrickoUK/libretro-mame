@@ -24,11 +24,12 @@ bool namcos22_renderer::gpu_init()
 			osd::gpu_shader_module module;
 			module.name = "namcos22";
 			module.fragment_source = NAMCOS22_FRAGMENT_SOURCE;
+			module.blend_factor_output = true;
 			module.varying_count = NAMCOS22_SHADER_VARYINGS;
 			for (int i = 0; i < NAMCOS22_SHADER_VARYINGS; i++)
 				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
 			module.state_stride = NAMCOS22_SHADER_STATE_WORDS;
-			module.binding_count = 5;
+			module.binding_count = 6;
 			module.binding_name[0] = "tile_data";
 			module.binding_format[0] = osd::gpu_texture_format::R8UI;
 			module.binding_name[1] = "tile_map";
@@ -39,6 +40,8 @@ bool namcos22_renderer::gpu_init()
 			module.binding_format[3] = osd::gpu_texture_format::R8UI;
 			module.binding_name[4] = "palette";
 			module.binding_format[4] = osd::gpu_texture_format::RGBA8;
+			module.binding_name[5] = "picture";
+			module.binding_format[5] = osd::gpu_texture_format::RGBA8;
 			m_gpu_module = m_gpu_engine->create_shader_module(module);
 
 			osd::gpu_texture_desc desc;
@@ -59,8 +62,13 @@ bool namcos22_renderer::gpu_init()
 			desc.width = 256;
 			desc.height = 128;
 			m_gpu_palette = m_gpu_engine->create_texture(desc);
+			// Super System 22 creates its picture texture at the screen size on the first frame.
+			desc.width = 1;
+			desc.height = 1;
+			if (!m_state.m_is_ss22)
+				m_gpu_picture = m_gpu_engine->create_texture(desc);
 
-			if (!m_gpu_module || !m_gpu_tile_data || !m_gpu_tile_map || !m_gpu_tile_attr || !m_gpu_sprite_data || !m_gpu_palette)
+			if (!m_gpu_module || !m_gpu_tile_data || !m_gpu_tile_map || !m_gpu_tile_attr || !m_gpu_sprite_data || !m_gpu_palette || (!m_state.m_is_ss22 && !m_gpu_picture))
 				m_gpu_engine = nullptr;
 			else
 				m_gpu_shadow_palette = make_unique_clear<u32[]>(0x8000);
@@ -200,7 +208,7 @@ void namcos22_renderer::gpu_add_sprite(const namcos22_object_data &extra, vertex
 	u32 d[NAMCOS22_SHADER_STATE_WORDS] = {};
 	gfx_element *const gfx = m_state.m_gfxdecode->gfx(2);
 
-	d[0] = 1 | 8;
+	d[0] = 1 | 8 | (extra.alpha_enabled ? 32 : 0);
 	d[1] = gpu_pen_index(extra.pens);
 	d[5] = 0xff - extra.fogfactor;
 	d[6] = extra.fogcolor.get_r();
@@ -275,23 +283,51 @@ void namcos22_renderer::gpu_release_nodes(struct namcos22_scenenode *node)
 // Draws the scene on the host GPU into bitmap, which holds the background and is replaced by the picture the
 // polygons leave; the priority bits of the covered pixels go to the screen's priority map. Returns false, leaving
 // the scene untouched, when the GPU cannot produce the frame; the caller then renders it in software.
-bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, rgb_t background)
+bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, rgb_t background, bool stamp)
 {
 	if (!gpu_init())
+		return false;
+	if (stamp && !m_gpu_picture)
+	{
+		osd::gpu_texture_desc desc;
+		desc.format = osd::gpu_texture_format::RGBA8;
+		desc.width = bitmap.width();
+		desc.height = bitmap.height();
+		m_gpu_picture = m_gpu_engine->create_texture(desc);
+		m_gpu_picture_size = { desc.width, desc.height };
+	}
+	if (stamp && (!m_gpu_picture || bitmap.width() != m_gpu_picture_size.first || bitmap.height() != m_gpu_picture_size.second))
 		return false;
 
 	m_gpu_state.clear();
 	m_gpu_vertices.clear();
+
+	// Polygons and sprites blend with the picture the text layer already made, so it is the first primitive.
+	if (stamp)
+	{
+		u32 d[NAMCOS22_SHADER_STATE_WORDS] = {};
+		d[0] = 64;
+		d[20] = bitmap.width();
+		d[21] = bitmap.height();
+		m_gpu_state.insert(m_gpu_state.end(), d, d + NAMCOS22_SHADER_STATE_WORDS);
+		const float w = bitmap.width();
+		const float h = bitmap.height();
+		const gpu_vertex corners[4] = { { 0, 0, 0, 1, 0, {} }, { w, 0, 0, 1, 0, {} }, { w, h, 0, 1, 0, {} }, { 0, h, 0, 1, 0, {} } };
+		for (int i : { 0, 1, 2, 0, 2, 3 })
+			m_gpu_vertices.push_back(corners[i]);
+	}
+	const u32 stamp_prims = m_gpu_state.size() / NAMCOS22_SHADER_STATE_WORDS;
+
 	m_gpu_collecting = true;
 	for (int i = NAMCOS22_RADIX_BUCKETS - 1; i >= 0; i--)
 		gpu_collect_nodes(screen, bitmap, m_scenenode_root.data.nonleaf.next[i]);
 	m_gpu_collecting = false;
 
 	const u32 prim_count = m_gpu_state.size() / NAMCOS22_SHADER_STATE_WORDS;
-	if (prim_count != 0)
+	if (prim_count > stamp_prims)
 	{
 		// The tile and sprite tables are fixed after video_start(); only the palette changes while running.
-		osd::gpu_texture_update updates[5];
+		osd::gpu_texture_update updates[6];
 		int update_count = 0;
 		if (m_gpu_full_upload)
 		{
@@ -335,6 +371,15 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 			pal.data = m_gpu_shadow_palette.get();
 		}
 		m_gpu_full_upload = false;
+		if (stamp)
+		{
+			osd::gpu_texture_update &picture = updates[update_count++];
+			picture.texture = m_gpu_picture;
+			picture.w = bitmap.width();
+			picture.h = bitmap.height();
+			picture.data = &bitmap.pix(0);
+			picture.pitch_bytes = bitmap.rowpixels() * sizeof(u32);
+		}
 
 		osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, 0, m_gpu_vertices.size());
 		draw.bindings[0] = m_gpu_tile_data;
@@ -342,6 +387,17 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 		draw.bindings[2] = m_gpu_tile_attr;
 		draw.bindings[3] = m_gpu_sprite_data;
 		draw.bindings[4] = m_gpu_palette;
+		draw.bindings[5] = m_gpu_picture;
+		if (m_state.m_is_ss22)
+		{
+			// the colour blends by the shader's weight, the alpha channel (priority bits) takes the new value
+			draw.blend.enable = true;
+			draw.blend.src = osd::gpu_blend_factor::SRC1_ALPHA;
+			draw.blend.dst = osd::gpu_blend_factor::ONE_MINUS_SRC1_ALPHA;
+			draw.blend.separate_alpha = true;
+			draw.blend.src_alpha = osd::gpu_blend_factor::ONE;
+			draw.blend.dst_alpha = osd::gpu_blend_factor::ZERO;
+		}
 
 		osd::gpu_readback_rect readback;
 		readback.x = cliprect.min_x;

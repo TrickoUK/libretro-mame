@@ -125,6 +125,8 @@ GLenum blend_factor_enum(osd::gpu_blend_factor f)
 	case osd::gpu_blend_factor::ONE_MINUS_SRC_COLOR:        return GL_ONE_MINUS_SRC_COLOR;
 	case osd::gpu_blend_factor::DST_COLOR:                  return GL_DST_COLOR;
 	case osd::gpu_blend_factor::ONE_MINUS_DST_COLOR:        return GL_ONE_MINUS_DST_COLOR;
+	case osd::gpu_blend_factor::SRC1_ALPHA:                 return GL_SRC1_ALPHA;
+	case osd::gpu_blend_factor::ONE_MINUS_SRC1_ALPHA:       return GL_ONE_MINUS_SRC1_ALPHA;
 	case osd::gpu_blend_factor::SRC_ALPHA_SATURATE:         break;
 	}
 	return GL_SRC_ALPHA_SATURATE;
@@ -463,6 +465,7 @@ osd::gpu_handle retro_gpu_engine::create_shader_module(const osd::gpu_shader_mod
 	std::copy(std::begin(desc.varying_mode), std::end(desc.varying_mode), std::begin(m.varying_mode));
 	m.state_stride = desc.state_stride;
 	m.writes_depth = desc.writes_depth;
+	m.blend_factor_output = desc.blend_factor_output;
 	m.binding_count = desc.binding_count;
 	for (int i = 0; i < desc.binding_count; i++)
 	{
@@ -531,7 +534,10 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 	fs += "flat in uint g_prim;\n";
 	for (int i = 0; i < m.varying_count; i++)
 		fs += interpolation_qualifier(m.varying_mode[i], (((m.centroid_mask >> i) & 1) != 0)) + "in float v" + std::to_string(i) + ";\n";
-	fs += "out vec4 o_color;\n";
+	if (m.blend_factor_output)
+		fs += "layout(location = 0, index = 0) out vec4 o_color;\nlayout(location = 0, index = 1) out vec4 o_blend;\nfloat blend_factor = 1.0;\n";
+	else
+		fs += "out vec4 o_color;\n";
 	fs += "uniform vec2 u_target_size;\nuniform int u_rec_texels;\nuniform isampler2D u_state_tex;\n";
 	fs += "int state(int k)\n{\n";
 	fs += "\tint idx = int(g_prim) * u_rec_texels + (k >> 2);\n";
@@ -548,7 +554,7 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 	if (m.writes_depth)
 		fs += "float frag_depth = 0.0;\n";
 	fs += m.source + "\n";
-	fs += std::string("void main()\n{\n\tvec4 c;\n\tif (!shade(c))\n\t\tdiscard;\n\to_color = c;\n") + (m.writes_depth ? "\tgl_FragDepth = frag_depth;\n" : "") + "}\n";
+	fs += std::string("void main()\n{\n\tvec4 c;\n\tif (!shade(c))\n\t\tdiscard;\n\to_color = c;\n") + (m.blend_factor_output ? "\to_blend = vec4(blend_factor);\n" : "") + (m.writes_depth ? "\tgl_FragDepth = frag_depth;\n" : "") + "}\n";
 
 	program p;
 	GLuint shaders[2] = { 0, 0 };
@@ -820,7 +826,10 @@ void retro_gpu_engine::apply_blend(const osd::gpu_blend_state &blend)
 	case osd::gpu_blend_op::REVERSE_SUBTRACT:   g_gl.BlendEquation(GL_FUNC_REVERSE_SUBTRACT); break;
 	}
 	g_gl.BlendColor(0.0f, 0.0f, 0.0f, blend.constant_alpha);
-	g_gl.BlendFunc(blend_factor_enum(blend.src), blend_factor_enum(blend.dst));
+	if (blend.separate_alpha)
+		g_gl.BlendFuncSeparate(blend_factor_enum(blend.src), blend_factor_enum(blend.dst), blend_factor_enum(blend.src_alpha), blend_factor_enum(blend.dst_alpha));
+	else
+		g_gl.BlendFunc(blend_factor_enum(blend.src), blend_factor_enum(blend.dst));
 }
 
 

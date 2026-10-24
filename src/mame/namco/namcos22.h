@@ -157,7 +157,7 @@ public:
 	namcos22_renderer(namcos22_state &state);
 
 	void render_scene(screen_device &screen, bitmap_rgb32 &bitmap);
-	bool gpu_render_scene(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, rgb_t background);
+	bool gpu_render_scene(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, rgb_t background, bool stamp);
 	struct namcos22_scenenode *new_scenenode(running_machine &machine, u32 zsort, namcos22_scenenode_type type);
 
 	void init();
@@ -189,6 +189,8 @@ private:
 	osd::gpu_handle m_gpu_tile_attr = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_sprite_data = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_palette = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_picture = osd::GPU_NULL_HANDLE;
+	std::pair<int, int> m_gpu_picture_size;
 	std::unique_ptr<u32[]> m_gpu_shadow_palette;
 	std::vector<u32> m_gpu_state;
 	std::vector<gpu_vertex> m_gpu_vertices;

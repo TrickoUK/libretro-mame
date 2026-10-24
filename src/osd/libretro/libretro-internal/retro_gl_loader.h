@@ -153,6 +153,7 @@ typedef void (*PFNGLVERTEXATTRIBPOINTERPROC)(GLuint, GLint, GLenum, GLboolean, G
 typedef void (*PFNGLACTIVETEXTUREPROC)(GLenum);
 typedef void (*PFNGLBLENDEQUATIONPROC)(GLenum);
 typedef void (*PFNGLBLENDFUNCPROC)(GLenum, GLenum);
+typedef void (*PFNGLBLENDFUNCSEPARATEPROC)(GLenum, GLenum, GLenum, GLenum);
 typedef void (*PFNGLBLENDCOLORPROC)(GLfloat, GLfloat, GLfloat, GLfloat);
 typedef void (*PFNGLGENTEXTURESPROC)(GLsizei, GLuint *);
 typedef void (*PFNGLBINDTEXTUREPROC)(GLenum, GLuint);
@@ -244,6 +245,8 @@ typedef GLboolean (*PFNGLUNMAPBUFFERPROC)(GLenum);
 #define GL_DST_COLOR 0x0306
 #define GL_ONE_MINUS_DST_COLOR 0x0307
 #define GL_SRC_ALPHA_SATURATE 0x0308
+#define GL_SRC1_ALPHA 0x8589
+#define GL_ONE_MINUS_SRC1_ALPHA 0x88FB
 #define GL_ONE_MINUS_CONSTANT_ALPHA 0x8004
 #define GL_MAX_TEXTURE_SIZE 0x0D33
 #define GL_MAX_SAMPLES 0x8D57
@@ -305,6 +308,7 @@ struct gl_dispatch
 	PFNGLACTIVETEXTUREPROC ActiveTexture = nullptr;
 	PFNGLBLENDEQUATIONPROC BlendEquation = nullptr;
 	PFNGLBLENDFUNCPROC BlendFunc = nullptr;
+	PFNGLBLENDFUNCSEPARATEPROC BlendFuncSeparate = nullptr;
 	PFNGLBLENDCOLORPROC BlendColor = nullptr;
 	PFNGLGENTEXTURESPROC GenTextures = nullptr;
 	PFNGLBINDTEXTUREPROC BindTexture = nullptr;

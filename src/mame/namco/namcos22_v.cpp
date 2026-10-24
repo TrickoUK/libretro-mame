@@ -2561,7 +2561,8 @@ u32 namcos22s_state::screen_update_namcos22s(screen_device &screen, bitmap_rgb32
 	if (BIT(layer, 2)) draw_text_layer(screen, bitmap, cliprect);
 	if (BIT(layer, 1)) draw_sprites();
 	if (BIT(layer, 0)) draw_polygons();
-	m_poly->render_scene(screen, bitmap);
+	if (!m_poly->gpu_render_scene(screen, bitmap, cliprect, bg_color.to_rgba(), true))
+		m_poly->render_scene(screen, bitmap);
 	if (BIT(layer, 2)) namcos22s_mix_text_layer(screen, bitmap, cliprect, 6);
 
 	// apply gamma
@@ -2597,7 +2598,7 @@ u32 namcos22_state::screen_update_namcos22(screen_device &screen, bitmap_rgb32 &
 
 	// layers
 	draw_polygons();
-	if (!m_poly->gpu_render_scene(screen, bitmap, cliprect, rgb_t(m_palette->pen(bg_color))))
+	if (!m_poly->gpu_render_scene(screen, bitmap, cliprect, rgb_t(m_palette->pen(bg_color)), false))
 		m_poly->render_scene(screen, bitmap);
 	draw_text_layer(screen, bitmap, cliprect); // text layer + final mix
 

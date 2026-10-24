@@ -14,12 +14,14 @@
     Bindings: "tile_data" (R8UI, 4096 wide, the 16x16x8bpp texture tiles),
     "tile_map" (R16UI, 1024 x 1024), "tile_attr" (R8UI, 1024 x 1024),
     "sprite_data" (R8UI, 4096 wide, the 32x32x8bpp sprite tiles) and
-    "palette" (RGBA8, 256 x 128, the 0x8000 pens as stored in memory).
+    "palette" (RGBA8, 256 x 128, the 0x8000 pens as stored in memory) and
+    "picture" (RGBA8, the screen bitmap as it stands before the polygons, which
+    a stamp primitive copies into the target).
     Varyings are screen-linear: v0 = 1/z, v1 = u/z, v2 = v/z, v3 = brightness/z
     for polygons; v0 and v1 are the texel position for sprites.
 
     State record, NAMCOS22_SHADER_STATE_WORDS words: flags (1 sprite, 2
-    texture, 4 shade, 8 Super System 22, 16 polygon fade, 32 alpha), pen
+    texture, 4 shade, 8 Super System 22, 16 polygon fade, 32 alpha, 64 stamp), pen
     base, pen mask and shift, texture bank, fog mix (255 = none) and colour,
     fade mix and colour, polygon fade colour, alpha mix and pen, the clip
     rectangle (min x, min y, max x + 1, max y + 1 in target pixels), sprite
@@ -64,6 +66,7 @@ constexpr char NAMCOS22_FRAGMENT_SOURCE[] =
 	"#define F_SUPER 8\n"
 	"#define F_PFADE 16\n"
 	"#define F_ALPHA 32\n"
+	"#define F_STAMP 64\n"
 	"ivec3 mix_color(ivec3 a, ivec3 b, int factor)\n"
 	"{\n"
 	"	return (a * factor + b * (256 - factor)) >> 8;\n"
@@ -110,6 +113,11 @@ constexpr char NAMCOS22_FRAGMENT_SOURCE[] =
 	"	if (p.x < state(S_CLIP) || p.y < state(S_CLIP + 1) || p.x >= state(S_CLIP + 2) || p.y >= state(S_CLIP + 3))\n"
 	"		return false;\n"
 	"	int flags = state(S_FLAGS);\n"
+	"	if ((flags & F_STAMP) != 0)\n"
+	"	{\n"
+	"		color = vec4(texelFetch(picture, p, 0).zyx, 0.0);\n"
+	"		return true;\n"
+	"	}\n"
 	"	int pen = 0;\n"
 	"	ivec3 rgb;\n"
 	"	if ((flags & F_SPRITE) != 0)\n"
@@ -151,6 +159,8 @@ constexpr char NAMCOS22_FRAGMENT_SOURCE[] =
 	"			rgb = apply_fade(rgb);\n"
 	"		}\n"
 	"	}\n"
+	"	if ((flags & F_SUPER) != 0 && state(S_ALPHAMIX) != 255 && ((flags & F_ALPHA) != 0 || pen == state(S_ALPHAPEN)))\n"
+	"		blend_factor = float(state(S_ALPHAMIX)) / 256.0;\n"
 	"	color = vec4(vec3(rgb) / 255.0, (state(S_PRIO) != 0) ? 1.0 : 128.0 / 255.0);\n"
 	"	return true;\n"
 	"}\n";
