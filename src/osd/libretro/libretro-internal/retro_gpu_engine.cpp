@@ -1212,10 +1212,8 @@ void retro_gpu_engine::drop_pending()
 }
 
 // Waits for the deferred read-backs of the last frame and writes their pixels.
-bool retro_gpu_engine::collect_frame()
+bool retro_gpu_engine::collect_pending()
 {
-	if (m_pending.empty())
-		return true;
 	if (!m_valid || m_failed)
 	{
 		m_pending.clear();
@@ -1275,11 +1273,40 @@ bool retro_gpu_engine::collect_frame()
 	return ok;
 }
 
+// A frame that cannot be produced once in a while (a bad frame description, a
+// GL error) falls back to software for that frame only. Failures that repeat
+// every frame latch the engine, so the devices switch to software for good.
+bool retro_gpu_engine::note_result(bool ok, int &streak, const char *what)
+{
+	if (ok)
+	{
+		streak = 0;
+		return true;
+	}
+	if (++streak >= MAX_FAILED_FRAMES && !m_failed)
+	{
+		m_failed = true;
+		fprintf(stderr, "[retro_gpu_engine] %d %s failures in a row; the GPU path is off for this session\n", streak, what);
+	}
+	return false;
+}
+
+bool retro_gpu_engine::collect_frame()
+{
+	if (m_pending.empty())
+		return true;
+	return note_result(collect_pending(), m_collect_failures, "collect");
+}
+
 bool retro_gpu_engine::submit_frame(const osd::gpu_frame &frame)
 {
 	if (!m_valid || m_failed)
 		return false;
+	return note_result(submit_pending(frame), m_submit_failures, "submit");
+}
 
+bool retro_gpu_engine::submit_pending(const osd::gpu_frame &frame)
+{
 	m_stats = osd::gpu_engine_stats();
 
 	if (!validate_frame(frame))

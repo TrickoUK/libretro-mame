@@ -183,6 +183,13 @@ private:
 	void fit_msaa(osd::gpu_target_desc &target);
 	void do_readback(const osd::gpu_readback_rect &r, void *dest, int row_length);
 	void drop_pending();
+	bool submit_pending(const osd::gpu_frame &frame);
+	bool collect_pending();
+	bool note_result(bool ok, int &streak, const char *what);
+
+	static constexpr int MAX_FAILED_FRAMES = 30;
+	int m_submit_failures = 0;
+	int m_collect_failures = 0;
 
 	int m_max_texture_samples = 0;
 	uint64_t m_msaa_budget = 1024ULL * 1024 * 1024;
