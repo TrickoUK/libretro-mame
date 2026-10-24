@@ -1707,17 +1707,9 @@ void hng64_state::video_start()
 	m_screen->register_screen_bitmap(m_sprite_bitmap);
 	m_screen->register_screen_bitmap(m_sprite_zbuffer);
 
-	// The 2D layers draw at native size, so the scaled screen gets them enlarged from native-size bitmaps
-	if (machine().osd().supersample_output() && m_poly_renderer->supersample() > 1)
-	{
-		m_output_scale = m_poly_renderer->supersample();
-		m_native.allocate(HTOTAL, VTOTAL);
-		m_native_before.allocate(HTOTAL, VTOTAL);
-
-		rectangle visarea = m_screen->visible_area();
-		visarea.set(visarea.min_x * m_output_scale, (visarea.max_x + 1) * m_output_scale - 1, visarea.min_y * m_output_scale, (visarea.max_y + 1) * m_output_scale - 1);
-		m_screen->configure(HTOTAL * m_output_scale, VTOTAL * m_output_scale, visarea, m_screen->frame_period());
-	}
+	// The screen is always presented at its native size (m_output_scale stays 1): supersampled 3D is averaged down to it.
+	// Resolving the whole 3D layer through the palette at the supersampled size costs more per frame than the
+	// emulation leaves room for, so the 3D output scale option has no effect here.
 }
 
 

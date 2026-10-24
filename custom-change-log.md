@@ -581,3 +581,9 @@ builds get them straight from here.
   solid blocks on every Voodoo board: Thrill Drive's trees had flat green backgrounds and its car windows were opaque. The GPU path now
   rejects those texels as the software renderer does. Checked against software on Thrill Drive (trees, windows), Jurassic Park III
   (large differences from software mostly gone) and Thrill Drive 2.
+
+### Hyper Neo Geo 64: always native output size
+- 3D Output Scale ("Match supersampling") no longer applies to Hyper Neo Geo 64; the screen is always shown at its normal size and
+  3D Supersampling is averaged down to it, as on Namco System 22. At 2x with "match" the Xtreme Rally race scene ran at about
+  0.59x real time (resolving the whole 3D layer through the palette at the larger size on the CPU); at 2x with native output it
+  runs at about 0.87x on this machine, against about 1.0x with supersampling off.
