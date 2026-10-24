@@ -44,7 +44,6 @@ static constexpr bool DEBUG_STATS = false;      // \ key to view stats
 
 // logging
 static constexpr bool LOG_VBLANK_SWAP = false;
-static constexpr bool LOG_GPU_BATCH = false;
 static constexpr bool LOG_FIFO = false;
 static constexpr bool LOG_FIFO_VERBOSE = false;
 static constexpr bool LOG_REGISTERS = false;
@@ -707,6 +706,9 @@ protected:
 
 	// edge anti-aliasing enhancement (see compute_edge_aa())
 	void compute_edge_aa();
+	std::vector<float> m_aa_luma;            // edge anti-aliasing work areas, kept between frames
+	std::vector<u16> m_aa_depth;
+	std::vector<u8> m_aa_is3d;
 	u8 m_edge_aa;                            // 0 = off, 1 = on, 2 = debug (smoothed pixels in red)
 	std::unique_ptr<u8[]> m_aa_mask;         // per frame buffer pixel: 3D stamp (see voodoo_renderer)
 	std::vector<u16> m_aa_map;               // per screen pixel: blend direction (bits 8-10), weight (0-7)
