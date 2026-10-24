@@ -420,6 +420,35 @@ void k001604_device::draw_front_layer(screen_device &screen, bitmap_rgb32 &bitma
 	draw_tilemap(screen, bitmap, cliprect, true, m_fg_tilemap, output_scale);
 }
 
+void k001604_device::draw_front_layer_enlarged(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale)
+{
+	if (output_scale <= 1)
+	{
+		draw_front_layer(screen, bitmap, cliprect);
+		return;
+	}
+
+	rectangle const native_clip(
+			cliprect.min_x / output_scale, cliprect.max_x / output_scale,
+			cliprect.min_y / output_scale, cliprect.max_y / output_scale);
+	if (m_layer.width() <= native_clip.max_x || m_layer.height() <= native_clip.max_y)
+		m_layer.resize(bitmap.width() / output_scale + 1, bitmap.height() / output_scale + 1);
+	m_layer.fill(0, native_clip);
+	draw_front_layer(screen, m_layer, native_clip, output_scale);
+
+	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		uint32_t const *const src = &m_layer.pix(y / output_scale, 0);
+		uint32_t *const dst = &bitmap.pix(y);
+		for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+		{
+			uint32_t const p = src[x / output_scale];
+			if (p & 0xff000000)
+				dst[x] = p;
+		}
+	}
+}
+
 uint32_t k001604_device::tile_r(offs_t offset)
 {
 	return m_tile_ram[offset];

@@ -19,6 +19,10 @@ public:
 
 	void draw_back_layer(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale = 1);
 	void draw_front_layer(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale = 1);
+
+	// Draws the front layer for a screen presented at output_scale times its native size: the layer is
+	// drawn at native size and its opaque pixels are enlarged onto the bitmap with sharp pixels.
+	void draw_front_layer_enlarged(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale);
 	void tile_w(offs_t offset, uint32_t data, uint32_t mem_mask = ~0);
 	uint32_t tile_r(offs_t offset);
 	void char_w(offs_t offset, uint32_t data, uint32_t mem_mask = ~0);
@@ -32,6 +36,7 @@ protected:
 	virtual void device_reset() override ATTR_COLD;
 private:
 	// internal state
+	bitmap_rgb32 m_layer;
 	tilemap_t* m_fg_tilemap;
 	tilemap_t* m_bg_tilemap8;
 	tilemap_t* m_bg_tilemap16;
