@@ -563,3 +563,8 @@ builds get them straight from here.
 - With 3D GPU Rendering on and 3D Output Scale at "native", the GPU now averages the supersampled 3D layer itself and sends back only the
   screen-size picture. Operation Thunder Hurricane at 4x supersampling went from about 1.5x to about 2.0x real time on this machine.
   The picture is the same to within one colour level.
+
+### Operation Thunder Hurricane, Solar Assault: cut-out texture edges
+- Cut-out parts of textures (fences, foliage, HUD-like shapes) on Operation Thunder Hurricane and Solar Assault keep a clean edge with
+  every option off, as they have since the 2026-10-17 filtering change: transparent texels beside a visible one borrow its colour
+  instead of bleeding dark lines. This is assumed hardware behaviour; it has not been compared with a real board.

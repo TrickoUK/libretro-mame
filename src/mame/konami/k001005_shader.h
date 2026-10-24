@@ -91,7 +91,7 @@ constexpr char K001005_FRAGMENT_SOURCE[] =
 	"            int v1i = ty + mirror_index(((iv >> 4) + 1) & 127, th, mirror);\n"
 	"            ivec4 t00 = fetch_texel(page, pal, u0, v0i), t01 = fetch_texel(page, pal, u1, v0i);\n"
 	"            ivec4 t10 = fetch_texel(page, pal, u0, v1i), t11 = fetch_texel(page, pal, u1, v1i);\n"
-	// cut-outs keep the silhouette of the unfiltered texture: transparency comes from the nearest texel,
+	// the hardware appears to keep the silhouette of cut-outs: transparency comes from the nearest texel,
 	// and transparent neighbours borrow its colour
 	"            ivec4 nearest = t00;\n"
 	"            if (vf >= 9 && uf >= 9) nearest = t11; else if (vf >= 9) nearest = t10; else if (uf >= 9) nearest = t01;\n"
@@ -126,7 +126,8 @@ constexpr char K001005_FRAGMENT_SOURCE[] =
 	"    }\n"
 	"    c = scale8(c, light);\n"
 	"    if (use_fog) c = blend8(c, unpack(state(9)), ifog);\n"
-	"    color = vec4(vec3(c.xyz) / 255.0, fb_blend ? float(factor) / 255.0 : 1.0);\n"
+	// the frame buffer blend weights the new colour by factor / 256, as the renderer's colour blend does
+	"    color = vec4(vec3(c.xyz) / 255.0, fb_blend ? float(factor) / 256.0 : 1.0);\n"
 	"    return true;\n"
 	"}\n";
 
