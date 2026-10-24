@@ -1251,10 +1251,14 @@ It can also be used with Final Furlong when wired correctly.
 
 #include "md8412b_s23.h"
 #include "namco_settings.h"
+#include "namcos23_shader.h"
 #include "vpx3220a.h"
 
 #include "corefloat.h"
 #include "endianness.h"
+
+#include "interface/gpuengine.h"
+#include "osdepend.h"
 
 #include <cfloat>
 
@@ -1537,6 +1541,25 @@ public:
 	void render_scanline(s32 scanline, const extent_t& extent, const namcos23_render_data& object, int threadid);
 
 private:
+	// vertex layout of the host-GPU path (see osd/interface/gpuengine.h)
+	struct gpu_vertex
+	{
+		float x, y, z, w;
+		u32 prim;
+		float v[NAMCOS23_SHADER_VARYINGS];
+	};
+
+	static constexpr int GPU_TILE_DATA_WIDTH = 4096;    // texture ROM words per row
+	static constexpr int GPU_TILE_MAP_WIDTH = 1024;     // tile table entries per row
+	static constexpr int GPU_STENCIL_WIDTH = 1024;      // C412 SRAM words per row
+	static constexpr int GPU_SCREEN_WIDTH = 640;        // the part of the screen bitmap the 3D layer draws into
+	static constexpr int GPU_SCREEN_HEIGHT = 480;
+
+	bool gpu_render(screen_device &screen, bitmap_rgb32 &bitmap);
+	bool gpu_init();
+	void gpu_add_poly(const struct namcos23_poly_entry &p);
+	template <typename T> void gpu_update_changed(osd::gpu_texture_update *updates, int &update_count, osd::gpu_handle texture, T *shadow, const T *source, int entries, int width, bool force);
+
 	bool stencil_lookup(u32 x, u32 y);
 	u32 texture_lookup(const pen_t *pens, int penshift, int penmask, u32 x, u32 y, u8 &pen);
 
@@ -1547,6 +1570,22 @@ private:
 	const u16 *m_texram;
 	u32 m_tileid_mask;
 	u32 m_tile_mask;
+
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	bool m_gpu_checked = false;
+	bool m_gpu_full_upload = true;
+	int m_gpu_scale = 1;                // render scale of the GPU target (supersampling)
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tile_data = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tile_map = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_palette = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_stencil = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_picture = osd::GPU_NULL_HANDLE;
+	std::unique_ptr<u32[]> m_gpu_tile_map_data;
+	std::unique_ptr<u32[]> m_gpu_shadow_palette;
+	std::unique_ptr<u16[]> m_gpu_shadow_stencil;
+	std::vector<u32> m_gpu_state;
+	std::vector<gpu_vertex> m_gpu_vertices;
 };
 
 typedef namcos23_renderer::vertex_t poly_vertex;
@@ -1736,6 +1775,8 @@ public:
 	const u8 *m_sprrom;
 
 protected:
+	friend class namcos23_renderer;
+
 	virtual void machine_start() override ATTR_COLD;
 	virtual void machine_reset() override ATTR_COLD;
 	virtual void video_start() override ATTR_COLD;
@@ -4349,6 +4390,8 @@ void namcos23_state::render_model(const namcos23_render_entry *re)
 	}
 }
 
+#include "namcos23_gpu.ipp"
+
 static int render_poly_compare(const void *i1, const void *i2)
 {
 	const namcos23_poly_entry *p1 = *(const namcos23_poly_entry **)i1;
@@ -4387,6 +4430,9 @@ void namcos23_renderer::render_flush(screen_device &screen, bitmap_rgb32 &bitmap
 		render.poly_order[i] = &render.polys[i];
 
 	qsort(render.poly_order, render.poly_count, sizeof(namcos23_poly_entry *), render_poly_compare);
+
+	if (gpu_render(screen, bitmap))
+		return;
 
 	const static rectangle scissor(0, 639, 0, 479);
 
