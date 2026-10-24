@@ -3589,8 +3589,21 @@ bool voodoo_1_device::gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprec
 	// the finished picture only changes with a new GPU frame, so rows are kept for the refreshes in between
 	bool const use_cache = !soft;
 	size_t const span = size_t(cliprect.max_x - cliprect.min_x + 1) * sizeof(u32);
-	u64 const key = (u64(m_gpu_seen_serial) << 32) ^ (u64(m_pen_generation) << 12) ^ (u64(front) << 8) ^ u64(uintptr_t(pens) >> 4) ^ (u64(bitmap.width()) << 20) ^ (u64(bitmap.height()) << 40) ^ u64(os) ^ (u64(u32(m_xoffs)) << 52) ^ (u64(u32(m_yoffs)) << 56) ^ (u64(scale) << 60) ^ (u64(rows) * 0x9e3779b97f4a7c15ULL) ^ (u64(cliprect.min_x) << 24) ^ (u64(cliprect.max_x) << 34);
-	if (use_cache && (key != m_gpu_out_key || m_gpu_out.size() != size_t(bitmap.width()) * bitmap.height()))
+	gpu_out_key key;
+	key.serial = m_gpu_seen_serial;
+	key.pen_generation = m_pen_generation;
+	key.front = front;
+	key.pens = uintptr_t(pens);
+	key.width = bitmap.width();
+	key.height = bitmap.height();
+	key.os = os;
+	key.xoffs = m_xoffs;
+	key.yoffs = m_yoffs;
+	key.scale = scale;
+	key.rows = rows;
+	key.min_x = cliprect.min_x;
+	key.max_x = cliprect.max_x;
+	if (use_cache && (!(key == m_gpu_out_key) || m_gpu_out.size() != size_t(bitmap.width()) * bitmap.height()))
 	{
 		m_gpu_out.resize(size_t(bitmap.width()) * bitmap.height());
 		m_gpu_out_valid.assign(bitmap.height(), 0);
