@@ -154,6 +154,7 @@ void k001005_renderer::swap_buffers()
 
 	m_fb[m_fb_page].fill(0, m_cliprect);
 	m_page_share[m_fb_page] = false;
+	m_page_native[m_fb_page] = false;
 
 	float const zvalue = 10000000000.0F;
 	m_zb.fill(*(int*)&zvalue, m_cliprect);
@@ -350,10 +351,14 @@ void k001005_renderer::gpu_submit()
 	readback.h = target.height();
 	readback.out = &target.pix(0, 0);
 	readback.stride = target.rowpixels();
-	if (m_gpu_msaa > 0)
+	// Rendering at a multiple of the native size without an output scale: the GPU averages each block of samples
+	// down to one native pixel, into the top-left of the page. The layer is transparent where nothing was drawn,
+	// so the samples of an edge pixel are averaged over the drawn ones only, with the drawn share in alpha.
+	bool const native_out = m_ss > 1 && !m_output_scaled;
+	if (native_out)
+		readback.downsample = m_ss;
+	if (native_out || m_gpu_msaa > 0)
 	{
-		// the layer is transparent where nothing was drawn, so the samples of an edge pixel are averaged
-		// over the drawn ones only, with the drawn share in alpha
 		readback.coverage = true;
 		readback.coverage_share = true;
 	}
@@ -380,7 +385,8 @@ void k001005_renderer::gpu_submit()
 	if (m_gpu_engine->submit_frame(frame))
 	{
 		m_gpu_pending = true;
-		m_page_share[m_fb_page] = m_gpu_msaa > 0;
+		m_page_share[m_fb_page] = native_out || m_gpu_msaa > 0;
+		m_page_native[m_fb_page] = native_out;
 	}
 	else
 	{
@@ -978,7 +984,8 @@ void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
 	gpu_collect();
 
-	int const ss = m_ss;
+	// a page the GPU averaged already has one pixel per native pixel
+	int const ss = m_page_native[m_fb_page ^ 1] ? 1 : m_ss;
 	int const samples = ss * ss;
 	bitmap_rgb32 const &page = m_fb[m_fb_page ^ 1];
 
