@@ -47,9 +47,10 @@ bool namcos22_renderer::gpu_init()
 			m_gpu_module = m_gpu_engine->create_shader_module(module);
 
 			osd::gpu_texture_desc desc;
+			// the texture ROM region is smaller than 16 MB on some sets
 			desc.format = osd::gpu_texture_format::R8UI;
 			desc.width = 4096;
-			desc.height = 4096;
+			desc.height = (m_state.m_gfxdecode->gfx(1)->elements() * 256 + 4095) / 4096;
 			m_gpu_tile_data = m_gpu_engine->create_texture(desc);
 			desc.format = osd::gpu_texture_format::R16UI;
 			desc.width = 1024;
@@ -364,7 +365,7 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 			osd::gpu_texture_update &data = updates[update_count++];
 			data.texture = m_gpu_tile_data;
 			data.w = 4096;
-			data.h = 4096;
+			data.h = m_state.m_gfxdecode->gfx(1)->elements() * 256 / 4096;
 			data.data = m_state.m_texture_tiledata;
 
 			osd::gpu_texture_update &map = updates[update_count++];
