@@ -130,9 +130,12 @@ public:
 
 	// Frame-based GPU engine (interface/gpuengine.h). `system` names the
 	// requesting emulated system (for example "model2") so the OSD can apply
-	// that system's enable option. Returns nullptr when the OSD has no engine,
-	// the system's option is off, no GPU context could be created, or the
-	// engine latched to failed; callers keep their software renderer then.
+	// that system's enable option. Each call returns an engine of its own, so
+	// two devices in one machine (a board with two Voodoo chips) never share a
+	// render target; a device calls this once and keeps the pointer for the
+	// life of the machine. Returns nullptr when the OSD has no engine, the
+	// system's option is off or no GPU context could be created; callers keep
+	// their software renderer then.
 	virtual osd::gpu_engine *get_gpu_engine(const char *system) { return nullptr; }
 
 	// The resolution multiplier a caller should scale by when

@@ -28,7 +28,11 @@
     - Failure: submit_frame() returns false when the GPU path cannot
       produce the frame (no context, a shader that does not compile, a
       bad frame description). The device then renders the frame in
-      software and stops submitting once failed() is true.
+      software and stops submitting once failed() is true. An engine
+      latches failed() by itself after a run of consecutive failed
+      frames, so a device can rely on it for a failure that repeats.
+    - Each device gets an engine of its own from get_gpu_engine(), so the
+      render target is never shared between devices.
     - The engine makes its GPU context current only inside submit_frame()
       and collect_frame() and releases it before returning, so it never stays
       current across separately scheduled emulator calls. A frame with
