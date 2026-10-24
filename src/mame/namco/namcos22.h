@@ -22,11 +22,14 @@
 #include "video/rgbutil.h"
 #include "video/poly.h"
 
+#include "interface/gpuengine.h"
+
 #include "emupal.h"
 #include "screen.h"
 #include "tilemap.h"
 
 #include "endianness.h"
+#include "namcos22_shader.h"
 
 class namcos22_state;
 
@@ -154,6 +157,7 @@ public:
 	namcos22_renderer(namcos22_state &state);
 
 	void render_scene(screen_device &screen, bitmap_rgb32 &bitmap);
+	bool gpu_render_scene(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, rgb_t background);
 	struct namcos22_scenenode *new_scenenode(running_machine &machine, u32 zsort, namcos22_scenenode_type type);
 
 	void init();
@@ -166,6 +170,29 @@ private:
 	std::list<namcos22_scenenode> m_scenenode_alloc;
 	rectangle m_cliprect;
 
+	// vertex layout of the host-GPU path (see osd/interface/gpuengine.h)
+	struct gpu_vertex
+	{
+		float x, y, z, w;
+		u32 prim;
+		float v[NAMCOS22_SHADER_VARYINGS];
+	};
+
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	bool m_gpu_checked = false;
+	bool m_gpu_collecting = false;      // the scene is being turned into GPU primitives instead of being rasterised
+	bool m_gpu_full_upload = true;
+	namcos22_object_data m_gpu_extra;
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tile_data = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tile_map = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tile_attr = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_sprite_data = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_palette = osd::GPU_NULL_HANDLE;
+	std::unique_ptr<u32[]> m_gpu_shadow_palette;
+	std::vector<u32> m_gpu_state;
+	std::vector<gpu_vertex> m_gpu_vertices;
+
 	static u8 nthbyte(const u32 *src, int n) { return util::big_endian_cast<u8>(src)[n]; }
 	static u16 nthword(const u32 *src, int n) { return util::big_endian_cast<u16>(src)[n]; }
 
@@ -176,6 +203,14 @@ private:
 
 	void free_scenenode(struct namcos22_scenenode *node);
 	struct namcos22_scenenode *alloc_scenenode(running_machine &machine, struct namcos22_scenenode *node);
+
+	bool gpu_init();
+	void gpu_collect_nodes(screen_device &screen, bitmap_rgb32 &bitmap, struct namcos22_scenenode *node);
+	void gpu_release_nodes(struct namcos22_scenenode *node);
+	void gpu_add_vertices(const vertex_t *verts, int count, int varyings, u32 prim);
+	void gpu_add_quad(const namcos22_object_data &extra, int clipverts, vertex_t const *clipv);
+	void gpu_add_sprite(const namcos22_object_data &extra, vertex_t const *vert);
+	u32 gpu_pen_index(const pen_t *pens) const;
 
 	using scanline_func = void (namcos22_renderer::*)(int32_t scanline, const extent_t &extent, const namcos22_object_data &extra, int threadid);
 
