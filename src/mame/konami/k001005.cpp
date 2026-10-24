@@ -152,12 +152,20 @@ void k001005_renderer::swap_buffers()
 
 	m_fb_page ^= 1;
 
-	m_fb[m_fb_page].fill(0, m_cliprect);
+	// A GPU-drawn page is written by the read-back alone: the native-size area at native output scale, the whole
+	// page otherwise. The depth buffer is only used by the software renderer.
+	bool const gpu = gpu_init();
+	bool const native_out = gpu && m_ss > 1 && !m_output_scaled;
+	rectangle const clear = native_out ? rectangle(0, m_cliprect.width() / m_ss - 1, 0, m_cliprect.height() / m_ss - 1) : m_cliprect;
+	m_fb[m_fb_page].fill(0, clear);
 	m_page_share[m_fb_page] = false;
-	m_page_native[m_fb_page] = false;
+	m_page_native[m_fb_page] = native_out;
 
-	float const zvalue = 10000000000.0F;
-	m_zb.fill(*(int*)&zvalue, m_cliprect);
+	if (!gpu)
+	{
+		float const zvalue = 10000000000.0F;
+		m_zb.fill(*(int*)&zvalue, m_cliprect);
+	}
 }
 
 bool k001005_renderer::fifo_filled()
@@ -392,6 +400,8 @@ void k001005_renderer::gpu_submit()
 	{
 		// the textures may not have reached the GPU, and this frame stays empty
 		m_gpu_full_upload = true;
+		m_fb[m_fb_page].fill(0, m_cliprect);
+		m_page_native[m_fb_page] = false;
 	}
 
 	m_gpu_state.clear();
