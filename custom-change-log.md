@@ -558,3 +558,8 @@ builds get them straight from here.
 - On boards with two Voodoo chips (Hang Pilot, Thrill Drive, Racing Jam and the Hornet pairs) both chips drew into one shared
   3D buffer, so Hang Pilot showed the same picture on both screens with patterned blocks across them. Each chip now has its own 3D
   buffer, and the two Hang Pilot screens show their own pictures again.
+
+### Operation Thunder Hurricane, GTI Club, Solar Assault: faster 3D Supersampling on the GPU
+- With 3D GPU Rendering on and 3D Output Scale at "native", the GPU now averages the supersampled 3D layer itself and sends back only the
+  screen-size picture. Operation Thunder Hurricane at 4x supersampling went from about 1.5x to about 2.0x real time on this machine.
+  The picture is the same to within one colour level.
