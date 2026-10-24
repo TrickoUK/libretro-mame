@@ -322,25 +322,20 @@ void retro_osd_interface::osd_exit()
 osd::gpu_engine *retro_osd_interface::get_gpu_engine(const char *system)
 {
 #if defined(HAVE_RETRO_GPU_TARGET)
-	// One engine serves every system. The PS1 path is enabled by its own
-	// resolution option (mame_psx_gpu_hle); every other system by the
-	// generic mame_3d_gpu option.
+	// Every caller gets an engine (and so a render target) of its own. The PS1
+	// path is enabled by its own resolution option (mame_psx_gpu_hle); every
+	// other system by the generic mame_3d_gpu option.
 	const bool enabled = (system && !strcmp(system, "ps1")) ? (psx_gpu_hle_scale > 0) : gpu3d_enable;
 	if (!enabled || m_gpu_engine_failed)
 		return nullptr;
-	if (!m_gpu_engine)
+	auto engine = std::make_unique<retro_gpu_engine>();
+	if (!engine->is_valid())
 	{
-		auto engine = std::make_unique<retro_gpu_engine>();
-		if (!engine->is_valid())
-		{
-			m_gpu_engine_failed = true;
-			return nullptr;
-		}
-		m_gpu_engine = std::move(engine);
-	}
-	if (m_gpu_engine->failed())
+		m_gpu_engine_failed = true;
 		return nullptr;
-	return m_gpu_engine.get();
+	}
+	m_gpu_engines.push_back(std::move(engine));
+	return m_gpu_engines.back().get();
 #else
 	return nullptr;
 #endif

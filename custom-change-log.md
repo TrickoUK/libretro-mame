@@ -553,3 +553,8 @@ builds get them straight from here.
   the HUD, text and logos stay sharp. 3D Texture Filtering (bilinear) smooths polygon textures. All are off by default.
 - 3D Output Scale "match" does not apply to these games; the picture is always averaged to the normal screen size.
 
+
+### Hang Pilot, Thrill Drive, Racing Jam and the other two-Voodoo boards: 3D GPU Rendering no longer mixes the two chips
+- On boards with two Voodoo chips (Hang Pilot, Thrill Drive, Racing Jam and the Hornet pairs) both chips drew into one shared
+  3D buffer, so Hang Pilot showed the same picture on both screens with patterned blocks across them. Each chip now has its own 3D
+  buffer, and the two Hang Pilot screens show their own pictures again.

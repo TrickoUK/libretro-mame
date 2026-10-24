@@ -8,6 +8,7 @@
 #include "interface/gpuengine.h"
 #include <chrono>
 #include <memory>
+#include <vector>
 
 #include "libretro-internal/libretro_shared.h"
 
@@ -202,7 +203,7 @@ private:
 	int m_last_click_x;
 	int m_last_click_y;
 
-	std::unique_ptr<osd::gpu_engine> m_gpu_engine;
+	std::vector<std::unique_ptr<osd::gpu_engine>> m_gpu_engines;
 	bool m_gpu_engine_failed = false;
 };
 
