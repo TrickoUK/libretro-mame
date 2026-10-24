@@ -12,6 +12,7 @@
 #pragma once
 
 #include "namcomcu.h"
+#include "namcos22_shader.h"
 
 #include "bus/snes_ctrl/ctrl.h"
 
@@ -29,7 +30,6 @@
 #include "tilemap.h"
 
 #include "endianness.h"
-#include "namcos22_shader.h"
 
 class namcos22_state;
 
