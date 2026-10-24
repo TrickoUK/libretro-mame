@@ -77,7 +77,11 @@ bool namcos22_renderer::gpu_init()
 				m_gpu_shadow_palette = make_unique_clear<u32[]>(0x8000);
 		}
 		else
+		{
+			if (m_gpu_engine)
+				osd_printf_verbose("namcos22: host GPU path unavailable, the largest texture is %d texels and 4096 are needed\n", m_gpu_engine->caps().max_texture_size);
 			m_gpu_engine = nullptr;
+		}
 	}
 	return m_gpu_engine != nullptr && !m_gpu_engine->failed();
 }
