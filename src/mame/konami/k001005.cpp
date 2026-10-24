@@ -525,7 +525,7 @@ void k001005_renderer::draw_scanline_generic(int32_t scanline, const extent_t& e
 					uint32_t const tex10 = k001006->fetch_texel(tex_page, palette_index, texel_u0, texel_v1);
 					uint32_t const tex11 = k001006->fetch_texel(tex_page, palette_index, texel_u1, texel_v1);
 
-					// Cut-outs keep the silhouette of the unfiltered texture: transparency comes from the
+					// The hardware appears to keep the silhouette of cut-outs: transparency comes from the
 					// nearest texel, and transparent neighbours borrow its colour instead of bleeding black
 					uint32_t tex[4] = { tex00, tex01, tex10, tex11 };
 					uint32_t const nearest = tex[((vfrac >= 9) ? 2 : 0) | ((ufrac >= 9) ? 1 : 0)];
