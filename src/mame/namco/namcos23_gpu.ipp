@@ -168,7 +168,8 @@ void namcos23_renderer::gpu_add_poly(const namcos23_poly_entry &p)
 
 	const float intensity_base = rd.intensity_base;
 	d[0] = (rd.stencil_enabled ? 1 : 0) | (rd.shade_enabled ? 2 : 0) | (rd.pfade_enabled ? 4 : 0) | ((rd.fadefactor != 0xff) ? 8 : 0)
-			| (rd.blend_enabled ? 16 : 0) | ((rd.alpha != 0xff) ? 32 : 0) | (rd.alpha_enabled ? 64 : 0);
+			| (rd.blend_enabled ? 16 : 0) | ((rd.alpha != 0xff) ? 32 : 0) | (rd.alpha_enabled ? 64 : 0)
+			| (m_state.machine().osd().texture_filter() ? 256 : 0);
 	d[1] = penbase;
 	d[2] = penmask;
 	d[3] = penshift;
@@ -414,7 +415,8 @@ bool namcos23_renderer::gpu_render(screen_device &screen, bitmap_rgb32 &bitmap)
 			return false;
 		}
 
-		// The alpha of a covered pixel is non-zero; the text layer is mixed again over those pixels.
+		// The alpha of a covered pixel is non-zero; the text layer is mixed again over those pixels. The bitmap is left
+		// opaque like the picture the scanline routines make.
 		for (int y = 0; y < GPU_SCREEN_HEIGHT; y++)
 		{
 			u32 *const dest = &bitmap.pix(y);
@@ -423,7 +425,7 @@ bool namcos23_renderer::gpu_render(screen_device &screen, bitmap_rgb32 &bitmap)
 			{
 				if (dest[x] >> 24)
 					primap[x] = (primap[x] & ~1) | 2;
-				dest[x] &= 0x00ffffff;
+				dest[x] |= 0xff000000;
 			}
 		}
 	}
