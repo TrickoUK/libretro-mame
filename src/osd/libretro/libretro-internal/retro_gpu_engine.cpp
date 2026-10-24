@@ -25,6 +25,9 @@ using namespace retro_gl;
 
 namespace {
 
+// engines currently holding the shared EGL display initialised
+int g_display_users = 0;
+
 using clock_type = std::chrono::steady_clock;
 
 double elapsed_ms(clock_type::time_point from)
@@ -194,9 +197,13 @@ bool retro_gpu_engine::init_context()
 	if (!m_display)
 		return false;
 
+	// The display is shared by every engine and initialised once; EGL does not
+	// count initialisations, so it is terminated with the last engine.
 	EGLint major = 0, minor = 0;
 	if (!g_egl.Initialize(m_display, &major, &minor))
 		return false;
+	g_display_users++;
+	m_display_used = true;
 	if (!g_egl.BindAPI(EGL_OPENGL_API_))
 		return false;
 
@@ -310,7 +317,9 @@ void retro_gpu_engine::shutdown()
 		g_egl.DestroyContext(m_display, m_context);
 	if (m_surface)
 		g_egl.DestroySurface(m_display, m_surface);
-	g_egl.Terminate(m_display);
+	if (m_display_used && --g_display_users == 0)
+		g_egl.Terminate(m_display);
+	m_display_used = false;
 	m_context = nullptr;
 	m_surface = nullptr;
 	m_display = nullptr;
