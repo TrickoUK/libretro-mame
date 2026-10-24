@@ -91,7 +91,9 @@ mixed into history.
   ADC read and ports, gun reads), `scripts/genie.lua`,
   `scripts/src/main.lua` and `src/osd/modules/lib/osdobj_common.cpp` (libretro
   hooks), `src/mame/namco/namcos22_v.cpp` and `namcos22.h` (host-GPU capture hooks: the `m_gpu_collecting` ternary and early
-  returns in `poly3d_drawquad`/`poly3d_drawsprite`, the two `gpu_render_scene` calls in the screen updates; the rest is `namcos22_gpu.ipp`), `src/mame/snk/hng64_3d.ipp` and `hng64_v.cpp` (3D supersampling: bigger buffers,
+  returns in `poly3d_drawquad`/`poly3d_drawsprite`, the two `gpu_render_scene` calls in the screen updates; the rest is `namcos22_gpu.ipp`), `src/mame/namco/namcos23.cpp` (host-GPU hooks: the
+  `namcos23_shader.h`/`gpuengine.h` includes, `friend class namcos23_renderer;`, the renderer's `gpu_*` members and the
+  `if (gpu_render(...)) return;` after the sort in `render_flush()`; the rest is `namcos23_gpu.ipp` and `namcos23_shader.h`), `src/mame/snk/hng64_3d.ipp` and `hng64_v.cpp` (3D supersampling: bigger buffers,
   scaled vertices and the palette-resolve composite; fork-only, not for upstream).
 - Upstream API changes in that sync that broke fork/libretro code:
   - `screen_device` is split per type (`screen_svg_device`, vector screens).
