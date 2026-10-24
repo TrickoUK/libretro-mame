@@ -709,7 +709,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_3d_supersample",
       "3D Supersampling",
       NULL,
-      "3D games with enhanced rendering: 3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others), Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games) SNK Hyper Neo Geo 64 and Namco System 22/Super System 22 (with 3D GPU Rendering). On Voodoo games it reduces shimmering on detailed textures seen at a distance, such as foliage and terrain, by averaging several texture samples across each pixel wherever a texture is shrunk; only texture colour is smoothed. On GTI Club hardware and Hyper Neo Geo 64 the whole 3D layer is rendered at 2x, 3x or 4x the native size and averaged down, which also smooths polygon edges; the HUD, text and 2D layers are unchanged. Each step costs more CPU: 2x is a good start, 4x can slow heavy scenes on slower machines. Save states made with it on, on GTI Club hardware, can only be loaded with it on. Requires restarting content to take effect.",
+      "3D games with enhanced rendering: 3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others), Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games) SNK Hyper Neo Geo 64 and Namco System 22/Super System 22 and System 23/Super System 23 (with 3D GPU Rendering). On Voodoo games it reduces shimmering on detailed textures seen at a distance, such as foliage and terrain, by averaging several texture samples across each pixel wherever a texture is shrunk; only texture colour is smoothed. On GTI Club hardware and Hyper Neo Geo 64 the whole 3D layer is rendered at 2x, 3x or 4x the native size and averaged down, which also smooths polygon edges; the HUD, text and 2D layers are unchanged. Each step costs more CPU: 2x is a good start, 4x can slow heavy scenes on slower machines. Save states made with it on, on GTI Club hardware, can only be loaded with it on. Requires restarting content to take effect.",
       NULL,
       "video",
       {
@@ -725,7 +725,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_3d_output_scale",
       "3D Output Scale",
       NULL,
-      "Sega Model 2, Konami GTI Club hardware and 3dfx Voodoo boards drawn on the host GPU (Midway Seattle/Vegas, Konami Viper). SNK Hyper Neo Geo 64 and Namco System 22 always output native and ignore this option. Normally 3D Supersampling renders the 3D layer larger and averages it back down to the native screen size. With this set to 'Match supersampling' the screen is presented at the supersampling size instead (for example 2x of 496x384), so the 3D layer keeps all its extra detail; the 2D layers (tilemaps, sprites, text) are enlarged with sharp pixels. Needs 3D Supersampling set to 2x or higher; it has no effect otherwise. Requires restarting content to take effect.",
+      "Sega Model 2, Konami GTI Club hardware and 3dfx Voodoo boards drawn on the host GPU (Midway Seattle/Vegas, Konami Viper). SNK Hyper Neo Geo 64 and Namco System 22/23 always output native and ignore this option. Normally 3D Supersampling renders the 3D layer larger and averages it back down to the native screen size. With this set to 'Match supersampling' the screen is presented at the supersampling size instead (for example 2x of 496x384), so the 3D layer keeps all its extra detail; the 2D layers (tilemaps, sprites, text) are enlarged with sharp pixels. Needs 3D Supersampling set to 2x or higher; it has no effect otherwise. Requires restarting content to take effect.",
       NULL,
       "video",
       {
@@ -739,7 +739,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_3d_gpu",
       "3D GPU Rendering",
       NULL,
-      "Sega Model 2, Konami GTI Club hardware (GTI Club, Thunder Hurricane, Solar Assault, Midnight Run), SNK Hyper Neo Geo 64, Namco System 22/Super System 22 (Ridge Racer, Time Crisis, Prop Cycle and others) and 3dfx Voodoo 1/2/3 boards (Midway Seattle and Vegas games: San Francisco Rush, California Speed, Gauntlet Legends and others; Konami Viper games). Renders the 3D layer on the host GPU instead of the CPU. The picture matches the software renderer closely; 3D Supersampling sets the resolution (3D Output Scale presents it at that size). On Voodoo boards the software renderer runs alongside for the first seconds of start-up, and the GPU path falls back to it for features it does not cover. If no GPU context can be created the software renderer is used. Requires restarting content to take effect.",
+      "Sega Model 2, Konami GTI Club hardware (GTI Club, Thunder Hurricane, Solar Assault, Midnight Run), SNK Hyper Neo Geo 64, Namco System 22/Super System 22 (Ridge Racer, Time Crisis, Prop Cycle and others), Namco System 23/Super System 23 (Time Crisis 2, Crisis Zone, 500 GP and others) and 3dfx Voodoo 1/2/3 boards (Midway Seattle and Vegas games: San Francisco Rush, California Speed, Gauntlet Legends and others; Konami Viper games). Renders the 3D layer on the host GPU instead of the CPU. The picture matches the software renderer closely; 3D Supersampling sets the resolution (3D Output Scale presents it at that size). On Voodoo boards the software renderer runs alongside for the first seconds of start-up, and the GPU path falls back to it for features it does not cover. If no GPU context can be created the software renderer is used. Requires restarting content to take effect.",
       NULL,
       "video",
       {
@@ -753,7 +753,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_3d_msaa",
       "3D Multisample Anti-Aliasing",
       NULL,
-      "Only with 3D GPU Rendering enabled (it has no effect on the software renderer): 3dfx Voodoo boards (Midway Seattle/Vegas, Konami Viper), Konami GTI Club hardware, Sega Model 2 and Namco System 22/Super System 22. SNK Hyper Neo Geo 64 is not covered. Smooths the stair-stepped outlines of 3D objects on the GPU by testing several coverage samples per pixel; it costs less GPU time than raising 3D Supersampling, but the multisampled buffers need extra video memory (4x MSAA about as much as 2x supersampling). It combines with 3D Supersampling and 3D Output Scale. HUD, text and other 2D content stay sharp. Textures and cut-out edges (fences, foliage) are not smoothed. Uses more video memory (4x costs about 4 times the colour and depth buffers, and the count is reduced automatically if the buffers would pass 1 GB). Requires restarting content to take effect.",
+      "Only with 3D GPU Rendering enabled (it has no effect on the software renderer): 3dfx Voodoo boards (Midway Seattle/Vegas, Konami Viper), Konami GTI Club hardware, Sega Model 2, Namco System 22/Super System 22 and Namco System 23/Super System 23. SNK Hyper Neo Geo 64 is not covered. Smooths the stair-stepped outlines of 3D objects on the GPU by testing several coverage samples per pixel; it costs less GPU time than raising 3D Supersampling, but the multisampled buffers need extra video memory (4x MSAA about as much as 2x supersampling). It combines with 3D Supersampling and 3D Output Scale. HUD, text and other 2D content stay sharp. Textures and cut-out edges (fences, foliage) are not smoothed. Uses more video memory (4x costs about 4 times the colour and depth buffers, and the count is reduced automatically if the buffers would pass 1 GB). Requires restarting content to take effect.",
       NULL,
       "video",
       {
@@ -783,7 +783,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_3d_texfilter",
       "3D Texture Filtering",
       NULL,
-      "Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games) and, with 3D GPU Rendering, Namco System 22/Super System 22 polygons (not sprites). Smooths blocky magnified textures with bilinear filtering. Operation Thunder Hurricane and Solar Assault already filter on the real hardware; this turns it on for the other games. Other 3D hardware is unaffected. Requires restarting content to take effect.",
+      "Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games) and, with 3D GPU Rendering, Namco System 22/Super System 22 and System 23/Super System 23 polygons (not sprites). Smooths blocky magnified textures with bilinear filtering. Operation Thunder Hurricane and Solar Assault already filter on the real hardware; this turns it on for the other games. Other 3D hardware is unaffected. Requires restarting content to take effect.",
       NULL,
       "video",
       {

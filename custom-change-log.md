@@ -587,3 +587,12 @@ builds get them straight from here.
   3D Supersampling is averaged down to it, as on Namco System 22. At 2x with "match" the Xtreme Rally race scene ran at about
   0.59x real time (resolving the whole 3D layer through the palette at the larger size on the CPU); at 2x with native output it
   runs at about 0.87x on this machine, against about 1.0x with supersampling off.
+
+### Time Crisis II, Crisis Zone, 500 GP and the other Namco System 23 / Super System 23 games: 3D GPU Rendering
+- With 3D GPU Rendering on, the 3D scene of these games is drawn by the graphics card. 3D Supersampling (2x-4x, shown at the normal
+  screen size), 3D Multisample Anti-Aliasing and 3D Texture Filtering now apply to them: polygon edges and textures are smoother while
+  the HUD, text and light-gun aim stay as they were. Time Crisis II, Crisis Zone and 500 GP matched the software picture to within
+  rounding on every frame checked; Motocross Go!, Final Furlong 2, Panic Park and Race On! were checked the same way.
+- It is a little faster than software (about 10-15% on this machine at the normal size) and 2x supersampling costs about what the
+  software renderer costs without it. These sets are all marked as not working in MAME, so the picture has the same glitches as before.
+  Rapid River and Final Furlong (the System 22.5 boards) still use the software renderer.
