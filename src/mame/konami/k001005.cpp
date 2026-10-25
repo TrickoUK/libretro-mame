@@ -336,6 +336,7 @@ void k001005_renderer::gpu_submit()
 	for (gpu_run const &run : m_gpu_runs)
 	{
 		osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, run.first_vertex, run.vertex_count);
+		draw.variant = osd::gpu_aniso_variant(m_gpu_machine.osd().anisotropy());
 		draw.bindings[0] = m_gpu_tex_rom;
 		draw.bindings[1] = m_gpu_palette;
 		draw.depth_func = run.z_compare ? osd::gpu_depth_func::LEQUAL : osd::gpu_depth_func::ALWAYS;
