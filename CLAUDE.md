@@ -83,6 +83,14 @@ mixed into history.
   (`voodoo_shader.h`, source `my-docs/tools/voodoo.glsl`). `arcade.flt` unchanged (validated, 2135 files).
   `scripts/src/bus.lua` changed, so genie was regenerated directly; full `-j10` build linked clean
   (201 objects). Smoke-tested gticlub2, jpark3, thrild2, sfrush (90 s each, `my-docs/out/sync1751`).
+- **Follow-up sync, 2026-10-25**: merge commit `f447a0efbef` merged mamedev master
+  `mame0289-1785-g84981cc15cf` (34 commits); libretro/mame master had nothing new. No conflicts,
+  `arcade.flt` unchanged (validated, 2135 files; only `softbox.cpp` moved, and it is not in the filter).
+  `scripts/src/bus.lua` and `video.lua` changed, so genie was regenerated directly; full `-j10` build linked
+  clean. Overlap was Model 2 (SHARC FIFO/halt fixes, `polygons`/`textures` regions now `ROM_REGION32_LE`/
+  `ROM_REGION16_LE`, `apply_focus`/`raster_init` take references, Last Bronx mesh path), `cv1k.cpp` (ATTR_COLD)
+  and `mame.lst`. Smoke-tested hotd, gunblade, daytona, lastbrnx (60 s each, `my-docs/out/sync1785`); gunblade's
+  helicopter hull has a small black hole, with no pre-merge frame to compare against.
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
