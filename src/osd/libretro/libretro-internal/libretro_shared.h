@@ -157,6 +157,10 @@ extern bool supersample_output_enable;
 // mame_3d_msaa core option: multisample anti-aliasing of the 3D layer on the host-GPU
 // path, 0 = off, else the sample count (2, 4 or 8) (see osdepend.h).
 extern int msaa_samples_option;
+
+// mame_3d_aniso core option: most texture taps per pixel for anisotropic
+// filtering on the host-GPU path (0 = off).
+extern int aniso_taps_option;
 // mame_3d_edge_aa core option: smooth 3D geometry outlines in the renderers
 // that support it (the Voodoo today, see osdepend.h).
 extern bool edge_aa_enable;

@@ -794,6 +794,23 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
+      CORE_NAME "_3d_aniso",
+      "3D Anisotropic Filtering",
+      NULL,
+      "Only with 3D GPU Rendering enabled: 3dfx Voodoo boards (Midway Seattle/Vegas, Konami Viper), Konami GTI Club hardware, Sega Model 2, Namco System 22/Super System 22 and Namco System 23/Super System 23. Keeps textures on steep, angled surfaces (roads, streets, floors, building fronts) steady and sharp in the distance instead of shimmering. Where a pixel covers a long, thin strip of the texture, it averages several texture samples along that strip; the number is the most samples taken per pixel. Costs GPU time only on such pixels, works at any 3D Supersampling and Output Scale setting, and combines with 3D Multisample Anti-Aliasing. Sony PlayStation-based boards and SNK Hyper Neo Geo 64 are not covered. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "2x",       "2x" },
+         { "4x",       "4x" },
+         { "8x",       "8x" },
+         { "16x",      "16x" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
       CORE_NAME "_cpu_overclock",
       "Main CPU Overclock %",
       NULL,

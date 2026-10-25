@@ -239,6 +239,12 @@ public:
 	// for it themselves; false = off (hardware-accurate).
 	virtual bool texture_filter() const { return false; }
 
+	// 3D anisotropic texture filtering (see the retro OSD's mame_3d_aniso
+	// core option), for every 3D renderer on the host-GPU path that samples
+	// textures itself: 0 = off, else the most texture taps per pixel along
+	// the long axis of the pixel's texture footprint.
+	virtual int anisotropy() const { return 0; }
+
 protected:
 	virtual ~osd_interface() { }
 };

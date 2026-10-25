@@ -197,6 +197,13 @@ enum class gpu_command_type : uint8_t
 	READBACK        // read a target rectangle back at this point of the frame (waits for the commands before it)
 };
 
+// Variant bits 24-27 carry log2 of the anisotropic tap limit (0 = off); a module sees the limit as the
+// ANISO_MAX macro and the remaining variant bits as VARIANT. Returns the bits for a tap limit of 0, 2, 4, 8 or 16.
+constexpr uint32_t gpu_aniso_variant(int taps)
+{
+	return (taps >= 16) ? (4U << 24) : (taps >= 8) ? (3U << 24) : (taps >= 4) ? (2U << 24) : (taps >= 2) ? (1U << 24) : 0U;
+}
+
 struct gpu_command
 {
 	gpu_command_type type = gpu_command_type::DRAW;

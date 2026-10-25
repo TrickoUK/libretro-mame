@@ -169,7 +169,8 @@ bool valid_identifier(const char *s)
 bool reserved_name(const char *s)
 {
 	return !strncmp(s, "u_", 2) || !strncmp(s, "g_", 2) || !strncmp(s, "o_", 2) || !strncmp(s, "a_", 2) || !strncmp(s, "gl_", 3)
-			|| !strcmp(s, "state") || !strcmp(s, "frag_pos") || !strcmp(s, "target_size") || !strcmp(s, "shade") || !strcmp(s, "main");
+			|| !strcmp(s, "state") || !strcmp(s, "frag_pos") || !strcmp(s, "target_size") || !strcmp(s, "shade") || !strcmp(s, "main")
+			|| !strcmp(s, "aniso_taps") || !strcmp(s, "ANISO_MAX");
 }
 
 } // anonymous namespace
@@ -539,7 +540,10 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 
 	// fragment shader: prelude plus the module source
 	std::string fs = "#version 330 core\n";
-	fs += "#define VARIANT " + std::to_string(variant) + "\n";
+	// Bits 24-27 of the variant carry log2 of the anisotropic tap limit (0 = off); the module sees the low 24 bits as VARIANT
+	const uint32_t aniso_log2 = (variant >> 24) & 15;
+	fs += "#define VARIANT " + std::to_string(variant & 0xffffffU) + "\n";
+	fs += "#define ANISO_MAX " + std::to_string(aniso_log2 ? (1U << aniso_log2) : 0U) + "\n";
 	fs += "flat in uint g_prim;\n";
 	for (int i = 0; i < m.varying_count; i++)
 		fs += interpolation_qualifier(m.varying_mode[i], (((m.centroid_mask >> i) & 1) != 0)) + "in float v" + std::to_string(i) + ";\n";
@@ -555,6 +559,16 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 	fs += "\treturn (c == 0) ? t.x : (c == 1) ? t.y : (c == 2) ? t.z : t.w;\n}\n";
 	fs += "vec2 frag_pos()\n{\n\treturn gl_FragCoord.xy;\n}\n";
 	fs += "ivec2 target_size()\n{\n\treturn ivec2(u_target_size);\n}\n";
+	// Anisotropic footprint: dx and dy are the screen derivatives of a texture coordinate in texels (taken in uniform control flow).
+	// Returns the tap count (1..limit) and the step vector spanning the footprint's long axis; tap i samples at
+	// uv + axis * ((i + 0.5) / n - 0.5).
+	fs += "int aniso_taps(vec2 dx, vec2 dy, int limit, out vec2 axis)\n{\n"
+			"\tfloat lx = length(dx);\n\tfloat ly = length(dy);\n"
+			"\taxis = (lx >= ly) ? dx : dy;\n"
+			"\tfloat major = max(lx, ly);\n\tfloat minor = max(min(lx, ly), 1e-6);\n"
+			"\tfloat ratio = major / minor;\n"
+			"\tif (limit < 2 || ratio < 1.5 || !(major < 1e9))\n\t\treturn 1;\n"
+			"\treturn clamp(int(ceil(ratio)), 1, limit);\n}\n";
 	for (int i = 0; i < m.binding_count; i++)
 	{
 		fs += std::string("uniform ") + sampler_type(m.binding_format[i]) + " " + m.binding_name[i] + ";\n";

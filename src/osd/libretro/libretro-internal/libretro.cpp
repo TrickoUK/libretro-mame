@@ -647,6 +647,21 @@ static void check_variables(void)
          msaa_samples_option = 8;
    }
 
+   var.key   = CORE_NAME "_3d_aniso";
+   var.value = NULL;
+   aniso_taps_option = 0;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "2x"))
+         aniso_taps_option = 2;
+      if (!strcmp(var.value, "4x"))
+         aniso_taps_option = 4;
+      if (!strcmp(var.value, "8x"))
+         aniso_taps_option = 8;
+      if (!strcmp(var.value, "16x"))
+         aniso_taps_option = 16;
+   }
+
    var.key   = CORE_NAME "_3d_edge_aa";
    var.value = NULL;
    edge_aa_enable = false;
