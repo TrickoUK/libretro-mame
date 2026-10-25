@@ -418,6 +418,7 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 
 		// Polygons are multisampled; sprites and the stamp are drawn at the pixel centre into every sample.
 		osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, 0, 0);
+		draw.variant = osd::gpu_aniso_variant(m_state.machine().osd().anisotropy());
 		draw.bindings[0] = m_gpu_tile_data;
 		draw.bindings[1] = m_gpu_tile_map;
 		draw.bindings[2] = m_gpu_tile_attr;
