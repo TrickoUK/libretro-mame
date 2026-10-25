@@ -785,6 +785,7 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 				osd::gpu_depth_func::NEVER, osd::gpu_depth_func::LESS, osd::gpu_depth_func::EQUAL, osd::gpu_depth_func::LEQUAL,
 				osd::gpu_depth_func::GREATER, osd::gpu_depth_func::NOTEQUAL, osd::gpu_depth_func::GEQUAL, osd::gpu_depth_func::ALWAYS };
 			next.depth_func = fbzmode.enable_depthbuf() ? FUNCS[fbzmode.depth_function()] : osd::gpu_depth_func::ALWAYS;
+			next.variant = osd::gpu_aniso_variant(m_machine.osd().anisotropy());
 			// Only geometry with a real depth compare has its edges multisampled. Everything drawn without one (HUD,
 			// text, logos, backdrops) covers whole pixels, so an overlay never blends toward the picture behind it.
 			next.multisample = next.depth_func != osd::gpu_depth_func::ALWAYS;

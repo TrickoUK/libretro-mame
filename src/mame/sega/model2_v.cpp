@@ -853,6 +853,7 @@ bool model2_state::gpu_layer_submit(const rectangle &ss_cliprect)
 	m_gpu_full_upload = false;
 
 	osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, 0, m_gpu_vertices.size());
+	draw.variant = osd::gpu_aniso_variant(machine().osd().anisotropy());
 	draw.bindings[0] = m_gpu_tex_sheets;
 	draw.bindings[1] = m_gpu_luma;
 	draw.bindings[2] = m_gpu_xlat;

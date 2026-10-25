@@ -360,6 +360,7 @@ bool namcos23_renderer::gpu_render(screen_device &screen, bitmap_rgb32 &bitmap)
 		// Polygons are multisampled; the stamp is drawn at the pixel centre into every sample. The colour blends by
 		// the shader's weight, the alpha channel (the drawn marker) takes the new value.
 		osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, 0, 0);
+		draw.variant = osd::gpu_aniso_variant(m_state.machine().osd().anisotropy());
 		draw.bindings[0] = m_gpu_tile_data;
 		draw.bindings[1] = m_gpu_tile_map;
 		draw.bindings[2] = m_gpu_palette;
