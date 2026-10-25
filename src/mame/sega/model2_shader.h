@@ -153,7 +153,9 @@ constexpr char MODEL2_FRAGMENT_SOURCE[] =
 	"#if ANISO_MAX > 1\n"
 	// the footprint axis is in level 0 texels; taps are averaged only when they would themselves be drawn
 	"        vec2 axis;\n"
-	"        int taps = aniso_taps(uv_dx, uv_dy, ANISO_MAX, axis);\n"
+	"        float lscale = 1.0 / float(1 << level);\n"
+	"        int taps = aniso_taps(uv_dx * lscale, uv_dy * lscale, ANISO_MAX, axis);\n"
+	"        axis /= lscale;\n"
 	"        if (taps > 1) {\n"
 	"            if (transl && t.y < 0x40) return false;\n"
 	"            ivec2 sum = ivec2(0);\n"

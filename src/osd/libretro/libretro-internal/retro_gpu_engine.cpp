@@ -559,16 +559,20 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 	fs += "\treturn (c == 0) ? t.x : (c == 1) ? t.y : (c == 2) ? t.z : t.w;\n}\n";
 	fs += "vec2 frag_pos()\n{\n\treturn gl_FragCoord.xy;\n}\n";
 	fs += "ivec2 target_size()\n{\n\treturn ivec2(u_target_size);\n}\n";
-	// Anisotropic footprint: dx and dy are the screen derivatives of a texture coordinate in texels (taken in uniform control flow).
-	// Returns the tap count (1..limit) and the step vector spanning the footprint's long axis; tap i samples at
-	// uv + axis * ((i + 0.5) / n - 0.5).
+	// Anisotropic footprint: dx and dy are the screen derivatives of a texture coordinate in texels of the level being sampled
+	// (taken in uniform control flow). The footprint is the parallelogram they span; its long axis is the longer of the two
+	// and its width is the area divided by that length. Returns the tap count: 1 when the footprint is no longer than a texel
+	// or nearly round, else the length-to-width ratio, never more than the footprint's length in texels or the limit.
+	// Tap i samples at uv + axis * ((i + 0.5) / n - 0.5).
 	fs += "int aniso_taps(vec2 dx, vec2 dy, int limit, out vec2 axis)\n{\n"
 			"\tfloat lx = length(dx);\n\tfloat ly = length(dy);\n"
 			"\taxis = (lx >= ly) ? dx : dy;\n"
-			"\tfloat major = max(lx, ly);\n\tfloat minor = max(min(lx, ly), 1e-6);\n"
+			"\tfloat major = max(lx, ly);\n"
+			"\tif (limit < 2 || !(major > 1.0) || !(major < 1e9))\n\t\treturn 1;\n"
+			"\tfloat minor = max(abs(dx.x * dy.y - dx.y * dy.x) / major, 1e-6);\n"
 			"\tfloat ratio = major / minor;\n"
-			"\tif (limit < 2 || ratio < 1.5 || !(major < 1e9))\n\t\treturn 1;\n"
-			"\treturn clamp(int(ceil(ratio)), 1, limit);\n}\n";
+			"\tif (ratio < 1.5)\n\t\treturn 1;\n"
+			"\treturn clamp(int(ceil(ratio)), 1, min(limit, int(ceil(major))));\n}\n";
 	for (int i = 0; i < m.binding_count; i++)
 	{
 		fs += std::string("uniform ") + sampler_type(m.binding_format[i]) + " " + m.binding_name[i] + ";\n";
