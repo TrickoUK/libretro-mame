@@ -170,7 +170,7 @@ bool reserved_name(const char *s)
 {
 	return !strncmp(s, "u_", 2) || !strncmp(s, "g_", 2) || !strncmp(s, "o_", 2) || !strncmp(s, "a_", 2) || !strncmp(s, "gl_", 3)
 			|| !strcmp(s, "state") || !strcmp(s, "frag_pos") || !strcmp(s, "target_size") || !strcmp(s, "shade") || !strcmp(s, "main")
-			|| !strcmp(s, "aniso_taps") || !strcmp(s, "ANISO_MAX");
+			|| !strcmp(s, "aniso_taps") || !strcmp(s, "aniso_grid") || !strcmp(s, "ANISO_MAX");
 }
 
 } // anonymous namespace
@@ -573,6 +573,24 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 			"\tfloat ratio = major / minor;\n"
 			"\tif (ratio < 1.5)\n\t\treturn 1;\n"
 			"\treturn clamp(int(ceil(ratio)), 1, min(limit, int(ceil(major))));\n}\n";
+	// Anisotropic footprint grid for textures without mip levels: dx and dy are the screen derivatives of a texture coordinate in
+	// texels (taken in uniform control flow). The footprint is the parallelogram they span, sampled on an nx by ny grid: each
+	// side takes one tap per texel of its length, rounded to a whole texel (a second tap needs 1.5 texels). When nx * ny passes the limit the budget is shared in proportion to the two
+	// sides, and a side left at one tap hands the other side the whole limit. Footprints of a texel or less, and non-finite
+	// derivatives, take one tap. Tap (i, j) samples at uv + dx * ((i + 0.5) / nx - 0.5) + dy * ((j + 0.5) / ny - 0.5).
+	fs += "void aniso_grid(vec2 dx, vec2 dy, int limit, out int nx, out int ny)\n{\n"
+			"\tnx = 1;\n\tny = 1;\n"
+			"\tfloat lx = length(dx);\n\tfloat ly = length(dy);\n"
+			"\tif (limit < 2 || !(lx < 1e9) || !(ly < 1e9))\n\t\treturn;\n"
+			"\tfloat wx = max(floor(lx + 0.5), 1.0);\n\tfloat wy = max(floor(ly + 0.5), 1.0);\n"
+			"\tfloat fl = float(limit);\n"
+			"\tif (wx * wy > fl) {\n"
+			"\t\tfloat f = sqrt(fl / (wx * wy));\n"
+			"\t\tfloat fx = max(floor(wx * f), 1.0);\n\t\tfloat fy = max(floor(wy * f), 1.0);\n"
+			"\t\tif (fx <= 1.0)\n\t\t\tfy = min(wy, fl);\n"
+			"\t\telse if (fy <= 1.0)\n\t\t\tfx = min(wx, fl);\n"
+			"\t\twx = fx;\n\t\twy = fy;\n\t}\n"
+			"\tnx = int(wx);\n\tny = int(wy);\n}\n";
 	for (int i = 0; i < m.binding_count; i++)
 	{
 		fs += std::string("uniform ") + sampler_type(m.binding_format[i]) + " " + m.binding_name[i] + ";\n";
