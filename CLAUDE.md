@@ -89,8 +89,10 @@ mixed into history.
   `scripts/src/bus.lua` and `video.lua` changed, so genie was regenerated directly; full `-j10` build linked
   clean. Overlap was Model 2 (SHARC FIFO/halt fixes, `polygons`/`textures` regions now `ROM_REGION32_LE`/
   `ROM_REGION16_LE`, `apply_focus`/`raster_init` take references, Last Bronx mesh path), `cv1k.cpp` (ATTR_COLD)
-  and `mame.lst`. Smoke-tested hotd, gunblade, daytona, lastbrnx (60 s each, `my-docs/out/sync1785`); gunblade's
-  helicopter hull has a small black hole, with no pre-merge frame to compare against.
+  and `mame.lst`. Smoke-tested hotd, gunblade, daytona, lastbrnx (60 s each, `my-docs/out/sync1785`). The black
+  blob under gunblade's attract-mode helicopter is its landing-gear wheel, not a fault: frames 3480-3520 are
+  pixel-identical between the pre-merge Model 2 files and the merged ones, and the blob is also there with the
+  host-GPU path off.
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
