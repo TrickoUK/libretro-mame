@@ -596,3 +596,10 @@ builds get them straight from here.
 - It is a little faster than software (about 10-15% on this machine at the normal size) and 2x supersampling costs about what the
   software renderer costs without it. These sets are all marked as not working in MAME, so the picture has the same glitches as before.
   Rapid River and Final Furlong (the System 22.5 boards) still use the software renderer.
+
+### Anisotropic filtering of 3D textures (all GPU-rendered 3D systems except PS1 and Hyper Neo Geo 64)
+- New core option "3D Anisotropic Filtering" (off, 2x to 16x). With 3D GPU Rendering on, roads, streets and building fronts seen at a
+  steep angle stay steady and sharp in the distance instead of shimmering. Seen most on Gunblade NY; also applies to the Voodoo
+  boards (GTI Club 2 and others), GTI Club hardware, System 22 and System 23 games.
+- It costs graphics-card time only on the pixels that need it and works with 3D Supersampling and Multisample Anti-Aliasing.
+  Off, the picture is identical to before.
