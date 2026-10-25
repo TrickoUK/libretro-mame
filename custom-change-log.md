@@ -603,3 +603,7 @@ builds get them straight from here.
   boards (GTI Club 2 and others), GTI Club hardware, System 22 and System 23 games.
 - It costs graphics-card time only on the pixels that need it and works with 3D Supersampling and Multisample Anti-Aliasing.
   Off, the picture is identical to before.
+
+### Anisotropic filtering: distant face-on surfaces on GTI Club, Ridge Racer and 500 GP style hardware
+- With 3D Anisotropic Filtering on, the distant scenery on Konami GTI Club hardware and Namco System 22 / System 23 games is
+  smoothed in both directions, not only along angled surfaces, so far-off buildings, cars and track edges shimmer less.
