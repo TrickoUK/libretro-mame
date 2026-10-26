@@ -161,9 +161,6 @@ extern int msaa_samples_option;
 // mame_3d_aniso core option: most texture taps per pixel for anisotropic
 // filtering on the host-GPU path (0 = off).
 extern int aniso_taps_option;
-// mame_3d_edge_aa core option: smooth 3D geometry outlines in the renderers
-// that support it (the Voodoo today, see osdepend.h).
-extern bool edge_aa_enable;
 // mame_3d_texfilter core option: bilinear filter textures in the renderers
 // that support it (the Konami K001005 today, see osdepend.h).
 extern bool texfilter_enable;

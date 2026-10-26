@@ -662,12 +662,6 @@ static void check_variables(void)
          aniso_taps_option = 16;
    }
 
-   var.key   = CORE_NAME "_3d_edge_aa";
-   var.value = NULL;
-   edge_aa_enable = false;
-   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
-      edge_aa_enable = !strcmp(var.value, "enabled");
-
    var.key   = CORE_NAME "_3d_gpu";
    var.value = NULL;
    gpu3d_enable = false;
