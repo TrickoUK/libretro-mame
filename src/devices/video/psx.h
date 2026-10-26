@@ -338,6 +338,23 @@ private:
 	uint32_t m_gpu_frame_vertex_count = 0;
 	void gpu_build_frame();
 	bool gpu_submit_frame( const osd::gpu_readback_rect *rects, int count );
+	bool gpu_send_frame( const osd::gpu_readback_rect *rects, int count, bool flush );
+	void gpu_frame_updates( std::vector<osd::gpu_texture_update> &updates );
+	void gpu_flush_chunk();
+
+	// Chunked submission (see gpu_flush_chunk()): the queue is sent to the engine once it holds
+	// m_gpu_chunk_commands entries while the frame is still being emulated. 0 keeps the single submit per
+	// refresh. Only engines with caps().chunked_frames get a non-zero value; MAME_PS1_GPU_CHUNK overrides it.
+	size_t m_gpu_chunk_commands = 0;
+	bool m_gpu_chunk_failed = false;
+	// The VRAM texture as the engine last received it, so each submit uploads only the rows that changed
+	std::vector<uint16_t> m_gpu_vram_shadow;
+	bool m_gpu_vram_shadow_valid = false;
+	// MAME_GPU_PROF counters, reported every 300 frames by gpu_send_frame()
+	bool m_gpu_prof = false;
+	uint32_t m_gpu_prof_frames = 0;
+	uint32_t m_gpu_prof_chunks = 0;
+	double m_gpu_prof_chunk_ms = 0.0;
 
 	// The user-selectable internal-resolution multiplier (mame_psx_gpu_hle
 	// core option on the retro OSD - "disabled"/"2x"/"4x", read once at

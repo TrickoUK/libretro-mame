@@ -780,6 +780,20 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
+      CORE_NAME "_3d_gpu_api",
+      "3D GPU API",
+      NULL,
+      "Graphics API for the host-GPU 3D rendering above. Vulkan is used when a Vulkan 1.3 device is present, otherwise OpenGL. Namco System 22 needs dualSrcBlend, so on a Vulkan device without it that system's 3D layer is drawn in software.",
+      NULL,
+      "video",
+      {
+         { "vulkan", "Vulkan" },
+         { "opengl", "OpenGL" },
+         { NULL, NULL },
+      },
+      "vulkan"
+   },
+   {
       CORE_NAME "_3d_texfilter",
       "3D Texture Filtering",
       NULL,

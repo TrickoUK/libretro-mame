@@ -170,6 +170,9 @@ extern bool texfilter_enable;
 // mame_3d_gpu core option: let systems with a GPU engine adapter render their 3D
 // layer on the host GPU (osd::gpu_engine). Off until an adapter registers the option.
 extern bool gpu3d_enable;
+// mame_3d_gpu_api core option: host-GPU API used by the GPU engine (GPU3D_API_*).
+enum { GPU3D_API_OPENGL, GPU3D_API_VULKAN };
+extern int gpu3d_api;
 // mame_steering_response/_smoothing/_input, mame_stick_steering_speed core
 // options: override the fork's gamepad steering Machine Configuration
 // settings (see apply_steering_options() in libretro.cpp). Set when a machine

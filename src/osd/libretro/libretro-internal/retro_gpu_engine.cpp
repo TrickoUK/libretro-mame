@@ -8,7 +8,9 @@
 
 ***************************************************************************/
 #include "retro_gpu_engine.h"
+#include "libretro_shared.h"
 #include "retro_gl_loader.h"
+#include "retro_vk_shader.h"
 
 #include <algorithm>
 #include <chrono>
@@ -245,6 +247,7 @@ bool retro_gpu_engine::init_context()
 	const char *version = (const char *)g_gl.GetString(GL_VERSION);
 	if (version)
 		sscanf(version, "%d.%d", &m_caps.gl_major, &m_caps.gl_minor);
+	m_caps.dual_source_blend = m_caps.gl_major > 3 || (m_caps.gl_major == 3 && m_caps.gl_minor >= 3);
 	GLint value = 0;
 	g_gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &value);
 	m_caps.max_texture_size = value;
@@ -514,6 +517,30 @@ const retro_gpu_engine::program *retro_gpu_engine::get_program(osd::gpu_handle m
 
 	const module &m = m_modules.find(module_handle)->second;
 	const auto start = clock_type::now();
+
+	// MAME_GPU_VK_SHADERCHECK: also compile the Vulkan form of this program (every program the GL
+	// engine builds is checked once; see retro_vk_shader.h)
+	static const bool shader_check = std::getenv("MAME_GPU_VK_SHADERCHECK") != nullptr;
+	if (shader_check)
+	{
+		osd::gpu_shader_module desc;
+		desc.name = m.name.c_str();
+		desc.fragment_source = m.source.c_str();
+		desc.centroid_mask = m.centroid_mask;
+		desc.varying_count = m.varying_count;
+		desc.writes_depth = m.writes_depth;
+		desc.blend_factor_output = m.blend_factor_output;
+		desc.binding_count = m.binding_count;
+		for (int i = 0; i < m.varying_count; i++)
+			desc.varying_mode[i] = m.varying_mode[i];
+		for (int i = 0; i < m.binding_count; i++)
+		{
+			desc.binding_name[i] = m.binding_name[i].c_str();
+			desc.binding_format[i] = m.binding_format[i];
+		}
+		const std::string cache_dir = std::string(retro_system_directory ? retro_system_directory : ".") + "/mame/gpu-cache";
+		retro_vk::check_module(desc, variant, cache_dir);
+	}
 
 	// vertex shader: position, primitive id and the varyings packed in vec4 groups
 	const int groups = (m.varying_count + 3) / 4;

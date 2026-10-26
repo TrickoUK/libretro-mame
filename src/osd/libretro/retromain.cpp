@@ -34,6 +34,8 @@
 
 #if defined(HAVE_RETRO_GPU_TARGET)
 #include "libretro-internal/retro_gpu_engine.h"
+#include "libretro-internal/retro_vk_device.h"
+#include "libretro-internal/retro_vk_engine.h"
 #endif
 
 bool fexists(std::string path)
@@ -328,6 +330,45 @@ osd::gpu_engine *retro_osd_interface::get_gpu_engine(const char *system)
 	const bool enabled = (system && !strcmp(system, "ps1")) ? (psx_gpu_hle_scale > 0) : gpu3d_enable;
 	if (!enabled || m_gpu_engine_failed)
 		return nullptr;
+
+	// The API is decided once per session. An engine keeps its persistent targets, so a session
+	// cannot switch API part way through.
+	if (!m_gpu_api_decided)
+	{
+		m_gpu_api_decided = true;
+		if (gpu3d_api == GPU3D_API_OPENGL)
+		{
+			fprintf(stderr, "[retro_gpu] OpenGL engine for this session (mame_3d_gpu_api = opengl)\n");
+		}
+		else
+		{
+			if (!m_vk_device)
+				m_vk_device = std::make_unique<retro_vk::vk_device>();
+			if (!m_vk_device->valid() && !m_vk_device->failed())
+			{
+				std::string report;
+				if (m_vk_device->create(report))
+					fprintf(stderr, "[retro_gpu] %s\n", report.c_str());
+				else
+					m_vk_device->latch("device", report.c_str());
+			}
+			m_gpu_engine_vulkan = m_vk_device->valid();
+			fprintf(stderr, "[retro_gpu] %s engine for this session\n",
+					m_gpu_engine_vulkan ? "Vulkan" : "OpenGL (Vulkan device unavailable)");
+		}
+	}
+
+	if (m_gpu_engine_vulkan)
+	{
+		auto vk_engine = std::make_unique<retro_vk_engine>(*m_vk_device);
+		if (!vk_engine->failed())
+		{
+			m_gpu_engines.push_back(std::move(vk_engine));
+			return m_gpu_engines.back().get();
+		}
+		fprintf(stderr, "[retro_gpu] Vulkan engine failed to initialise, using OpenGL for this device\n");
+	}
+
 	auto engine = std::make_unique<retro_gpu_engine>();
 	if (!engine->is_valid())
 	{
@@ -373,6 +414,8 @@ void retro_osd_interface::init(running_machine &machine)
 	// device that held one of the GPU engines
 	m_gpu_engines.clear();
 	m_gpu_engine_failed = false;
+	m_gpu_api_decided = false;
+	m_gpu_engine_vulkan = false;
 
 #if 0
 	const char *stemp;

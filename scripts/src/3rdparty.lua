@@ -2239,3 +2239,63 @@ project "asmjit"
 		MAME_DIR .. "3rdparty/asmjit/asmjit/x86/x86rapass_p.h",
 	}
 end
+
+
+--------------------------------------------------
+-- glslang: GLSL to SPIR-V for the libretro host-GPU Vulkan engine
+-- (compiled at run time, so the
+-- compiler is linked into the core). Built from bgfx's vendored copy.
+-- SPIRV-Tools optimisation and the HLSL front end are left out.
+--------------------------------------------------
+
+project "glslang"
+	uuid "9cb2b02b-cae2-41a1-a721-b4a97cde0455"
+	kind (LIBTYPE)
+
+	addprojectflags()
+
+	configuration { "vs*" }
+if _OPTIONS["vs"]==nil then
+		buildoptions {
+			"/wd4100", -- warning C4100: unreferenced formal parameter
+			"/wd4127", -- warning C4127: conditional expression is constant
+			"/wd4244", -- warning C4244: conversion, possible loss of data
+			"/wd4189", -- warning C4189: local variable is initialized but not referenced
+		}
+end
+
+	configuration { }
+
+	defines {
+		"ENABLE_OPT=0",
+		"ENABLE_HLSL=0",
+	}
+
+	includedirs {
+		MAME_DIR .. "3rdparty/bgfx/3rdparty",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/glslang",
+	}
+
+	files {
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/glslang/**.cpp",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/glslang/**.h",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/SPIRV/**.cpp",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/SPIRV/**.h",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/OGLCompilersDLL/**.cpp",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/OGLCompilersDLL/**.h",
+		-- GetDefaultResources() (the built-in limits glslang needs to parse) is defined in StandAlone
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/StandAlone/ResourceLimits.cpp",
+	}
+
+	configuration { "windows" }
+		removefiles {
+			MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/glslang/OSDependent/Unix/**.cpp",
+		}
+
+	configuration { "not windows" }
+		removefiles {
+			MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/glslang/OSDependent/Windows/**.cpp",
+		}
+
+	configuration { }

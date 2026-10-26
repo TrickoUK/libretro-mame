@@ -325,6 +325,11 @@ struct gpu_engine_caps
 	int gl_major = 0, gl_minor = 0;
 	int max_texture_size = 0;
 	int max_samples = 0;
+	// The engine returns from submit_frame() before the GPU finishes, and its frames are cheap enough to send
+	// in chunks while emulation runs (see flush_frame()). Devices that split a frame only do so when this is set.
+	bool chunked_frames = false;
+	// SRC1 blend factors, which a module with blend_factor_output needs (GL 3.3, or the Vulkan dualSrcBlend feature)
+	bool dual_source_blend = false;
 	const char *renderer = "";
 };
 
@@ -365,6 +370,17 @@ public:
 
 	// run one frame; see the file header for the lifecycle rules
 	virtual bool submit_frame(const gpu_frame &frame) = 0;
+
+	// Sends the commands of a frame that continues after this call: the frame's own read-backs are not
+	// performed, nothing is waited for, and the next submit of the device is ordered after these commands. The
+	// default submits the frame without read-backs, which the OpenGL engine returns from without waiting.
+	virtual bool flush_frame(const gpu_frame &frame)
+	{
+		gpu_frame chunk = frame;
+		chunk.readbacks = nullptr;
+		chunk.readback_count = 0;
+		return submit_frame(chunk);
+	}
 
 	// Completes the deferred read-backs of the last submit_frame() and writes their pixels, waiting for the GPU
 	// if it is not done. Call it in the same emulated frame as the submit. A frame submitted after a submit
