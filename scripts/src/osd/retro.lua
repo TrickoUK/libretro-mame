@@ -139,6 +139,8 @@ project ("osd_" .. _OPTIONS["osd"])
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_device.h",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_shader.cpp",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_shader.h",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_engine.cpp",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_engine.h",
 			MAME_DIR .. "src/osd/interface/gpurender.h",
 			MAME_DIR .. "src/osd/interface/gpuengine.h",
 		}

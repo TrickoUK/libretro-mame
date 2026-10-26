@@ -239,6 +239,16 @@ bool vk_device::create(std::string &report)
 	fn.destroy_buffer = device_proc<PFN_vkDestroyBuffer>(dp, m_device, "vkDestroyBuffer");
 	fn.get_buffer_memory_requirements = device_proc<PFN_vkGetBufferMemoryRequirements>(dp, m_device, "vkGetBufferMemoryRequirements");
 	fn.bind_buffer_memory = device_proc<PFN_vkBindBufferMemory>(dp, m_device, "vkBindBufferMemory");
+	fn.create_image = device_proc<PFN_vkCreateImage>(dp, m_device, "vkCreateImage");
+	fn.destroy_image = device_proc<PFN_vkDestroyImage>(dp, m_device, "vkDestroyImage");
+	fn.get_image_memory_requirements = device_proc<PFN_vkGetImageMemoryRequirements>(dp, m_device, "vkGetImageMemoryRequirements");
+	fn.bind_image_memory = device_proc<PFN_vkBindImageMemory>(dp, m_device, "vkBindImageMemory");
+	fn.cmd_pipeline_barrier = device_proc<PFN_vkCmdPipelineBarrier>(dp, m_device, "vkCmdPipelineBarrier");
+	fn.cmd_copy_buffer_to_image = device_proc<PFN_vkCmdCopyBufferToImage>(dp, m_device, "vkCmdCopyBufferToImage");
+	fn.cmd_copy_image_to_buffer = device_proc<PFN_vkCmdCopyImageToBuffer>(dp, m_device, "vkCmdCopyImageToBuffer");
+	fn.cmd_copy_image = device_proc<PFN_vkCmdCopyImage>(dp, m_device, "vkCmdCopyImage");
+	fn.cmd_clear_color_image = device_proc<PFN_vkCmdClearColorImage>(dp, m_device, "vkCmdClearColorImage");
+	fn.cmd_clear_depth_stencil_image = device_proc<PFN_vkCmdClearDepthStencilImage>(dp, m_device, "vkCmdClearDepthStencilImage");
 
 	fn.get_device_queue(m_device, m_queue_family, 0, &m_queue);
 

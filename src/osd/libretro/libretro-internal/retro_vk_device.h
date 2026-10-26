@@ -69,6 +69,16 @@ struct vk_functions
 	PFN_vkDestroyBuffer destroy_buffer = nullptr;
 	PFN_vkGetBufferMemoryRequirements get_buffer_memory_requirements = nullptr;
 	PFN_vkBindBufferMemory bind_buffer_memory = nullptr;
+	PFN_vkCreateImage create_image = nullptr;
+	PFN_vkDestroyImage destroy_image = nullptr;
+	PFN_vkGetImageMemoryRequirements get_image_memory_requirements = nullptr;
+	PFN_vkBindImageMemory bind_image_memory = nullptr;
+	PFN_vkCmdPipelineBarrier cmd_pipeline_barrier = nullptr;
+	PFN_vkCmdCopyBufferToImage cmd_copy_buffer_to_image = nullptr;
+	PFN_vkCmdCopyImageToBuffer cmd_copy_image_to_buffer = nullptr;
+	PFN_vkCmdCopyImage cmd_copy_image = nullptr;
+	PFN_vkCmdClearColorImage cmd_clear_color_image = nullptr;
+	PFN_vkCmdClearDepthStencilImage cmd_clear_depth_stencil_image = nullptr;
 };
 
 class vk_device
