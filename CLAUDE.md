@@ -93,6 +93,15 @@ mixed into history.
   blob under gunblade's attract-mode helicopter is its landing-gear wheel, not a fault: frames 3480-3520 are
   pixel-identical between the pre-merge Model 2 files and the merged ones, and the blob is also there with the
   host-GPU path off.
+- **Follow-up sync, 2026-10-26**: merge commit `d23272a8584` merged mamedev master
+  `mame0289-1795-g6ec57cdad91` (10 commits); libretro/mame master had nothing new. One conflict,
+  `src/devices/cpu/psx/dma.cpp`: kept upstream's zero word-count handling and rewritten reverse-clear loop,
+  and kept the fork's `m_ram_write_cb` call, now made once before the loop with the full word count.
+  `arcade.flt` unchanged (validated, 2135 files). `osdcore.h` gained work-queue API (`WORK_QUEUE_FLAG_COARSE`,
+  `osd_work_item_queue_list`), so nearly everything rebuilt (`osdsync.cpp` merged cleanly with the fork's
+  `thread_mode` hooks); `bus.lua`/`sound.lua` changed, genie regenerated directly; full `-j10` build linked clean.
+  Smoke-tested gdarius2 and starswep (60 s, clean); brvblade booted but its screenshot came out empty and was not
+  re-checked (`my-docs/out/sync1795`).
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
