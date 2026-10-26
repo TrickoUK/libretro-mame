@@ -141,7 +141,7 @@ public:
 	// shadow for a specific RAM word address - the end of the
 	// GTE-write -> GPR -> RAM -> DMA-to-GPU propagation chain this class
 	// implements below (see the m_pgxp_gpr/m_pgxp_ram_shadow comments).
-	void set_pgxp_enabled(bool enabled) { m_gte.set_pgxp_enabled(enabled); }
+	void set_pgxp_enabled(bool enabled) { m_pgxp_enabled = enabled; m_gte.set_pgxp_enabled(enabled); }
 	void set_pgxp_vertex_cache_enabled(bool enabled) { m_gte.set_pgxp_vertex_cache_enabled(enabled); }
 	bool pgxp_vertex_cache_query(int sx, int sy, float &x, float &y, float &w) { return m_gte.pgxp_vertex_cache_query(sx, sy, x, y, w); }
 
@@ -149,10 +149,10 @@ public:
 	// device_start() - m_ram->size() measured 0 there live (this
 	// project's established "RAM/OSD isn't ready yet at device_start()"
 	// hazard). Called from the OP_SW and SWC2 propagation sites before
-	// they touch m_pgxp_ram_shadow; a no-op once already sized.
+	// they touch m_pgxp_ram_shadow; a no-op once already sized, and while PGXP is off (nothing reads the shadows then).
 	void ensure_pgxp_ram_shadow()
 	{
-		if (m_pgxp_ram_shadow.empty() && m_ram->size() > 0)
+		if (m_pgxp_enabled && m_pgxp_ram_shadow.empty() && m_ram->size() > 0)
 			m_pgxp_ram_shadow.resize(m_ram->size() / 4);
 	}
 
@@ -280,6 +280,8 @@ protected:
 	uint32_t m_com_delay;
 	uint32_t m_delayv;
 	uint32_t m_delayr;
+	// Set by set_pgxp_enabled(). While it is clear no shadow is recorded or propagated, so the CPU does no PGXP work.
+	bool m_pgxp_enabled = false;
 	// PGXP shadow (CLAUDE.md Phase 4c) paired with m_delayr/m_delayv -
 	// carries a load's shadow (from delayed_load()'s optional argument)
 	// across the same one-instruction MIPS load delay m_delayr/m_delayv
