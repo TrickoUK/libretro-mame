@@ -141,6 +141,8 @@ bool psxgpu_device::gpu_active()
 			vram.width = 1024;
 			vram.height = m_vram_height;
 			m_gpu_vram_tex = m_gpu_engine->create_texture(vram);
+			// a new texture holds nothing, so every row is sent again
+			m_gpu_vram_shadow_valid = false;
 
 			if (!m_gpu_module || !m_gpu_vram_tex)
 				m_gpu_engine = nullptr;
@@ -2747,6 +2749,11 @@ bool psxgpu_device::gpu_send_frame( const osd::gpu_readback_rect *rects, int cou
 	m_gpu_frame_state.clear();
 	m_gpu_frame_commands.clear();
 	m_gpu_frame_vertex_count = 0;
+	// the shadow already holds the rows that were just offered, so a refused send must resend them
+	if( send && !ok )
+	{
+		m_gpu_vram_shadow_valid = false;
+	}
 	m_gpu_chunk_failed = flush && !ok;
 
 	// MAME_GPU_PROF: every 300 frames, the chunks sent per frame and the time they took, with the timings of the
