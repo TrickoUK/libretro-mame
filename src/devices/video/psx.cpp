@@ -20,6 +20,7 @@
 #include "screen.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -145,7 +146,9 @@ bool psxgpu_device::gpu_active()
 				m_gpu_engine = nullptr;
 			m_gpu_texfilter_mode = std::clamp( machine().osd().gpu_render_texfilter(), 0, 3 );
 
-			// Chunks go to engines that overlap the GPU with emulation; MAME_PS1_GPU_CHUNK sets the size in triangles (0 = off)
+			m_gpu_prof = std::getenv( "MAME_GPU_PROF" ) != nullptr;
+
+			// Chunks go to engines that overlap the GPU with emulation; MAME_PS1_GPU_CHUNK sets the size in queued commands (0 = off)
 			if( m_gpu_engine != nullptr && m_gpu_engine->caps().chunked_frames )
 			{
 				const char *chunk_env = std::getenv( "MAME_PS1_GPU_CHUNK" );
@@ -2732,13 +2735,32 @@ bool psxgpu_device::gpu_send_frame( const osd::gpu_readback_rect *rects, int cou
 	bool ok = send;
 	if( send )
 	{
+		const auto start = std::chrono::steady_clock::now();
 		ok = flush ? m_gpu_engine->flush_frame( frame ) : m_gpu_engine->submit_frame( frame );
+		if( flush )
+		{
+			m_gpu_prof_chunks++;
+			m_gpu_prof_chunk_ms += std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - start ).count();
+		}
 	}
 	m_gpu_frame_vertices.clear();
 	m_gpu_frame_state.clear();
 	m_gpu_frame_commands.clear();
 	m_gpu_frame_vertex_count = 0;
 	m_gpu_chunk_failed = flush && !ok;
+
+	// MAME_GPU_PROF: every 300 frames, the chunks sent per frame and the time they took, with the timings of the
+	// frame's final submit from the engine
+	if( m_gpu_prof && !flush && ok && ++m_gpu_prof_frames == 300 )
+	{
+		const osd::gpu_engine_stats &st = m_gpu_engine->last_frame_stats();
+		fprintf( stderr, "[psx_gpu] %u frames: %.2f chunks/frame, %.3f ms/frame in chunk submits; final submit: upload %.3f draw %.3f readback %.3f ms, %u draw calls, %llu uploaded bytes\n",
+				m_gpu_prof_frames, double( m_gpu_prof_chunks ) / m_gpu_prof_frames, m_gpu_prof_chunk_ms / m_gpu_prof_frames,
+				st.upload_ms, st.draw_ms, st.readback_ms, st.draw_calls, (unsigned long long)st.uploaded_bytes );
+		m_gpu_prof_frames = 0;
+		m_gpu_prof_chunks = 0;
+		m_gpu_prof_chunk_ms = 0.0;
+	}
 	return ok;
 }
 

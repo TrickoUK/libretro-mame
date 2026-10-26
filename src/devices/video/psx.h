@@ -350,6 +350,11 @@ private:
 	// The VRAM texture as the engine last received it, so each submit uploads only the rows that changed
 	std::vector<uint16_t> m_gpu_vram_shadow;
 	bool m_gpu_vram_shadow_valid = false;
+	// MAME_GPU_PROF counters, reported every 300 frames by gpu_send_frame()
+	bool m_gpu_prof = false;
+	uint32_t m_gpu_prof_frames = 0;
+	uint32_t m_gpu_prof_chunks = 0;
+	double m_gpu_prof_chunk_ms = 0.0;
 
 	// The user-selectable internal-resolution multiplier (mame_psx_gpu_hle
 	// core option on the retro OSD - "disabled"/"2x"/"4x", read once at
