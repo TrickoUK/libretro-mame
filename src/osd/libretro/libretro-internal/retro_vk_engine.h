@@ -290,7 +290,7 @@ private:
 	image m_resolve;
 
 	// multisampling: the sample counts the device supports for colour and depth targets and for sampled colour,
-	// the largest count that is supported, and the memory budget the target's samples must fit in (as the OpenGL engine)
+	// the largest count that is supported, and the memory budget the target's samples must fit in
 	uint32_t m_sample_counts = 0;
 	uint32_t m_sampled_sample_counts = 0;
 	uint64_t m_msaa_budget = 1024ULL * 1024 * 1024;

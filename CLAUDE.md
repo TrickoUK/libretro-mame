@@ -112,8 +112,8 @@ mixed into history.
   hooks), `src/mame/namco/namcos22_v.cpp` and `namcos22.h` (host-GPU capture hooks: the `m_gpu_collecting` ternary and early
   returns in `poly3d_drawquad`/`poly3d_drawsprite`, the two `gpu_render_scene` calls in the screen updates; the rest is `namcos22_gpu.ipp`), `src/mame/namco/namcos23.cpp` (host-GPU hooks: the
   `namcos23_shader.h`/`gpuengine.h` includes, `friend class namcos23_renderer;`, the renderer's `gpu_*` members and the
-  `if (gpu_render(...)) return;` after the sort in `render_flush()`; the rest is `namcos23_gpu.ipp` and `namcos23_shader.h`), `src/mame/snk/hng64_3d.ipp` and `hng64_v.cpp` (3D supersampling: bigger buffers,
-  scaled vertices and the palette-resolve composite; fork-only, not for upstream).
+  `if (gpu_render(...)) return;` after the sort in `render_flush()`; the rest is `namcos23_gpu.ipp` and `namcos23_shader.h`), `src/mame/snk/hng64_3d.ipp` and `hng64_v.cpp` (the GPU path's engine and submit/collect, and the
+  palette-resolve composite that averages supersampled GPU output; fork-only, not for upstream). The software renderer is upstream again, so only these GPU-path hunks conflict.
 - Upstream API changes in that sync that broke fork/libretro code:
   - `screen_device` is split per type (`screen_svg_device`, vector screens).
     Use `video_output_interface_enumerator`/`is_vector()` instead of
@@ -140,8 +140,8 @@ and `002-batocera-ini`. Keep these fixes through upstream merges, and check whet
 upstream has fixed the same thing before re-porting one:
 - `plugins/offscreenreload/init.lua`: batocera's lightgun reload auto-bind, which
   skips the bind when BUTTON2 is already used by gameplay.
-- `src/mame/sega/model2*`: supersample antialiasing of the 3D layer
-  (the generic `mame_3d_supersample` core option, off by default); `hotd` has no trigger flash (`init_hotd` ROM patch,
+- `src/mame/sega/model2*`: supersample antialiasing of the 3D layer on the host-GPU path
+  (the generic `mame_3d_supersample` core option, off by default; the software renderer is upstream and ignores it); `hotd` has no trigger flash (`init_hotd` ROM patch,
   Revision A only); `gunblade` gun Y gets `PORT_REVERSE` under `__LIBRETRO__`.
 - `src/mame/taito/opwolf.cpp`: no trigger flash on `opwolf` only. It's a runtime ROM
   patch about 900 frames in, because the C-chip ROM check rejects a static patch.
@@ -336,6 +336,10 @@ distrobox enter mame-dev -- retroarch -v -L /var/home/bazzite/Projects/libretro/
 
 ### Architecture decision: private EGL context, not `RETRO_HW_RENDER` (Phase 1 done, 2026-09-16)
 
+**Superseded (VO.1, 2026-10-26):** the EGL/OpenGL engine and its loader were removed. The Vulkan engine
+(`retro_vk_engine`, below) is now the only host-GPU engine. The EGL reasoning below is kept as history: the private,
+independent-context argument still applies to the Vulkan instance and device.
+
 The dead `RETRO_HW_RENDER` scaffolding above turned out to be a dead end
 worth avoiding, not reviving: investigation for the implementation plan
 found (a) `hw_render`/`context_reset`/`context_destroy`/`do_glflush` are
@@ -371,17 +375,11 @@ for full phase-by-phase detail):
   (`src/osd/osdepend.h`), with a shared nullptr-returning default in
   `osd_common_t` (`src/osd/modules/lib/osdobj_common.h`) so **every other
   OSD (SDL/Windows) needed zero changes**.
-- `src/osd/libretro/libretro-internal/retro_gpu_target.{h,cpp}` — the real
-  EGL-backed implementation, only for the retro OSD. **EGL/GL are loaded
-  entirely via `dlopen()`/`dlsym()` at runtime, not linked at build time** —
-  this build host has no EGL/GL `-devel` packages (layering them on this
-  atomic/immutable desktop needs a reboot), so there are no new build-time
-  header/library dependencies at all; the feature just degrades to
-  unavailable (`is_valid() == false`) on any system without a working
-  OpenGL/EGL install.
-- Vulkan engine (the default, `mame_3d_gpu_api`): `src/osd/libretro/libretro-internal/retro_vk_device`, `retro_vk_engine` and
-  `retro_vk_shader` `.{h,cpp}`. The OpenGL engine (`retro_gpu_engine`) is used when no Vulkan 1.3 device is found. Status and
-  plan: `my-docs/gpu-vulkan-plan.md`.
+- The EGL-backed `retro_gpu_target` of Phase 1 (removed in VO.1): EGL/GL were loaded with `dlopen()`/`dlsym()`.
+- Vulkan engine (the only host-GPU engine since VO.1, 2026-10-26): `src/osd/libretro/libretro-internal/retro_vk_device`,
+  `retro_vk_engine` and `retro_vk_shader` `.{h,cpp}`. The Vulkan loader is opened with `dlopen()`, so there are no
+  build-time Vulkan dependencies. Without a Vulkan 1.3 device the GPU path is off and the system renders in software.
+  Status and plan: `my-docs/gpu-vulkan-plan.md`, `my-docs/gpu-vulkan-only-plan.md`.
 - Gated behind a **`HAVE_RETRO_GPU_TARGET`** build define (on by default for Linux
   builds since 2026-10-23, set in `Makefile.libretro`; pass `HAVE_RETRO_GPU_TARGET=` empty to leave it out) — **not** `HAVE_OPENGL`: that name collides
   with the pre-existing dead `RETRO_HW_RENDER` code above, which shares the
@@ -1193,7 +1191,7 @@ MAME's own `video:snapshot()` (the emulated frame at native resolution).
   upstream standards: hardware-accurate, no libretro/fork-only hooks in shared code, and keep
   it separable from fork-only changes.
   **Exception**: fork-only features that upstream would never take (the PS1 GPU HLE/PGXP path,
-  Voodoo supersampling/edge AA, gamepad steering and similar enhancements) don't need to follow
+  GPU-path Voodoo supersampling, gamepad steering and similar enhancements) don't need to follow
   the hardware. There, make it work and make it as efficient as possible.
 
 - **Code comments describe how the hardware works (or is assumed to work), never the edit.** This applies to

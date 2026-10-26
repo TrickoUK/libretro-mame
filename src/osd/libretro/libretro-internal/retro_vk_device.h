@@ -10,8 +10,8 @@
     Vulkan instance or device.
 
     The device exists for the whole session once it has been created. A
-    failure latches (failed()) and the caller stays on the software or
-    OpenGL path for the rest of the session, as the GL engine does.
+    failure latches (failed()) and the caller stays on the software
+    path for the rest of the session.
 
 ***************************************************************************/
 #ifndef MAME_OSD_LIBRETRO_RETRO_VK_DEVICE_H

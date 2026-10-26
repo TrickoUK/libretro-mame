@@ -709,7 +709,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_3d_supersample",
       "3D Supersampling",
       NULL,
-      "3D games with enhanced rendering: 3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others), Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games) SNK Hyper Neo Geo 64 and Namco System 22/Super System 22 and System 23/Super System 23 (with 3D GPU Rendering). On Voodoo games it reduces shimmering on detailed textures seen at a distance, such as foliage and terrain, by averaging several texture samples across each pixel wherever a texture is shrunk; only texture colour is smoothed. On GTI Club hardware and Hyper Neo Geo 64 the whole 3D layer is rendered at 2x, 3x or 4x the native size and averaged down, which also smooths polygon edges; the HUD, text and 2D layers are unchanged. Each step costs more CPU: 2x is a good start, 4x can slow heavy scenes on slower machines. Save states made with it on, on GTI Club hardware, can only be loaded with it on. Requires restarting content to take effect.",
+      "3D games with enhanced rendering: 3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others), Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games) SNK Hyper Neo Geo 64 and Namco System 22/Super System 22 and System 23/Super System 23 (with 3D GPU Rendering). Only with 3D GPU Rendering enabled: the software renderers draw at native size and ignore it. On Voodoo games it reduces shimmering on detailed textures seen at a distance, such as foliage and terrain, by averaging several texture samples across each pixel wherever a texture is shrunk; only texture colour is smoothed. On GTI Club hardware and Hyper Neo Geo 64 the whole 3D layer is rendered at 2x, 3x or 4x the native size and averaged down, which also smooths polygon edges; the HUD, text and 2D layers are unchanged. Each step costs more CPU: 2x is a good start, 4x can slow heavy scenes on slower machines. Save states made with it on, on GTI Club hardware, can only be loaded with it on. Requires restarting content to take effect.",
       NULL,
       "video",
       {
@@ -725,7 +725,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_3d_output_scale",
       "3D Output Scale",
       NULL,
-      "Sega Model 2, Konami GTI Club hardware and 3dfx Voodoo boards drawn on the host GPU (Midway Seattle/Vegas, Konami Viper). SNK Hyper Neo Geo 64 and Namco System 22/23 always output native and ignore this option. Normally 3D Supersampling renders the 3D layer larger and averages it back down to the native screen size. With this set to 'Match supersampling' the screen is presented at the supersampling size instead (for example 2x of 496x384), so the 3D layer keeps all its extra detail; the 2D layers (tilemaps, sprites, text) are enlarged with sharp pixels. Needs 3D Supersampling set to 2x or higher; it has no effect otherwise. Requires restarting content to take effect.",
+      "Sega Model 2, Konami GTI Club hardware and 3dfx Voodoo boards drawn on the host GPU (Midway Seattle/Vegas, Konami Viper). SNK Hyper Neo Geo 64 and Namco System 22/23 always output native and ignore this option. Normally 3D Supersampling renders the 3D layer larger and averages it back down to the native screen size. With this set to 'Match supersampling' the screen is presented at the supersampling size instead (for example 2x of 496x384), so the 3D layer keeps all its extra detail; the 2D layers (tilemaps, sprites, text) are enlarged with sharp pixels. Only with 3D GPU Rendering enabled, and needs 3D Supersampling set to 2x or higher; it has no effect otherwise. Requires restarting content to take effect.",
       NULL,
       "video",
       {
@@ -766,38 +766,10 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "disabled"
    },
    {
-      CORE_NAME "_3d_edge_aa",
-      "3D Edge Anti-Aliasing",
-      NULL,
-      "3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others), software rendering only. Smooths the stair-stepped outlines of 3D objects. Only edges of depth-tested 3D geometry are touched; textures, HUD and text stay sharp, and emulation is unaffected. Low CPU cost. It has no effect while 3D GPU Rendering is enabled: on the GPU path, 3D Supersampling smooths the edges instead. Other 3D hardware is unaffected (3D Supersampling already smooths edges on GTI Club hardware). Requires restarting content to take effect.",
-      NULL,
-      "video",
-      {
-         { "disabled", "Disabled" },
-         { "enabled",  "Enabled" },
-         { NULL, NULL },
-      },
-      "disabled"
-   },
-   {
-      CORE_NAME "_3d_gpu_api",
-      "3D GPU API",
-      NULL,
-      "Graphics API for the host-GPU 3D rendering above. Vulkan is used when a Vulkan 1.3 device is present, otherwise OpenGL. Namco System 22 needs dualSrcBlend, so on a Vulkan device without it that system's 3D layer is drawn in software.",
-      NULL,
-      "video",
-      {
-         { "vulkan", "Vulkan" },
-         { "opengl", "OpenGL" },
-         { NULL, NULL },
-      },
-      "vulkan"
-   },
-   {
       CORE_NAME "_3d_texfilter",
       "3D Texture Filtering",
       NULL,
-      "Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games) and, with 3D GPU Rendering, Namco System 22/Super System 22 and System 23/Super System 23 polygons (not sprites). Smooths blocky magnified textures with bilinear filtering. Operation Thunder Hurricane and Solar Assault already filter on the real hardware; this turns it on for the other games. Other 3D hardware is unaffected. Requires restarting content to take effect.",
+      "Only with 3D GPU Rendering enabled: Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games) and Namco System 22/Super System 22 and System 23/Super System 23 polygons (not sprites). Smooths blocky magnified textures with bilinear filtering. Operation Thunder Hurricane and Solar Assault already filter on the real hardware; this turns it on for the other games. The software renderers keep their own filtering, and other 3D hardware is unaffected. Requires restarting content to take effect.",
       NULL,
       "video",
       {

@@ -33,7 +33,6 @@
 #include "libretro_vfs.h"
 
 #if defined(HAVE_RETRO_GPU_TARGET)
-#include "libretro-internal/retro_gpu_engine.h"
 #include "libretro-internal/retro_vk_device.h"
 #include "libretro-internal/retro_vk_engine.h"
 #endif
@@ -331,51 +330,33 @@ osd::gpu_engine *retro_osd_interface::get_gpu_engine(const char *system)
 	if (!enabled || m_gpu_engine_failed)
 		return nullptr;
 
-	// The API is decided once per session. An engine keeps its persistent targets, so a session
-	// cannot switch API part way through.
-	if (!m_gpu_api_decided)
+	// The device is created once per session. Without a Vulkan 1.3 device, or when an engine fails to
+	// start, the system renders in software.
+	if (!m_vk_device)
+		m_vk_device = std::make_unique<retro_vk::vk_device>();
+	if (!m_vk_device->valid() && !m_vk_device->failed())
 	{
-		m_gpu_api_decided = true;
-		if (gpu3d_api == GPU3D_API_OPENGL)
-		{
-			fprintf(stderr, "[retro_gpu] OpenGL engine for this session (mame_3d_gpu_api = opengl)\n");
-		}
+		std::string report;
+		if (m_vk_device->create(report))
+			fprintf(stderr, "[retro_gpu] %s\n", report.c_str());
 		else
-		{
-			if (!m_vk_device)
-				m_vk_device = std::make_unique<retro_vk::vk_device>();
-			if (!m_vk_device->valid() && !m_vk_device->failed())
-			{
-				std::string report;
-				if (m_vk_device->create(report))
-					fprintf(stderr, "[retro_gpu] %s\n", report.c_str());
-				else
-					m_vk_device->latch("device", report.c_str());
-			}
-			m_gpu_engine_vulkan = m_vk_device->valid();
-			fprintf(stderr, "[retro_gpu] %s engine for this session\n",
-					m_gpu_engine_vulkan ? "Vulkan" : "OpenGL (Vulkan device unavailable)");
-		}
+			m_vk_device->latch("device", report.c_str());
 	}
-
-	if (m_gpu_engine_vulkan)
-	{
-		auto vk_engine = std::make_unique<retro_vk_engine>(*m_vk_device);
-		if (!vk_engine->failed())
-		{
-			m_gpu_engines.push_back(std::move(vk_engine));
-			return m_gpu_engines.back().get();
-		}
-		fprintf(stderr, "[retro_gpu] Vulkan engine failed to initialise, using OpenGL for this device\n");
-	}
-
-	auto engine = std::make_unique<retro_gpu_engine>();
-	if (!engine->is_valid())
+	if (!m_vk_device->valid())
 	{
 		m_gpu_engine_failed = true;
 		return nullptr;
 	}
-	m_gpu_engines.push_back(std::move(engine));
+
+	// An engine keeps its persistent targets, so each one is made for the life of its machine.
+	auto vk_engine = std::make_unique<retro_vk_engine>(*m_vk_device);
+	if (vk_engine->failed())
+	{
+		fprintf(stderr, "[retro_gpu] Vulkan engine failed to initialise, this system renders in software\n");
+		m_gpu_engine_failed = true;
+		return nullptr;
+	}
+	m_gpu_engines.push_back(std::move(vk_engine));
 	return m_gpu_engines.back().get();
 #else
 	return nullptr;
@@ -410,12 +391,12 @@ void retro_osd_interface::init(running_machine &machine)
 	// call our parent
 	osd_common_t::init(machine);
 
+#if defined(HAVE_RETRO_GPU_TARGET)
 	// the previous machine (before a hard reset) is gone, and with it every
 	// device that held one of the GPU engines
 	m_gpu_engines.clear();
 	m_gpu_engine_failed = false;
-	m_gpu_api_decided = false;
-	m_gpu_engine_vulkan = false;
+#endif
 
 #if 0
 	const char *stemp;
@@ -437,20 +418,6 @@ void retro_osd_interface::init(running_machine &machine)
 		using namespace std::placeholders;
 		machine.add_logerror_callback(std::bind(&retro_osd_interface::output_oslog, this, _1));
 	}
-
-	// NOTE: Phase 1's self-test used to run right here, constructing the
-	// GPU render target immediately. Removed for Phase 2: init() runs
-	// synchronously inside retro_load_game(), before RetroArch has set up
-	// its own Wayland/EGL context, and constructing our EGL context this
-	// early was found to corrupt RetroArch's later context setup
-	// (EGL_BAD_CONTEXT, then a crash) - regardless of EGL platform choice
-	// or careful current-context save/restore around our own calls. The
-	// GPU render target is now acquired lazily instead, on first real use
-	// from psxgpu_device::gpu_active() (src/devices/video/psx.cpp), which
-	// only happens once actual gameplay execution is underway (well after
-	// RetroArch's own setup completes). Phase 1's mechanism itself was
-	// already validated safe via an LD_PRELOAD-injected background-thread
-	// test against a live RetroArch session - see the implementation plan.
 }
 
 

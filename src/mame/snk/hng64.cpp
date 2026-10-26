@@ -1021,7 +1021,7 @@ void hng64_state::sysregs_w(offs_t offset, u32 data, u32 mem_mask)
 	if (((offset * 4) & 0xff00) == 0x1100)
 		LOGMASKED(LOG_SYSREGS, "%s: HNG64 writing to SYSTEM Registers 0x%08x == 0x%08x. (PC=%08x)\n", machine().describe_context(), offset*4, m_sysregs[offset], m_maincpu->pc());
 
-	const int scanline = m_screen->vpos() / m_output_scale;
+	const int scanline = m_screen->vpos();
 
 	switch (offset * 4)
 	{
@@ -1171,10 +1171,10 @@ void hng64_state::vregs_w(offs_t offset, u32 data, u32 mem_mask)
 
 	if (newval != m_videoregs[offset])
 	{
-		const int vpos = m_screen->vpos() / m_output_scale;
+		const int vpos = m_screen->vpos();
 
 		if (vpos > 0)
-			m_screen->update_partial(vpos * m_output_scale - 1);
+			m_screen->update_partial(vpos - 1);
 
 		m_videoregs[offset] = newval;
 	}
@@ -2176,11 +2176,7 @@ void hng64_state::set_irq(u32 irq_vector)
 
 TIMER_DEVICE_CALLBACK_MEMBER(hng64_state::hng64_irq)
 {
-	// the scan timer fires on every screen line, which are m_output_scale per native line
-	if (param % m_output_scale)
-		return;
-
-	const int scanline = param / m_output_scale;
+	const int scanline = param;
 
 	if (!(scanline & 1)) // in reality there are half as many scanlines, as we're running in interlace mode
 	{

@@ -5,8 +5,8 @@
     Vulkan implementation of osd::gpu_engine (see retro_vk_engine.h). Every
     image is kept in VK_IMAGE_LAYOUT_GENERAL, so transfers and clears need
     no layout changes. The colour target is B8G8R8A8, so a read-back copies
-    the bytes the OpenGL engine's GL_BGRA read-back produces, and the RG8
-    read-back takes the red and green bytes as the OpenGL one does.
+    the bytes of a BGRA read-back, and the RG8
+    read-back takes the red and green bytes of each pixel.
 ***************************************************************************/
 
 #include "retro_vk_engine.h"
@@ -90,8 +90,8 @@ struct output_constants
 };
 static_assert(sizeof(output_constants) == 36, "output constants match the read-back shader");
 
-// The read-back compute pass. It averages each ds-by-ds block of the target (through the same integer arithmetic
-// as the OpenGL output pass, so both engines give the same bytes), maps the colour through the lookup table and
+// The read-back compute pass. It averages each ds-by-ds block of the target (with integer arithmetic),
+// maps the colour through the lookup table and
 // writes the output pixels as BGRA bytes, one word per pixel. @SAMPLER@ and @SAMPLE@ are replaced by output_source():
 // a sampler2DMS read sample by sample, or a sampler2D read once.
 constexpr const char *OUTPUT_GLSL = R"(#version 450
@@ -643,8 +643,7 @@ void retro_vk_engine::destroy_shader_module(osd::gpu_handle handle)
 //**************************************************************************
 
 // Allocates the target when its size or depth mode changes, and reports whether
-// the target must be cleared before this frame's commands (the same rules as the
-// OpenGL engine's ensure_target()).
+// the target must be cleared before this frame's commands.
 bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &clear_color, bool &clear_depth)
 {
 	const bool realloc = !m_target_valid || target.width != m_target.width || target.height != m_target.height
@@ -788,7 +787,7 @@ void retro_vk_engine::record_barrier()
 			0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
-// CLEAR and the target's own clear ignore the clip, as the OpenGL engine's do.
+// CLEAR and the target's own clear ignore the clip.
 void retro_vk_engine::record_clear(const float *rgba, bool color, bool depth)
 {
 	if (m_target.msaa_samples > 0)
@@ -823,7 +822,7 @@ constexpr VkSampleLocationEXT STANDARD_LOCATIONS_8[] = {
 
 // Sets the sample locations for the draws that follow on a multisample target: every sample at the pixel centre for a
 // draw without multisampling, which covers the pixels whose centres the triangle contains and writes all their samples
-// (the OpenGL engine's GL_MULTISAMPLE-off draw), and the standard pattern otherwise. Only called when centre_samples().
+// (a draw with multisampling off), and the standard pattern otherwise. Only called when centre_samples().
 void retro_vk_engine::set_sample_locations(bool multisample)
 {
 	const int mode = multisample ? 0 : 1;
@@ -953,7 +952,7 @@ size_t retro_vk_engine::readback_bytes(const osd::gpu_readback_rect &r) const
 	return readback_lut_bytes(r) + pixels * 4;
 }
 
-// Each lookup value is stored as one word, so the pass reads it with the same indexing as the OpenGL uniform array.
+// Each lookup value is stored as one word, so the pass reads it with the indexing of a uniform array.
 void retro_vk_engine::write_readback_lut(const osd::gpu_readback_rect &r, uint8_t *dst) const
 {
 	if (!readback_lut_bytes(r))
@@ -1176,7 +1175,7 @@ bool retro_vk_engine::sample_count_supported(int samples, bool sampled) const
 }
 
 // Reduces the requested sample count to what the device supports and to the memory budget for the target (colour and
-// depth samples plus the single-sample resolve image), as the OpenGL engine's fit_msaa() does. One sample is not
+// depth samples plus the single-sample resolve image). One sample is not
 // multisampling, so it becomes none.
 void retro_vk_engine::fit_msaa(osd::gpu_target_desc &target)
 {
@@ -1242,7 +1241,7 @@ void retro_vk_engine::snap_triangles(const osd::gpu_frame &frame, uint8_t *verti
 	}
 }
 
-// Refuses the frames the OpenGL engine refuses, with the same checks.
+// Refuses the frames that the engine cannot draw.
 bool retro_vk_engine::validate_frame(const osd::gpu_frame &frame)
 {
 	const osd::gpu_target_desc &tg = frame.target;
@@ -1711,7 +1710,7 @@ VkPipeline retro_vk_engine::get_pipeline(const pipeline_key &key, const program 
 }
 
 // Resolves every draw's program and pipeline before any command is recorded, so a failure leaves the frame unrecorded.
-// The depth mode of the frame sets the depth test: ORDER always uses LESS and writes, as the OpenGL engine does.
+// The depth mode of the frame sets the depth test: ORDER always uses LESS and writes.
 bool retro_vk_engine::prepare_draws(const osd::gpu_frame &frame, bool use_depth, std::vector<VkPipeline> &pipelines)
 {
 	for (int i = 0; i < frame.command_count; i++)
@@ -1967,7 +1966,7 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		return false;
 
 	// The previous frame must finish before its command buffer, descriptor pools and staging are reused. Its
-	// uncollected read-backs are dropped, as the OpenGL engine drops them.
+	// uncollected read-backs are dropped.
 	if (!wait_in_flight())
 		return false;
 	drop_pending();

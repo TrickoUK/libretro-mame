@@ -73,11 +73,13 @@ public:
 	static constexpr int POLY_A = 9;
 
 private:
-	// The 3D layer is 512x384. m_ss is the supersampling factor (1 = native): the framebuffers,
-	// depth buffer and polygon coordinates are m_ss times bigger and draw() averages them down.
+	// The 3D layer is 512x384. m_ss is the host-GPU supersampling factor (1 = native, and always 1 without an
+	// engine): the GPU framebuffers, depth buffer and polygon coordinates are m_ss times bigger and draw() averages
+	// a GPU-drawn page down. m_draw_ss is the scale the polygons of the current frame are drawn at.
 	static constexpr int NATIVE_WIDTH = 512;
 	static constexpr int NATIVE_HEIGHT = 384;
 	int m_ss;
+	int m_draw_ss;
 	// With the 3D output scale the screen is presented at the supersampling size instead of
 	// averaging the 3D layer down, so draw() copies samples one to one.
 	bool m_output_scaled;

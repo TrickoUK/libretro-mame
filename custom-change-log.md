@@ -617,3 +617,14 @@ builds get them straight from here.
 - Speed is the same as OpenGL on the games measured. MSAA works on Vulkan.
 - PS1 frames are sent to the GPU in chunks while emulation runs.
 - Namco System 22 needs dualSrcBlend; on a Vulkan device without it, that system's 3D layer is drawn in software.
+
+### Host-GPU engine: Vulkan only
+- The OpenGL engine and its loader are gone, along with the `mame_3d_gpu_api` option. Vulkan 1.3 is the only host-GPU
+  API; without a Vulkan device the 3D and PS1 GPU paths render in software.
+
+### Software 3D renderers match upstream again (Voodoo, K001005, Model 2, HNG64); PS1 PGXP costs nothing when off
+- With 3D GPU Rendering off, Voodoo, K001005, Model 2 and HNG64 draw exactly like upstream at native size. The software-only
+  texture supersampling and the Voodoo software edge AA are gone (`mame_3d_edge_aa` was removed).
+- The 3D options (supersampling, output scale, MSAA, texture filtering, anisotropic) only act on the host-GPU path, and the
+  core option texts say so.
+- PS1 with PGXP on but the GPU HLE off, and with PGXP off, does no shadow work on the CPU.

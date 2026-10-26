@@ -12,7 +12,7 @@
     gpu_shader_module (GLSL fragment source); the engine owns contexts,
     textures, programs, depth and read-back.
 
-    The interface holds no OpenGL types, so another backend can implement
+    The interface holds no API types, so another backend can implement
     it. An OSD without an engine returns nullptr from
     osd_interface::get_gpu_engine(), and a device must then keep using its
     software renderer.
@@ -322,7 +322,6 @@ struct gpu_frame
 
 struct gpu_engine_caps
 {
-	int gl_major = 0, gl_minor = 0;
 	int max_texture_size = 0;
 	int max_samples = 0;
 	// The engine returns from submit_frame() before the GPU finishes, and its frames are cheap enough to send
@@ -373,7 +372,7 @@ public:
 
 	// Sends the commands of a frame that continues after this call: the frame's own read-backs are not
 	// performed, nothing is waited for, and the next submit of the device is ordered after these commands. The
-	// default submits the frame without read-backs, which the OpenGL engine returns from without waiting.
+	// default submits the frame without read-backs, and returns without waiting.
 	virtual bool flush_frame(const gpu_frame &frame)
 	{
 		gpu_frame chunk = frame;

@@ -133,7 +133,7 @@ public:
 	virtual bool gpu_render_pgxp_enabled() const override
 	{
 #if defined(HAVE_RETRO_GPU_TARGET)
-		return psx_gpu_pgxp_enable;
+		return psx_gpu_hle_scale > 0 && psx_gpu_pgxp_enable;
 #else
 		return false;
 #endif
@@ -189,7 +189,6 @@ public:
 	virtual int supersample() const override { return supersample_factor; }
 	virtual bool supersample_output() const override { return supersample_output_enable; }
 	virtual int msaa() const override { return msaa_samples_option; }
-	virtual bool edge_aa() const override { return edge_aa_enable; }
 	virtual bool texture_filter() const override { return texfilter_enable; }
 	virtual int anisotropy() const override { return aniso_taps_option; }
 	virtual osd::gpu_engine *get_gpu_engine(const char *system) override;
@@ -206,13 +205,12 @@ private:
 	int m_last_click_x;
 	int m_last_click_y;
 
+#if defined(HAVE_RETRO_GPU_TARGET)
 	// one Vulkan device for the core, declared before the engines so that it outlives them
 	std::unique_ptr<retro_vk::vk_device> m_vk_device;
-	// the API of this session's engines, decided by the first engine request after init()
-	bool m_gpu_api_decided = false;
-	bool m_gpu_engine_vulkan = false;
 	std::vector<std::unique_ptr<osd::gpu_engine>> m_gpu_engines;
 	bool m_gpu_engine_failed = false;
+#endif
 };
 
 //============================================================

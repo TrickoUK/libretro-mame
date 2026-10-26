@@ -1485,16 +1485,19 @@ void psxcpu_device::commit_delayed_load()
 	if( m_delayr != 0 )
 	{
 		m_r[ m_delayr ] = m_delayv;
-		m_pgxp_gpr[ m_delayr ] = m_pgxp_delay_shadow;
-		// PGXP (CLAUDE.md Phase 4c investigation): tag with the value
-		// actually being committed to this register right now - see
-		// the value-validation-at-use comment on the OP_SW site below
-		// for why this is checked again there, not just trusted because
-		// .valid is set here.
-		m_pgxp_gpr[ m_delayr ].tag_value = m_delayv;
+		if( m_pgxp_enabled )
+		{
+			m_pgxp_gpr[ m_delayr ] = m_pgxp_delay_shadow;
+			// PGXP (CLAUDE.md Phase 4c investigation): tag with the value
+			// actually being committed to this register right now - see
+			// the value-validation-at-use comment on the OP_SW site below
+			// for why this is checked again there, not just trusted because
+			// .valid is set here.
+			m_pgxp_gpr[ m_delayr ].tag_value = m_delayv;
+			m_pgxp_delay_shadow = gte::pgxp_shadow();
+		}
 		m_delayr = 0;
 		m_delayv = 0;
-		m_pgxp_delay_shadow = gte::pgxp_shadow();
 	}
 }
 
@@ -1561,7 +1564,8 @@ void psxcpu_device::load( uint32_t reg, uint32_t value )
 		// own stale-RAM-shadow problem (see its comment) - that one is
 		// about the destination address, this one is about the *source
 		// register* silently outliving the value that earned its shadow.
-		m_pgxp_gpr[ reg ] = gte::pgxp_shadow();
+		if( m_pgxp_enabled )
+			m_pgxp_gpr[ reg ] = gte::pgxp_shadow();
 	}
 }
 
@@ -1571,14 +1575,16 @@ void psxcpu_device::delayed_load( uint32_t reg, uint32_t value, const gte::pgxp_
 	{
 		m_delayr = 0;
 		m_delayv = 0;
-		m_pgxp_delay_shadow = gte::pgxp_shadow();
+		if( m_pgxp_enabled )
+			m_pgxp_delay_shadow = gte::pgxp_shadow();
 	}
 
 	advance_pc();
 
 	m_delayr = reg;
 	m_delayv = value;
-	m_pgxp_delay_shadow = shadow != nullptr ? *shadow : gte::pgxp_shadow();
+	if( m_pgxp_enabled )
+		m_pgxp_delay_shadow = shadow != nullptr ? *shadow : gte::pgxp_shadow();
 }
 
 void psxcpu_device::branch( uint32_t address )
@@ -2479,7 +2485,8 @@ void psxcpu_device::execute_run()
 							m_r[ INS_RD( m_op ) ] = m_pc + 4;
 							// PGXP (CLAUDE.md Phase 4c): see load()'s comment - a
 							// link register is never vertex data.
-							m_pgxp_gpr[ INS_RD( m_op ) ] = gte::pgxp_shadow();
+							if( m_pgxp_enabled )
+								m_pgxp_gpr[ INS_RD( m_op ) ] = gte::pgxp_shadow();
 						}
 						break;
 
@@ -2606,7 +2613,8 @@ void psxcpu_device::execute_run()
 						{
 							m_r[ 31 ] = m_pc + 4;
 							// PGXP (CLAUDE.md Phase 4c): see load()'s comment.
-							m_pgxp_gpr[ 31 ] = gte::pgxp_shadow();
+							if( m_pgxp_enabled )
+								m_pgxp_gpr[ 31 ] = gte::pgxp_shadow();
 						}
 						break;
 
@@ -2617,7 +2625,8 @@ void psxcpu_device::execute_run()
 						{
 							m_r[ 31 ] = m_pc + 4;
 							// PGXP (CLAUDE.md Phase 4c): see load()'s comment.
-							m_pgxp_gpr[ 31 ] = gte::pgxp_shadow();
+							if( m_pgxp_enabled )
+								m_pgxp_gpr[ 31 ] = gte::pgxp_shadow();
 						}
 						break;
 					}
@@ -2631,7 +2640,8 @@ void psxcpu_device::execute_run()
 					unconditional_branch();
 					m_r[ 31 ] = m_pc + 4;
 					// PGXP (CLAUDE.md Phase 4c): see load()'s comment.
-					m_pgxp_gpr[ 31 ] = gte::pgxp_shadow();
+					if( m_pgxp_enabled )
+						m_pgxp_gpr[ 31 ] = gte::pgxp_shadow();
 					break;
 
 				case OP_BEQ:

@@ -131,7 +131,9 @@ public:
 
 	// The 3D buffers are 512x512 on the hardware.  With supersampling they are m_ss times bigger in
 	// each direction, and the polygon coordinates are scaled to match.
-	int supersample() const { return m_ss; }
+	int supersample() const { return m_frame_ss; }
+	int frameSize() const { return NATIVE_SIZE * m_frame_ss; }
+	void begin_frame();
 	int bufferSize() const { return NATIVE_SIZE * m_ss; }
 
 	static constexpr int NATIVE_SIZE = 512;
@@ -142,6 +144,8 @@ private:
 
 	hng64_state &m_state;
 	int m_ss;
+	// scale of the frame being drawn, see begin_frame()
+	int m_frame_ss;
 
 	osd::gpu_engine *m_gpu_engine = nullptr;
 	bool m_gpu_checked = false;
@@ -335,11 +339,6 @@ private:
 	bitmap_ind16 m_sprite_bitmap;
 	bitmap_ind16 m_sprite_zbuffer;
 
-	// 3D output scale: the screen is m_output_scale times its native size, and the 2D layers draw at native size into m_native
-	int m_output_scale = 1;
-	bitmap_rgb32 m_native;
-	bitmap_rgb32 m_native_before;
-
 	u8 m_irq_pos_half;
 	u32 m_raster_irq_pos[2];
 
@@ -505,9 +504,6 @@ private:
 	void set_irq(u32 irq_vector);
 	template <u8 Which, u8 Size> TILE_GET_INFO_MEMBER(get_tile_info);
 	u32 screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
-	void enlarge_native(bitmap_rgb32 &bitmap, const rectangle &cliprect) const;
-	void reduce_to_native(const bitmap_rgb32 &bitmap, const rectangle &cliprect);
-	void enlarge_changed(bitmap_rgb32 &bitmap, const rectangle &cliprect) const;
 	void screen_vblank(int state);
 	TIMER_DEVICE_CALLBACK_MEMBER(hng64_irq);
 	void do_dma(address_space &space);
