@@ -607,3 +607,13 @@ builds get them straight from here.
 ### Anisotropic filtering: distant face-on surfaces on GTI Club, Ridge Racer and 500 GP style hardware
 - With 3D Anisotropic Filtering on, the distant scenery on Konami GTI Club hardware and Namco System 22 / System 23 games is
   smoothed in both directions, not only along angled surfaces, so far-off buildings, cars and track edges shimmer less.
+
+## 2026-10-26
+
+### Host-GPU 3D rendering: Vulkan engine, now the default
+- Every host-GPU 3D system can draw through Vulkan: the PS1 boards, Model 2, K001005, HNG64, the Voodoo boards, System 22 and System 23.
+  `mame_3d_gpu_api` picks Vulkan (the default) or OpenGL. OpenGL is used when no Vulkan 1.3 device is found.
+- Output matches the OpenGL path frame for frame, except a few edge pixels on Model 2, HNG64, System 22 and System 23.
+- Speed is the same as OpenGL on the games measured. MSAA works on Vulkan.
+- PS1 frames are sent to the GPU in chunks while emulation runs.
+- Namco System 22 needs dualSrcBlend; on a Vulkan device without it, that system's 3D layer is drawn in software.

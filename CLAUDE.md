@@ -379,6 +379,9 @@ for full phase-by-phase detail):
   header/library dependencies at all; the feature just degrades to
   unavailable (`is_valid() == false`) on any system without a working
   OpenGL/EGL install.
+- Vulkan engine (the default, `mame_3d_gpu_api`): `src/osd/libretro/libretro-internal/retro_vk_device`, `retro_vk_engine` and
+  `retro_vk_shader` `.{h,cpp}`. The OpenGL engine (`retro_gpu_engine`) is used when no Vulkan 1.3 device is found. Status and
+  plan: `my-docs/gpu-vulkan-plan.md`.
 - Gated behind a **`HAVE_RETRO_GPU_TARGET`** build define (on by default for Linux
   builds since 2026-10-23, set in `Makefile.libretro`; pass `HAVE_RETRO_GPU_TARGET=` empty to leave it out) — **not** `HAVE_OPENGL`: that name collides
   with the pre-existing dead `RETRO_HW_RENDER` code above, which shares the
@@ -944,6 +947,9 @@ make -f Makefile.libretro -j4          # fallback without the scope (see -j note
   `journalctl -u systemd-oomd` and `journalctl -k | grep -i oom`, then go back to `-j4`.
   Without the scope, stay on `-j4`.
 
+- glslang (bgfx's vendored copy, the `glslang` project in `scripts/src/3rdparty.lua`) is compiled into the core when
+  `HAVE_RETRO_GPU_TARGET` is set, for run-time shader compilation. The Vulkan loader is `dlopen()`ed at run time, so
+  there is no build-time Vulkan dependency.
 - Output: `mame_libretro.so` at the repo root (GENie appends the
   `_libretro` target suffix; see `scripts/src/main.lua`).
 - `DEBUG=1 make -f Makefile.libretro ...` switches to `CONFIG=libretrodbg`
