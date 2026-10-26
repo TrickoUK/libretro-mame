@@ -674,15 +674,6 @@ static void check_variables(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
       gpu3d_enable = !strcmp(var.value, "enabled");
 
-   var.key   = CORE_NAME "_3d_gpu_api";
-   var.value = NULL;
-   gpu3d_api = GPU3D_API_VULKAN;
-   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
-   {
-      if (!strcmp(var.value, "opengl"))
-         gpu3d_api = GPU3D_API_OPENGL;
-   }
-
    var.key   = CORE_NAME "_3d_texfilter";
    var.value = NULL;
    texfilter_enable = false;

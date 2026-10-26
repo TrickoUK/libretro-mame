@@ -116,12 +116,9 @@ project ("osd_" .. _OPTIONS["osd"])
 		MAME_DIR .. "src/osd/modules/sound/retro_sound.cpp",
 	}
 
-	-- Optional GPU-accelerated render target for device code (e.g.
-	-- psxgpu_device) - a private/headless EGL context, independent of
-	-- RetroArch's own. dlopen-based at runtime, so no new build-time
-	-- header/library dependency; opt-in only, default build is unaffected.
-	-- See CLAUDE.md "Chosen first target" for why this architecture was
-	-- picked over libretro's RETRO_HW_RENDER API.
+	-- Optional host-GPU engine for device code (e.g. psxgpu_device), drawn
+	-- with Vulkan. The Vulkan loader is dlopen-based at runtime, so no new
+	-- build-time header/library dependency; the default build is unaffected.
 	if _OPTIONS["HAVE_RETRO_GPU_TARGET"] then
 		defines {
 			"HAVE_RETRO_GPU_TARGET",
@@ -131,10 +128,6 @@ project ("osd_" .. _OPTIONS["osd"])
 			MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang",
 		}
 		files {
-			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.cpp",
-			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.h",
-			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gl_loader.cpp",
-			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gl_loader.h",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_device.cpp",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_device.h",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_shader.cpp",

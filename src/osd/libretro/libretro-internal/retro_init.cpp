@@ -91,7 +91,6 @@ int msaa_samples_option = 0;
 int aniso_taps_option = 0;
 bool texfilter_enable = false;
 bool gpu3d_enable = false;
-int gpu3d_api = GPU3D_API_VULKAN;
 bool steering_options_pending = false;
 
 // emu flags

@@ -206,13 +206,12 @@ private:
 	int m_last_click_x;
 	int m_last_click_y;
 
+#if defined(HAVE_RETRO_GPU_TARGET)
 	// one Vulkan device for the core, declared before the engines so that it outlives them
 	std::unique_ptr<retro_vk::vk_device> m_vk_device;
-	// the API of this session's engines, decided by the first engine request after init()
-	bool m_gpu_api_decided = false;
-	bool m_gpu_engine_vulkan = false;
 	std::vector<std::unique_ptr<osd::gpu_engine>> m_gpu_engines;
 	bool m_gpu_engine_failed = false;
+#endif
 };
 
 //============================================================

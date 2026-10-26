@@ -161,7 +161,7 @@ std::string vertex_glsl(const osd::gpu_shader_module &module)
 				"out float v" + std::to_string(i) + ";\n";
 	src += "void main()\n{\n";
 	// Vulkan's framebuffer origin is the top-left, so target y = 0 maps to NDC -1 and rows
-	// are read back in target order without a flip, as the OpenGL engine does.
+	// are read back in target order without a flip.
 	src += "\tvec2 ndc = a_pos.xy / gpu_push.target_size * 2.0 - 1.0;\n";
 	src += "\tfloat z = (gpu_push.depth_order != 0) ? (float(a_prim) + 1.0) * gpu_push.order_scale : a_pos.z;\n";
 	src += "\tfloat w = a_pos.w;\n";
@@ -178,7 +178,7 @@ std::string vertex_glsl(const osd::gpu_shader_module &module)
 std::string fragment_glsl(const osd::gpu_shader_module &module, uint32_t variant)
 {
 	// Bits 24-27 of the variant carry log2 of the anisotropic tap limit (0 = off); the module sees
-	// the low 24 bits as VARIANT and the limit as ANISO_MAX (see retro_gpu_engine.cpp get_program).
+	// the low 24 bits as VARIANT and the limit as ANISO_MAX.
 	const uint32_t aniso_log2 = (variant >> 24) & 15;
 	std::string src = "#version 450\n";
 	src += "#define VARIANT " + std::to_string(variant & 0xffffffU) + "\n";
@@ -199,7 +199,7 @@ std::string fragment_glsl(const osd::gpu_shader_module &module, uint32_t variant
 	src += "\treturn state_buf.words[int(g_prim) * gpu_push.rec_texels * 4 + k];\n}\n";
 	src += "vec2 frag_pos()\n{\n\treturn gl_FragCoord.xy;\n}\n";
 	src += "ivec2 target_size()\n{\n\treturn ivec2(gpu_push.target_size);\n}\n";
-	// The anisotropic helpers are the same functions the OpenGL prelude defines.
+	// Anisotropic sampling helpers for the module's samplers.
 	src += "int aniso_taps(vec2 dx, vec2 dy, int limit, out vec2 axis)\n{\n"
 			"\tfloat lx = length(dx);\n\tfloat ly = length(dy);\n"
 			"\taxis = (lx >= ly) ? dx : dy;\n"
@@ -300,30 +300,6 @@ bool compile_cached(shader_stage stage, const std::string &source, const std::st
 		write_file(path, spirv);
 	}
 	return true;
-}
-
-bool check_module(const osd::gpu_shader_module &module, uint32_t variant, const std::string &cache_dir)
-{
-	const std::string key = compiler_cache_key();
-	bool ok = true;
-	std::vector<uint32_t> spirv;
-	std::string log;
-	const struct { shader_stage stage; std::string source; const char *what; } stages[2] = {
-		{ shader_stage::VERTEX, vertex_glsl(module), "vertex" },
-		{ shader_stage::FRAGMENT, fragment_glsl(module, variant), "fragment" },
-	};
-	for (const auto &s : stages)
-	{
-		if (!compile_cached(s.stage, s.source, key, cache_dir, spirv, log))
-		{
-			std::fprintf(stderr, "[retro_vk] shader check: module '%s' variant %u: %s failed:\n%s\n",
-					module.name, variant, s.what, log.c_str());
-			ok = false;
-		}
-	}
-	if (ok)
-		std::fprintf(stderr, "[retro_vk] shader check: module '%s' variant %u: ok\n", module.name, variant);
-	return ok;
 }
 
 // The key for compile_cached(): the compiler and prelude versions, then the device key the

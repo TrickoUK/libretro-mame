@@ -5,8 +5,7 @@
     retro_vk_shader.h
 
     Vulkan side of the host-GPU engine's shaders. A module's GLSL 330
-    fragment source is wrapped in the same kind of prelude the OpenGL engine
-    uses (retro_gpu_engine.cpp get_program), but written for GLSL 450 with
+    fragment source is wrapped in a prelude that declares its inputs, written for GLSL 450 with
     Vulkan's binding model: the per-frame values are push constants, the
     per-primitive state is a storage buffer of int, and the samplers are in
     descriptor set 0. The module source itself is unchanged.
@@ -54,11 +53,6 @@ bool compile_cached(shader_stage stage, const std::string &source, const std::st
 // The cache key for compile_cached(): the compiler and prelude versions followed by the
 // caller's device key, which names the vendor, device and driver version.
 std::string shader_cache_key(const std::string &device_key);
-
-// Compiles both stages of one module and variant and logs the outcome.
-// Used by MAME_GPU_VK_SHADERCHECK to check every program the GL engine
-// builds. Returns true when both stages compile.
-bool check_module(const osd::gpu_shader_module &module, uint32_t variant, const std::string &cache_dir);
 
 } // namespace retro_vk
 

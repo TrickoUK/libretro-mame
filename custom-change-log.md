@@ -617,3 +617,7 @@ builds get them straight from here.
 - Speed is the same as OpenGL on the games measured. MSAA works on Vulkan.
 - PS1 frames are sent to the GPU in chunks while emulation runs.
 - Namco System 22 needs dualSrcBlend; on a Vulkan device without it, that system's 3D layer is drawn in software.
+
+### Host-GPU engine: Vulkan only
+- The OpenGL engine and its loader are gone, along with the `mame_3d_gpu_api` option. Vulkan 1.3 is the only host-GPU
+  API; without a Vulkan device the 3D and PS1 GPU paths render in software.
