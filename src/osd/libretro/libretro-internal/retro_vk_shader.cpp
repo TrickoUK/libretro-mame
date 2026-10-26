@@ -128,7 +128,7 @@ bool write_file(const std::string &path, const std::vector<uint32_t> &words)
 }
 
 // Names the compiler and the prelude, so an update of either invalidates
-// the cache. The driver version is added by the Vulkan engine (VK.3).
+// the cache. The Vulkan engine adds the driver version to the key.
 std::string compiler_cache_key()
 {
 	return std::string("glslang-") + std::to_string(GLSLANG_VERSION_MAJOR) + "." + std::to_string(GLSLANG_VERSION_MINOR) +

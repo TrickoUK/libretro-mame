@@ -576,7 +576,7 @@ void retro_vk_engine::write_update(const osd::gpu_texture_update &u, uint8_t *ds
 //  Shader modules
 //**************************************************************************
 
-// Only registered here: pipelines are built by the draw path (VK.3c).
+// The module is stored here; its programs and pipelines are built by the first draw that uses them.
 osd::gpu_handle retro_vk_engine::create_shader_module(const osd::gpu_shader_module &desc)
 {
 	if (failed() || !desc.fragment_source

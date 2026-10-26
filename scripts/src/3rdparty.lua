@@ -2243,7 +2243,7 @@ end
 
 --------------------------------------------------
 -- glslang: GLSL to SPIR-V for the libretro host-GPU Vulkan engine
--- (gpu-vulkan-plan.md, decision 8.1: compiled at run time, so the
+-- (compiled at run time, so the
 -- compiler is linked into the core). Built from bgfx's vendored copy.
 -- SPIRV-Tools optimisation and the HLSL front end are left out.
 --------------------------------------------------

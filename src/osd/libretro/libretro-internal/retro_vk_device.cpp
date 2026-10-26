@@ -23,7 +23,7 @@ namespace retro_vk {
 namespace {
 
 // Vulkan 1.3, VK_MAKE_API_VERSION(0, 1, 3, 0): the minimum the engine
-// relies on (gpu-vulkan-plan.md decision 8.4).
+// relies on.
 constexpr uint32_t REQUIRED_API_VERSION = 0x00403000;
 
 // Preference order for the physical device. The CPU (software) implementation

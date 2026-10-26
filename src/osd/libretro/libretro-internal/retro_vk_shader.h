@@ -11,8 +11,8 @@
     per-primitive state is a storage buffer of int, and the samplers are in
     descriptor set 0. The module source itself is unchanged.
 
-    Compilation is GLSL to SPIR-V at run time through glslang
-    (gpu-vulkan-plan.md decision 8.1). Compiled SPIR-V is kept on disk under
+    Compilation is GLSL to SPIR-V at run time through glslang.
+    Compiled SPIR-V is kept on disk under
     <system>/mame/gpu-cache, keyed by a hash of the stage, the generated
     source and a caller-supplied key (the driver version once the Vulkan
     engine knows it).
