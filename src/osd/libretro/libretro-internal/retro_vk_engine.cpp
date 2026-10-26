@@ -1123,7 +1123,12 @@ bool retro_vk_engine::create_staging(size_t bytes, staging_buffer &staging)
 
 	VkMemoryRequirements req = {};
 	m_device.fn.get_buffer_memory_requirements(dev, staging.buffer, &req);
-	staging.memory = m_device.allocate(req, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	// The read-backs are read by the CPU from this memory, which is much slower from write-combined memory,
+	// so cached memory is preferred and write-combined is the fallback
+	const VkMemoryPropertyFlags visible = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	staging.memory = m_device.allocate(req, visible | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+	if (staging.memory == VK_NULL_HANDLE)
+		staging.memory = m_device.allocate(req, visible);
 	void *mapped = nullptr;
 	if (staging.memory == VK_NULL_HANDLE
 			|| m_device.fn.bind_buffer_memory(dev, staging.buffer, staging.memory, 0) != VK_SUCCESS
