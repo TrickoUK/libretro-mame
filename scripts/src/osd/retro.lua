@@ -128,7 +128,7 @@ project ("osd_" .. _OPTIONS["osd"])
 		}
 		includedirs {
 			MAME_DIR .. "3rdparty/bgfx/3rdparty",
-		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang",
+			MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang",
 		}
 		files {
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.cpp",

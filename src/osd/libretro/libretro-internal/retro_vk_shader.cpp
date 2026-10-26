@@ -14,9 +14,11 @@
 #include "glslang/Public/ResourceLimits.h"
 #include "glslang/Public/ShaderLang.h"
 #include "glslang/SPIRV/GlslangToSpv.h"
+#include "glslang/build_info.h"
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -25,6 +27,17 @@
 #include <vector>
 
 namespace retro_vk {
+
+namespace {
+
+// First word of every SPIR-V module
+constexpr uint32_t SPIRV_MAGIC = 0x07230203;
+
+// Bump when vertex_glsl() or fragment_glsl() change what they generate, so
+// cached SPIR-V from the old prelude is not reused.
+constexpr int PRELUDE_VERSION = 1;
+
+} // anonymous namespace
 
 namespace {
 
@@ -73,26 +86,53 @@ uint64_t fnv1a(const std::string &s, uint64_t h = 0xcbf29ce484222325ULL)
 	return h;
 }
 
+// Reads a cache entry. Anything that is not a whole SPIR-V module (a
+// truncated write, a file from another tool) is rejected, so it is compiled
+// again and overwritten.
 bool read_file(const std::string &path, std::vector<uint32_t> &words)
 {
 	std::ifstream in(path, std::ios::binary);
 	if (!in)
 		return false;
 	std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-	if (bytes.empty() || (bytes.size() % 4) != 0)
+	if (bytes.size() < 4 || (bytes.size() % 4) != 0)
 		return false;
 	words.resize(bytes.size() / 4);
 	std::memcpy(words.data(), bytes.data(), bytes.size());
+	return words[0] == SPIRV_MAGIC;
+}
+
+// Writes to a temporary name and renames it into place, so a run killed
+// mid-write leaves no entry at the final name.
+bool write_file(const std::string &path, const std::vector<uint32_t> &words)
+{
+	const std::string temp = path + ".tmp";
+	{
+		std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+		if (!out)
+			return false;
+		out.write(reinterpret_cast<const char *>(words.data()), std::streamsize(words.size() * 4));
+		out.close();
+		if (!out)
+		{
+			std::remove(temp.c_str());
+			return false;
+		}
+	}
+	if (std::rename(temp.c_str(), path.c_str()) != 0)
+	{
+		std::remove(temp.c_str());
+		return false;
+	}
 	return true;
 }
 
-bool write_file(const std::string &path, const std::vector<uint32_t> &words)
+// Names the compiler and the prelude, so an update of either invalidates
+// the cache. The driver version is added by the Vulkan engine (VK.3).
+std::string compiler_cache_key()
 {
-	std::ofstream out(path, std::ios::binary | std::ios::trunc);
-	if (!out)
-		return false;
-	out.write(reinterpret_cast<const char *>(words.data()), std::streamsize(words.size() * 4));
-	return bool(out);
+	return std::string("glslang-") + std::to_string(GLSLANG_VERSION_MAJOR) + "." + std::to_string(GLSLANG_VERSION_MINOR) +
+			"." + std::to_string(GLSLANG_VERSION_PATCH) + "-prelude" + std::to_string(PRELUDE_VERSION);
 }
 
 // glslang is initialised once for the process and never finalised: the
@@ -263,8 +303,7 @@ bool compile_cached(shader_stage stage, const std::string &source, const std::st
 
 bool check_module(const osd::gpu_shader_module &module, uint32_t variant, const std::string &cache_dir)
 {
-	// the key names the compiler; the generated source is part of the entry name
-	const std::string key = "glslang-bgfx";
+	const std::string key = compiler_cache_key();
 	bool ok = true;
 	std::vector<uint32_t> spirv;
 	std::string log;
