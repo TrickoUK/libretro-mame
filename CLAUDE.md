@@ -336,6 +336,10 @@ distrobox enter mame-dev -- retroarch -v -L /var/home/bazzite/Projects/libretro/
 
 ### Architecture decision: private EGL context, not `RETRO_HW_RENDER` (Phase 1 done, 2026-09-16)
 
+**Superseded (VO.1, 2026-10-26):** the EGL/OpenGL engine and its loader were removed. The Vulkan engine
+(`retro_vk_engine`, below) is now the only host-GPU engine. The EGL reasoning below is kept as history: the private,
+independent-context argument still applies to the Vulkan instance and device.
+
 The dead `RETRO_HW_RENDER` scaffolding above turned out to be a dead end
 worth avoiding, not reviving: investigation for the implementation plan
 found (a) `hw_render`/`context_reset`/`context_destroy`/`do_glflush` are
@@ -371,17 +375,11 @@ for full phase-by-phase detail):
   (`src/osd/osdepend.h`), with a shared nullptr-returning default in
   `osd_common_t` (`src/osd/modules/lib/osdobj_common.h`) so **every other
   OSD (SDL/Windows) needed zero changes**.
-- `src/osd/libretro/libretro-internal/retro_gpu_target.{h,cpp}` — the real
-  EGL-backed implementation, only for the retro OSD. **EGL/GL are loaded
-  entirely via `dlopen()`/`dlsym()` at runtime, not linked at build time** —
-  this build host has no EGL/GL `-devel` packages (layering them on this
-  atomic/immutable desktop needs a reboot), so there are no new build-time
-  header/library dependencies at all; the feature just degrades to
-  unavailable (`is_valid() == false`) on any system without a working
-  OpenGL/EGL install.
-- Vulkan engine (the default, `mame_3d_gpu_api`): `src/osd/libretro/libretro-internal/retro_vk_device`, `retro_vk_engine` and
-  `retro_vk_shader` `.{h,cpp}`. The OpenGL engine (`retro_gpu_engine`) is used when no Vulkan 1.3 device is found. Status and
-  plan: `my-docs/gpu-vulkan-plan.md`.
+- The EGL-backed `retro_gpu_target` of Phase 1 (removed in VO.1): EGL/GL were loaded with `dlopen()`/`dlsym()`.
+- Vulkan engine (the only host-GPU engine since VO.1, 2026-10-26): `src/osd/libretro/libretro-internal/retro_vk_device`,
+  `retro_vk_engine` and `retro_vk_shader` `.{h,cpp}`. The Vulkan loader is opened with `dlopen()`, so there are no
+  build-time Vulkan dependencies. Without a Vulkan 1.3 device the GPU path is off and the system renders in software.
+  Status and plan: `my-docs/gpu-vulkan-plan.md`, `my-docs/gpu-vulkan-only-plan.md`.
 - Gated behind a **`HAVE_RETRO_GPU_TARGET`** build define (on by default for Linux
   builds since 2026-10-23, set in `Makefile.libretro`; pass `HAVE_RETRO_GPU_TARGET=` empty to leave it out) — **not** `HAVE_OPENGL`: that name collides
   with the pre-existing dead `RETRO_HW_RENDER` code above, which shares the
