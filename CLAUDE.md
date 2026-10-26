@@ -112,8 +112,8 @@ mixed into history.
   hooks), `src/mame/namco/namcos22_v.cpp` and `namcos22.h` (host-GPU capture hooks: the `m_gpu_collecting` ternary and early
   returns in `poly3d_drawquad`/`poly3d_drawsprite`, the two `gpu_render_scene` calls in the screen updates; the rest is `namcos22_gpu.ipp`), `src/mame/namco/namcos23.cpp` (host-GPU hooks: the
   `namcos23_shader.h`/`gpuengine.h` includes, `friend class namcos23_renderer;`, the renderer's `gpu_*` members and the
-  `if (gpu_render(...)) return;` after the sort in `render_flush()`; the rest is `namcos23_gpu.ipp` and `namcos23_shader.h`), `src/mame/snk/hng64_3d.ipp` and `hng64_v.cpp` (3D supersampling: bigger buffers,
-  scaled vertices and the palette-resolve composite; fork-only, not for upstream).
+  `if (gpu_render(...)) return;` after the sort in `render_flush()`; the rest is `namcos23_gpu.ipp` and `namcos23_shader.h`), `src/mame/snk/hng64_3d.ipp` and `hng64_v.cpp` (the GPU path's engine and submit/collect, and the
+  palette-resolve composite that averages supersampled GPU output; fork-only, not for upstream). The software renderer is upstream again, so only these GPU-path hunks conflict.
 - Upstream API changes in that sync that broke fork/libretro code:
   - `screen_device` is split per type (`screen_svg_device`, vector screens).
     Use `video_output_interface_enumerator`/`is_vector()` instead of
@@ -140,8 +140,8 @@ and `002-batocera-ini`. Keep these fixes through upstream merges, and check whet
 upstream has fixed the same thing before re-porting one:
 - `plugins/offscreenreload/init.lua`: batocera's lightgun reload auto-bind, which
   skips the bind when BUTTON2 is already used by gameplay.
-- `src/mame/sega/model2*`: supersample antialiasing of the 3D layer
-  (the generic `mame_3d_supersample` core option, off by default); `hotd` has no trigger flash (`init_hotd` ROM patch,
+- `src/mame/sega/model2*`: supersample antialiasing of the 3D layer on the host-GPU path
+  (the generic `mame_3d_supersample` core option, off by default; the software renderer is upstream and ignores it); `hotd` has no trigger flash (`init_hotd` ROM patch,
   Revision A only); `gunblade` gun Y gets `PORT_REVERSE` under `__LIBRETRO__`.
 - `src/mame/taito/opwolf.cpp`: no trigger flash on `opwolf` only. It's a runtime ROM
   patch about 900 frames in, because the C-chip ROM check rejects a static patch.
@@ -1191,7 +1191,7 @@ MAME's own `video:snapshot()` (the emulated frame at native resolution).
   upstream standards: hardware-accurate, no libretro/fork-only hooks in shared code, and keep
   it separable from fork-only changes.
   **Exception**: fork-only features that upstream would never take (the PS1 GPU HLE/PGXP path,
-  Voodoo supersampling/edge AA, gamepad steering and similar enhancements) don't need to follow
+  GPU-path Voodoo supersampling, gamepad steering and similar enhancements) don't need to follow
   the hardware. There, make it work and make it as efficient as possible.
 
 - **Code comments describe how the hardware works (or is assumed to work), never the edit.** This applies to
