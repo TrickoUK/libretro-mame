@@ -282,6 +282,7 @@ retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device)
 	m_caps.max_texture_size = int(std::min<uint32_t>(m_device.properties().limits.maxImageDimension2D, 16384));
 	// submits are recorded and queued without waiting for the GPU, so a frame split into chunks overlaps emulation
 	m_caps.chunked_frames = true;
+	m_caps.dual_source_blend = m_device.dual_src_blend();
 	// the sample counts for colour and depth targets, and for sampled colour (read one sample at a time)
 	const auto &limits = m_device.properties().limits;
 	m_sample_counts = limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts;
@@ -1522,7 +1523,7 @@ std::string retro_vk_engine::device_key() const
 }
 
 // The shader pair for one module and variant, compiled on first use. A compile failure latches the engine: the module
-// is not retried and the device returns to software for the session.
+// is not retried, the engine refuses every later frame, and the device draws in software for the session.
 const retro_vk_engine::program *retro_vk_engine::get_program(osd::gpu_handle module_handle, uint32_t variant)
 {
 	const auto key = std::make_pair(module_handle, variant);
@@ -1531,6 +1532,12 @@ const retro_vk_engine::program *retro_vk_engine::get_program(osd::gpu_handle mod
 		return &found->second;
 
 	const module &m = m_modules.find(module_handle)->second;
+	// the frame that draws with this module is refused (see caps().dual_source_blend)
+	if (m.blend_factor_output && !m_device.dual_src_blend())
+	{
+		log_problem("module", (m.name + ": needs dualSrcBlend, which the device lacks").c_str());
+		return nullptr;
+	}
 	osd::gpu_shader_module desc;
 	desc.name = m.name.c_str();
 	desc.fragment_source = m.source.c_str();

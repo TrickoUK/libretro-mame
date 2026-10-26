@@ -247,6 +247,7 @@ bool retro_gpu_engine::init_context()
 	const char *version = (const char *)g_gl.GetString(GL_VERSION);
 	if (version)
 		sscanf(version, "%d.%d", &m_caps.gl_major, &m_caps.gl_minor);
+	m_caps.dual_source_blend = m_caps.gl_major > 3 || (m_caps.gl_major == 3 && m_caps.gl_minor >= 3);
 	GLint value = 0;
 	g_gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &value);
 	m_caps.max_texture_size = value;

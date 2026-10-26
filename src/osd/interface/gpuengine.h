@@ -328,6 +328,8 @@ struct gpu_engine_caps
 	// The engine returns from submit_frame() before the GPU finishes, and its frames are cheap enough to send
 	// in chunks while emulation runs (see flush_frame()). Devices that split a frame only do so when this is set.
 	bool chunked_frames = false;
+	// SRC1 blend factors, which a module with blend_factor_output needs (GL 3.3, or the Vulkan dualSrcBlend feature)
+	bool dual_source_blend = false;
 	const char *renderer = "";
 };
 
