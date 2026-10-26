@@ -340,10 +340,6 @@ osd::gpu_engine *retro_osd_interface::get_gpu_engine(const char *system)
 		{
 			fprintf(stderr, "[retro_gpu] OpenGL engine for this session (mame_3d_gpu_api = opengl)\n");
 		}
-		else if (msaa_samples_option > 0)
-		{
-			fprintf(stderr, "[retro_gpu] OpenGL engine for this session: mame_3d_msaa needs multisampled targets, which the Vulkan engine does not have yet\n");
-		}
 		else
 		{
 			if (!m_vk_device)

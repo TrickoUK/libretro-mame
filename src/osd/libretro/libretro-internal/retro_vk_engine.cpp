@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -75,8 +76,8 @@ struct push_constants
 static_assert(sizeof(push_constants) == 20, "push constants match the shader prelude");
 
 // The read-back pass: the rectangle's top-left and output size, the downsample factor, the flags (1 channel lookup,
-// 2 opaque, 4 coverage, 8 coverage share, 16 priority bits), and the word offsets of the output and of the lookup
-// table in the staging buffer.
+// 2 opaque, 4 coverage, 8 coverage share, 16 priority bits), the word offsets of the output and of the lookup
+// table in the staging buffer, and the samples read per pixel (1 unless the target is multisampled and read sample by sample).
 struct output_constants
 {
 	int32_t origin[2];
@@ -85,19 +86,21 @@ struct output_constants
 	int32_t flags;
 	int32_t out_at;
 	int32_t lut_at;
+	int32_t samples;
 };
-static_assert(sizeof(output_constants) == 32, "output constants match the read-back shader");
+static_assert(sizeof(output_constants) == 36, "output constants match the read-back shader");
 
 // The read-back compute pass. It averages each ds-by-ds block of the target (through the same integer arithmetic
 // as the OpenGL output pass, so both engines give the same bytes), maps the colour through the lookup table and
-// writes the output pixels as BGRA bytes, one word per pixel.
+// writes the output pixels as BGRA bytes, one word per pixel. @SAMPLER@ and @SAMPLE@ are replaced by output_source():
+// a sampler2DMS read sample by sample, or a sampler2D read once.
 constexpr const char *OUTPUT_GLSL = R"(#version 450
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(std430, set = 0, binding = 0) buffer Staging
 {
 	uint words[];
 };
-layout(set = 0, binding = 1) uniform sampler2D u_src;
+layout(set = 0, binding = 1) uniform @SAMPLER@ u_src;
 layout(push_constant) uniform Pass
 {
 	ivec2 origin;
@@ -106,6 +109,7 @@ layout(push_constant) uniform Pass
 	int flags;
 	int out_at;
 	int lut_at;
+	int samples;
 };
 void main()
 {
@@ -121,17 +125,20 @@ void main()
 	{
 		for (int x = 0; x < ds; x++)
 		{
-			const ivec4 t = ivec4(texelFetch(u_src, base + ivec2(x, y), 0) * 255.0 + 0.5);
-			if (t.a != 0)
+			for (int s = 0; s < samples; s++)
 			{
-				drawn++;
-				if (t.a == 255)
-					high++;
-			}
-			if ((flags & 4) == 0 || t.a != 0)
-			{
-				sum += t;
-				count++;
+				const ivec4 t = ivec4(texelFetch(u_src, base + ivec2(x, y), @SAMPLE@) * 255.0 + 0.5);
+				if (t.a != 0)
+				{
+					drawn++;
+					if (t.a == 255)
+						high++;
+				}
+				if ((flags & 4) == 0 || t.a != 0)
+				{
+					sum += t;
+					count++;
+				}
 			}
 		}
 	}
@@ -148,13 +155,27 @@ void main()
 		v.a = (drawn == 0) ? 0 : (high * 2 > drawn) ? 255 : 128;
 	if ((flags & 4) != 0)
 	{
-		const int total = ds * ds;
+		const int total = ds * ds * samples;
 		v.a = (count == 0) ? 0 : ((flags & 8) != 0) ? max(1, (255 * count + total / 2) / total) : 255;
 	}
 	const uint packed = uint(v.b) | (uint(v.g) << 8) | (uint(v.r) << 16) | (uint(v.a) << 24);
 	words[out_at + o.y * size.x + o.x] = packed;
 }
 )";
+
+// The read-back shader for a single-sample target (or one read once) or for a multisample target read sample by sample.
+std::string output_source(bool per_sample)
+{
+	std::string source = OUTPUT_GLSL;
+	auto replace = [&source](const char *token, const char *with)
+	{
+		for (size_t at = source.find(token); at != std::string::npos; at = source.find(token, at + std::strlen(with)))
+			source.replace(at, std::strlen(token), with);
+	};
+	replace("@SAMPLER@", per_sample ? "sampler2DMS" : "sampler2D");
+	replace("@SAMPLE@", per_sample ? "s" : "0");
+	return source;
+}
 
 VkBlendFactor blend_factor_vk(osd::gpu_blend_factor f)
 {
@@ -259,7 +280,16 @@ retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device)
 	m_renderer = m_device.properties().deviceName;
 	m_caps.renderer = m_renderer.c_str();
 	m_caps.max_texture_size = int(std::min<uint32_t>(m_device.properties().limits.maxImageDimension2D, 16384));
-	m_caps.max_samples = 0;     // multisampled targets come with VK.5
+	// the sample counts for colour and depth targets, and for sampled colour (read one sample at a time)
+	const auto &limits = m_device.properties().limits;
+	m_sample_counts = limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts;
+	m_sampled_sample_counts = limits.sampledImageColorSampleCounts;
+	m_caps.max_samples = 0;
+	for (int n = 2; n <= 64; n *= 2)
+	{
+		if (sample_count_supported(n, false))
+			m_caps.max_samples = n;
+	}
 
 	const VkDevice dev = m_device.device();
 	VkCommandBufferAllocateInfo alloc = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -363,7 +393,7 @@ int retro_vk_engine::texel_bytes(osd::gpu_handle texture) const
 //  Images
 //**************************************************************************
 
-bool retro_vk_engine::create_image(image &img, VkFormat format, int width, int height, VkImageUsageFlags usage, VkImageAspectFlags aspect)
+bool retro_vk_engine::create_image(image &img, VkFormat format, int width, int height, VkImageUsageFlags usage, VkImageAspectFlags aspect, int samples)
 {
 	const VkDevice dev = m_device.device();
 
@@ -375,7 +405,7 @@ bool retro_vk_engine::create_image(image &img, VkFormat format, int width, int h
 	info.extent.depth = 1;
 	info.mipLevels = 1;
 	info.arrayLayers = 1;
-	info.samples = VK_SAMPLE_COUNT_1_BIT;
+	info.samples = VkSampleCountFlagBits(samples);
 	info.tiling = VK_IMAGE_TILING_OPTIMAL;
 	info.usage = usage;
 	info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -598,7 +628,7 @@ void retro_vk_engine::destroy_shader_module(osd::gpu_handle handle)
 bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &clear_color, bool &clear_depth)
 {
 	const bool realloc = !m_target_valid || target.width != m_target.width || target.height != m_target.height
-			|| target.depth != m_target.depth;
+			|| target.depth != m_target.depth || target.msaa_samples != m_target.msaa_samples;
 
 	clear_color = !target.persistent;
 	clear_depth = target.depth == osd::gpu_depth_mode::ORDER || !target.persistent;
@@ -607,15 +637,20 @@ bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &cl
 	{
 		release_target();
 
+		// a multisampled target is drawn at its sample count and resolved into m_resolve for the read-backs
+		const int samples = std::max(target.msaa_samples, 1);
 		const VkImageUsageFlags color_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-		bool ok = create_image(m_color, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)
-				&& create_image(m_scratch, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)
+		bool ok = create_image(m_color, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT, samples)
+				&& create_image(m_scratch, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT, samples)
 				&& transition_to_general(m_color)
 				&& transition_to_general(m_scratch);
+		if (ok && target.msaa_samples > 0)
+			ok = create_image(m_resolve, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)
+					&& transition_to_general(m_resolve);
 		if (ok && target.depth != osd::gpu_depth_mode::NONE)
 		{
 			const VkImageUsageFlags depth_usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-			ok = create_image(m_depth, VK_FORMAT_D32_SFLOAT, target.width, target.height, depth_usage, VK_IMAGE_ASPECT_DEPTH_BIT)
+			ok = create_image(m_depth, VK_FORMAT_D32_SFLOAT, target.width, target.height, depth_usage, VK_IMAGE_ASPECT_DEPTH_BIT, samples)
 					&& transition_to_general(m_depth);
 		}
 		if (!ok)
@@ -623,6 +658,14 @@ bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &cl
 			release_target();
 			log_problem("render target", "image allocation failed");
 			return false;
+		}
+		if (target.msaa_samples > 0)
+		{
+			// the memory the target asks for: colour and depth for every sample, plus the single-sample resolve image
+			const double pixels = double(target.width) * target.height;
+			const double depth_bytes = (target.depth != osd::gpu_depth_mode::NONE) ? 4.0 : 0.0;
+			fprintf(stderr, "[retro_vk_engine] target %dx%d, %d samples: colour+depth %.1f MB, resolve %.1f MB\n",
+					target.width, target.height, target.msaa_samples, pixels * samples * (4.0 + depth_bytes) / 1048576.0, pixels * 4.0 / 1048576.0);
 		}
 		clear_color = true;
 		clear_depth = true;
@@ -643,6 +686,7 @@ void retro_vk_engine::release_target()
 	destroy_image(m_color);
 	destroy_image(m_scratch);
 	destroy_image(m_depth);
+	destroy_image(m_resolve);
 	m_target_valid = false;
 }
 
@@ -725,6 +769,11 @@ void retro_vk_engine::record_barrier()
 // CLEAR and the target's own clear ignore the clip, as the OpenGL engine's do.
 void retro_vk_engine::record_clear(const float *rgba, bool color, bool depth)
 {
+	if (m_target.msaa_samples > 0)
+	{
+		record_clear_multisample(rgba, color, depth);
+		return;
+	}
 	if (color)
 	{
 		VkClearColorValue value = {};
@@ -740,6 +789,48 @@ void retro_vk_engine::record_clear(const float *rgba, bool color, bool depth)
 		const VkImageSubresourceRange range = full_range(VK_IMAGE_ASPECT_DEPTH_BIT);
 		m_device.fn.cmd_clear_depth_stencil_image(m_cmd, m_depth.handle, VK_IMAGE_LAYOUT_GENERAL, &value, 1, &range);
 	}
+}
+
+// A multisampled image cannot be cleared by vkCmdClearColorImage, so the clear is the load operation of an empty render
+// pass. Attachments that are not cleared keep their contents.
+void retro_vk_engine::record_clear_multisample(const float *rgba, bool color, bool depth)
+{
+	VkRenderingAttachmentInfo colour = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+	colour.imageView = m_color.view;
+	colour.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	colour.loadOp = color ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+	colour.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	for (int i = 0; i < 4; i++)
+		colour.clearValue.color.float32[i] = rgba[i];
+	VkRenderingAttachmentInfo depth_attachment = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+	depth_attachment.imageView = m_depth.view;
+	depth_attachment.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	depth_attachment.loadOp = depth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+	depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	depth_attachment.clearValue.depthStencil.depth = 1.0f;
+
+	VkRenderingInfo info = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+	info.renderArea.extent.width = uint32_t(m_target.width);
+	info.renderArea.extent.height = uint32_t(m_target.height);
+	info.layerCount = 1;
+	info.colorAttachmentCount = 1;
+	info.pColorAttachments = &colour;
+	info.pDepthAttachment = (m_depth.handle != VK_NULL_HANDLE) ? &depth_attachment : nullptr;
+	m_device.fn.cmd_begin_rendering(m_cmd, &info);
+	m_device.fn.cmd_end_rendering(m_cmd);
+}
+
+// Averages the samples of the colour target into the single-sample image the read-backs read.
+void retro_vk_engine::record_resolve()
+{
+	VkImageResolve region = {};
+	region.srcSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
+	region.dstSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
+	region.extent.width = uint32_t(m_target.width);
+	region.extent.height = uint32_t(m_target.height);
+	region.extent.depth = 1;
+	m_device.fn.cmd_resolve_image(m_cmd, m_color.handle, VK_IMAGE_LAYOUT_GENERAL, m_resolve.handle, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+	record_barrier();
 }
 
 // Copies through the scratch image, so the source is the target as it was before the command.
@@ -780,6 +871,8 @@ void retro_vk_engine::record_update(const osd::gpu_texture_update &u, size_t off
 // Read-back copies BGRA8 bytes, four per target pixel, tightly packed into the staging buffer.
 void retro_vk_engine::record_readback(const osd::gpu_readback_rect &r, size_t offset, const staging_buffer &staging)
 {
+	if (m_target.msaa_samples > 0)
+		record_resolve();
 	VkBufferImageCopy region = {};
 	region.bufferOffset = offset;
 	region.imageSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
@@ -788,7 +881,7 @@ void retro_vk_engine::record_readback(const osd::gpu_readback_rect &r, size_t of
 	region.imageExtent.width = uint32_t(r.w);
 	region.imageExtent.height = uint32_t(r.h);
 	region.imageExtent.depth = 1;
-	m_device.fn.cmd_copy_image_to_buffer(m_cmd, m_color.handle, VK_IMAGE_LAYOUT_GENERAL, staging.buffer, 1, &region);
+	m_device.fn.cmd_copy_image_to_buffer(m_cmd, readback_image().handle, VK_IMAGE_LAYOUT_GENERAL, staging.buffer, 1, &region);
 }
 
 // A read-back region holds its lookup table first (readback_lut_bytes), then its pixels: the rectangle as BGRA bytes
@@ -834,8 +927,11 @@ bool retro_vk_engine::record_readback_any(const osd::gpu_readback_rect &r, size_
 // because the frame's command buffer is only executed after this call returns.
 bool retro_vk_engine::record_output_pass(const osd::gpu_readback_rect &r, size_t at, const staging_buffer &staging)
 {
-	if (!ensure_output_pipeline())
+	const bool per_sample = reads_samples(r);
+	if (!ensure_output_pipeline(per_sample))
 		return false;
+	if (m_target.msaa_samples > 0 && !per_sample)
+		record_resolve();
 	VkDescriptorSet set = VK_NULL_HANDLE;
 	if (!allocate_frame_set(set))
 	{
@@ -845,7 +941,8 @@ bool retro_vk_engine::record_output_pass(const osd::gpu_readback_rect &r, size_t
 
 	const VkDevice dev = m_device.device();
 	VkDescriptorBufferInfo buffer = { staging.buffer, 0, VK_WHOLE_SIZE };
-	VkDescriptorImageInfo image = { m_sampler_nearest, m_color.view, VK_IMAGE_LAYOUT_GENERAL };
+	const image &source = per_sample ? m_color : readback_image();
+	VkDescriptorImageInfo image = { m_sampler_nearest, source.view, VK_IMAGE_LAYOUT_GENERAL };
 	VkWriteDescriptorSet writes[2] = {};
 	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 	writes[0].dstSet = set;
@@ -872,8 +969,9 @@ bool retro_vk_engine::record_output_pass(const osd::gpu_readback_rect &r, size_t
 	pc.flags = (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0) | (r.coverage ? 4 : 0) | (r.coverage_share ? 8 : 0) | (r.priority_bits ? 16 : 0);
 	pc.out_at = int32_t((at + lut) / 4);
 	pc.lut_at = int32_t(at / 4);
+	pc.samples = per_sample ? m_target.msaa_samples : 1;
 
-	m_device.fn.cmd_bind_pipeline(m_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_output_pipeline);
+	m_device.fn.cmd_bind_pipeline(m_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_output_pipeline[per_sample ? 1 : 0]);
 	m_device.fn.cmd_bind_descriptor_sets(m_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_output_layout, 0, 1, &set, 0, nullptr);
 	m_device.fn.cmd_push_constants(m_cmd, m_output_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 	// the target's writes (from the draws or a copy) are visible to the pass
@@ -882,54 +980,60 @@ bool retro_vk_engine::record_output_pass(const osd::gpu_readback_rect &r, size_t
 	return true;
 }
 
-// The read-back pass, built on first use and kept for the session. It binds the frame's staging buffer and the target.
-bool retro_vk_engine::ensure_output_pipeline()
+// The read-back pass for one kind of read, built on first use and kept for the session. It binds the frame's staging
+// buffer and the target. The layout is shared by both kinds.
+bool retro_vk_engine::ensure_output_pipeline(bool per_sample)
 {
-	if (m_output_pipeline != VK_NULL_HANDLE)
+	const size_t kind = per_sample ? 1 : 0;
+	if (m_output_pipeline[kind] != VK_NULL_HANDLE)
 		return true;
 	const VkDevice dev = m_device.device();
 	std::vector<uint32_t> spirv;
 	std::string log;
-	if (!retro_vk::compile_cached(retro_vk::shader_stage::COMPUTE, OUTPUT_GLSL, retro_vk::shader_cache_key(device_key()), m_cache_dir, spirv, log))
+	const std::string source = output_source(per_sample);
+	if (!retro_vk::compile_cached(retro_vk::shader_stage::COMPUTE, source, retro_vk::shader_cache_key(device_key()), m_cache_dir, spirv, log))
 	{
 		log_problem("output pass", log.c_str());
 		return false;
 	}
 
+	if (m_output_layout == VK_NULL_HANDLE)
+	{
+		VkPushConstantRange push = {};
+		push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+		push.size = sizeof(output_constants);
+		VkPipelineLayoutCreateInfo layout_info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+		layout_info.setLayoutCount = 1;
+		layout_info.pSetLayouts = &m_set_layout;
+		layout_info.pushConstantRangeCount = 1;
+		layout_info.pPushConstantRanges = &push;
+		if (m_device.fn.create_pipeline_layout(dev, &layout_info, nullptr, &m_output_layout) != VK_SUCCESS)
+		{
+			log_problem("output pass", "layout creation failed");
+			return false;
+		}
+	}
+
 	VkShaderModuleCreateInfo module_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 	module_info.codeSize = spirv.size() * sizeof(uint32_t);
 	module_info.pCode = spirv.data();
-	VkPushConstantRange push = {};
-	push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	push.size = sizeof(output_constants);
-	VkPipelineLayoutCreateInfo layout_info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-	layout_info.setLayoutCount = 1;
-	layout_info.pSetLayouts = &m_set_layout;
-	layout_info.pushConstantRangeCount = 1;
-	layout_info.pPushConstantRanges = &push;
+	if (m_device.fn.create_shader_module(dev, &module_info, nullptr, &m_output_module[kind]) != VK_SUCCESS)
+	{
+		log_problem("output pass", "module creation failed");
+		return false;
+	}
 	VkComputePipelineCreateInfo pipeline_info = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
 	pipeline_info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	pipeline_info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	pipeline_info.stage.pName = "main";
-
-	if (m_device.fn.create_shader_module(dev, &module_info, nullptr, &m_output_module) != VK_SUCCESS
-			|| m_device.fn.create_pipeline_layout(dev, &layout_info, nullptr, &m_output_layout) != VK_SUCCESS)
+	pipeline_info.stage.module = m_output_module[kind];
+	pipeline_info.layout = m_output_layout;
+	if (m_device.fn.create_compute_pipelines(dev, m_pipeline_cache, 1, &pipeline_info, nullptr, &m_output_pipeline[kind]) != VK_SUCCESS)
 	{
-		log_problem("output pass", "module or layout creation failed");
-	}
-	else
-	{
-		pipeline_info.stage.module = m_output_module;
-		pipeline_info.layout = m_output_layout;
-		if (m_device.fn.create_compute_pipelines(dev, m_pipeline_cache, 1, &pipeline_info, nullptr, &m_output_pipeline) == VK_SUCCESS)
-			return true;
 		log_problem("output pass", "pipeline creation failed");
+		return false;
 	}
-	m_device.fn.destroy_pipeline_layout(dev, m_output_layout, nullptr);
-	m_device.fn.destroy_shader_module(dev, m_output_module, nullptr);
-	m_output_layout = VK_NULL_HANDLE;
-	m_output_module = VK_NULL_HANDLE;
-	return false;
+	return true;
 }
 
 void retro_vk_engine::unpack_readback(const osd::gpu_readback_rect &r, const uint8_t *src) const
@@ -1006,6 +1110,78 @@ void retro_vk_engine::destroy_staging(staging_buffer &staging)
 //  Frames
 //**************************************************************************
 
+bool retro_vk_engine::sample_count_supported(int samples, bool sampled) const
+{
+	return samples >= 1 && ((sampled ? m_sampled_sample_counts : m_sample_counts) & uint32_t(samples)) != 0;
+}
+
+// Reduces the requested sample count to what the device supports and to the memory budget for the target (colour and
+// depth samples plus the single-sample resolve image), as the OpenGL engine's fit_msaa() does. One sample is not
+// multisampling, so it becomes none.
+void retro_vk_engine::fit_msaa(osd::gpu_target_desc &target)
+{
+	const int requested = target.msaa_samples;
+	int samples = std::min(requested, m_caps.max_samples);
+	while (samples >= 2 && !sample_count_supported(samples, target.msaa_per_sample))
+		samples /= 2;
+
+	const uint64_t pixels = uint64_t(std::max(target.width, 0)) * std::max(target.height, 0);
+	const uint64_t sample_bytes = (target.depth != osd::gpu_depth_mode::NONE) ? 8 : 4;
+	while (samples >= 2 && pixels * samples * sample_bytes + pixels * 4 > m_msaa_budget)
+	{
+		samples /= 2;
+		while (samples >= 2 && !sample_count_supported(samples, target.msaa_per_sample))
+			samples /= 2;
+	}
+	target.msaa_samples = (samples < 2) ? 0 : samples;
+
+	if (requested != target.msaa_samples && (requested != m_msaa_logged_requested || target.msaa_samples != m_msaa_logged_granted))
+	{
+		m_msaa_logged_requested = requested;
+		m_msaa_logged_granted = target.msaa_samples;
+		fprintf(stderr, "[retro_vk_engine] %dx MSAA on a %dx%d target reduced to %d samples (device limit %d, memory budget %llu MB)\n",
+				requested, target.width, target.height, target.msaa_samples, m_caps.max_samples, (unsigned long long)(m_msaa_budget >> 20));
+	}
+}
+
+// A read-back of a multisample target reads the samples one by one when the target keeps them readable and the read-back
+// needs them (coverage or priority bits); any other read-back reads the resolved image.
+bool retro_vk_engine::reads_samples(const osd::gpu_readback_rect &r) const
+{
+	return m_target.msaa_samples > 0 && m_target.msaa_per_sample && (r.coverage || r.priority_bits);
+}
+
+// Overlay triangles drawn without multisampling are moved to pixel centres, so each covers the pixels whose centres it
+// contains rather than a sliver of samples. A triangle whose three vertices all sit on whole pixels (the pixel-aligned
+// rectangles) is left as it is. The vertices are the frame's copy in the staging buffer.
+void retro_vk_engine::snap_triangles(const osd::gpu_frame &frame, uint8_t *vertices) const
+{
+	const size_t stride = size_t(5 + frame.varyings_per_vertex) * 4;
+	for (int i = 0; i < frame.command_count; i++)
+	{
+		const osd::gpu_command &c = frame.commands[i];
+		if (c.type != osd::gpu_command_type::DRAW || c.multisample)
+			continue;
+		for (uint32_t t = 0; t + 3 <= c.vertex_count; t += 3)
+		{
+			float *v[3] = {};
+			bool whole = true;
+			for (int k = 0; k < 3; k++)
+			{
+				v[k] = reinterpret_cast<float *>(vertices + (size_t(c.first_vertex) + t + k) * stride);
+				whole = whole && v[k][0] == std::floor(v[k][0]) && v[k][1] == std::floor(v[k][1]);
+			}
+			if (whole)
+				continue;
+			for (int k = 0; k < 3; k++)
+			{
+				v[k][0] = std::floor(v[k][0]) + 0.5f;
+				v[k][1] = std::floor(v[k][1]) + 0.5f;
+			}
+		}
+	}
+}
+
 // Refuses the frames the OpenGL engine refuses, with the same checks.
 bool retro_vk_engine::validate_frame(const osd::gpu_frame &frame)
 {
@@ -1013,12 +1189,6 @@ bool retro_vk_engine::validate_frame(const osd::gpu_frame &frame)
 	if (tg.width <= 0 || tg.height <= 0 || tg.width > m_caps.max_texture_size || tg.height > m_caps.max_texture_size)
 	{
 		log_problem("frame", "target size out of range");
-		return false;
-	}
-	// multisampled targets come with VK.5; the factory keeps those sessions on OpenGL
-	if (tg.msaa_samples > 0)
-	{
-		log_problem("frame", "multisampled target, not supported by the Vulkan engine yet");
 		return false;
 	}
 	if (frame.update_count > 0 && !frame.updates)
@@ -1211,12 +1381,15 @@ void retro_vk_engine::destroy_pipeline_objects()
 	m_desc_pools.clear();
 	m_desc_pool_next = 0;
 	m_device.fn.destroy_pipeline_cache(dev, m_pipeline_cache, nullptr);
-	m_device.fn.destroy_pipeline(dev, m_output_pipeline, nullptr);
+	for (size_t kind = 0; kind < 2; kind++)
+	{
+		m_device.fn.destroy_pipeline(dev, m_output_pipeline[kind], nullptr);
+		m_device.fn.destroy_shader_module(dev, m_output_module[kind], nullptr);
+		m_output_pipeline[kind] = VK_NULL_HANDLE;
+		m_output_module[kind] = VK_NULL_HANDLE;
+	}
 	m_device.fn.destroy_pipeline_layout(dev, m_output_layout, nullptr);
-	m_device.fn.destroy_shader_module(dev, m_output_module, nullptr);
-	m_output_pipeline = VK_NULL_HANDLE;
 	m_output_layout = VK_NULL_HANDLE;
-	m_output_module = VK_NULL_HANDLE;
 	m_device.fn.destroy_pipeline_layout(dev, m_pipeline_layout, nullptr);
 	m_device.fn.destroy_descriptor_set_layout(dev, m_set_layout, nullptr);
 	m_device.fn.destroy_sampler(dev, m_sampler_linear, nullptr);
@@ -1386,9 +1559,9 @@ VkPipeline retro_vk_engine::get_pipeline(const pipeline_key &key, const program 
 	raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 	raster.lineWidth = 1.0f;
 
-	// the targets are single-sample: frames are drawn without multisampling until VK.5
+	// the sample count matches the colour and depth attachments of the target, and the rasteriser writes each sample
 	VkPipelineMultisampleStateCreateInfo multisample = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-	multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	multisample.rasterizationSamples = VkSampleCountFlagBits(key.samples);
 
 	VkPipelineDepthStencilStateCreateInfo depth = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 	depth.depthTestEnable = key.depth_test ? VK_TRUE : VK_FALSE;
@@ -1472,6 +1645,7 @@ bool retro_vk_engine::prepare_draws(const osd::gpu_frame &frame, bool use_depth,
 		key.module = c.module;
 		key.variant = c.variant;
 		key.varyings = uint32_t(frame.varyings_per_vertex);
+		key.samples = uint32_t(std::max(m_target.msaa_samples, 1));
 		key.depth_attachment = use_depth;
 		key.depth_compare = VK_COMPARE_OP_ALWAYS;
 		switch (frame.target.depth)
@@ -1721,6 +1895,7 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 
 	const auto upload_start = clock_type::now();
 	osd::gpu_target_desc target = frame.target;
+	fit_msaa(target);
 	bool clear_color = false;
 	bool clear_depth = false;
 	if (!ensure_target(target, clear_color, clear_depth))
@@ -1819,6 +1994,8 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		write_readback_lut(frame.readbacks[i], m_staging.data + readback_at[i]);
 	if (vertex_bytes > 0)
 		std::memcpy(m_staging.data + vertex_at, frame.vertices, vertex_bytes);
+	if (target.msaa_samples > 0)
+		snap_triangles(frame, m_staging.data + vertex_at);
 	std::memset(m_staging.data + state_at, 0, state_bytes);
 	if (frame.prim_state && frame.prim_count > 0 && frame.state_stride > 0)
 	{

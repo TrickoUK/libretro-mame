@@ -77,6 +77,7 @@ struct vk_functions
 	PFN_vkCmdCopyBufferToImage cmd_copy_buffer_to_image = nullptr;
 	PFN_vkCmdCopyImageToBuffer cmd_copy_image_to_buffer = nullptr;
 	PFN_vkCmdCopyImage cmd_copy_image = nullptr;
+	PFN_vkCmdResolveImage cmd_resolve_image = nullptr;
 	PFN_vkCmdClearColorImage cmd_clear_color_image = nullptr;
 	PFN_vkCmdClearDepthStencilImage cmd_clear_depth_stencil_image = nullptr;
 	PFN_vkCreateImageView create_image_view = nullptr;

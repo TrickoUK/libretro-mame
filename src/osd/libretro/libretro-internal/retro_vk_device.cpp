@@ -255,6 +255,7 @@ bool vk_device::create(std::string &report)
 	fn.cmd_copy_buffer_to_image = device_proc<PFN_vkCmdCopyBufferToImage>(dp, m_device, "vkCmdCopyBufferToImage");
 	fn.cmd_copy_image_to_buffer = device_proc<PFN_vkCmdCopyImageToBuffer>(dp, m_device, "vkCmdCopyImageToBuffer");
 	fn.cmd_copy_image = device_proc<PFN_vkCmdCopyImage>(dp, m_device, "vkCmdCopyImage");
+	fn.cmd_resolve_image = device_proc<PFN_vkCmdResolveImage>(dp, m_device, "vkCmdResolveImage");
 	fn.cmd_clear_color_image = device_proc<PFN_vkCmdClearColorImage>(dp, m_device, "vkCmdClearColorImage");
 	fn.cmd_clear_depth_stencil_image = device_proc<PFN_vkCmdClearDepthStencilImage>(dp, m_device, "vkCmdClearDepthStencilImage");
 	fn.create_image_view = device_proc<PFN_vkCreateImageView>(dp, m_device, "vkCreateImageView");

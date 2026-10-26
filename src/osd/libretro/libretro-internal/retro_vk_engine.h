@@ -124,6 +124,7 @@ private:
 		osd::gpu_handle module = osd::GPU_NULL_HANDLE;
 		uint32_t variant = 0;
 		uint32_t varyings = 0;
+		uint32_t samples = 1;           // the target's sample count: the pipeline's rasterisation samples
 		bool depth_attachment = false;
 		bool depth_test = false;
 		uint32_t depth_compare = 0;     // VkCompareOp
@@ -136,10 +137,10 @@ private:
 
 		bool operator<(const pipeline_key &o) const
 		{
-			return std::tie(module, variant, varyings, depth_attachment, depth_test, depth_compare, depth_write, color_write,
+			return std::tie(module, variant, varyings, samples, depth_attachment, depth_test, depth_compare, depth_write, color_write,
 					blend, blend_op, src, dst, src_alpha, dst_alpha)
-					< std::tie(o.module, o.variant, o.varyings, o.depth_attachment, o.depth_test, o.depth_compare, o.depth_write,
-					o.color_write, o.blend, o.blend_op, o.src, o.dst, o.src_alpha, o.dst_alpha);
+					< std::tie(o.module, o.variant, o.varyings, o.samples, o.depth_attachment, o.depth_test, o.depth_compare,
+					o.depth_write, o.color_write, o.blend, o.blend_op, o.src, o.dst, o.src_alpha, o.dst_alpha);
 		}
 	};
 
@@ -147,6 +148,11 @@ private:
 	bool note_result(bool ok, int &streak, const char *what);
 
 	bool validate_frame(const osd::gpu_frame &frame);
+	void fit_msaa(osd::gpu_target_desc &target);
+	bool sample_count_supported(int samples, bool sampled) const;
+	const image &readback_image() const { return m_target.msaa_samples > 0 ? m_resolve : m_color; }
+	void snap_triangles(const osd::gpu_frame &frame, uint8_t *vertices) const;
+	bool reads_samples(const osd::gpu_readback_rect &r) const;
 	bool validate_update(const osd::gpu_texture_update &u);
 	bool valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg);
 	bool submit_pending(const osd::gpu_frame &frame);
@@ -154,7 +160,7 @@ private:
 	bool wait_in_flight();
 	void read_timer();
 	void drop_pending();
-	bool ensure_output_pipeline();
+	bool ensure_output_pipeline(bool per_sample);
 	bool allocate_frame_set(VkDescriptorSet &set);
 	bool record_output_pass(const osd::gpu_readback_rect &r, size_t at, const staging_buffer &staging);
 	size_t readback_lut_bytes(const osd::gpu_readback_rect &r) const;
@@ -177,7 +183,7 @@ private:
 
 	int texel_bytes(osd::gpu_handle texture) const;
 	VkSampler sampler_for(const texture &t) const;
-	bool create_image(image &img, VkFormat format, int width, int height, VkImageUsageFlags usage, VkImageAspectFlags aspect);
+	bool create_image(image &img, VkFormat format, int width, int height, VkImageUsageFlags usage, VkImageAspectFlags aspect, int samples = 1);
 	void destroy_image(image &img);
 	bool transition_to_general(const image &img);
 	bool ensure_target(const osd::gpu_target_desc &target, bool &clear_color, bool &clear_depth);
@@ -187,6 +193,8 @@ private:
 	bool end_recording(bool wait);
 	void record_barrier();
 	void record_clear(const float *rgba, bool color, bool depth);
+	void record_clear_multisample(const float *rgba, bool color, bool depth);
+	void record_resolve();
 	void record_copy(const osd::gpu_command &c);
 	void record_update(const osd::gpu_texture_update &u, size_t offset, const staging_buffer &staging);
 	void record_readback(const osd::gpu_readback_rect &r, size_t offset, const staging_buffer &staging);
@@ -210,10 +218,11 @@ private:
 	VkSampler m_sampler_nearest = VK_NULL_HANDLE;
 	VkSampler m_sampler_linear = VK_NULL_HANDLE;
 	VkPipelineCache m_pipeline_cache = VK_NULL_HANDLE;
-	// the read-back compute pass: its module, pipeline and layout (the set layout is shared)
-	VkShaderModule m_output_module = VK_NULL_HANDLE;
+	// the read-back compute passes, [0] for a single-sample target (or one read once) and [1] for samples read one by one:
+	// each its module and pipeline; the layout (and the set layout) is shared
+	VkShaderModule m_output_module[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+	VkPipeline m_output_pipeline[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
 	VkPipelineLayout m_output_layout = VK_NULL_HANDLE;
-	VkPipeline m_output_pipeline = VK_NULL_HANDLE;
 	bool m_pipeline_cache_dirty = false;
 	std::string m_cache_dir;
 
@@ -261,12 +270,22 @@ private:
 	uint64_t m_texture_budget = 512ULL * 1024 * 1024;
 
 	// render target: BGRA8 colour (the byte order a BGRA read-back produces), optional D32 depth, and a
-	// same-size copy used by COPY_RECT so overlapping rectangles copy from the original pixels
+	// same-size copy used by COPY_RECT so overlapping rectangles copy from the original pixels. A multisampled
+	// target has its colour, depth and copy at the sample count; m_resolve is the single-sample colour that
+	// read-backs read, filled from m_color by record_resolve()
 	osd::gpu_target_desc m_target;
 	bool m_target_valid = false;
 	image m_color;
 	image m_depth;
 	image m_scratch;
+	image m_resolve;
+
+	// multisampling: the sample counts the device supports for colour and depth targets and for sampled colour,
+	// the largest count that is supported, and the memory budget the target's samples must fit in (as the OpenGL engine)
+	uint32_t m_sample_counts = 0;
+	uint32_t m_sampled_sample_counts = 0;
+	uint64_t m_msaa_budget = 1024ULL * 1024 * 1024;
+	int m_msaa_logged_requested = 0, m_msaa_logged_granted = 0;
 };
 
 #endif // MAME_OSD_LIBRETRO_RETRO_VK_ENGINE_H
