@@ -674,6 +674,17 @@ static void check_variables(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
       gpu3d_enable = !strcmp(var.value, "enabled");
 
+   var.key   = CORE_NAME "_3d_gpu_api";
+   var.value = NULL;
+   gpu3d_api = GPU3D_API_OPENGL;
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      if (!strcmp(var.value, "vulkan"))
+         gpu3d_api = GPU3D_API_VULKAN;
+      else if (!strcmp(var.value, "auto"))
+         gpu3d_api = GPU3D_API_AUTO;
+   }
+
    var.key   = CORE_NAME "_3d_texfilter";
    var.value = NULL;
    texfilter_enable = false;

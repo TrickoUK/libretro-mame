@@ -34,6 +34,7 @@
 
 #if defined(HAVE_RETRO_GPU_TARGET)
 #include "libretro-internal/retro_gpu_engine.h"
+#include "libretro-internal/retro_vk_loader.h"
 #endif
 
 bool fexists(std::string path)
@@ -328,6 +329,19 @@ osd::gpu_engine *retro_osd_interface::get_gpu_engine(const char *system)
 	const bool enabled = (system && !strcmp(system, "ps1")) ? (psx_gpu_hle_scale > 0) : gpu3d_enable;
 	if (!enabled || m_gpu_engine_failed)
 		return nullptr;
+	if (gpu3d_api != GPU3D_API_OPENGL)
+	{
+		// The Vulkan engine (gpu-vulkan-plan.md VK.3) is not built yet: probe the device once and
+		// keep using the OpenGL engine.
+		static bool probed = false;
+		if (!probed)
+		{
+			probed = true;
+			auto const probe = retro_vk::retro_vk_probe();
+			fprintf(stderr, "[retro_vk] %s: %s\n", probe.available ? "device found" : "no device", probe.report.c_str());
+			fprintf(stderr, "[retro_vk] Vulkan engine not built yet, using OpenGL\n");
+		}
+	}
 	auto engine = std::make_unique<retro_gpu_engine>();
 	if (!engine->is_valid())
 	{

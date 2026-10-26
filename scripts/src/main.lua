@@ -430,6 +430,7 @@ end
 			files {
 				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.cpp",
 				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gl_loader.cpp",
+				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_loader.cpp",
 			}
 		end
 	end

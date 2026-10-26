@@ -131,6 +131,8 @@ project ("osd_" .. _OPTIONS["osd"])
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.h",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gl_loader.cpp",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gl_loader.h",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_loader.cpp",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_loader.h",
 			MAME_DIR .. "src/osd/interface/gpurender.h",
 			MAME_DIR .. "src/osd/interface/gpuengine.h",
 		}
