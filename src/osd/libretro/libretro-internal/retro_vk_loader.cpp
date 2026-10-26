@@ -88,6 +88,8 @@ vk_probe_result retro_vk_probe()
 {
 	vk_probe_result result;
 
+	// The library is deliberately never closed: some ICDs misbehave when unloaded, and the
+	// Vulkan engine reuses the same handle.
 	void *const lib = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
 	if (!lib)
 	{
