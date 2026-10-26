@@ -164,12 +164,11 @@ size_t align_up(size_t value, size_t alignment)
 } // anonymous namespace
 
 
-retro_vk_engine::retro_vk_engine()
+retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device)
+	: m_device(device)
 {
-	std::string report;
-	if (!m_device.create(report))
+	if (!m_device.valid())
 	{
-		fprintf(stderr, "[retro_vk_engine] %s\n", report.c_str());
 		m_failed = true;
 		return;
 	}
@@ -715,6 +714,12 @@ bool retro_vk_engine::validate_frame(const osd::gpu_frame &frame)
 	if (tg.width <= 0 || tg.height <= 0 || tg.width > m_caps.max_texture_size || tg.height > m_caps.max_texture_size)
 	{
 		log_problem("frame", "target size out of range");
+		return false;
+	}
+	// multisampled targets come with VK.5; the factory keeps those sessions on OpenGL
+	if (tg.msaa_samples > 0)
+	{
+		log_problem("frame", "multisampled target, not supported by the Vulkan engine yet");
 		return false;
 	}
 	if (frame.update_count > 0 && !frame.updates)
@@ -1357,7 +1362,6 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 
 	const auto upload_start = clock_type::now();
 	osd::gpu_target_desc target = frame.target;
-	target.msaa_samples = 0;
 	bool clear_color = false;
 	bool clear_depth = false;
 	if (!ensure_target(target, clear_color, clear_depth))

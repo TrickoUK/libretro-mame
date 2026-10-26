@@ -33,7 +33,8 @@
 class retro_vk_engine : public osd::gpu_engine
 {
 public:
-	retro_vk_engine();
+	// the device is owned by the caller (the OSD's engine factory) and outlives the engine
+	explicit retro_vk_engine(retro_vk::vk_device &device);
 	virtual ~retro_vk_engine();
 
 	retro_vk_engine(const retro_vk_engine &) = delete;
@@ -176,7 +177,7 @@ private:
 
 	static constexpr int MAX_FAILED_FRAMES = 30;
 
-	retro_vk::vk_device m_device;
+	retro_vk::vk_device &m_device;
 	VkCommandBuffer m_cmd = VK_NULL_HANDLE;
 	VkFence m_fence = VK_NULL_HANDLE;
 
