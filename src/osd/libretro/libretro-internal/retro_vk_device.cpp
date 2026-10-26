@@ -159,7 +159,7 @@ bool vk_device::create(std::string &report)
 	const char *const wanted = std::getenv("MAME_GPU_VK_DEVICE");
 	int best_rank = 1000;
 	uint32_t best_family = UINT32_MAX;
-	VkPhysicalDeviceFeatures2 best_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	bool best_dual = false;
 	for (uint32_t i = 0; i < device_count; i++)
 	{
 		VkPhysicalDeviceProperties2 props = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
@@ -171,6 +171,12 @@ bool vk_device::create(std::string &report)
 		const uint32_t family = graphics_queue_family(fn, devices[i]);
 		if (family == UINT32_MAX)
 			continue;
+		// the draw path records dynamic rendering, which is core in 1.3 but must be enabled at creation
+		VkPhysicalDeviceVulkan13Features features13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+		VkPhysicalDeviceFeatures2 query = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &features13 };
+		fn.get_physical_device_features2(devices[i], &query);
+		if (!features13.dynamicRendering)
+			continue;
 		// the CPU implementation is only used when named explicitly
 		const int rank = (props.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? (wanted ? 0 : -1) : type_rank(props.properties.deviceType);
 		if (rank < 0 || (m_physical && rank >= best_rank))
@@ -179,17 +185,16 @@ bool vk_device::create(std::string &report)
 		m_props = props.properties;
 		best_rank = rank;
 		best_family = family;
-		best_features = VkPhysicalDeviceFeatures2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-		fn.get_physical_device_features2(devices[i], &best_features);
+		best_dual = query.features.dualSrcBlend;
 	}
 	if (!m_physical)
 	{
 		report = wanted ? std::string("no usable device matches MAME_GPU_VK_DEVICE=") + wanted
-				: std::string("no device with Vulkan 1.3 and a graphics queue");
+				: std::string("no device with Vulkan 1.3, dynamic rendering and a graphics queue");
 		return false;
 	}
 	m_queue_family = best_family;
-	m_dual_src_blend = best_features.features.dualSrcBlend;
+	m_dual_src_blend = best_dual;
 	fn.get_memory_properties(m_physical, &m_memory);
 
 	// one graphics queue, dual-source blending enabled when the device has it (System 22)
@@ -204,6 +209,9 @@ bool vk_device::create(std::string &report)
 	device_info.queueCreateInfoCount = 1;
 	device_info.pQueueCreateInfos = &queue_info;
 	device_info.pEnabledFeatures = &features;
+	VkPhysicalDeviceVulkan13Features enabled13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+	enabled13.dynamicRendering = VK_TRUE;
+	device_info.pNext = &enabled13;
 	if (fn.create_device(m_physical, &device_info, nullptr, &m_device) != VK_SUCCESS)
 	{
 		report = "vkCreateDevice failed";
@@ -249,6 +257,36 @@ bool vk_device::create(std::string &report)
 	fn.cmd_copy_image = device_proc<PFN_vkCmdCopyImage>(dp, m_device, "vkCmdCopyImage");
 	fn.cmd_clear_color_image = device_proc<PFN_vkCmdClearColorImage>(dp, m_device, "vkCmdClearColorImage");
 	fn.cmd_clear_depth_stencil_image = device_proc<PFN_vkCmdClearDepthStencilImage>(dp, m_device, "vkCmdClearDepthStencilImage");
+	fn.create_image_view = device_proc<PFN_vkCreateImageView>(dp, m_device, "vkCreateImageView");
+	fn.destroy_image_view = device_proc<PFN_vkDestroyImageView>(dp, m_device, "vkDestroyImageView");
+	fn.create_sampler = device_proc<PFN_vkCreateSampler>(dp, m_device, "vkCreateSampler");
+	fn.destroy_sampler = device_proc<PFN_vkDestroySampler>(dp, m_device, "vkDestroySampler");
+	fn.create_shader_module = device_proc<PFN_vkCreateShaderModule>(dp, m_device, "vkCreateShaderModule");
+	fn.destroy_shader_module = device_proc<PFN_vkDestroyShaderModule>(dp, m_device, "vkDestroyShaderModule");
+	fn.create_descriptor_set_layout = device_proc<PFN_vkCreateDescriptorSetLayout>(dp, m_device, "vkCreateDescriptorSetLayout");
+	fn.destroy_descriptor_set_layout = device_proc<PFN_vkDestroyDescriptorSetLayout>(dp, m_device, "vkDestroyDescriptorSetLayout");
+	fn.create_descriptor_pool = device_proc<PFN_vkCreateDescriptorPool>(dp, m_device, "vkCreateDescriptorPool");
+	fn.destroy_descriptor_pool = device_proc<PFN_vkDestroyDescriptorPool>(dp, m_device, "vkDestroyDescriptorPool");
+	fn.reset_descriptor_pool = device_proc<PFN_vkResetDescriptorPool>(dp, m_device, "vkResetDescriptorPool");
+	fn.allocate_descriptor_sets = device_proc<PFN_vkAllocateDescriptorSets>(dp, m_device, "vkAllocateDescriptorSets");
+	fn.update_descriptor_sets = device_proc<PFN_vkUpdateDescriptorSets>(dp, m_device, "vkUpdateDescriptorSets");
+	fn.create_pipeline_layout = device_proc<PFN_vkCreatePipelineLayout>(dp, m_device, "vkCreatePipelineLayout");
+	fn.destroy_pipeline_layout = device_proc<PFN_vkDestroyPipelineLayout>(dp, m_device, "vkDestroyPipelineLayout");
+	fn.create_pipeline_cache = device_proc<PFN_vkCreatePipelineCache>(dp, m_device, "vkCreatePipelineCache");
+	fn.destroy_pipeline_cache = device_proc<PFN_vkDestroyPipelineCache>(dp, m_device, "vkDestroyPipelineCache");
+	fn.get_pipeline_cache_data = device_proc<PFN_vkGetPipelineCacheData>(dp, m_device, "vkGetPipelineCacheData");
+	fn.create_graphics_pipelines = device_proc<PFN_vkCreateGraphicsPipelines>(dp, m_device, "vkCreateGraphicsPipelines");
+	fn.destroy_pipeline = device_proc<PFN_vkDestroyPipeline>(dp, m_device, "vkDestroyPipeline");
+	fn.cmd_begin_rendering = device_proc<PFN_vkCmdBeginRendering>(dp, m_device, "vkCmdBeginRendering");
+	fn.cmd_end_rendering = device_proc<PFN_vkCmdEndRendering>(dp, m_device, "vkCmdEndRendering");
+	fn.cmd_bind_pipeline = device_proc<PFN_vkCmdBindPipeline>(dp, m_device, "vkCmdBindPipeline");
+	fn.cmd_bind_descriptor_sets = device_proc<PFN_vkCmdBindDescriptorSets>(dp, m_device, "vkCmdBindDescriptorSets");
+	fn.cmd_bind_vertex_buffers = device_proc<PFN_vkCmdBindVertexBuffers>(dp, m_device, "vkCmdBindVertexBuffers");
+	fn.cmd_push_constants = device_proc<PFN_vkCmdPushConstants>(dp, m_device, "vkCmdPushConstants");
+	fn.cmd_set_viewport = device_proc<PFN_vkCmdSetViewport>(dp, m_device, "vkCmdSetViewport");
+	fn.cmd_set_scissor = device_proc<PFN_vkCmdSetScissor>(dp, m_device, "vkCmdSetScissor");
+	fn.cmd_set_blend_constants = device_proc<PFN_vkCmdSetBlendConstants>(dp, m_device, "vkCmdSetBlendConstants");
+	fn.cmd_draw = device_proc<PFN_vkCmdDraw>(dp, m_device, "vkCmdDraw");
 
 	fn.get_device_queue(m_device, m_queue_family, 0, &m_queue);
 

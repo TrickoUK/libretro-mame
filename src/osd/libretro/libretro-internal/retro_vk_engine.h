@@ -3,12 +3,13 @@
 /***************************************************************************
     retro_vk_engine.h
     Vulkan implementation of osd::gpu_engine on the private device from
-    retro_vk_device. This stage (VK.3b) owns the textures, the render
-    target and its scratch copy, and runs UPDATE_TEXTURE, CLEAR, COPY_RECT,
-    SET_CLIP and plain read-back. Draw commands and the pixel pipelines come
-    with VK.3c, so a frame that draws is refused. Each frame is recorded into
-    one command buffer and waited for before submit_frame() returns. The
-    factory in retromain.cpp still returns the OpenGL engine.
+    retro_vk_device. It owns the textures, the render target and its scratch
+    copy, and runs UPDATE_TEXTURE, CLEAR, COPY_RECT, SET_CLIP, DRAW and
+    read-back. Each module's shader pair is compiled per variant, and its
+    pipelines are created on first use and kept in a VkPipelineCache under the
+    system's gpu-cache directory. Each frame is recorded into one command
+    buffer and waited for before submit_frame() returns. The factory in
+    retromain.cpp still returns the OpenGL engine until VK.3d.
     Only compiled when HAVE_RETRO_GPU_TARGET is defined.
 ***************************************************************************/
 
@@ -21,8 +22,12 @@
 #include "interface/gpuengine.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
+#include <tuple>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 
 class retro_vk_engine : public osd::gpu_engine
@@ -58,6 +63,8 @@ private:
 		VkImage handle = VK_NULL_HANDLE;
 		VkDeviceMemory memory = VK_NULL_HANDLE;
 		VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		VkFormat format = VK_FORMAT_UNDEFINED;
+		VkImageView view = VK_NULL_HANDLE;
 		int width = 0;
 		int height = 0;
 	};
@@ -84,12 +91,44 @@ private:
 		osd::gpu_texture_format binding_format[osd::GPU_MAX_BINDINGS] = {};
 	};
 
-	// one host-visible buffer per frame: uploads first, then read-backs
+	// one host-visible buffer per frame: uploads first, then read-backs, the vertices and the state records
 	struct staging_buffer
 	{
 		VkBuffer buffer = VK_NULL_HANDLE;
 		VkDeviceMemory memory = VK_NULL_HANDLE;
 		uint8_t *data = nullptr;
+	};
+
+	// the two shader stages of one module and variant
+	struct program
+	{
+		VkShaderModule vertex = VK_NULL_HANDLE;
+		VkShaderModule fragment = VK_NULL_HANDLE;
+	};
+
+	// everything a graphics pipeline depends on apart from the program itself
+	struct pipeline_key
+	{
+		osd::gpu_handle module = osd::GPU_NULL_HANDLE;
+		uint32_t variant = 0;
+		uint32_t varyings = 0;
+		bool depth_attachment = false;
+		bool depth_test = false;
+		uint32_t depth_compare = 0;     // VkCompareOp
+		bool depth_write = false;
+		bool color_write = false;
+		bool blend = false;
+		uint32_t blend_op = 0;          // VkBlendOp
+		uint32_t src = 0, dst = 0;      // VkBlendFactor
+		uint32_t src_alpha = 0, dst_alpha = 0;
+
+		bool operator<(const pipeline_key &o) const
+		{
+			return std::tie(module, variant, varyings, depth_attachment, depth_test, depth_compare, depth_write, color_write,
+					blend, blend_op, src, dst, src_alpha, dst_alpha)
+					< std::tie(o.module, o.variant, o.varyings, o.depth_attachment, o.depth_test, o.depth_compare, o.depth_write,
+					o.color_write, o.blend, o.blend_op, o.src, o.dst, o.src_alpha, o.dst_alpha);
+		}
 	};
 
 	void log_problem(const char *what, const char *detail);
@@ -99,8 +138,23 @@ private:
 	bool validate_update(const osd::gpu_texture_update &u);
 	bool valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg);
 	bool submit_pending(const osd::gpu_frame &frame);
+	std::string device_key() const;
+
+	bool create_pipeline_objects();
+	void destroy_pipeline_objects();
+	void load_pipeline_cache();
+	void save_pipeline_cache();
+	const program *get_program(osd::gpu_handle module_handle, uint32_t variant);
+	VkPipeline get_pipeline(const pipeline_key &key, const program &p);
+	bool prepare_draws(const osd::gpu_frame &frame, bool use_depth, std::vector<VkPipeline> &pipelines);
+	bool allocate_set(const osd::gpu_command &c, const module &m, const staging_buffer &staging, size_t state_at, size_t state_bytes, VkDescriptorSet &set);
+	void begin_rendering(bool use_depth);
+	void end_rendering();
+	bool record_draw(const osd::gpu_command &c, VkPipeline pipeline, const osd::gpu_frame &frame, const staging_buffer &staging,
+			size_t vertex_at, size_t state_at, size_t state_bytes);
 
 	int texel_bytes(osd::gpu_handle texture) const;
+	VkSampler sampler_for(const texture &t) const;
 	bool create_image(image &img, VkFormat format, int width, int height, VkImageUsageFlags usage, VkImageAspectFlags aspect);
 	void destroy_image(image &img);
 	bool transition_to_general(const image &img);
@@ -125,6 +179,30 @@ private:
 	retro_vk::vk_device m_device;
 	VkCommandBuffer m_cmd = VK_NULL_HANDLE;
 	VkFence m_fence = VK_NULL_HANDLE;
+
+	// shared pipeline state: one set layout (binding 0 the state buffer, bindings 1..8 the samplers), one pipeline
+	// layout with the per-frame push constants, the samplers and the pipeline cache
+	VkDescriptorSetLayout m_set_layout = VK_NULL_HANDLE;
+	VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
+	VkSampler m_sampler_nearest = VK_NULL_HANDLE;
+	VkSampler m_sampler_linear = VK_NULL_HANDLE;
+	VkPipelineCache m_pipeline_cache = VK_NULL_HANDLE;
+	bool m_pipeline_cache_dirty = false;
+	std::string m_cache_dir;
+
+	std::map<std::pair<osd::gpu_handle, uint32_t>, program> m_programs;
+	std::map<pipeline_key, VkPipeline> m_pipelines;
+
+	// descriptor pools are reset at the start of each frame, when nothing is in flight; a new one is added when one fills
+	std::vector<VkDescriptorPool> m_desc_pools;
+	size_t m_desc_pool_next = 0;
+	VkDescriptorSet m_last_set = VK_NULL_HANDLE;
+	osd::gpu_handle m_last_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_last_bindings[osd::GPU_MAX_BINDINGS] = {};
+
+	// dynamic state the draws set: the scissor (SET_CLIP) and whether a render pass is open
+	int m_clip[4] = { 0, 0, 0, 0 };
+	bool m_rendering = false;
 
 	osd::gpu_engine_caps m_caps;
 	std::string m_renderer;

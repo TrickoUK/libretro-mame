@@ -325,4 +325,11 @@ bool check_module(const osd::gpu_shader_module &module, uint32_t variant, const 
 	return ok;
 }
 
+// The key for compile_cached(): the compiler and prelude versions, then the device key the
+// caller gives (vendor, device and driver version), so a driver update invalidates the cache.
+std::string shader_cache_key(const std::string &device_key)
+{
+	return compiler_cache_key() + "-" + device_key;
+}
+
 } // namespace retro_vk

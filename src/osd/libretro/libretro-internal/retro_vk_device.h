@@ -79,6 +79,36 @@ struct vk_functions
 	PFN_vkCmdCopyImage cmd_copy_image = nullptr;
 	PFN_vkCmdClearColorImage cmd_clear_color_image = nullptr;
 	PFN_vkCmdClearDepthStencilImage cmd_clear_depth_stencil_image = nullptr;
+	PFN_vkCreateImageView create_image_view = nullptr;
+	PFN_vkDestroyImageView destroy_image_view = nullptr;
+	PFN_vkCreateSampler create_sampler = nullptr;
+	PFN_vkDestroySampler destroy_sampler = nullptr;
+	PFN_vkCreateShaderModule create_shader_module = nullptr;
+	PFN_vkDestroyShaderModule destroy_shader_module = nullptr;
+	PFN_vkCreateDescriptorSetLayout create_descriptor_set_layout = nullptr;
+	PFN_vkDestroyDescriptorSetLayout destroy_descriptor_set_layout = nullptr;
+	PFN_vkCreateDescriptorPool create_descriptor_pool = nullptr;
+	PFN_vkDestroyDescriptorPool destroy_descriptor_pool = nullptr;
+	PFN_vkResetDescriptorPool reset_descriptor_pool = nullptr;
+	PFN_vkAllocateDescriptorSets allocate_descriptor_sets = nullptr;
+	PFN_vkUpdateDescriptorSets update_descriptor_sets = nullptr;
+	PFN_vkCreatePipelineLayout create_pipeline_layout = nullptr;
+	PFN_vkDestroyPipelineLayout destroy_pipeline_layout = nullptr;
+	PFN_vkCreatePipelineCache create_pipeline_cache = nullptr;
+	PFN_vkDestroyPipelineCache destroy_pipeline_cache = nullptr;
+	PFN_vkGetPipelineCacheData get_pipeline_cache_data = nullptr;
+	PFN_vkCreateGraphicsPipelines create_graphics_pipelines = nullptr;
+	PFN_vkDestroyPipeline destroy_pipeline = nullptr;
+	PFN_vkCmdBeginRendering cmd_begin_rendering = nullptr;
+	PFN_vkCmdEndRendering cmd_end_rendering = nullptr;
+	PFN_vkCmdBindPipeline cmd_bind_pipeline = nullptr;
+	PFN_vkCmdBindDescriptorSets cmd_bind_descriptor_sets = nullptr;
+	PFN_vkCmdBindVertexBuffers cmd_bind_vertex_buffers = nullptr;
+	PFN_vkCmdPushConstants cmd_push_constants = nullptr;
+	PFN_vkCmdSetViewport cmd_set_viewport = nullptr;
+	PFN_vkCmdSetScissor cmd_set_scissor = nullptr;
+	PFN_vkCmdSetBlendConstants cmd_set_blend_constants = nullptr;
+	PFN_vkCmdDraw cmd_draw = nullptr;
 };
 
 class vk_device

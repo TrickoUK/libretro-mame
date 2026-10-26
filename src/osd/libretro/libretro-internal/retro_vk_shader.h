@@ -51,6 +51,10 @@ bool compile_glsl(shader_stage stage, const std::string &source, std::vector<uin
 bool compile_cached(shader_stage stage, const std::string &source, const std::string &cache_key,
 		const std::string &cache_dir, std::vector<uint32_t> &spirv, std::string &log);
 
+// The cache key for compile_cached(): the compiler and prelude versions followed by the
+// caller's device key, which names the vendor, device and driver version.
+std::string shader_cache_key(const std::string &device_key);
+
 // Compiles both stages of one module and variant and logs the outcome.
 // Used by MAME_GPU_VK_SHADERCHECK to check every program the GL engine
 // builds. Returns true when both stages compile.
