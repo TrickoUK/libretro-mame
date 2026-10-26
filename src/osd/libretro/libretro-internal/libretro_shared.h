@@ -147,8 +147,8 @@ extern int psx_gpu_texfilter_mode;
 extern int psx_gpu_filter_exclude_sprite_mode;
 extern int psx_gpu_filter_exclude_2d_polygon_mode;
 // mame_3d_supersample core option: supersampling factor for the 3D renderers
-// that support it (Voodoo texture samples, Konami K001005 render scale),
-// 1 = off (see osdepend.h).
+// that support it on the host-GPU path (Voodoo, Konami K001005, Model 2,
+// HNG64), 1 = off (see osdepend.h).
 extern int supersample_factor;
 // mame_3d_output_scale core option: present the supersampled 3D layer at
 // supersample_factor times the native screen size instead of averaging it
@@ -161,8 +161,8 @@ extern int msaa_samples_option;
 // mame_3d_aniso core option: most texture taps per pixel for anisotropic
 // filtering on the host-GPU path (0 = off).
 extern int aniso_taps_option;
-// mame_3d_texfilter core option: bilinear filter textures in the renderers
-// that support it (the Konami K001005 today, see osdepend.h).
+// mame_3d_texfilter core option: bilinear filter textures on the host-GPU path
+// (see osdepend.h).
 extern bool texfilter_enable;
 // mame_3d_gpu core option: let systems with a GPU engine adapter render their 3D
 // layer on the host GPU (osd::gpu_engine). Off until an adapter registers the option.
