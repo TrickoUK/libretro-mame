@@ -1580,6 +1580,7 @@ const retro_vk_engine::program *retro_vk_engine::get_program(osd::gpu_handle mod
 	{
 		m_device.fn.destroy_shader_module(m_device.device(), p.vertex, nullptr);
 		m_device.fn.destroy_shader_module(m_device.device(), p.fragment, nullptr);
+		fprintf(stderr, "[retro_vk_engine] shader compile failed (%s); the Vulkan engine is off for this session\n", m.name.c_str());
 		m_failed = true;
 		return nullptr;
 	}
