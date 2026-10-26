@@ -216,6 +216,7 @@ private:
 	static constexpr int MAX_FAILED_FRAMES = 30;
 
 	retro_vk::vk_device &m_device;
+	VkCommandPool m_pool = VK_NULL_HANDLE;
 	VkCommandBuffer m_cmd = VK_NULL_HANDLE;
 	VkFence m_fence = VK_NULL_HANDLE;
 

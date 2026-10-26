@@ -335,16 +335,6 @@ bool vk_device::create(std::string &report)
 
 	fn.get_device_queue(m_device, m_queue_family, 0, &m_queue);
 
-	VkCommandPoolCreateInfo pool_info = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
-	pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-	pool_info.queueFamilyIndex = m_queue_family;
-	if (fn.create_command_pool(m_device, &pool_info, nullptr, &m_pool) != VK_SUCCESS)
-	{
-		report = "vkCreateCommandPool failed";
-		destroy();
-		return false;
-	}
-
 	report = std::string("device \"") + m_props.deviceName + "\" (" + type_name(m_props.deviceType) + ", Vulkan " +
 			api_string(m_props.apiVersion) + ", dualSrcBlend " + (m_dual_src_blend ? "yes" : "no") + ")";
 	return true;
@@ -355,13 +345,10 @@ void vk_device::destroy()
 	if (m_device != VK_NULL_HANDLE)
 	{
 		fn.device_wait_idle(m_device);
-		if (m_pool != VK_NULL_HANDLE)
-			fn.destroy_command_pool(m_device, m_pool, nullptr);
 		fn.destroy_device(m_device, nullptr);
 	}
 	if (m_instance != VK_NULL_HANDLE)
 		fn.destroy_instance(m_instance, nullptr);
-	m_pool = VK_NULL_HANDLE;
 	m_device = VK_NULL_HANDLE;
 	m_queue = VK_NULL_HANDLE;
 	m_instance = VK_NULL_HANDLE;

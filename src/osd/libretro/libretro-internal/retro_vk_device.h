@@ -157,7 +157,6 @@ public:
 	VkPhysicalDevice physical_device() const { return m_physical; }
 	VkDevice device() const { return m_device; }
 	VkQueue queue() const { return m_queue; }
-	VkCommandPool command_pool() const { return m_pool; }
 	uint32_t queue_family() const { return m_queue_family; }
 	bool dual_src_blend() const { return m_dual_src_blend; }
 	// VK_EXT_sample_locations is enabled when the device has it; variable locations (per pixel) are needed to set the
@@ -175,7 +174,6 @@ private:
 	VkPhysicalDevice m_physical = VK_NULL_HANDLE;
 	VkDevice m_device = VK_NULL_HANDLE;
 	VkQueue m_queue = VK_NULL_HANDLE;
-	VkCommandPool m_pool = VK_NULL_HANDLE;
 	uint32_t m_queue_family = 0;
 	bool m_dual_src_blend = false;
 	bool m_sample_locations = false;

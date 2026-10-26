@@ -297,13 +297,22 @@ retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device)
 				m_device.variable_sample_locations() ? "variable locations, multisample-off draws put every sample at the pixel centre" : "not variable, snapping instead");
 
 	const VkDevice dev = m_device.device();
+	// the pool belongs to this engine alone, so resetting it for one frame cannot touch another engine's command buffer
+	VkCommandPoolCreateInfo pool_info = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+	pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	pool_info.queueFamilyIndex = m_device.queue_family();
+	if (m_device.fn.create_command_pool(dev, &pool_info, nullptr, &m_pool) != VK_SUCCESS)
+	{
+		fprintf(stderr, "[retro_vk_engine] command pool creation failed\n");
+		m_failed = true;
+	}
 	VkCommandBufferAllocateInfo alloc = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-	alloc.commandPool = m_device.command_pool();
+	alloc.commandPool = m_pool;
 	alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 	alloc.commandBufferCount = 1;
 	VkFenceCreateInfo fence_info = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-	if (m_device.fn.allocate_command_buffers(dev, &alloc, &m_cmd) != VK_SUCCESS
-			|| m_device.fn.create_fence(dev, &fence_info, nullptr, &m_fence) != VK_SUCCESS)
+	if (!m_failed && (m_device.fn.allocate_command_buffers(dev, &alloc, &m_cmd) != VK_SUCCESS
+			|| m_device.fn.create_fence(dev, &fence_info, nullptr, &m_fence) != VK_SUCCESS))
 	{
 		fprintf(stderr, "[retro_vk_engine] command buffer or fence creation failed\n");
 		m_failed = true;
@@ -354,6 +363,9 @@ retro_vk_engine::~retro_vk_engine()
 	destroy_pipeline_objects();
 	if (m_fence != VK_NULL_HANDLE)
 		m_device.fn.destroy_fence(m_device.device(), m_fence, nullptr);
+	// destroying the pool frees m_cmd
+	if (m_pool != VK_NULL_HANDLE)
+		m_device.fn.destroy_command_pool(m_device.device(), m_pool, nullptr);
 	// the device itself is destroyed when m_device goes out of scope
 }
 
@@ -704,14 +716,13 @@ void retro_vk_engine::release_target()
 //  Command recording
 //**************************************************************************
 
-// Records into m_cmd. The command pool is reset here, which is safe because every
-// earlier submission has been waited for.
-// The command buffer is reused, so the frame in flight (if any) must finish first.
+// Records into m_cmd. The engine's pool is reset here, which is safe because the frame in flight (if any) has
+// finished first: the command buffer is reused and nothing else allocates from the pool.
 bool retro_vk_engine::begin_recording()
 {
 	if (!wait_in_flight())
 		return false;
-	if (m_device.fn.reset_command_pool(m_device.device(), m_device.command_pool(), 0) != VK_SUCCESS)
+	if (m_device.fn.reset_command_pool(m_device.device(), m_pool, 0) != VK_SUCCESS)
 		return false;
 	m_locations_mode = -1;
 	VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
