@@ -431,6 +431,14 @@ end
 				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.cpp",
 				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gl_loader.cpp",
 				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_loader.cpp",
+				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_shader.cpp",
+			}
+			includedirs {
+				MAME_DIR .. "3rdparty/bgfx/3rdparty",
+				MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang",
+			}
+			links {
+				"glslang",
 			}
 		end
 	end

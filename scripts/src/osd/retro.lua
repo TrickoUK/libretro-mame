@@ -126,6 +126,10 @@ project ("osd_" .. _OPTIONS["osd"])
 		defines {
 			"HAVE_RETRO_GPU_TARGET",
 		}
+		includedirs {
+			MAME_DIR .. "3rdparty/bgfx/3rdparty",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang",
+		}
 		files {
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.cpp",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gpu_engine.h",
@@ -133,6 +137,8 @@ project ("osd_" .. _OPTIONS["osd"])
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_gl_loader.h",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_loader.cpp",
 			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_loader.h",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_shader.cpp",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_shader.h",
 			MAME_DIR .. "src/osd/interface/gpurender.h",
 			MAME_DIR .. "src/osd/interface/gpuengine.h",
 		}
