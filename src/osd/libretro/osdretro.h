@@ -133,7 +133,7 @@ public:
 	virtual bool gpu_render_pgxp_enabled() const override
 	{
 #if defined(HAVE_RETRO_GPU_TARGET)
-		return psx_gpu_pgxp_enable;
+		return psx_gpu_hle_scale > 0 && psx_gpu_pgxp_enable;
 #else
 		return false;
 #endif

@@ -235,6 +235,10 @@ void gte::setcp2dr( uint32_t pc, int reg, uint32_t value )
 		SXY1 = old_sxy2;
 		SXY2 = value;
 
+		// the PGXP shadows are only tracked while PGXP is enabled
+		if (!m_pgxp_enabled)
+			break;
+
 		m_pgxp_shadow[ 0 ] = old_shadow1;
 		m_pgxp_shadow[ 1 ] = old_shadow2;
 		if( value == old_sxy2 )
