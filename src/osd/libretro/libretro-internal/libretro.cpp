@@ -676,11 +676,11 @@ static void check_variables(void)
 
    var.key   = CORE_NAME "_3d_gpu_api";
    var.value = NULL;
-   gpu3d_api = GPU3D_API_OPENGL;
+   gpu3d_api = GPU3D_API_VULKAN;
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
-      if (!strcmp(var.value, "vulkan"))
-         gpu3d_api = GPU3D_API_VULKAN;
+      if (!strcmp(var.value, "opengl"))
+         gpu3d_api = GPU3D_API_OPENGL;
       else if (!strcmp(var.value, "auto"))
          gpu3d_api = GPU3D_API_AUTO;
    }

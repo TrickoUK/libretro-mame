@@ -787,12 +787,12 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       NULL,
       "video",
       {
-         { "opengl", "OpenGL" },
          { "vulkan", "Vulkan" },
+         { "opengl", "OpenGL" },
          { "auto",   "Auto" },
          { NULL, NULL },
       },
-      "opengl"
+      "vulkan"
    },
    {
       CORE_NAME "_3d_texfilter",
