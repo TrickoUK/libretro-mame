@@ -32,17 +32,19 @@ k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, devi
 {
 	m_k001006 = k001006;
 
-	// Not a hardware setting: render at a multiple of the native size and average down
-	int ss = screen.machine().osd().supersample();
-	if (char const *env = getenv("MAME_K001005_SS"))
-		ss = atoi(env);
-	m_ss = std::clamp(ss, 1, 4);
-	m_output_scaled = screen.machine().osd().supersample_output() && m_ss > 1;
-
 	m_force_bilinear = screen.machine().osd().texture_filter();
 	m_gpu_msaa = screen.machine().osd().msaa();
 	if (char const *env = getenv("MAME_K001005_TEXFILTER"))
 		m_force_bilinear = atoi(env) != 0;
+
+	// The scale belongs to the host-GPU path, so it is only raised when the engine exists; without one the
+	// renderer works at native size. Not a hardware setting: the GPU draws at a multiple of the native size and averages down
+	int ss = screen.machine().osd().supersample();
+	if (char const *env = getenv("MAME_K001005_SS"))
+		ss = atoi(env);
+	m_ss = gpu_init() ? std::clamp(ss, 1, 4) : 1;
+	m_draw_ss = m_ss;
+	m_output_scaled = screen.machine().osd().supersample_output() && m_ss > 1;
 
 	int const width = NATIVE_WIDTH * m_ss;
 	int const height = NATIVE_HEIGHT * m_ss;
@@ -154,17 +156,20 @@ void k001005_renderer::swap_buffers()
 
 	// A GPU-drawn page is written by the read-back alone: the native-size area at native output scale, the whole
 	// page otherwise. The depth buffer is only used by the software renderer.
+	// A page is native (one pixel per native pixel, in the top-left corner of the buffers) when the GPU averaged
+	// it down, or when software draws it because there is no engine. draw() enlarges such a page to the screen.
 	bool const gpu = gpu_init();
-	bool const native_out = gpu && m_ss > 1 && !m_output_scaled;
-	rectangle const clear = native_out ? rectangle(0, m_cliprect.width() / m_ss - 1, 0, m_cliprect.height() / m_ss - 1) : m_cliprect;
+	m_draw_ss = gpu ? m_ss : 1;
+	bool const native_page = m_ss > 1 && (!gpu || !m_output_scaled);
+	rectangle const clear = native_page ? rectangle(0, m_cliprect.width() / m_ss - 1, 0, m_cliprect.height() / m_ss - 1) : m_cliprect;
 	m_fb[m_fb_page].fill(0, clear);
 	m_page_share[m_fb_page] = false;
-	m_page_native[m_fb_page] = native_out;
+	m_page_native[m_fb_page] = native_page;
 
 	if (!gpu)
 	{
 		float const zvalue = 10000000000.0F;
-		m_zb.fill(*(int*)&zvalue, m_cliprect);
+		m_zb.fill(*(int*)&zvalue, clear);
 	}
 }
 
@@ -484,7 +489,7 @@ void k001005_renderer::draw_scanline_generic(int32_t scanline, const extent_t& e
 	bool const UseFog = extradata.fog_enable;
 
 	bool const WriteZ = true;
-	bool const UseBilinear = m_force_bilinear || k001006->bilinear_enabled();
+	bool const UseBilinear = k001006->bilinear_enabled();
 
 	uint32_t texel = 0;
 	uint32_t texel_alpha = 0;
@@ -704,7 +709,7 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 	int const viewport_max_y = std::clamp(200 + m_viewport_max_y - m_viewport_center_y + 1, 0, NATIVE_HEIGHT - 1);
 
 	// The clip rectangle is inclusive, so the last native pixel covers up to the last sample
-	rectangle cliprect(viewport_min_x * m_ss, (viewport_max_x + 1) * m_ss - 1, viewport_min_y * m_ss, (viewport_max_y + 1) * m_ss - 1);
+	rectangle cliprect(viewport_min_x * m_draw_ss, (viewport_max_x + 1) * m_draw_ss - 1, viewport_min_y * m_draw_ss, (viewport_max_y + 1) * m_draw_ss - 1);
 
 	int const start_index = index;
 
@@ -764,8 +769,8 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 			int y = (fifo[index] >> 16) & 0x1fff;
 			y |= ((y & 0x1000) ? 0xffffe000 : 0);
 
-			m_vertexb[m_vertexb_ptr].x = (((float)(x) / 16.0f) + 256.0f) * m_ss;
-			m_vertexb[m_vertexb_ptr].y = (((float)(-y) / 16.0f) + 200.0f) * m_ss;
+			m_vertexb[m_vertexb_ptr].x = (((float)(x) / 16.0f) + 256.0f) * m_draw_ss;
+			m_vertexb[m_vertexb_ptr].y = (((float)(-y) / 16.0f) + 200.0f) * m_draw_ss;
 
 			is_quad = BIT(fifo[index], 14);
 			last_vertex = BIT(fifo[index], 15);
@@ -1018,15 +1023,16 @@ void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 
 	if (m_output_scaled)
 	{
-		// The screen has one pixel per sample
+		// The screen has one pixel per sample; a native page is enlarged with sharp pixels
+		int const enlarge = m_page_native[m_fb_page ^ 1] ? m_ss : 1;
 		for (int j = cliprect.min_y; j <= cliprect.max_y; j++)
 		{
 			uint32_t *const bmp = &bitmap.pix(j);
-			uint32_t const *const src = &page.pix(j - cliprect.min_y, 0);
+			uint32_t const *const src = &page.pix((j - cliprect.min_y) / enlarge, 0);
 
 			for (int i = cliprect.min_x; i <= cliprect.max_x; i++)
 			{
-				uint32_t const p = src[i - cliprect.min_x];
+				uint32_t const p = src[(i - cliprect.min_x) / enlarge];
 				if (p & 0xff000000)
 				{
 					if (share && (p >> 24) != 0xff)
