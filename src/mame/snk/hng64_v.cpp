@@ -1082,7 +1082,7 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 			{
 				const int realy = (((y-visarea.top()) * yinc) >> 16);
 
-				const u16 *src = &m_poly_renderer->colorBuffer3d()[((realy) & 0x1ff) * 512];
+				const u16 *src = &m_poly_renderer->colorBuffer3d()[((realy) & 0x1ff) * m_poly_renderer->bufferSize()];
 				u32 *dst = &canvas.pix(y, clip.left());
 
 				for (int x = clip.left(); x <= clip.right(); x++)

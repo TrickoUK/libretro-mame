@@ -11,6 +11,11 @@ hng64_poly_renderer::hng64_poly_renderer(hng64_state& state)
 	, m_state(state)
 	, m_ss(std::clamp(state.machine().osd().supersample(), 1, 4))
 {
+	// The supersampling is a host-GPU setting: it is only kept when the engine exists at start
+	if (!gpu_init())
+		m_ss = 1;
+	m_frame_ss = m_ss;
+
 	const s32 bufferSize = this->bufferSize() * this->bufferSize();
 	m_depthBuffer3d = std::make_unique<float[]>(bufferSize);
 	m_colorBuffer3d = std::make_unique<u16[]>(bufferSize);
@@ -1060,6 +1065,7 @@ void hng64_state::clear3d()
 {
 	// Reset the buffers...
 	//const rectangle& visarea = m_screen->visible_area();
+	m_poly_renderer->begin_frame();
 	const int size = m_poly_renderer->bufferSize();
 	std::fill_n(m_poly_renderer->colorBuffer3d(), size * size, 0);
 	m_poly_renderer->clear_depth();
@@ -1320,9 +1326,9 @@ void hng64_poly_renderer::render_texture_scanline(s32 scanline, const extent_t& 
 {
 	const int size = bufferSize();
 	// The hardware wraps x at the buffer width, which the rasterizer can hit once at x = 512
-	const int xmask = (m_ss == 1) ? (NATIVE_SIZE - 1) : -1;
+	const int xmask = (m_frame_ss == 1) ? (NATIVE_SIZE - 1) : -1;
 
-	if ((scanline >= size) | (scanline < 0))
+	if ((scanline >= frameSize()) | (scanline < 0))
 		return;
 
 	// Pull the parameters out of the extent structure
@@ -1425,9 +1431,9 @@ void hng64_poly_renderer::render_texture_scanline(s32 scanline, const extent_t& 
 void hng64_poly_renderer::render_flat_scanline(s32 scanline, const extent_t& extent, const hng64_poly_data& renderData, int threadid)
 {
 	const int size = bufferSize();
-	const int xmask = (m_ss == 1) ? (NATIVE_SIZE - 1) : -1;
+	const int xmask = (m_frame_ss == 1) ? (NATIVE_SIZE - 1) : -1;
 
-	if ((scanline >= size) | (scanline < 0))
+	if ((scanline >= frameSize()) | (scanline < 0))
 		return;
 
 	// Pull the parameters out of the extent structure
@@ -1623,6 +1629,13 @@ void hng64_poly_renderer::gpu_clear()
 	m_gpu_generation++;
 }
 
+// Each frame is drawn at the supersampling factor while the host-GPU engine works. A frame that starts without
+// the engine is drawn by the software rasterizer at native size, and its palette resolve reads it at native size.
+void hng64_poly_renderer::begin_frame()
+{
+	m_frame_ss = gpu_init() ? m_ss : 1;
+}
+
 // The depth buffer is only used by the software rasteriser, so it is cleared when a polygon first needs it.
 void hng64_poly_renderer::clear_depth()
 {
@@ -1665,7 +1678,7 @@ void hng64_poly_renderer::drawShaded(polygon *p)
 
 	// Without supersampling the hardware's rectangle runs one past the last pixel (see the x wrap in the scanline code)
 	rectangle visibleArea;
-	if (m_ss == 1)
+	if (m_frame_ss == 1)
 		visibleArea.set(0, NATIVE_SIZE, 0, NATIVE_SIZE);
 	else
 		visibleArea.set(0, bufferSize() - 1, 0, bufferSize() - 1);
