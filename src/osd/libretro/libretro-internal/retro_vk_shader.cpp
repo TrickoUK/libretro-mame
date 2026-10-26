@@ -251,7 +251,8 @@ bool compile_glsl(shader_stage stage, const std::string &source, std::vector<uin
 		return false;
 	}
 
-	const EShLanguage language = (stage == shader_stage::VERTEX) ? EShLangVertex : EShLangFragment;
+	const EShLanguage language = (stage == shader_stage::VERTEX) ? EShLangVertex
+			: (stage == shader_stage::FRAGMENT) ? EShLangFragment : EShLangCompute;
 	glslang::TShader shader(language);
 	const char *strings[1] = { source.c_str() };
 	shader.setStrings(strings, 1);
@@ -283,7 +284,7 @@ bool compile_cached(shader_stage stage, const std::string &source, const std::st
 		const std::string &cache_dir, std::vector<uint32_t> &spirv, std::string &log)
 {
 	// the entry name covers the stage, the key and the generated source
-	const uint64_t hash = fnv1a(source, fnv1a(cache_key, fnv1a(stage == shader_stage::VERTEX ? "v" : "f")));
+	const uint64_t hash = fnv1a(source, fnv1a(cache_key, fnv1a(stage == shader_stage::VERTEX ? "v" : (stage == shader_stage::FRAGMENT) ? "f" : "c")));
 	char name[32];
 	std::snprintf(name, sizeof(name), "%016llx.spv", static_cast<unsigned long long>(hash));
 	const std::string path = cache_dir.empty() ? std::string() : cache_dir + "/" + name;

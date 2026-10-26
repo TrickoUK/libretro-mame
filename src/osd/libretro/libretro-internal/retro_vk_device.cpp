@@ -287,6 +287,13 @@ bool vk_device::create(std::string &report)
 	fn.cmd_set_scissor = device_proc<PFN_vkCmdSetScissor>(dp, m_device, "vkCmdSetScissor");
 	fn.cmd_set_blend_constants = device_proc<PFN_vkCmdSetBlendConstants>(dp, m_device, "vkCmdSetBlendConstants");
 	fn.cmd_draw = device_proc<PFN_vkCmdDraw>(dp, m_device, "vkCmdDraw");
+	fn.create_compute_pipelines = device_proc<PFN_vkCreateComputePipelines>(dp, m_device, "vkCreateComputePipelines");
+	fn.cmd_dispatch = device_proc<PFN_vkCmdDispatch>(dp, m_device, "vkCmdDispatch");
+	fn.create_query_pool = device_proc<PFN_vkCreateQueryPool>(dp, m_device, "vkCreateQueryPool");
+	fn.destroy_query_pool = device_proc<PFN_vkDestroyQueryPool>(dp, m_device, "vkDestroyQueryPool");
+	fn.cmd_reset_query_pool = device_proc<PFN_vkCmdResetQueryPool>(dp, m_device, "vkCmdResetQueryPool");
+	fn.cmd_write_timestamp = device_proc<PFN_vkCmdWriteTimestamp>(dp, m_device, "vkCmdWriteTimestamp");
+	fn.get_query_pool_results = device_proc<PFN_vkGetQueryPoolResults>(dp, m_device, "vkGetQueryPoolResults");
 
 	fn.get_device_queue(m_device, m_queue_family, 0, &m_queue);
 

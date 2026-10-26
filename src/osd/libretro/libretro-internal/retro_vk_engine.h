@@ -5,11 +5,14 @@
     Vulkan implementation of osd::gpu_engine on the private device from
     retro_vk_device. It owns the textures, the render target and its scratch
     copy, and runs UPDATE_TEXTURE, CLEAR, COPY_RECT, SET_CLIP, DRAW and
-    read-back. Each module's shader pair is compiled per variant, and its
-    pipelines are created on first use and kept in a VkPipelineCache under the
-    system's gpu-cache directory. Each frame is recorded into one command
-    buffer and waited for before submit_frame() returns. The factory in
-    retromain.cpp still returns the OpenGL engine until VK.3d.
+    read-back. A read-back that is not plain (downsample, opaque, coverage,
+    priority bits, channel lookup) runs a compute pass that writes the output
+    pixels into the frame's staging buffer. Each module's shader pair is
+    compiled per variant, and its pipelines are created on first use and kept
+    in a VkPipelineCache under the system's gpu-cache directory. Each frame is
+    recorded into one command buffer. A frame with read-backs (and without
+    defer_readback) is waited for before submit_frame() returns; any other
+    frame returns once it is submitted, and the next call waits for it first.
     Only compiled when HAVE_RETRO_GPU_TARGET is defined.
 ***************************************************************************/
 
@@ -55,6 +58,7 @@ public:
 	virtual void destroy_shader_module(osd::gpu_handle module) override;
 
 	virtual bool submit_frame(const osd::gpu_frame &frame) override;
+	virtual bool collect_frame() override;
 	virtual const osd::gpu_engine_stats &last_frame_stats() const override { return m_stats; }
 
 private:
@@ -75,6 +79,13 @@ private:
 		osd::gpu_texture_desc desc;
 		image img;
 		uint64_t bytes = 0;
+	};
+
+	// a read-back waiting for collect_frame(): its rectangle, and where its bytes are in the staging buffer
+	struct pending_readback
+	{
+		osd::gpu_readback_rect rect;
+		size_t at = 0;
 	};
 
 	struct module
@@ -139,6 +150,16 @@ private:
 	bool validate_update(const osd::gpu_texture_update &u);
 	bool valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg);
 	bool submit_pending(const osd::gpu_frame &frame);
+	bool collect_pending();
+	bool wait_in_flight();
+	void read_timer();
+	void drop_pending();
+	bool ensure_output_pipeline();
+	bool allocate_frame_set(VkDescriptorSet &set);
+	bool record_output_pass(const osd::gpu_readback_rect &r, size_t at, const staging_buffer &staging);
+	size_t readback_lut_bytes(const osd::gpu_readback_rect &r) const;
+	size_t readback_bytes(const osd::gpu_readback_rect &r) const;
+	void write_readback_lut(const osd::gpu_readback_rect &r, uint8_t *dst) const;
 	std::string device_key() const;
 
 	bool create_pipeline_objects();
@@ -163,12 +184,13 @@ private:
 	void release_target();
 
 	bool begin_recording();
-	bool end_recording();
+	bool end_recording(bool wait);
 	void record_barrier();
 	void record_clear(const float *rgba, bool color, bool depth);
 	void record_copy(const osd::gpu_command &c);
 	void record_update(const osd::gpu_texture_update &u, size_t offset, const staging_buffer &staging);
 	void record_readback(const osd::gpu_readback_rect &r, size_t offset, const staging_buffer &staging);
+	bool record_readback_any(const osd::gpu_readback_rect &r, size_t at, const staging_buffer &staging);
 
 	bool create_staging(size_t bytes, staging_buffer &staging);
 	void destroy_staging(staging_buffer &staging);
@@ -188,6 +210,10 @@ private:
 	VkSampler m_sampler_nearest = VK_NULL_HANDLE;
 	VkSampler m_sampler_linear = VK_NULL_HANDLE;
 	VkPipelineCache m_pipeline_cache = VK_NULL_HANDLE;
+	// the read-back compute pass: its module, pipeline and layout (the set layout is shared)
+	VkShaderModule m_output_module = VK_NULL_HANDLE;
+	VkPipelineLayout m_output_layout = VK_NULL_HANDLE;
+	VkPipeline m_output_pipeline = VK_NULL_HANDLE;
 	bool m_pipeline_cache_dirty = false;
 	std::string m_cache_dir;
 
@@ -198,6 +224,22 @@ private:
 	std::vector<VkDescriptorPool> m_desc_pools;
 	size_t m_desc_pool_next = 0;
 	VkDescriptorSet m_last_set = VK_NULL_HANDLE;
+	// the frame in flight: its staging buffer stays alive until its read-backs are collected or the next frame starts
+	bool m_in_flight = false;
+	staging_buffer m_staging;
+	std::vector<pending_readback> m_pending;
+	int m_collect_failures = 0;
+	// GPU timestamps around the command loop, only when MAME_GPU_PROF is set and the queue supports them
+	bool m_timers = false;
+	VkQueryPool m_query_pool = VK_NULL_HANDLE;
+	double m_timestamp_period = 0.0;
+	uint64_t m_timestamp_mask = 0;
+	bool m_query_pending = false;
+	bool m_gpu_ms_ready = false;
+	double m_last_gpu_ms = 0.0;
+	// the first refused frame's reason, logged once with the session's decision
+	std::string m_last_problem;
+	std::string m_first_refusal;
 	osd::gpu_handle m_last_module = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_last_bindings[osd::GPU_MAX_BINDINGS] = {};
 

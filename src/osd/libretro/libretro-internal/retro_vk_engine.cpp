@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -72,6 +73,88 @@ struct push_constants
 	int32_t rec_texels;
 };
 static_assert(sizeof(push_constants) == 20, "push constants match the shader prelude");
+
+// The read-back pass: the rectangle's top-left and output size, the downsample factor, the flags (1 channel lookup,
+// 2 opaque, 4 coverage, 8 coverage share, 16 priority bits), and the word offsets of the output and of the lookup
+// table in the staging buffer.
+struct output_constants
+{
+	int32_t origin[2];
+	int32_t size[2];
+	int32_t ds;
+	int32_t flags;
+	int32_t out_at;
+	int32_t lut_at;
+};
+static_assert(sizeof(output_constants) == 32, "output constants match the read-back shader");
+
+// The read-back compute pass. It averages each ds-by-ds block of the target (through the same integer arithmetic
+// as the OpenGL output pass, so both engines give the same bytes), maps the colour through the lookup table and
+// writes the output pixels as BGRA bytes, one word per pixel.
+constexpr const char *OUTPUT_GLSL = R"(#version 450
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(std430, set = 0, binding = 0) buffer Staging
+{
+	uint words[];
+};
+layout(set = 0, binding = 1) uniform sampler2D u_src;
+layout(push_constant) uniform Pass
+{
+	ivec2 origin;
+	ivec2 size;
+	int ds;
+	int flags;
+	int out_at;
+	int lut_at;
+};
+void main()
+{
+	const ivec2 o = ivec2(gl_GlobalInvocationID.xy);
+	if (o.x >= size.x || o.y >= size.y)
+		return;
+	const ivec2 base = o * ds + origin;
+	ivec4 sum = ivec4(0);
+	int count = 0;
+	int drawn = 0;
+	int high = 0;
+	for (int y = 0; y < ds; y++)
+	{
+		for (int x = 0; x < ds; x++)
+		{
+			const ivec4 t = ivec4(texelFetch(u_src, base + ivec2(x, y), 0) * 255.0 + 0.5);
+			if (t.a != 0)
+			{
+				drawn++;
+				if (t.a == 255)
+					high++;
+			}
+			if ((flags & 4) == 0 || t.a != 0)
+			{
+				sum += t;
+				count++;
+			}
+		}
+	}
+	ivec4 v = (count > 0) ? (sum / count) : ivec4(0);
+	if ((flags & 1) != 0)
+	{
+		v.r = int(words[lut_at + (v.r >> 3)]);
+		v.g = int(words[lut_at + 32 + (v.g >> 2)]);
+		v.b = int(words[lut_at + 96 + (v.b >> 3)]);
+	}
+	if ((flags & 2) != 0)
+		v.a = 255;
+	if ((flags & 16) != 0)
+		v.a = (drawn == 0) ? 0 : (high * 2 > drawn) ? 255 : 128;
+	if ((flags & 4) != 0)
+	{
+		const int total = ds * ds;
+		v.a = (count == 0) ? 0 : ((flags & 8) != 0) ? max(1, (255 * count + total / 2) / total) : 255;
+	}
+	const uint packed = uint(v.b) | (uint(v.g) << 8) | (uint(v.r) << 16) | (uint(v.a) << 24);
+	words[out_at + o.y * size.x + o.x] = packed;
+}
+)";
 
 VkBlendFactor blend_factor_vk(osd::gpu_blend_factor f)
 {
@@ -195,12 +278,40 @@ retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device)
 		fprintf(stderr, "[retro_vk_engine] sampler, layout or pipeline cache creation failed\n");
 		m_failed = true;
 	}
+
+	// timestamps need a queue that supports them; the valid bits of the queue family limit the counter's range
+	m_timers = (std::getenv("MAME_GPU_PROF") != nullptr) || (std::getenv("MAME_VOODOO_GPU_PROF") != nullptr);
+	if (m_timers && m_device.valid())
+	{
+		uint32_t count = 0;
+		m_device.fn.get_queue_family_properties(m_device.physical_device(), &count, nullptr);
+		std::vector<VkQueueFamilyProperties> families(count);
+		if (m_device.queue_family() < count)
+			m_device.fn.get_queue_family_properties(m_device.physical_device(), &count, families.data());
+		const uint32_t bits = m_device.queue_family() < count ? families[m_device.queue_family()].timestampValidBits : 0;
+		const VkPhysicalDeviceLimits &limits = m_device.properties().limits;
+		m_timers = limits.timestampComputeAndGraphics && bits > 0;
+		if (m_timers)
+		{
+			m_timestamp_mask = bits >= 64 ? ~uint64_t(0) : (uint64_t(1) << bits) - 1;
+			m_timestamp_period = limits.timestampPeriod;
+			VkQueryPoolCreateInfo query_info = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+			query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+			query_info.queryCount = 2;
+			m_timers = m_device.fn.create_query_pool(m_device.device(), &query_info, nullptr, &m_query_pool) == VK_SUCCESS;
+		}
+	}
 }
 
 retro_vk_engine::~retro_vk_engine()
 {
 	if (!m_device.valid())
 		return;
+	// nothing may be in flight while its objects are destroyed
+	wait_in_flight();
+	drop_pending();
+	if (m_query_pool != VK_NULL_HANDLE)
+		m_device.fn.destroy_query_pool(m_device.device(), m_query_pool, nullptr);
 	for (auto &t : m_textures)
 		destroy_image(t.second.img);
 	m_textures.clear();
@@ -213,6 +324,7 @@ retro_vk_engine::~retro_vk_engine()
 
 void retro_vk_engine::log_problem(const char *what, const char *detail)
 {
+	m_last_problem = std::string(what) + ": " + detail;
 	// a broken adapter would otherwise print every frame
 	if (m_problem_count < 20)
 		fprintf(stderr, "[retro_vk_engine] %s: %s\n", what, detail);
@@ -227,6 +339,11 @@ bool retro_vk_engine::note_result(bool ok, int &streak, const char *what)
 	{
 		streak = 0;
 		return true;
+	}
+	if (m_first_refusal.empty())
+	{
+		m_first_refusal = m_last_problem.empty() ? std::string("no reason was logged") : m_last_problem;
+		fprintf(stderr, "[retro_vk_engine] first refused frame (%s): %s\n", what, m_first_refusal.c_str());
 	}
 	if (++streak >= MAX_FAILED_FRAMES && !m_failed)
 	{
@@ -320,7 +437,7 @@ bool retro_vk_engine::transition_to_general(const image &img)
 	barrier.subresourceRange = full_range(img.aspect);
 	m_device.fn.cmd_pipeline_barrier(m_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 			0, 0, nullptr, 0, nullptr, 1, &barrier);
-	return end_recording();
+	return end_recording(true);
 }
 
 
@@ -364,7 +481,8 @@ void retro_vk_engine::destroy_texture(osd::gpu_handle handle)
 	const auto it = m_textures.find(handle);
 	if (it == m_textures.end())
 		return;
-	// nothing is in flight once submit_frame() has returned, so the image can go now
+	// the frame in flight may still sample the image
+	wait_in_flight();
 	destroy_image(it->second.img);
 	m_texture_bytes -= it->second.bytes;
 	m_textures.erase(it);
@@ -441,6 +559,8 @@ void retro_vk_engine::destroy_shader_module(osd::gpu_handle handle)
 {
 	if (m_device.valid())
 	{
+		// the frame in flight may still use the pipelines
+		wait_in_flight();
 		const VkDevice dev = m_device.device();
 		for (auto it = m_pipelines.begin(); it != m_pipelines.end(); )
 		{
@@ -487,7 +607,7 @@ bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &cl
 	{
 		release_target();
 
-		const VkImageUsageFlags color_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		const VkImageUsageFlags color_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 		bool ok = create_image(m_color, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)
 				&& create_image(m_scratch, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)
 				&& transition_to_general(m_color)
@@ -533,8 +653,11 @@ void retro_vk_engine::release_target()
 
 // Records into m_cmd. The command pool is reset here, which is safe because every
 // earlier submission has been waited for.
+// The command buffer is reused, so the frame in flight (if any) must finish first.
 bool retro_vk_engine::begin_recording()
 {
+	if (!wait_in_flight())
+		return false;
 	if (m_device.fn.reset_command_pool(m_device.device(), m_device.command_pool(), 0) != VK_SUCCESS)
 		return false;
 	VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -542,8 +665,9 @@ bool retro_vk_engine::begin_recording()
 	return m_device.fn.begin_command_buffer(m_cmd, &begin) == VK_SUCCESS;
 }
 
-// Submits what was recorded and waits for it. The engine never leaves work in flight across calls.
-bool retro_vk_engine::end_recording()
+// Submits what was recorded. With wait the call returns once the GPU has finished it; otherwise the frame stays in
+// flight until wait_in_flight() is called, which every later call that reuses the command buffer does first.
+bool retro_vk_engine::end_recording(bool wait)
 {
 	const VkDevice dev = m_device.device();
 	if (m_device.fn.end_command_buffer(m_cmd) != VK_SUCCESS)
@@ -554,7 +678,37 @@ bool retro_vk_engine::end_recording()
 	submit.pCommandBuffers = &m_cmd;
 	if (m_device.fn.queue_submit(m_device.queue(), 1, &submit, m_fence) != VK_SUCCESS)
 		return false;
-	return m_device.fn.wait_for_fences(dev, 1, &m_fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
+	m_in_flight = true;
+	return wait ? wait_in_flight() : true;
+}
+
+// Waits for the frame in flight, if there is one, and reads its timestamps.
+bool retro_vk_engine::wait_in_flight()
+{
+	if (!m_in_flight)
+		return true;
+	m_in_flight = false;
+	if (m_device.fn.wait_for_fences(m_device.device(), 1, &m_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS)
+	{
+		log_problem("frame", "waiting for the GPU failed");
+		return false;
+	}
+	if (m_query_pending)
+		read_timer();
+	return true;
+}
+
+void retro_vk_engine::read_timer()
+{
+	uint64_t ts[2] = { 0, 0 };
+	if (m_device.fn.get_query_pool_results(m_device.device(), m_query_pool, 0, 2, sizeof(ts), ts, sizeof(uint64_t),
+			VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
+	{
+		const uint64_t ticks = (ts[1] - ts[0]) & m_timestamp_mask;
+		m_last_gpu_ms = double(ticks) * m_timestamp_period * 1e-6;
+		m_gpu_ms_ready = true;
+	}
+	m_query_pending = false;
 }
 
 // Orders each transfer or clear after the one before it. The images are small and the
@@ -637,17 +791,162 @@ void retro_vk_engine::record_readback(const osd::gpu_readback_rect &r, size_t of
 	m_device.fn.cmd_copy_image_to_buffer(m_cmd, m_color.handle, VK_IMAGE_LAYOUT_GENERAL, staging.buffer, 1, &region);
 }
 
+// A read-back region holds its lookup table first (readback_lut_bytes), then its pixels: the rectangle as BGRA bytes
+// for a plain read-back, or the output pixels of the read-back pass, one per ds-by-ds block.
+size_t retro_vk_engine::readback_lut_bytes(const osd::gpu_readback_rect &r) const
+{
+	return (!r.plain() && r.channel_lut) ? 128 * 4 : 0;
+}
+
+size_t retro_vk_engine::readback_bytes(const osd::gpu_readback_rect &r) const
+{
+	const size_t ds = size_t(std::max(r.downsample, 1));
+	const size_t pixels = r.plain() ? size_t(r.w) * r.h : (size_t(r.w) / ds) * (size_t(r.h) / ds);
+	return readback_lut_bytes(r) + pixels * 4;
+}
+
+// Each lookup value is stored as one word, so the pass reads it with the same indexing as the OpenGL uniform array.
+void retro_vk_engine::write_readback_lut(const osd::gpu_readback_rect &r, uint8_t *dst) const
+{
+	if (!readback_lut_bytes(r))
+		return;
+	for (int i = 0; i < 128; i++)
+	{
+		const uint32_t value = r.channel_lut[i];
+		memcpy(dst + size_t(i) * 4, &value, sizeof(value));
+	}
+}
+
+// Writes the pixels of a read-back: BGRA bytes for a plain read-back, or 8-bit red and green per pixel for RG8.
+// A plain read-back copies the rectangle; any other runs the read-back pass.
+bool retro_vk_engine::record_readback_any(const osd::gpu_readback_rect &r, size_t at, const staging_buffer &staging)
+{
+	if (r.plain())
+	{
+		record_readback(r, at, staging);
+		return true;
+	}
+	return record_output_pass(r, at, staging);
+}
+
+// Records the read-back pass: a compute dispatch over the output pixels, reading the target in its current layout and
+// writing into the staging buffer. Its descriptor set is taken from the frame's pools and written now, which is safe
+// because the frame's command buffer is only executed after this call returns.
+bool retro_vk_engine::record_output_pass(const osd::gpu_readback_rect &r, size_t at, const staging_buffer &staging)
+{
+	if (!ensure_output_pipeline())
+		return false;
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	if (!allocate_frame_set(set))
+	{
+		log_problem("output pass", "descriptor set allocation failed");
+		return false;
+	}
+
+	const VkDevice dev = m_device.device();
+	VkDescriptorBufferInfo buffer = { staging.buffer, 0, VK_WHOLE_SIZE };
+	VkDescriptorImageInfo image = { m_sampler_nearest, m_color.view, VK_IMAGE_LAYOUT_GENERAL };
+	VkWriteDescriptorSet writes[2] = {};
+	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[0].dstSet = set;
+	writes[0].dstBinding = 0;
+	writes[0].descriptorCount = 1;
+	writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	writes[0].pBufferInfo = &buffer;
+	writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[1].dstSet = set;
+	writes[1].dstBinding = 1;
+	writes[1].descriptorCount = 1;
+	writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	writes[1].pImageInfo = &image;
+	m_device.fn.update_descriptor_sets(dev, 2, writes, 0, nullptr);
+
+	const int ds = std::max(r.downsample, 1);
+	const size_t lut = readback_lut_bytes(r);
+	output_constants pc = {};
+	pc.origin[0] = r.x;
+	pc.origin[1] = r.y;
+	pc.size[0] = r.w / ds;
+	pc.size[1] = r.h / ds;
+	pc.ds = ds;
+	pc.flags = (r.channel_lut ? 1 : 0) | (r.opaque ? 2 : 0) | (r.coverage ? 4 : 0) | (r.coverage_share ? 8 : 0) | (r.priority_bits ? 16 : 0);
+	pc.out_at = int32_t((at + lut) / 4);
+	pc.lut_at = int32_t(at / 4);
+
+	m_device.fn.cmd_bind_pipeline(m_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_output_pipeline);
+	m_device.fn.cmd_bind_descriptor_sets(m_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_output_layout, 0, 1, &set, 0, nullptr);
+	m_device.fn.cmd_push_constants(m_cmd, m_output_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+	// the target's writes (from the draws or a copy) are visible to the pass
+	record_barrier();
+	m_device.fn.cmd_dispatch(m_cmd, uint32_t((pc.size[0] + 7) / 8), uint32_t((pc.size[1] + 7) / 8), 1);
+	return true;
+}
+
+// The read-back pass, built on first use and kept for the session. It binds the frame's staging buffer and the target.
+bool retro_vk_engine::ensure_output_pipeline()
+{
+	if (m_output_pipeline != VK_NULL_HANDLE)
+		return true;
+	const VkDevice dev = m_device.device();
+	std::vector<uint32_t> spirv;
+	std::string log;
+	if (!retro_vk::compile_cached(retro_vk::shader_stage::COMPUTE, OUTPUT_GLSL, retro_vk::shader_cache_key(device_key()), m_cache_dir, spirv, log))
+	{
+		log_problem("output pass", log.c_str());
+		return false;
+	}
+
+	VkShaderModuleCreateInfo module_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	module_info.codeSize = spirv.size() * sizeof(uint32_t);
+	module_info.pCode = spirv.data();
+	VkPushConstantRange push = {};
+	push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	push.size = sizeof(output_constants);
+	VkPipelineLayoutCreateInfo layout_info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	layout_info.setLayoutCount = 1;
+	layout_info.pSetLayouts = &m_set_layout;
+	layout_info.pushConstantRangeCount = 1;
+	layout_info.pPushConstantRanges = &push;
+	VkComputePipelineCreateInfo pipeline_info = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	pipeline_info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pipeline_info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	pipeline_info.stage.pName = "main";
+
+	if (m_device.fn.create_shader_module(dev, &module_info, nullptr, &m_output_module) != VK_SUCCESS
+			|| m_device.fn.create_pipeline_layout(dev, &layout_info, nullptr, &m_output_layout) != VK_SUCCESS)
+	{
+		log_problem("output pass", "module or layout creation failed");
+	}
+	else
+	{
+		pipeline_info.stage.module = m_output_module;
+		pipeline_info.layout = m_output_layout;
+		if (m_device.fn.create_compute_pipelines(dev, m_pipeline_cache, 1, &pipeline_info, nullptr, &m_output_pipeline) == VK_SUCCESS)
+			return true;
+		log_problem("output pass", "pipeline creation failed");
+	}
+	m_device.fn.destroy_pipeline_layout(dev, m_output_layout, nullptr);
+	m_device.fn.destroy_shader_module(dev, m_output_module, nullptr);
+	m_output_layout = VK_NULL_HANDLE;
+	m_output_module = VK_NULL_HANDLE;
+	return false;
+}
+
 void retro_vk_engine::unpack_readback(const osd::gpu_readback_rect &r, const uint8_t *src) const
 {
-	const size_t row_bytes = size_t(r.w) * 4;
-	for (int row = 0; row < r.h; row++)
+	// a read-back that is not plain has one output pixel per ds-by-ds block of the target
+	const int ds = std::max(r.downsample, 1);
+	const int ow = r.w / ds;
+	const int oh = r.h / ds;
+	const size_t row_bytes = size_t(ow) * 4;
+	for (int row = 0; row < oh; row++)
 	{
 		const uint8_t *line = src + size_t(row) * row_bytes;
 		if (r.format == osd::gpu_readback_format::RG8)
 		{
 			// the red and green bytes of each BGRA pixel, as GL_RG / GL_UNSIGNED_BYTE gives them
 			uint16_t *out = r.out16 + size_t(row) * r.stride;
-			for (int col = 0; col < r.w; col++)
+			for (int col = 0; col < ow; col++)
 				out[col] = uint16_t(line[col * 4 + 2] | (line[col * 4 + 1] << 8));
 		}
 		else
@@ -817,11 +1116,12 @@ bool retro_vk_engine::validate_frame(const osd::gpu_frame &frame)
 
 bool retro_vk_engine::valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg)
 {
+	const int ds = std::max(r.downsample, 1);
 	const bool rg8 = r.format == osd::gpu_readback_format::RG8;
-	if (!r.plain() || (rg8 ? !r.out16 : !r.out) || r.w <= 0 || r.h <= 0 || r.x < 0 || r.y < 0
-			|| r.x + r.w > tg.width || r.y + r.h > tg.height || r.stride < r.w)
+	if ((rg8 ? (!r.out16 || !r.plain()) : !r.out) || r.w <= 0 || r.h <= 0 || r.x < 0 || r.y < 0 || r.x + r.w > tg.width || r.y + r.h > tg.height
+			|| r.w % ds != 0 || r.h % ds != 0 || r.stride < r.w / ds)
 	{
-		log_problem("readback", "rectangle outside the target, bad buffer, or not a plain read-back");
+		log_problem("readback", "rectangle outside the target, bad buffer, or a size that is not a multiple of the downsample");
 		return false;
 	}
 	return true;
@@ -911,6 +1211,12 @@ void retro_vk_engine::destroy_pipeline_objects()
 	m_desc_pools.clear();
 	m_desc_pool_next = 0;
 	m_device.fn.destroy_pipeline_cache(dev, m_pipeline_cache, nullptr);
+	m_device.fn.destroy_pipeline(dev, m_output_pipeline, nullptr);
+	m_device.fn.destroy_pipeline_layout(dev, m_output_layout, nullptr);
+	m_device.fn.destroy_shader_module(dev, m_output_module, nullptr);
+	m_output_pipeline = VK_NULL_HANDLE;
+	m_output_layout = VK_NULL_HANDLE;
+	m_output_module = VK_NULL_HANDLE;
 	m_device.fn.destroy_pipeline_layout(dev, m_pipeline_layout, nullptr);
 	m_device.fn.destroy_descriptor_set_layout(dev, m_set_layout, nullptr);
 	m_device.fn.destroy_sampler(dev, m_sampler_linear, nullptr);
@@ -1200,18 +1506,10 @@ bool retro_vk_engine::prepare_draws(const osd::gpu_frame &frame, bool use_depth,
 
 // The descriptor set for one draw: the state buffer at binding 0 and the module's textures from binding 1. The set of
 // the previous draw is reused when it names the same module and textures in this frame.
-bool retro_vk_engine::allocate_set(const osd::gpu_command &c, const module &m, const staging_buffer &staging, size_t state_at, size_t state_bytes, VkDescriptorSet &set)
+// A descriptor set with the module layout, from the frame's pools; a new pool is added when the last one fills.
+bool retro_vk_engine::allocate_frame_set(VkDescriptorSet &set)
 {
 	const VkDevice dev = m_device.device();
-	bool same = m_last_set != VK_NULL_HANDLE && m_last_module == c.module;
-	for (int b = 0; same && b < osd::GPU_MAX_BINDINGS; b++)
-		same = m_last_bindings[b] == c.bindings[b];
-	if (same)
-	{
-		set = m_last_set;
-		return true;
-	}
-
 	VkDescriptorSetAllocateInfo alloc = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
 	alloc.descriptorSetCount = 1;
 	alloc.pSetLayouts = &m_set_layout;
@@ -1241,6 +1539,24 @@ bool retro_vk_engine::allocate_set(const osd::gpu_command &c, const module &m, c
 			return false;
 		m_desc_pool_next++;
 	}
+
+	return true;
+}
+
+bool retro_vk_engine::allocate_set(const osd::gpu_command &c, const module &m, const staging_buffer &staging, size_t state_at, size_t state_bytes, VkDescriptorSet &set)
+{
+	const VkDevice dev = m_device.device();
+	bool same = m_last_set != VK_NULL_HANDLE && m_last_module == c.module;
+	for (int b = 0; same && b < osd::GPU_MAX_BINDINGS; b++)
+		same = m_last_bindings[b] == c.bindings[b];
+	if (same)
+	{
+		set = m_last_set;
+		return true;
+	}
+
+	if (!allocate_frame_set(set))
+		return false;
 
 	VkDescriptorBufferInfo buffer = { staging.buffer, state_at, state_bytes };
 	VkDescriptorImageInfo images[osd::GPU_MAX_BINDINGS] = {};
@@ -1353,12 +1669,55 @@ bool retro_vk_engine::record_draw(const osd::gpu_command &c, VkPipeline pipeline
 	return true;
 }
 
+// Forgets read-backs that were never collected, and the staging buffer they were read from. Nothing may be in flight.
+void retro_vk_engine::drop_pending()
+{
+	m_pending.clear();
+	destroy_staging(m_staging);
+}
+
+// Waits for the frame in flight and writes the pixels of its deferred read-backs.
+bool retro_vk_engine::collect_pending()
+{
+	const auto start = clock_type::now();
+	const bool ok = wait_in_flight();
+	if (ok)
+	{
+		for (const pending_readback &p : m_pending)
+			unpack_readback(p.rect, m_staging.data + p.at + readback_lut_bytes(p.rect));
+	}
+	drop_pending();
+	m_stats.collect_ms = elapsed_ms(start);
+	return ok;
+}
+
+bool retro_vk_engine::collect_frame()
+{
+	if (m_pending.empty())
+		return true;
+	return note_result(collect_pending(), m_collect_failures, "collect");
+}
+
+// Records one frame: uploads, the command list, then the trailing read-backs. A frame with read-backs is waited for
+// unless it defers them, and a frame with a READBACK command in its list always is. Any other frame stays in flight.
 bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 {
 	m_stats = osd::gpu_engine_stats();
+	m_last_problem.clear();
 
 	if (!validate_frame(frame))
 		return false;
+
+	// The previous frame must finish before its command buffer, descriptor pools and staging are reused. Its
+	// uncollected read-backs are dropped, as the OpenGL engine drops them.
+	if (!wait_in_flight())
+		return false;
+	drop_pending();
+	if (m_gpu_ms_ready)
+	{
+		m_stats.gpu_ms = m_last_gpu_ms;
+		m_gpu_ms_ready = false;
+	}
 
 	const auto upload_start = clock_type::now();
 	osd::gpu_target_desc target = frame.target;
@@ -1395,10 +1754,6 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 	{
 		return size_t(u.w) * u.h * texel_bytes(u.texture);
 	};
-	auto readback_bytes = [](const osd::gpu_readback_rect &r)
-	{
-		return size_t(r.w) * r.h * 4;
-	};
 
 	std::vector<size_t> update_at(frame.update_count);
 	for (int i = 0; i < frame.update_count; i++)
@@ -1407,6 +1762,8 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		m_stats.uploaded_bytes += update_bytes(frame.updates[i]);
 	}
 	std::vector<size_t> command_at(frame.command_count, 0);
+	bool mid_list_readback = false;
+	bool output_pass = false;
 	for (int i = 0; i < frame.command_count; i++)
 	{
 		const osd::gpu_command &c = frame.commands[i];
@@ -1418,11 +1775,16 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		else if (c.type == osd::gpu_command_type::READBACK)
 		{
 			command_at[i] = take(readback_bytes(c.readback));
+			mid_list_readback = true;
+			output_pass |= !c.readback.plain();
 		}
 	}
 	std::vector<size_t> readback_at(frame.readback_count);
 	for (int i = 0; i < frame.readback_count; i++)
+	{
 		readback_at[i] = take(readback_bytes(frame.readbacks[i]));
+		output_pass |= !frame.readbacks[i].plain();
+	}
 
 	// the vertices as the frame gives them, then the state records padded to whole texels; the descriptor reads the
 	// records at a 256-byte aligned offset, which every implementation accepts
@@ -1432,43 +1794,58 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 	const size_t state_bytes = std::max<size_t>(1, frame.prim_count) * rec_texels * 16;
 	const size_t state_at = take(state_bytes, 256);
 
-	staging_buffer staging;
-	if (total > 0 && !create_staging(total, staging))
+	// the read-back pass binds the whole staging buffer as one storage buffer
+	if (output_pass && total > m_device.properties().limits.maxStorageBufferRange)
+	{
+		log_problem("frame", "staging buffer larger than the storage buffer limit for the read-back pass");
+		return false;
+	}
+	if (total > 0 && !create_staging(total, m_staging))
 	{
 		log_problem("frame", "staging buffer allocation failed");
 		return false;
 	}
 	for (int i = 0; i < frame.update_count; i++)
-		write_update(frame.updates[i], staging.data + update_at[i]);
+		write_update(frame.updates[i], m_staging.data + update_at[i]);
 	for (int i = 0; i < frame.command_count; i++)
-		if (frame.commands[i].type == osd::gpu_command_type::UPDATE_TEXTURE)
-			write_update(frame.commands[i].update, staging.data + command_at[i]);
+	{
+		const osd::gpu_command &c = frame.commands[i];
+		if (c.type == osd::gpu_command_type::UPDATE_TEXTURE)
+			write_update(c.update, m_staging.data + command_at[i]);
+		else if (c.type == osd::gpu_command_type::READBACK)
+			write_readback_lut(c.readback, m_staging.data + command_at[i]);
+	}
+	for (int i = 0; i < frame.readback_count; i++)
+		write_readback_lut(frame.readbacks[i], m_staging.data + readback_at[i]);
 	if (vertex_bytes > 0)
-		std::memcpy(staging.data + vertex_at, frame.vertices, vertex_bytes);
-	std::memset(staging.data + state_at, 0, state_bytes);
+		std::memcpy(m_staging.data + vertex_at, frame.vertices, vertex_bytes);
+	std::memset(m_staging.data + state_at, 0, state_bytes);
 	if (frame.prim_state && frame.prim_count > 0 && frame.state_stride > 0)
 	{
 		for (uint32_t i = 0; i < frame.prim_count; i++)
-			std::memcpy(staging.data + state_at + size_t(i) * rec_texels * 16,
+			std::memcpy(m_staging.data + state_at + size_t(i) * rec_texels * 16,
 					frame.prim_state + size_t(i) * frame.state_stride, size_t(frame.state_stride) * 4);
 	}
 	m_stats.uploaded_bytes += vertex_bytes + state_bytes;
 	m_stats.upload_ms = elapsed_ms(upload_start);
 
+	const bool waits = mid_list_readback || (frame.readback_count > 0 && !frame.defer_readback);
 	const auto draw_start = clock_type::now();
 	if (!begin_recording())
-	{
-		destroy_staging(staging);
 		return false;
-	}
 	m_rendering = false;
+	if (m_timers)
+	{
+		m_device.fn.cmd_reset_query_pool(m_cmd, m_query_pool, 0, 2);
+		m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_query_pool, 0);
+	}
 	if (clear_color || clear_depth)
 		record_clear(target.clear_color, clear_color, clear_depth);
 	record_barrier();
 
 	for (int i = 0; i < frame.update_count; i++)
 	{
-		record_update(frame.updates[i], update_at[i], staging);
+		record_update(frame.updates[i], update_at[i], m_staging);
 		record_barrier();
 	}
 	for (int i = 0; i < frame.command_count; i++)
@@ -1481,10 +1858,9 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 				continue;
 			if (!m_rendering)
 				begin_rendering(use_depth);
-			if (!record_draw(c, pipelines[i], frame, staging, vertex_at, state_at, state_bytes))
+			if (!record_draw(c, pipelines[i], frame, m_staging, vertex_at, state_at, state_bytes))
 			{
 				m_rendering = false;
-				destroy_staging(staging);
 				return false;
 			}
 			continue;
@@ -1519,10 +1895,11 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 			record_copy(c);
 			break;
 		case osd::gpu_command_type::UPDATE_TEXTURE:
-			record_update(c.update, command_at[i], staging);
+			record_update(c.update, command_at[i], m_staging);
 			break;
 		case osd::gpu_command_type::READBACK:
-			record_readback(c.readback, command_at[i], staging);
+			if (!record_readback_any(c.readback, command_at[i], m_staging))
+				return false;
 			break;
 		case osd::gpu_command_type::CLEAR:
 			record_clear(c.clear_color, c.clear_color_enable, c.clear_depth_enable);
@@ -1534,29 +1911,50 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		record_barrier();
 	}
 	end_rendering();
-	for (int i = 0; i < frame.readback_count; i++)
-		record_readback(frame.readbacks[i], readback_at[i], staging);
 
-	const bool ok = end_recording();
+	const auto readback_start = clock_type::now();
+	for (int i = 0; i < frame.readback_count; i++)
+	{
+		if (!record_readback_any(frame.readbacks[i], readback_at[i], m_staging))
+			return false;
+	}
+	const double readback_record_ms = frame.readback_count > 0 ? elapsed_ms(readback_start) : 0.0;
+	if (m_timers)
+		m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_query_pool, 1);
+	m_query_pending = m_timers;
+
+	const bool ok = end_recording(waits);
 	m_stats.draw_ms = elapsed_ms(draw_start);
 	if (!ok)
-	{
-		destroy_staging(staging);
 		return false;
+	if (m_gpu_ms_ready)
+	{
+		m_stats.gpu_ms = m_last_gpu_ms;
+		m_gpu_ms_ready = false;
 	}
 
+	if (frame.readback_count > 0 && !waits)
+	{
+		// deferred: the pixels are written by collect_frame(), from the staging buffer that stays alive until then
+		m_pending.clear();
+		for (int i = 0; i < frame.readback_count; i++)
+			m_pending.push_back({ frame.readbacks[i], readback_at[i] });
+		m_stats.readback_ms = readback_record_ms;
+		return true;
+	}
+	if (!waits)
+		return true;
+
 	// the read-back time is zero for a frame that reads nothing back
-	const bool reads_back = frame.readback_count > 0 || std::any_of(frame.commands, frame.commands + frame.command_count,
-			[](const osd::gpu_command &c) { return c.type == osd::gpu_command_type::READBACK; });
 	const auto read_start = clock_type::now();
 	for (int i = 0; i < frame.command_count; i++)
 		if (frame.commands[i].type == osd::gpu_command_type::READBACK)
-			unpack_readback(frame.commands[i].readback, staging.data + command_at[i]);
+			unpack_readback(frame.commands[i].readback, m_staging.data + command_at[i] + readback_lut_bytes(frame.commands[i].readback));
 	for (int i = 0; i < frame.readback_count; i++)
-		unpack_readback(frame.readbacks[i], staging.data + readback_at[i]);
-	if (reads_back)
-		m_stats.readback_ms = elapsed_ms(read_start);
+		unpack_readback(frame.readbacks[i], m_staging.data + readback_at[i] + readback_lut_bytes(frame.readbacks[i]));
+	if (mid_list_readback || frame.readback_count > 0)
+		m_stats.readback_ms = readback_record_ms + elapsed_ms(read_start);
 
-	destroy_staging(staging);
+	drop_pending();
 	return true;
 }

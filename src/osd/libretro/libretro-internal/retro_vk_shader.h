@@ -31,7 +31,7 @@
 
 namespace retro_vk {
 
-enum class shader_stage { VERTEX, FRAGMENT };
+enum class shader_stage { VERTEX, FRAGMENT, COMPUTE };
 
 // Vulkan GLSL 450 source for the vertex stage of a module. It depends only on
 // the module's varyings, so it is the same for every variant.

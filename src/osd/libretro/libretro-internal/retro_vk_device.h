@@ -109,6 +109,13 @@ struct vk_functions
 	PFN_vkCmdSetScissor cmd_set_scissor = nullptr;
 	PFN_vkCmdSetBlendConstants cmd_set_blend_constants = nullptr;
 	PFN_vkCmdDraw cmd_draw = nullptr;
+	PFN_vkCreateComputePipelines create_compute_pipelines = nullptr;
+	PFN_vkCmdDispatch cmd_dispatch = nullptr;
+	PFN_vkCreateQueryPool create_query_pool = nullptr;
+	PFN_vkDestroyQueryPool destroy_query_pool = nullptr;
+	PFN_vkCmdResetQueryPool cmd_reset_query_pool = nullptr;
+	PFN_vkCmdWriteTimestamp cmd_write_timestamp = nullptr;
+	PFN_vkGetQueryPoolResults get_query_pool_results = nullptr;
 };
 
 class vk_device
