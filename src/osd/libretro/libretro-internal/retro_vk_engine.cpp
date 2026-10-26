@@ -280,6 +280,8 @@ retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device)
 	m_renderer = m_device.properties().deviceName;
 	m_caps.renderer = m_renderer.c_str();
 	m_caps.max_texture_size = int(std::min<uint32_t>(m_device.properties().limits.maxImageDimension2D, 16384));
+	// submits are recorded and queued without waiting for the GPU, so a frame split into chunks overlaps emulation
+	m_caps.chunked_frames = true;
 	// the sample counts for colour and depth targets, and for sampled colour (read one sample at a time)
 	const auto &limits = m_device.properties().limits;
 	m_sample_counts = limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts;

@@ -144,6 +144,13 @@ bool psxgpu_device::gpu_active()
 			if (!m_gpu_module || !m_gpu_vram_tex)
 				m_gpu_engine = nullptr;
 			m_gpu_texfilter_mode = std::clamp( machine().osd().gpu_render_texfilter(), 0, 3 );
+
+			// Chunks go to engines that overlap the GPU with emulation; MAME_PS1_GPU_CHUNK sets the size in triangles (0 = off)
+			if( m_gpu_engine != nullptr && m_gpu_engine->caps().chunked_frames )
+			{
+				const char *chunk_env = std::getenv( "MAME_PS1_GPU_CHUNK" );
+				m_gpu_chunk_commands = size_t( chunk_env != nullptr ? std::max( 0, std::atoi( chunk_env ) ) : 256 );
+			}
 		}
 		// No context/frame priming here - all GPU work happens in one
 		// submitted frame per refresh in gpu_update_screen() (see the
@@ -155,6 +162,7 @@ bool psxgpu_device::gpu_active()
 		// The engine stopped producing frames; the software renderer takes over
 		// from the next primitive on.
 		m_gpu_engine = nullptr;
+		m_gpu_chunk_commands = 0;
 		m_gpu_queue.clear();
 		m_gpu_frame_vertices.clear();
 		m_gpu_frame_state.clear();
@@ -1683,6 +1691,12 @@ void psxgpu_device::gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const os
 		cmd2.blend = blend;
 		m_gpu_queue.push_back( std::move( cmd2 ) );
 	}
+
+	// a chunk ends after a whole primitive, never between the two triangles of a quad
+	if( m_gpu_chunk_commands > 0 && m_gpu_queue.size() >= m_gpu_chunk_commands )
+	{
+		gpu_flush_chunk();
+	}
 }
 
 void psxgpu_device::gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable, int cull_mask )
@@ -2631,13 +2645,70 @@ void psxgpu_device::gpu_build_frame()
 // per frame. It is sized to the whole VRAM, not only the displayed part:
 // draw-offset-relative geometry can land anywhere in VRAM, for example in
 // the hidden half of a double buffer.
-bool psxgpu_device::gpu_submit_frame( const osd::gpu_readback_rect *rects, int count )
+// Fills in the VRAM texture updates for the next submit. Without chunks the whole VRAM goes up. With chunks
+// only the rows that differ from the last upload go up, as contiguous bands: a row is 1024 words in p_vram,
+// so a band's data is contiguous too.
+void psxgpu_device::gpu_frame_updates( std::vector<osd::gpu_texture_update> &updates )
 {
-	osd::gpu_texture_update vram;
-	vram.texture = m_gpu_vram_tex;
-	vram.w = 1024;
-	vram.h = m_vram_height;
-	vram.data = p_vram;
+	if( m_gpu_chunk_commands == 0 )
+	{
+		osd::gpu_texture_update vram;
+		vram.texture = m_gpu_vram_tex;
+		vram.w = 1024;
+		vram.h = m_vram_height;
+		vram.data = p_vram;
+		updates.push_back( vram );
+		return;
+	}
+
+	const size_t row_words = 1024;
+	if( m_gpu_vram_shadow.size() != row_words * m_vram_height )
+	{
+		m_gpu_vram_shadow.assign( row_words * m_vram_height, 0 );
+		m_gpu_vram_shadow_valid = false;
+	}
+	auto row_dirty = [ this, row_words ]( int y )
+	{
+		return !m_gpu_vram_shadow_valid
+			|| std::memcmp( p_vram + size_t( y ) * row_words, m_gpu_vram_shadow.data() + size_t( y ) * row_words, row_words * sizeof( uint16_t ) ) != 0;
+	};
+	for( int y = 0; y < m_vram_height; )
+	{
+		if( !row_dirty( y ) )
+		{
+			y++;
+			continue;
+		}
+		int end = y + 1;
+		while( end < m_vram_height && row_dirty( end ) )
+		{
+			end++;
+		}
+		osd::gpu_texture_update band;
+		band.texture = m_gpu_vram_tex;
+		band.x = 0;
+		band.y = y;
+		band.w = 1024;
+		band.h = end - y;
+		band.data = p_vram + size_t( y ) * row_words;
+		updates.push_back( band );
+		std::memcpy( m_gpu_vram_shadow.data() + size_t( y ) * row_words, band.data, size_t( end - y ) * row_words * sizeof( uint16_t ) );
+		y = end;
+	}
+	m_gpu_vram_shadow_valid = true;
+}
+
+// Sends the frame built by gpu_build_frame(). With flush set the commands go to the engine without the
+// read-backs, see osd::gpu_engine::flush_frame(). A chunk that failed leaves the frame incomplete, so nothing
+// more is sent for it and the final submit reports failure, which makes the software path draw the frame.
+bool psxgpu_device::gpu_send_frame( const osd::gpu_readback_rect *rects, int count, bool flush )
+{
+	const bool send = !m_gpu_chunk_failed;
+	std::vector<osd::gpu_texture_update> updates;
+	if( send )
+	{
+		gpu_frame_updates( updates );
+	}
 
 	osd::gpu_frame frame;
 	frame.target.width = n_screenwidth * gpu_scale();
@@ -2645,8 +2716,8 @@ bool psxgpu_device::gpu_submit_frame( const osd::gpu_readback_rect *rects, int c
 	frame.target.persistent = true;
 	frame.target.msaa_samples = machine().osd().gpu_render_msaa_samples();
 	frame.target.clear_color[ 3 ] = 1.0f;
-	frame.updates = &vram;
-	frame.update_count = 1;
+	frame.updates = updates.data();
+	frame.update_count = (int)updates.size();
 	frame.vertices = m_gpu_frame_vertices.data();
 	frame.vertex_count = m_gpu_frame_vertex_count;
 	frame.varyings_per_vertex = PSXGPU_SHADER_VARYINGS;
@@ -2658,12 +2729,37 @@ bool psxgpu_device::gpu_submit_frame( const osd::gpu_readback_rect *rects, int c
 	frame.readbacks = rects;
 	frame.readback_count = count;
 
-	const bool ok = m_gpu_engine->submit_frame( frame );
+	bool ok = send;
+	if( send )
+	{
+		ok = flush ? m_gpu_engine->flush_frame( frame ) : m_gpu_engine->submit_frame( frame );
+	}
 	m_gpu_frame_vertices.clear();
 	m_gpu_frame_state.clear();
 	m_gpu_frame_commands.clear();
 	m_gpu_frame_vertex_count = 0;
+	m_gpu_chunk_failed = flush && !ok;
 	return ok;
+}
+
+bool psxgpu_device::gpu_submit_frame( const osd::gpu_readback_rect *rects, int count )
+{
+	return gpu_send_frame( rects, count, false );
+}
+
+// Sends the queued commands of the frame in progress without a read-back, so the GPU draws them while
+// emulation continues. The queue is turned into commands by gpu_build_frame(), which carries the replay
+// state (texture page, window, draw area) over to the next chunk just as it does from frame to frame. The
+// VRAM texture gets the rows changed since the last send, so the chunk samples VRAM as it stands now.
+void psxgpu_device::gpu_flush_chunk()
+{
+	if( m_gpu_engine == nullptr )
+	{
+		m_gpu_queue.clear();
+		return;
+	}
+	gpu_build_frame();
+	gpu_send_frame( nullptr, 0, true );
 }
 
 // Submits this frame's queued commands (see gpu_build_frame() and the
