@@ -290,6 +290,9 @@ retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device)
 		if (sample_count_supported(n, false))
 			m_caps.max_samples = n;
 	}
+	if (m_device.sample_locations())
+		fprintf(stderr, "[retro_vk_engine] VK_EXT_sample_locations: %s\n",
+				m_device.variable_sample_locations() ? "variable locations, multisample-off draws put every sample at the pixel centre" : "not variable, snapping instead");
 
 	const VkDevice dev = m_device.device();
 	VkCommandBufferAllocateInfo alloc = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -393,7 +396,8 @@ int retro_vk_engine::texel_bytes(osd::gpu_handle texture) const
 //  Images
 //**************************************************************************
 
-bool retro_vk_engine::create_image(image &img, VkFormat format, int width, int height, VkImageUsageFlags usage, VkImageAspectFlags aspect, int samples)
+bool retro_vk_engine::create_image(image &img, VkFormat format, int width, int height, VkImageUsageFlags usage, VkImageAspectFlags aspect, int samples,
+		VkImageCreateFlags flags)
 {
 	const VkDevice dev = m_device.device();
 
@@ -406,6 +410,7 @@ bool retro_vk_engine::create_image(image &img, VkFormat format, int width, int h
 	info.mipLevels = 1;
 	info.arrayLayers = 1;
 	info.samples = VkSampleCountFlagBits(samples);
+	info.flags = flags;
 	info.tiling = VK_IMAGE_TILING_OPTIMAL;
 	info.usage = usage;
 	info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -650,7 +655,9 @@ bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &cl
 		if (ok && target.depth != osd::gpu_depth_mode::NONE)
 		{
 			const VkImageUsageFlags depth_usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-			ok = create_image(m_depth, VK_FORMAT_D32_SFLOAT, target.width, target.height, depth_usage, VK_IMAGE_ASPECT_DEPTH_BIT, samples)
+			// the depth values stay valid when draws use different sample locations (VK_EXT_sample_locations)
+			const VkImageCreateFlags depth_flags = centre_samples(target.msaa_samples) ? VK_IMAGE_CREATE_SAMPLE_LOCATIONS_COMPATIBLE_DEPTH_BIT_EXT : 0;
+			ok = create_image(m_depth, VK_FORMAT_D32_SFLOAT, target.width, target.height, depth_usage, VK_IMAGE_ASPECT_DEPTH_BIT, samples, depth_flags)
 					&& transition_to_general(m_depth);
 		}
 		if (!ok)
@@ -704,6 +711,7 @@ bool retro_vk_engine::begin_recording()
 		return false;
 	if (m_device.fn.reset_command_pool(m_device.device(), m_device.command_pool(), 0) != VK_SUCCESS)
 		return false;
+	m_locations_mode = -1;
 	VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	return m_device.fn.begin_command_buffer(m_cmd, &begin) == VK_SUCCESS;
@@ -789,6 +797,39 @@ void retro_vk_engine::record_clear(const float *rgba, bool color, bool depth)
 		const VkImageSubresourceRange range = full_range(VK_IMAGE_ASPECT_DEPTH_BIT);
 		m_device.fn.cmd_clear_depth_stencil_image(m_cmd, m_depth.handle, VK_IMAGE_LAYOUT_GENERAL, &value, 1, &range);
 	}
+}
+
+// The standard sample pattern for 2, 4 and 8 samples, which an enabled pipeline uses when a draw names the standard
+// locations (the same positions a pipeline without custom locations gets).
+constexpr VkSampleLocationEXT STANDARD_LOCATIONS_2[] = { { 0.25f, 0.25f }, { 0.75f, 0.75f } };
+constexpr VkSampleLocationEXT STANDARD_LOCATIONS_4[] = { { 0.375f, 0.125f }, { 0.875f, 0.375f }, { 0.125f, 0.625f }, { 0.625f, 0.875f } };
+constexpr VkSampleLocationEXT STANDARD_LOCATIONS_8[] = {
+		{ 0.5625f, 0.3125f }, { 0.4375f, 0.6875f }, { 0.8125f, 0.5625f }, { 0.3125f, 0.1875f },
+		{ 0.1875f, 0.8125f }, { 0.0625f, 0.4375f }, { 0.6875f, 0.9375f }, { 0.9375f, 0.0625f } };
+
+// Sets the sample locations for the draws that follow on a multisample target: every sample at the pixel centre for a
+// draw without multisampling, which covers the pixels whose centres the triangle contains and writes all their samples
+// (the OpenGL engine's GL_MULTISAMPLE-off draw), and the standard pattern otherwise. Only called when centre_samples().
+void retro_vk_engine::set_sample_locations(bool multisample)
+{
+	const int mode = multisample ? 0 : 1;
+	if (mode == m_locations_mode)
+		return;
+	m_locations_mode = mode;
+	const int samples = m_target.msaa_samples;
+	const VkSampleLocationEXT centre[8] = { { 0.5f, 0.5f }, { 0.5f, 0.5f }, { 0.5f, 0.5f }, { 0.5f, 0.5f },
+			{ 0.5f, 0.5f }, { 0.5f, 0.5f }, { 0.5f, 0.5f }, { 0.5f, 0.5f } };
+	const VkSampleLocationEXT *pattern = centre;
+	if (multisample)
+		pattern = (samples == 2) ? STANDARD_LOCATIONS_2 : (samples == 4) ? STANDARD_LOCATIONS_4 : STANDARD_LOCATIONS_8;
+
+	VkSampleLocationsInfoEXT info = { VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT };
+	info.sampleLocationsPerPixel = VkSampleCountFlagBits(samples);
+	info.sampleLocationGridSize.width = 1;
+	info.sampleLocationGridSize.height = 1;
+	info.sampleLocationsCount = uint32_t(samples);
+	info.pSampleLocations = pattern;
+	m_device.fn.cmd_set_sample_locations(m_cmd, &info);
 }
 
 // A multisampled image cannot be cleared by vkCmdClearColorImage, so the clear is the load operation of an empty render
@@ -1562,6 +1603,20 @@ VkPipeline retro_vk_engine::get_pipeline(const pipeline_key &key, const program 
 	// the sample count matches the colour and depth attachments of the target, and the rasteriser writes each sample
 	VkPipelineMultisampleStateCreateInfo multisample = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
 	multisample.rasterizationSamples = VkSampleCountFlagBits(key.samples);
+	// with variable locations the draws set them (dynamic state), so the pipeline only enables them
+	VkPipelineSampleLocationsStateCreateInfoEXT locations = { VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT };
+	const bool dynamic_locations = centre_samples(int(key.samples));
+	if (dynamic_locations)
+	{
+		locations.sampleLocationsEnable = VK_TRUE;
+		locations.sampleLocationsInfo.sType = VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT;
+		locations.sampleLocationsInfo.sampleLocationsPerPixel = VkSampleCountFlagBits(key.samples);
+		locations.sampleLocationsInfo.sampleLocationGridSize.width = 1;
+		locations.sampleLocationsInfo.sampleLocationGridSize.height = 1;
+		locations.sampleLocationsInfo.sampleLocationsCount = key.samples;
+		locations.sampleLocationsInfo.pSampleLocations = STANDARD_LOCATIONS_8;
+		multisample.pNext = &locations;
+	}
 
 	VkPipelineDepthStencilStateCreateInfo depth = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 	depth.depthTestEnable = key.depth_test ? VK_TRUE : VK_FALSE;
@@ -1583,9 +1638,10 @@ VkPipeline retro_vk_engine::get_pipeline(const pipeline_key &key, const program 
 	blend.attachmentCount = 1;
 	blend.pAttachments = &attachment;
 
-	const VkDynamicState dynamic_states[3] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_BLEND_CONSTANTS };
+	const VkDynamicState dynamic_states[4] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_BLEND_CONSTANTS,
+			VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT };
 	VkPipelineDynamicStateCreateInfo dynamic = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
-	dynamic.dynamicStateCount = 3;
+	dynamic.dynamicStateCount = dynamic_locations ? 4 : 3;
 	dynamic.pDynamicStates = dynamic_states;
 
 	const VkFormat color_format = VK_FORMAT_B8G8R8A8_UNORM;
@@ -1828,6 +1884,8 @@ bool retro_vk_engine::record_draw(const osd::gpu_command &c, VkPipeline pipeline
 
 	m_device.fn.cmd_bind_pipeline(m_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 	m_device.fn.cmd_bind_descriptor_sets(m_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layout, 0, 1, &set, 0, nullptr);
+	if (m_target.msaa_samples > 0 && centre_samples(m_target.msaa_samples))
+		set_sample_locations(c.multisample);
 	const push_constants push = {
 		{ float(m_target.width), float(m_target.height) },
 		1.0f / float(frame.prim_count + 1),
@@ -1994,7 +2052,7 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		write_readback_lut(frame.readbacks[i], m_staging.data + readback_at[i]);
 	if (vertex_bytes > 0)
 		std::memcpy(m_staging.data + vertex_at, frame.vertices, vertex_bytes);
-	if (target.msaa_samples > 0)
+	if (target.msaa_samples > 0 && !centre_samples(target.msaa_samples))
 		snap_triangles(frame, m_staging.data + vertex_at);
 	std::memset(m_staging.data + state_at, 0, state_bytes);
 	if (frame.prim_state && frame.prim_count > 0 && frame.state_stride > 0)

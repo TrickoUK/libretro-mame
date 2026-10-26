@@ -72,6 +72,23 @@ F device_proc(PFN_vkGetDeviceProcAddr gpa, VkDevice device, const char *name)
 }
 
 // The first queue family with graphics support, or UINT32_MAX.
+// Whether the device lists the named device extension.
+bool has_device_extension(const vk_functions &fn, VkPhysicalDevice device, const char *name)
+{
+	uint32_t count = 0;
+	if (fn.enumerate_device_extension_properties(device, nullptr, &count, nullptr) != VK_SUCCESS)
+		return false;
+	std::vector<VkExtensionProperties> list(count);
+	if (fn.enumerate_device_extension_properties(device, nullptr, &count, list.data()) != VK_SUCCESS)
+		return false;
+	for (const VkExtensionProperties &p : list)
+	{
+		if (strcmp(p.extensionName, name) == 0)
+			return true;
+	}
+	return false;
+}
+
 uint32_t graphics_queue_family(const vk_functions &fn, VkPhysicalDevice device)
 {
 	uint32_t count = 0;
@@ -142,6 +159,7 @@ bool vk_device::create(std::string &report)
 
 	fn.destroy_instance = instance_proc<PFN_vkDestroyInstance>(fn.get_instance_proc_addr, m_instance, "vkDestroyInstance");
 	fn.enumerate_physical_devices = instance_proc<PFN_vkEnumeratePhysicalDevices>(fn.get_instance_proc_addr, m_instance, "vkEnumeratePhysicalDevices");
+	fn.enumerate_device_extension_properties = instance_proc<PFN_vkEnumerateDeviceExtensionProperties>(fn.get_instance_proc_addr, m_instance, "vkEnumerateDeviceExtensionProperties");
 	fn.get_physical_device_properties2 = instance_proc<PFN_vkGetPhysicalDeviceProperties2>(fn.get_instance_proc_addr, m_instance, "vkGetPhysicalDeviceProperties2");
 	fn.get_physical_device_features2 = instance_proc<PFN_vkGetPhysicalDeviceFeatures2>(fn.get_instance_proc_addr, m_instance, "vkGetPhysicalDeviceFeatures2");
 	fn.get_queue_family_properties = instance_proc<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(fn.get_instance_proc_addr, m_instance, "vkGetPhysicalDeviceQueueFamilyProperties");
@@ -160,6 +178,7 @@ bool vk_device::create(std::string &report)
 	int best_rank = 1000;
 	uint32_t best_family = UINT32_MAX;
 	bool best_dual = false;
+	bool best_sample_locations = false;
 	for (uint32_t i = 0; i < device_count; i++)
 	{
 		VkPhysicalDeviceProperties2 props = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
@@ -186,6 +205,7 @@ bool vk_device::create(std::string &report)
 		best_rank = rank;
 		best_family = family;
 		best_dual = query.features.dualSrcBlend;
+		best_sample_locations = has_device_extension(fn, devices[i], VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME);
 	}
 	if (!m_physical)
 	{
@@ -195,6 +215,15 @@ bool vk_device::create(std::string &report)
 	}
 	m_queue_family = best_family;
 	m_dual_src_blend = best_dual;
+	m_sample_locations = best_sample_locations;
+	if (m_sample_locations)
+	{
+		VkPhysicalDeviceSampleLocationsPropertiesEXT locations = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLE_LOCATIONS_PROPERTIES_EXT };
+		VkPhysicalDeviceProperties2 props = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &locations };
+		fn.get_physical_device_properties2(m_physical, &props);
+		m_variable_sample_locations = locations.variableSampleLocations == VK_TRUE;
+		m_sample_location_counts = locations.sampleLocationSampleCounts;
+	}
 	fn.get_memory_properties(m_physical, &m_memory);
 
 	// one graphics queue, dual-source blending enabled when the device has it (System 22)
@@ -212,6 +241,13 @@ bool vk_device::create(std::string &report)
 	VkPhysicalDeviceVulkan13Features enabled13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
 	enabled13.dynamicRendering = VK_TRUE;
 	device_info.pNext = &enabled13;
+	// the extension is enabled only when the device has it; the engine falls back to snapping without it
+	const char *extensions[] = { VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME };
+	if (m_sample_locations)
+	{
+		device_info.enabledExtensionCount = 1;
+		device_info.ppEnabledExtensionNames = extensions;
+	}
 	if (fn.create_device(m_physical, &device_info, nullptr, &m_device) != VK_SUCCESS)
 	{
 		report = "vkCreateDevice failed";
@@ -255,6 +291,7 @@ bool vk_device::create(std::string &report)
 	fn.cmd_copy_buffer_to_image = device_proc<PFN_vkCmdCopyBufferToImage>(dp, m_device, "vkCmdCopyBufferToImage");
 	fn.cmd_copy_image_to_buffer = device_proc<PFN_vkCmdCopyImageToBuffer>(dp, m_device, "vkCmdCopyImageToBuffer");
 	fn.cmd_copy_image = device_proc<PFN_vkCmdCopyImage>(dp, m_device, "vkCmdCopyImage");
+	fn.cmd_set_sample_locations = m_sample_locations ? device_proc<PFN_vkCmdSetSampleLocationsEXT>(dp, m_device, "vkCmdSetSampleLocationsEXT") : nullptr;
 	fn.cmd_resolve_image = device_proc<PFN_vkCmdResolveImage>(dp, m_device, "vkCmdResolveImage");
 	fn.cmd_clear_color_image = device_proc<PFN_vkCmdClearColorImage>(dp, m_device, "vkCmdClearColorImage");
 	fn.cmd_clear_depth_stencil_image = device_proc<PFN_vkCmdClearDepthStencilImage>(dp, m_device, "vkCmdClearDepthStencilImage");

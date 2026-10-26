@@ -151,6 +151,13 @@ private:
 	void fit_msaa(osd::gpu_target_desc &target);
 	bool sample_count_supported(int samples, bool sampled) const;
 	const image &readback_image() const { return m_target.msaa_samples > 0 ? m_resolve : m_color; }
+	// whether draws on a target with this many samples place their samples by VK_EXT_sample_locations: every sample at
+	// the pixel centre for a draw without multisampling, the standard pattern otherwise
+	bool centre_samples(int samples) const
+	{
+		return samples > 1 && m_device.variable_sample_locations() && (m_device.sample_location_counts() & uint32_t(samples)) != 0;
+	}
+	void set_sample_locations(bool multisample);
 	void snap_triangles(const osd::gpu_frame &frame, uint8_t *vertices) const;
 	bool reads_samples(const osd::gpu_readback_rect &r) const;
 	bool validate_update(const osd::gpu_texture_update &u);
@@ -183,7 +190,8 @@ private:
 
 	int texel_bytes(osd::gpu_handle texture) const;
 	VkSampler sampler_for(const texture &t) const;
-	bool create_image(image &img, VkFormat format, int width, int height, VkImageUsageFlags usage, VkImageAspectFlags aspect, int samples = 1);
+	bool create_image(image &img, VkFormat format, int width, int height, VkImageUsageFlags usage, VkImageAspectFlags aspect, int samples = 1,
+			VkImageCreateFlags flags = 0);
 	void destroy_image(image &img);
 	bool transition_to_general(const image &img);
 	bool ensure_target(const osd::gpu_target_desc &target, bool &clear_color, bool &clear_depth);
@@ -285,6 +293,8 @@ private:
 	uint32_t m_sample_counts = 0;
 	uint32_t m_sampled_sample_counts = 0;
 	uint64_t m_msaa_budget = 1024ULL * 1024 * 1024;
+	// the sample locations the command buffer was last given: 0 standard, 1 centre, -1 none yet
+	int m_locations_mode = -1;
 	int m_msaa_logged_requested = 0, m_msaa_logged_granted = 0;
 };
 

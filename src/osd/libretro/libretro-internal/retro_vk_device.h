@@ -36,6 +36,7 @@ struct vk_functions
 	PFN_vkCreateInstance create_instance = nullptr;
 	PFN_vkDestroyInstance destroy_instance = nullptr;
 	PFN_vkEnumeratePhysicalDevices enumerate_physical_devices = nullptr;
+	PFN_vkEnumerateDeviceExtensionProperties enumerate_device_extension_properties = nullptr;
 	PFN_vkGetPhysicalDeviceProperties2 get_physical_device_properties2 = nullptr;
 	PFN_vkGetPhysicalDeviceFeatures2 get_physical_device_features2 = nullptr;
 	PFN_vkGetPhysicalDeviceQueueFamilyProperties get_queue_family_properties = nullptr;
@@ -78,6 +79,7 @@ struct vk_functions
 	PFN_vkCmdCopyImageToBuffer cmd_copy_image_to_buffer = nullptr;
 	PFN_vkCmdCopyImage cmd_copy_image = nullptr;
 	PFN_vkCmdResolveImage cmd_resolve_image = nullptr;
+	PFN_vkCmdSetSampleLocationsEXT cmd_set_sample_locations = nullptr;
 	PFN_vkCmdClearColorImage cmd_clear_color_image = nullptr;
 	PFN_vkCmdClearDepthStencilImage cmd_clear_depth_stencil_image = nullptr;
 	PFN_vkCreateImageView create_image_view = nullptr;
@@ -158,6 +160,11 @@ public:
 	VkCommandPool command_pool() const { return m_pool; }
 	uint32_t queue_family() const { return m_queue_family; }
 	bool dual_src_blend() const { return m_dual_src_blend; }
+	// VK_EXT_sample_locations is enabled when the device has it; variable locations (per pixel) are needed to set the
+	// locations per draw, and sample_location_counts is the sample counts those locations may be used with
+	bool sample_locations() const { return m_sample_locations; }
+	bool variable_sample_locations() const { return m_variable_sample_locations; }
+	VkSampleCountFlags sample_location_counts() const { return m_sample_location_counts; }
 	const VkPhysicalDeviceProperties &properties() const { return m_props; }
 
 private:
@@ -171,6 +178,9 @@ private:
 	VkCommandPool m_pool = VK_NULL_HANDLE;
 	uint32_t m_queue_family = 0;
 	bool m_dual_src_blend = false;
+	bool m_sample_locations = false;
+	bool m_variable_sample_locations = false;
+	VkSampleCountFlags m_sample_location_counts = 0;
 	VkPhysicalDeviceProperties m_props = {};
 	VkPhysicalDeviceMemoryProperties m_memory = {};
 	bool m_failed = false;
