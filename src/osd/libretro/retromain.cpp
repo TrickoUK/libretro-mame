@@ -34,7 +34,7 @@
 
 #if defined(HAVE_RETRO_GPU_TARGET)
 #include "libretro-internal/retro_gpu_engine.h"
-#include "libretro-internal/retro_vk_loader.h"
+#include "libretro-internal/retro_vk_device.h"
 #endif
 
 bool fexists(std::string path)
@@ -331,14 +331,16 @@ osd::gpu_engine *retro_osd_interface::get_gpu_engine(const char *system)
 		return nullptr;
 	if (gpu3d_api != GPU3D_API_OPENGL)
 	{
-		// The Vulkan engine (gpu-vulkan-plan.md VK.3) is not built yet: probe the device once and
-		// keep using the OpenGL engine.
-		static bool probed = false;
-		if (!probed)
+		// The Vulkan engine does not draw yet (gpu-vulkan-plan.md VK.3b): the device is created
+		// once to check the system, and the OpenGL engine is used.
+		static retro_vk::vk_device device;
+		if (!device.valid() && !device.failed())
 		{
-			probed = true;
-			auto const probe = retro_vk::retro_vk_probe();
-			fprintf(stderr, "[retro_vk] %s: %s\n", probe.available ? "device found" : "no device", probe.report.c_str());
+			std::string report;
+			if (device.create(report))
+				fprintf(stderr, "[retro_vk] %s\n", report.c_str());
+			else
+				device.latch("device", report.c_str());
 			fprintf(stderr, "[retro_vk] Vulkan engine not built yet, using OpenGL\n");
 		}
 	}
