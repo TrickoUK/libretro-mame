@@ -359,7 +359,7 @@ private:
 	void model2_3d_process_polygon(raster_state *raster, u32 attr);
 
 	// inliners
-	inline void model2_3d_project(polygon *poly);
+	inline void model2_3d_project(polygon *poly, int ss);
 	inline u16 float_to_zval(float floatval, s32 z_adjust);
 	inline bool check_culling(raster_state *raster, u32 attr, float min_z, float max_z);
 };
@@ -700,12 +700,10 @@ struct m2_poly_extra_data
 	u8       luma;
 };
 
-// destmap/fillmap are rendered at the supersampling factor times the linear
-// resolution of the real screen and box-filtered back down when composited
-// (see render_polygons()), to give the software 3D rasterizer some
-// antialiasing on polygon edges that real Model 2 hardware had via a
-// dedicated AA circuit this driver doesn't otherwise emulate. The factor
-// comes from the OSD's 3D supersampling setting (1 = native resolution).
+// The host-GPU path renders the 3D layer at the supersampling factor times the linear resolution of the
+// real screen and averages it back down, for polygon edge antialiasing that real Model 2 hardware had via a
+// dedicated AA circuit this driver doesn't otherwise emulate. The factor comes from the OSD's 3D supersampling
+// setting (1 = native resolution). Software frames are always drawn at native size.
 int model2_supersample_factor(running_machine &machine);
 
 // 0x10000 = size of the poly_sorted_list array
@@ -714,7 +712,7 @@ class model2_renderer : public poly_manager<float, m2_poly_extra_data, 4>
 public:
 	using polygon = model2_state::polygon;
 
-	model2_renderer(model2_state& state) :
+	model2_renderer(model2_state& state, int ss) :
 		poly_manager<float, m2_poly_extra_data, 4>(state.machine()),
 		m_render_callbacks{
 				{ &model2_renderer::draw_scanline_solid<false>, this },
@@ -722,7 +720,7 @@ public:
 				{ &model2_renderer::draw_scanline_tex<false>, this },
 				{ &model2_renderer::draw_scanline_tex<true>, this } },
 		m_state(state),
-		m_ss(model2_supersample_factor(state.machine())),
+		m_ss(ss),
 		m_destmap(512 * m_ss, 512 * m_ss),
 		m_fillmap(512 * m_ss, 512 * m_ss),
 		m_xoffs(90),
@@ -749,6 +747,7 @@ private:
 	render_delegate m_render_callbacks[4];
 
 	model2_state &m_state;
+	// host-GPU supersampling factor of destmap/fillmap (1 without an engine)
 	int m_ss;
 	bitmap_rgb32 m_destmap;
 	bitmap_ind8 m_fillmap;

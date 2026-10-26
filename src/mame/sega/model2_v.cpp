@@ -568,9 +568,8 @@ void model2_renderer::model2_3d_render(polygon *poly, const rectangle &cliprect)
 	/* select renderer based on attributes (bit14 = textured, bit13 = transparent) */
 	u8 renderer = (poly->texheader[0] >> 13) & 3;
 
-	/* calculate and clip to viewport (destmap-space, i.e. already scaled by the supersampling factor) */
-	rectangle vp(m_ss * (poly->viewport[0] + m_xoffs), m_ss * (poly->viewport[2] + m_xoffs),
-	             m_ss * ((384-poly->viewport[3]) + m_yoffs), m_ss * ((384-poly->viewport[1]) + m_yoffs));
+	/* calculate and clip to viewport */
+	rectangle vp(poly->viewport[0] + m_xoffs, poly->viewport[2] + m_xoffs, (384-poly->viewport[3]) + m_yoffs, (384-poly->viewport[1]) + m_yoffs);
 	vp &= cliprect;
 
 	extra.state = &m_state;
@@ -767,7 +766,7 @@ bool model2_state::gpu_layer_submit(const rectangle &ss_cliprect)
 				{
 					// the GPU path works on a copy, so a frame it cannot produce can still be rendered from the original
 					polygon gpu_poly = *poly;
-					model2_3d_project(&gpu_poly);
+					model2_3d_project(&gpu_poly, m_renderer->supersample());
 					m_renderer->gpu_add_polygon(&gpu_poly, ss_cliprect, m_gpu_state, m_gpu_vertices);
 				}
 			}
@@ -964,13 +963,11 @@ void model2_state::vertical_sync_w(u16 data)
 }
 
 /* 3D Rasterizer projection: projects a polygon into screen coordinates */
-inline void model2_state::model2_3d_project(polygon *poly)
+inline void model2_state::model2_3d_project(polygon *poly, int ss)
 {
-	int const ss = m_renderer->supersample();
-
 	for (int i = 0; i < poly->num_vertices; i++)
 	{
-		/* project the vertices into destmap space (scaled by the supersampling factor) */
+		/* project the vertices into destmap space (scaled by ss, the host-GPU supersampling factor) */
 		poly->v[i].x = ss * (m_crtc_xoffset + poly->center[0] + (poly->v[i].x / (poly->v[i].pz + std::numeric_limits<float>::min())));
 		poly->v[i].y = ss * (((384 - poly->center[1])+m_crtc_yoffset) - (poly->v[i].y / (poly->v[i].pz + std::numeric_limits<float>::min())));
 	}
@@ -1006,12 +1003,6 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	raster_state *raster = m_raster.get();
 	int32_t z;
 
-	// destmap/fillmap are rendered at the supersampling factor times cliprect's resolution
-	int const ss = m_renderer->supersample();
-	rectangle const ss_cliprect(
-			cliprect.min_x * ss, (cliprect.max_x + 1) * ss - 1,
-			cliprect.min_y * ss, (cliprect.max_y + 1) * ss - 1);
-
 	// if the geometrizer hasn't presented a new frame, just copy the previous frame and bail
 	if (m_render_done)
 	{
@@ -1030,9 +1021,10 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 		return;
 	}
 
+	// software frames are drawn at native size
 	m_layer_from_gpu = false;
-	m_renderer->destmap().fill(0x00000000, ss_cliprect);
-	m_renderer->fillmap().fill(0x00, ss_cliprect);
+	m_renderer->destmap().fill(0x00000000, cliprect);
+	m_renderer->fillmap().fill(0x00, cliprect);
 
 	for (int window = raster->cur_window; window >= 0; window--)
 	{
@@ -1051,8 +1043,8 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 					if (poly->window == window)
 					{
 						/* project and render */
-						model2_3d_project(poly);
-						m_renderer->model2_3d_render(poly, ss_cliprect);
+						model2_3d_project(poly, 1);
+						m_renderer->model2_3d_render(poly, cliprect);
 					}
 
 					poly = (polygon *)poly->next;
@@ -1067,7 +1059,7 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	m_render_done = true;
 }
 
-// Box-filter downsample of the supersampled 3D polygon layer (m_renderer->destmap()/fillmap())
+// Box-filter downsample of the 3D polygon layer (m_renderer->destmap()/fillmap(), supersampled for GPU frames and native for software frames)
 // into the real screen bitmap. Only opaque (fillmap-marked) source texels are averaged, and a
 // destination pixel is left untouched (transparent) if none of its source block is opaque, so
 // the tilemap/sprite layers drawn before/after this one in screen_update() still show through
@@ -1076,8 +1068,9 @@ void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cl
 {
 	bitmap_rgb32 &src = m_renderer->destmap();
 	bitmap_ind8 &srcfill = m_renderer->fillmap();
-	int const ss = m_renderer->supersample();
 	bool const from_gpu = m_layer_from_gpu;
+	// the GPU layer is supersampled, a software layer is drawn at native size
+	int const ss = from_gpu ? m_renderer->supersample() : 1;
 
 	// The GPU has already averaged the covered samples to the native size.
 	if (from_gpu && m_layer_native)
@@ -1096,31 +1089,41 @@ void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cl
 		return;
 	}
 
-	// At the output scale the screen has the supersampled resolution, so opaque texels are copied as they are.
-	if (m_output_scale > 1)
+	// At the output scale the GPU layer has the screen's resolution, so its opaque texels are copied as they are.
+	if (m_output_scale > 1 && from_gpu)
 	{
 		for (int y = cliprect.min_y * ss; y <= (cliprect.max_y + 1) * ss - 1; y++)
 		{
-			u8 const *const fillrow = &srcfill.pix(y);
 			u32 const *const srcrow = &src.pix(y);
 			u32 *const dest = &bitmap.pix(y);
 
 			// the GPU layer carries its coverage in alpha
-			if (from_gpu)
+			for (int x = cliprect.min_x * ss; x <= (cliprect.max_x + 1) * ss - 1; x++)
 			{
-				for (int x = cliprect.min_x * ss; x <= (cliprect.max_x + 1) * ss - 1; x++)
-				{
-					if (srcrow[x] >> 24)
-						dest[x] = srcrow[x];
-				}
+				if (srcrow[x] >> 24)
+					dest[x] = srcrow[x];
 			}
-			else
+		}
+		return;
+	}
+
+	// A software layer is native: each opaque texel fills its block of output pixels.
+	if (m_output_scale > 1)
+	{
+		int const scale = m_output_scale;
+
+		for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+		{
+			u8 const *const fillrow = &srcfill.pix(y);
+			u32 const *const srcrow = &src.pix(y);
+
+			for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
 			{
-				for (int x = cliprect.min_x * ss; x <= (cliprect.max_x + 1) * ss - 1; x++)
-				{
-					if (fillrow[x])
-						dest[x] = srcrow[x];
-				}
+				if (!fillrow[x])
+					continue;
+
+				for (int dy = 0; dy < scale; dy++)
+					std::fill_n(&bitmap.pix(y * scale + dy, x * scale), scale, srcrow[x]);
 			}
 		}
 		return;
@@ -2918,18 +2921,22 @@ void model2_state::video_start()
 
 	m_sys24_bitmap.allocate(width, height+4);
 
+	// The supersampling factor belongs to the host-GPU path: it is only raised when the engine exists and works
+	// at start. Without one the 3D layer is drawn at native size, which is the software renderer.
+	int const ss = gpu_init() ? model2_supersample_factor(machine()) : 1;
+
 	// With the 3D output scale enabled the screen is presented at the supersampling factor times
 	// its native size. The tilemaps and the frame buffer view still draw at native size.
-	if (machine().osd().supersample_output() && model2_supersample_factor(machine()) > 1)
+	if (machine().osd().supersample_output() && ss > 1)
 	{
-		m_output_scale = model2_supersample_factor(machine());
+		m_output_scale = ss;
 		rectangle scaled_visarea(visarea.min_x * m_output_scale, (visarea.max_x + 1) * m_output_scale - 1,
 				visarea.min_y * m_output_scale, (visarea.max_y + 1) * m_output_scale - 1);
 		m_screen->configure(m_screen->width() * m_output_scale, m_screen->height() * m_output_scale,
 				scaled_visarea, m_screen->frame_period());
 	}
 
-	m_renderer = std::make_unique<model2_renderer>(*this);
+	m_renderer = std::make_unique<model2_renderer>(*this, ss);
 
 	/* initialize the hardware rasterizer */
 	raster_init(*memregion("textures"));
