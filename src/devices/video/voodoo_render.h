@@ -526,6 +526,7 @@ public:
 
 	// allocate a new poly_data and fill in the rasterizer_params
 	poly_data &alloc_poly();
+	void compute_raster(rasterizer_params &raster);
 
 	// enqueue operations
 	u32 enqueue_fastfill(poly_data &poly);

@@ -1283,6 +1283,12 @@ void voodoo_renderer::register_save(save_proxy &save)
 //  and compute the raster parameters
 //-------------------------------------------------
 
+void voodoo_renderer::compute_raster(rasterizer_params &raster)
+{
+	raster.compute(m_fbi_reg, m_tmu0_reg, m_tmu1_reg);
+}
+
+
 poly_data &voodoo_renderer::alloc_poly()
 {
 	// allocate poly data and compute the rasterization parameters

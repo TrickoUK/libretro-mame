@@ -1181,6 +1181,10 @@ MAME's own `video:snapshot()` (the emulated frame at native resolution).
 
 ## Working conventions for this project
 
+- **Never `pkill -f` or `pgrep -f` with a pattern that appears in the command itself.** The shell
+  running the command has that pattern in its own command line, so it matches and kills itself
+  (exit 144). Match the process name with `-x` (`pkill -x retroarch`), or kill by PID.
+
 - **Fix games the way the real hardware works (upstream-PR-able work).** When improving a game
   or getting a system working, first try a hardware-appropriate solution that keeps to the
   spirit of the original design. Example: Apache 3's sprite rotation first worked with a large
