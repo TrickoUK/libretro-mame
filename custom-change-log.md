@@ -628,3 +628,9 @@ builds get them straight from here.
 - The 3D options (supersampling, output scale, MSAA, texture filtering, anisotropic) only act on the host-GPU path, and the
   core option texts say so.
 - PS1 with PGXP on but the GPU HLE off, and with PGXP off, does no shadow work on the CPU.
+
+## 2026-10-27
+
+### thrild2: no crash with 3D GPU Rendering on
+- Thrild2 no longer crashes about 5800 frames in (around 1.5 minutes) when the GPU path hands a triangle to the software
+  rasterizer. The game runs past that point with the Vulkan path on.

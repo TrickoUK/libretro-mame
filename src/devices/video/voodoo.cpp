@@ -3530,8 +3530,9 @@ s32 voodoo_1_device::triangle()
 	if (destbase == nullptr)
 		return TRIANGLE_SETUP_CLOCKS;
 
-	// allocate polygon information now
-	auto &poly = m_renderer->alloc_poly();
+	// fill in the polygon locally: the ring slot is taken once the host GPU decision is made
+	poly_data poly{};
+	m_renderer->compute_raster(poly.raster);
 	poly.destbase = destbase;
 	poly.depthbase = aux_buffer();
 	poly.clipleft = m_reg.clip_left();
@@ -3658,6 +3659,9 @@ s32 voodoo_1_device::triangle()
 		else if ((gpu_buffer = gpu_buffer_index(poly.destbase, true)) < 0)
 			gpu_latch("triangle outside the colour buffers");
 	}
+	// take the polygon slot now that the host GPU decision is made
+	auto &slot = m_renderer->alloc_poly();
+	slot = poly;
 	if (gpu_buffer >= 0)
 	{
 		if (m_gpu->batch().needs_flush())
@@ -3669,7 +3673,7 @@ s32 voodoo_1_device::triangle()
 		float const x[3] = { vert[0].x, vert[1].x, vert[2].x };
 		float const y[3] = { vert[0].y, vert[1].y, vert[2].y };
 		voodoo::gpu_batch::globals g = { m_reg.chroma_range().raw(), m_renderer->fogblend(), m_renderer->fogdelta(), m_renderer->fogdelta_mask(), m_renderer->bilinear_mask(), m_shared->argb1555, m_shared->argb4444 };
-		m_gpu->batch().add_triangle(poly, gpu_buffer, poly.raster.fbzmode().y_origin(), m_renderer->yorigin(), x, y, g);
+		m_gpu->batch().add_triangle(slot, gpu_buffer, slot.raster.fbzmode().y_origin(), m_renderer->yorigin(), x, y, g);
 		if (!m_gpu_parallel)
 		{
 			float ymin = y[0], ymax = y[0];
@@ -3678,19 +3682,19 @@ s32 voodoo_1_device::triangle()
 				ymin = std::min(ymin, y[i]);
 				ymax = std::max(ymax, y[i]);
 			}
-			bool const flip = poly.raster.fbzmode().y_origin();
+			bool const flip = slot.raster.fbzmode().y_origin();
 			s32 const yo = m_renderer->yorigin();
 			gpu_mark_rows(gpu_buffer, s32(std::floor(flip ? yo + 1 - ymax : ymin)) - 1, s32(std::ceil(flip ? yo + 1 - ymin : ymax)) + 1);
 		}
 		auto const count_start = voodoo::gpu_renderer::profiling() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
-		pixels = m_gpu_parallel ? m_renderer->enqueue_triangle(poly, vert) : m_renderer->count_triangle(vert);
+		pixels = m_gpu_parallel ? m_renderer->enqueue_triangle(slot, vert) : m_renderer->count_triangle(vert);
 		if (voodoo::gpu_renderer::profiling())
 			m_gpu->profile_count("count_us", u32(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - count_start).count()));
 		if (voodoo::gpu_renderer::profiling())
 			m_gpu->profile_capture(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prof_start).count());
 	}
 	else
-		pixels = m_renderer->enqueue_triangle(poly, vert);
+		pixels = m_renderer->enqueue_triangle(slot, vert);
 
 	// update stats
 	m_reg.add(voodoo_regs::reg_fbiTrianglesOut, 1);
