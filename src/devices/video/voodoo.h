@@ -651,13 +651,16 @@ protected:
 	std::unique_ptr<voodoo::shared_tables> m_shared; // shared tables
 	std::unique_ptr<voodoo::voodoo_renderer> m_renderer; // rendering helper
 	// host-GPU path (nullptr = software only)
-	static constexpr int GPU_SLOTS = 4;
+	static constexpr int GPU_SLOTS = 8;
 	bool gpu_shared_memory() const { return m_model == voodoo::voodoo_model::VOODOO_BANSHEE || m_model == voodoo::voodoo_model::VOODOO_3; }
 	int gpu_buffer_index(u16 const *buffer, bool create = false);
 	u32 gpu_slot_offset(int slot) const;
 	u16 *gpu_slot_buffer(int slot) const { return (u16 *)(m_fbram + gpu_slot_offset(slot)); }
 	int gpu_front_slot();
-	void gpu_ram_write(u32 offs, u32 bytes);
+	// returns true when the range is in a colour buffer; without upload the write is latched, with upload the
+	// caller stores the bytes and then calls gpu_ram_upload()
+	bool gpu_ram_write(u32 offs, u32 bytes, bool upload = false);
+	void gpu_ram_upload(u32 offs, u32 bytes);
 	void gpu_ram_read(u32 offs, u32 bytes);
 	void gpu_sync_down(int buffer, u32 first_row = 0, u32 last_row = 1023);
 	void gpu_mark_rows(int buffer, s32 first_row, s32 last_row);
@@ -669,7 +672,7 @@ protected:
 	std::vector<u32> m_gpu_image;            // front buffer as read back, rgb32
 	bool m_gpu_shadow_dirty[GPU_SLOTS] = { };        // the GPU drew into the buffer since m_fbram was last updated from it
 	bool m_gpu_dirty_row[GPU_SLOTS][1024] = { };     // per row of each buffer, in 16-row groups checked together
-	u32 m_gpu_slot_offs[GPU_SLOTS] = { ~0U, ~0U, ~0U, ~0U };  // shared-memory models: RAM offset of the buffer in each slot
+	u32 m_gpu_slot_offs[GPU_SLOTS] = { ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U };  // shared-memory models: RAM offset of the buffer in each slot
 	u32 m_gpu_seen_serial = ~0U;             // renderer submit serial of the last picture read from the GPU
 	int m_gpu_seen_front = -1;               // front buffer index of that picture
 	u32 m_gpu_image_serial = ~0U;            // serial and front buffer m_gpu_image holds

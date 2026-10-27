@@ -1157,14 +1157,20 @@ void voodoo_banshee_device::internal_lfb_direct_w(offs_t offset, u32 data, u32 m
 
 	// wait for any outstanding work to finish
 	m_renderer->wait("internal_lfb_direct_w");
+	u32 const addr = u32(reinterpret_cast<u8 *>(dest) - m_fbram);
+	bool gpu_target = false;
 	if (m_gpu && dest < end)
-		gpu_ram_write(u32(reinterpret_cast<u8 *>(dest) - m_fbram), 4);
+		gpu_target = gpu_ram_write(addr, 4, true);
 
 	// write to the RGB buffer
 	if (ACCESSING_BITS_0_15 && dest < end)
 		dest[0] = BIT(data, 0, 16);
 	if (ACCESSING_BITS_16_31 && dest + 1 < end)
 		dest[1] = BIT(data, 16, 16);
+
+	// the GPU target takes the pixels just stored
+	if (gpu_target)
+		gpu_ram_upload(addr, 4);
 
 	// notify that frame buffer has changed
 	m_video_changed = true;

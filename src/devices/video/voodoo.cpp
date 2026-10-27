@@ -3025,6 +3025,7 @@ int voodoo_1_device::gpu_buffer_index(u16 const *buffer, bool create)
 		if (m_gpu_slot_offs[i] == ~0U)
 		{
 			m_gpu_slot_offs[i] = offs;
+			osd_printf_verbose("Voodoo GPU colour buffer %d at RAM offset %08x\n", i, offs);
 			return i;
 		}
 	return -1;
@@ -3086,22 +3087,52 @@ void voodoo_1_device::gpu_ram_read(u32 offs, u32 bytes)
 //  the GPU
 //-------------------------------------------------
 
-void voodoo_1_device::gpu_ram_write(u32 offs, u32 bytes)
+bool voodoo_1_device::gpu_ram_write(u32 offs, u32 bytes, bool upload)
 {
 	if (!m_gpu || !m_gpu->usable())
-		return;
+		return false;
 	m_gpu->texture_write(0, offs, bytes);
 	if (m_gpu->rows() == 0)
-		return;
+		return false;
 	u32 const size = m_gpu->rowpixels() * m_gpu->rows() * 2;
 	for (int i = 0; i < GPU_SLOTS; i++)
 	{
 		u32 const base = gpu_slot_offset(i);
 		if (base != ~0U && offs < base + size && offs + bytes > base)
 		{
-			gpu_latch("direct write to a colour buffer");
-			return;
+			if (!upload)
+				gpu_latch("direct write to a colour buffer");
+			return true;
 		}
+	}
+	return false;
+}
+
+
+//-------------------------------------------------
+//  gpu_ram_upload - the software side has stored
+//  bytes that gpu_ram_write() reported inside a
+//  colour buffer: the pixels are drawn into the
+//  GPU target so it matches video RAM again
+//-------------------------------------------------
+
+void voodoo_1_device::gpu_ram_upload(u32 offs, u32 bytes)
+{
+	if (!m_gpu || !m_gpu->usable() || m_gpu->rows() == 0)
+		return;
+	u32 const rowpixels = m_gpu->rowpixels();
+	u32 const size = rowpixels * m_gpu->rows() * 2;
+	for (int i = 0; i < GPU_SLOTS; i++)
+	{
+		u32 const base = gpu_slot_offset(i);
+		if (base == ~0U || offs >= base + size || offs + bytes <= base)
+			continue;
+		u32 const first = (std::max(offs, base) - base) / 2;
+		u32 const last = (std::min(offs + bytes, base + size) - base - 1) / 2;
+		u16 const *const src = gpu_slot_buffer(i);
+		for (u32 p = first; p <= last; p++)
+			m_gpu->batch().add_lfb_pixel(i, p % rowpixels, p / rowpixels, 0xff000000 | m_shared->rgb565[src[p]]);
+		m_gpu->batch().close_stamp();
 	}
 }
 

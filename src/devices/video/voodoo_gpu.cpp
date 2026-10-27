@@ -534,6 +534,9 @@ void gpu_renderer::configure(u32 rowpixels, u32 rows, int buffers)
 	m_buffers = buffers;
 	m_scale = std::max(1, m_machine.osd().supersample());
 	int const limit = m_engine->caps().max_texture_size;
+	// the stack is sized for every slot, so a tall stack at 4x would not fit: 3x is the largest scale that does
+	if (int(rows) * buffers * m_scale > limit)
+		m_scale = std::min(m_scale, 3);
 	while (m_scale > 1 && (int(rowpixels) * m_scale > limit || int(rows) * buffers * m_scale > limit))
 		m_scale--;
 	m_batch.set_geometry(rowpixels, rows);

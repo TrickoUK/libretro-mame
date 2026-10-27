@@ -624,8 +624,9 @@ static void check_variables(void)
          supersample_factor = 2;
       if (!strcmp(var.value, "3x"))
          supersample_factor = 3;
+      // 3x is the ceiling every system supports, so a 4x value is held at it
       if (!strcmp(var.value, "4x"))
-         supersample_factor = 4;
+         supersample_factor = 3;
    }
 
    var.key   = CORE_NAME "_3d_output_scale";
