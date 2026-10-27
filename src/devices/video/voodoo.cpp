@@ -3525,13 +3525,14 @@ s32 voodoo_1_device::triangle()
 {
 	auto profile = g_profiler.start(PROFILER_USER2);
 
+	// determine the draw buffer
+	u16 *const destbase = draw_buffer_indirect(m_reg.fbz_mode().draw_buffer());
+	if (destbase == nullptr)
+		return TRIANGLE_SETUP_CLOCKS;
+
 	// allocate polygon information now
 	auto &poly = m_renderer->alloc_poly();
-
-	// determine the draw buffer
-	poly.destbase = draw_buffer_indirect(m_reg.fbz_mode().draw_buffer());
-	if (poly.destbase == nullptr)
-		return TRIANGLE_SETUP_CLOCKS;
+	poly.destbase = destbase;
 	poly.depthbase = aux_buffer();
 	poly.clipleft = m_reg.clip_left();
 	poly.clipright = m_reg.clip_right();
