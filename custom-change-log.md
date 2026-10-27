@@ -634,3 +634,13 @@ builds get them straight from here.
 ### thrild2: no crash with 3D GPU Rendering on
 - Thrild2 no longer crashes about 5800 frames in (around 1.5 minutes) when the GPU path hands a triangle to the software
   rasterizer. The game runs past that point with the Vulkan path on.
+
+### Cartfury: stays on the host-GPU path past its direct-write point (Voodoo 2, Vegas)
+- Direct writes to the colour buffer go to the GPU target instead of dropping the whole game to software. Cartfury keeps
+  drawing on the host GPU after the frame where it used to switch.
+
+### Voodoo: 3x is the highest 3D supersampling, and colour buffers can be added up to eight
+- `mame_3d_supersample` offers 2x and 3x only. A saved 4x setting runs at 3x. 4x is not supported on every system: the
+  colour-target stack would not fit the GPU image limit on tall modes.
+- The Voodoo GPU target can hold up to eight colour buffers (was four). Games whose 3D draws reach a fifth buffer stay on
+  the host-GPU path instead of dropping to software there.
