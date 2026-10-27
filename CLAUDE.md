@@ -379,7 +379,7 @@ for full phase-by-phase detail):
 - Vulkan engine (the only host-GPU engine since VO.1, 2026-10-26): `src/osd/libretro/libretro-internal/retro_vk_device`,
   `retro_vk_engine` and `retro_vk_shader` `.{h,cpp}`. The Vulkan loader is opened with `dlopen()`, so there are no
   build-time Vulkan dependencies. Without a Vulkan 1.3 device the GPU path is off and the system renders in software.
-  Status and plan: `my-docs/gpu-vulkan-plan.md`, `my-docs/gpu-vulkan-only-plan.md`.
+  Status and plan: `my-docs/plans-archived/gpu-vulkan-plan.md`, `my-docs/gpu-vulkan-only-plan.md`.
 - Gated behind a **`HAVE_RETRO_GPU_TARGET`** build define (on by default for Linux
   builds since 2026-10-23, set in `Makefile.libretro`; pass `HAVE_RETRO_GPU_TARGET=` empty to leave it out) — **not** `HAVE_OPENGL`: that name collides
   with the pre-existing dead `RETRO_HW_RENDER` code above, which shares the
