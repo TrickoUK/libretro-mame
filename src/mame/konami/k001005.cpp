@@ -749,7 +749,9 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 
 	while ((fifo[index] & 0xffff0000) != 0x80000000 && index < m_3dfifo_ptr)
 	{
-		k001005_polydata& extra = object_data().next();
+		// the host GPU path copies the polygon out, so it takes a local record and the software object data is left alone
+		k001005_polydata gpu_extra {};
+		k001005_polydata &extra = gpu ? gpu_extra : object_data().next();
 
 		bool last_vertex = false;
 		bool is_quad = false;
