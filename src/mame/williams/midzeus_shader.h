@@ -24,7 +24,8 @@
     solid colour, 2 fill), colour, texture base byte offset, texture width,
     block layout, v offset, palette base byte offset, colour key flag, blend
     (0 plain, 1 intensity 255/256, 2 srca/256, 3 2 * srca/256), srca, depth
-    offset, depth test flag.
+    offset, depth test flag, supersample scale (samples per native pixel along
+    each side; the write stamp reads it).
 
 ***************************************************************************/
 #ifndef MAME_WILLIAMS_MIDZEUS_SHADER_H
@@ -32,7 +33,7 @@
 
 #pragma once
 
-constexpr int MIDZEUS_SHADER_STATE_WORDS = 12;
+constexpr int MIDZEUS_SHADER_STATE_WORDS = 13;
 constexpr int MIDZEUS_SHADER_VARYINGS = 3;
 
 constexpr char MIDZEUS_FRAGMENT_SOURCE[] =
@@ -48,6 +49,7 @@ constexpr char MIDZEUS_FRAGMENT_SOURCE[] =
 	"#define S_SRCA 9\n"
 	"#define S_ZOFFSET 10\n"
 	"#define S_DEPTH_TEST 11\n"
+	"#define S_SCALE 12\n"
 	"#define KIND_TEX 0\n"
 	"#define KIND_SOLID 1\n"
 	"#define KIND_FILL 2\n"
@@ -147,9 +149,10 @@ constexpr char MIDZEUS_FRAGMENT_SOURCE[] =
 	"}\n";
 
 constexpr char MIDZEUS_STAMP_SOURCE[] =
+	"#define S_SCALE 12\n"
 	"bool shade(out vec4 color)\n"
 	"{\n"
-	"	ivec2 p = ivec2(floor(frag_pos()));\n"
+	"	ivec2 p = ivec2(floor(frag_pos())) / int(state(S_SCALE));\n"
 	"	int word = int(texelFetch(tex_fb, ivec2(4 * (p.x / 2) + (p.x & 1) + 2 * VARIANT, p.y), 0).r);\n"
 	"	frag_depth = float(word) / 65536.0;\n"
 	"	ivec3 c = ivec3((word >> 10) & 31, (word >> 5) & 31, word & 31);\n"

@@ -14,6 +14,13 @@
     as they stood when the chip drew it. The page on screen comes back as
     ordinary pixels when the screen is updated.
 
+    With mame_3d_supersample the target holds a block of samples for each
+    native pixel, and the read-back averages each block back to one pixel.
+    Every coordinate the target is addressed by is multiplied by the scale
+    (the vertices, the clip rectangle and the stamps), while the frame
+    buffer's words stay at native size. With mame_3d_msaa the target keeps
+    coverage samples per pixel, resolved by the same read-back.
+
     The CPU writes to the frame buffer (0xb0/0xb2 with bit 31 of 0xb6 set)
     reach the target as write stamps. Each written word is flagged per pixel
     until the next draw or submit. Then the frame buffer's words are uploaded
@@ -43,6 +50,7 @@ enum : uint32_t
 	SW_SRCA,
 	SW_ZOFFSET,
 	SW_DEPTH_TEST,
+	SW_SCALE,
 	SW_COUNT
 };
 
@@ -202,9 +210,19 @@ bool midzeus_renderer::gpu_init()
 		return false;
 	}
 
+	// the options are read when the machine starts, as the core option text says they take effect on a restart; the target is
+	// reduced to the largest scale whose rows the texture size allows
+	m_gpu_msaa = m_state.machine().osd().msaa();
+	m_gpu_scale = std::clamp(m_state.machine().osd().supersample(), 1, 3);
+	while (m_gpu_scale > 1 && GPU_TARGET_ROWS * m_gpu_scale > int(m_gpu_engine->caps().max_texture_size))
+		m_gpu_scale--;
+
+	// a sample is taken inside the quad for a pixel the quad only partly covers, so u, v and z are never extrapolated past its
+	// edges (z is the depth the shader writes for every covered sample of the pixel)
 	osd::gpu_shader_module module;
 	module.name = "midzeus";
 	module.fragment_source = MIDZEUS_FRAGMENT_SOURCE;
+	module.centroid_mask = (m_gpu_msaa > 0) ? 0x7 : 0;
 	module.varying_count = MIDZEUS_SHADER_VARYINGS;
 	for (int i = 0; i < MIDZEUS_SHADER_VARYINGS; i++)
 		module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
@@ -250,7 +268,8 @@ bool midzeus_renderer::gpu_init()
 	m_gpu_fb_flags.assign(size_t(GPU_TARGET_WIDTH) * GPU_TARGET_ROWS, 0);
 	m_gpu_ready = true;
 	gpu_reset();
-	osd_printf_info("midzeus: host GPU path on, target %dx%d\n", GPU_TARGET_WIDTH, GPU_TARGET_ROWS);
+	osd_printf_info("midzeus: host GPU path on, target %dx%d, %dx supersampling, %d MSAA samples\n",
+			GPU_TARGET_WIDTH * m_gpu_scale, GPU_TARGET_ROWS * m_gpu_scale, m_gpu_scale, m_gpu_msaa);
 	return true;
 }
 
@@ -413,15 +432,17 @@ void midzeus_renderer::gpu_flush_frame_buffer()
 		gpu_flag_rects(m_gpu_fb_flags, row_min, row_max, mask,
 			[this, plane](int x0, int x1, int y0, int y1)
 			{
-				// the stamp reads no state, but every primitive needs a record in the frame's table
+				// the stamp reads its scale from its record (its other words are unused): one native pixel is scale target pixels
 				const uint32_t prim = m_gpu_state.size() / MIDZEUS_SHADER_STATE_WORDS;
 				m_gpu_state.resize(m_gpu_state.size() + MIDZEUS_SHADER_STATE_WORDS, 0);
+				m_gpu_state[prim * MIDZEUS_SHADER_STATE_WORDS + SW_SCALE] = uint32_t(m_gpu_scale);
 
-				auto corner = [prim](float x, float y)
+				const float scale = float(m_gpu_scale);
+				auto corner = [prim, scale](float x, float y)
 				{
 					gpu_vertex v = {};
-					v.x = x;
-					v.y = y;
+					v.x = x * scale;
+					v.y = y * scale;
 					v.z = 0.0f;
 					v.w = 1.0f;
 					v.prim = prim;
@@ -434,7 +455,7 @@ void midzeus_renderer::gpu_flush_frame_buffer()
 				const uint32_t first = m_gpu_vertices.size();
 				m_gpu_vertices.insert(m_gpu_vertices.end(), { a, b, c, a, c, d });
 
-				m_gpu_commands.push_back(osd::gpu_command::make_clip(x0, y0, x1 - x0, y1 - y0));
+				m_gpu_commands.push_back(osd::gpu_command::make_clip(x0 * m_gpu_scale, y0 * m_gpu_scale, (x1 - x0) * m_gpu_scale, (y1 - y0) * m_gpu_scale));
 				osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_stamp_module, first, 6);
 				draw.bindings[0] = m_gpu_fb_texture;
 				draw.variant = plane;
@@ -458,7 +479,7 @@ void midzeus_renderer::gpu_set_clip(int row, const rectangle &clip)
 		return;
 	m_gpu_clip_row = row;
 	m_gpu_clip = clip;
-	m_gpu_commands.push_back(osd::gpu_command::make_clip(clip.min_x, row + clip.min_y, clip.width(), clip.height()));
+	m_gpu_commands.push_back(osd::gpu_command::make_clip(clip.min_x * m_gpu_scale, (row + clip.min_y) * m_gpu_scale, clip.width() * m_gpu_scale, clip.height() * m_gpu_scale));
 }
 
 // Adds one polygon from capture_polygon(): the clipped screen-space vertices as a fan of triangles, and the state record of the
@@ -559,6 +580,7 @@ void midzeus_renderer::gpu_add_polygon(const rectangle &clip, const vertex_t *ve
 	words[SW_BLEND] = term;
 	words[SW_SRCA] = state.alpha & 0xff;
 	words[SW_ZOFFSET] = uint32_t(int32_t(state.zoffset));
+	words[SW_SCALE] = uint32_t(m_gpu_scale);
 
 	// the fill is an unconditional write of colour and depth, as render_poly_solid_fixedz() does it
 	const bool depth_test = !fill && state.depth_test_enable;
@@ -571,12 +593,13 @@ void midzeus_renderer::gpu_add_polygon(const rectangle &clip, const vertex_t *ve
 	gpu_set_clip(row, clip);
 
 	// texture coordinates in texel units; the depth is the chip's 16.16 z, which the shader reduces to the integer depth
+	const float scale = float(m_gpu_scale);
 	const uint32_t prim = m_gpu_state.size() / SW_COUNT;
 	gpu_vertex vv[6];
 	for (uint32_t i = 0; i < numverts; i++)
 	{
-		vv[i].x = vert[i].x;
-		vv[i].y = vert[i].y + row;
+		vv[i].x = vert[i].x * scale;
+		vv[i].y = (vert[i].y + row) * scale;
 		vv[i].z = 0.0f;
 		vv[i].w = 1.0f;
 		vv[i].prim = prim;
@@ -622,10 +645,11 @@ bool midzeus_renderer::gpu_submit(const osd::gpu_readback_rect *readback, bool f
 	gpu_flush_frame_buffer();
 
 	osd::gpu_frame frame;
-	frame.target.width = GPU_TARGET_WIDTH;
-	frame.target.height = GPU_TARGET_ROWS;
+	frame.target.width = GPU_TARGET_WIDTH * m_gpu_scale;
+	frame.target.height = GPU_TARGET_ROWS * m_gpu_scale;
 	frame.target.persistent = true;
 	frame.target.depth = osd::gpu_depth_mode::REAL;
+	frame.target.msaa_samples = m_gpu_msaa;
 	frame.target.generation = m_gpu_generation;
 	frame.vertices = m_gpu_vertices.data();
 	frame.vertex_count = m_gpu_vertices.size();
@@ -667,10 +691,11 @@ bool midzeus_renderer::gpu_screen_update(bitmap_rgb32 &bitmap, const rectangle &
 	osd::gpu_readback_rect readback;
 	if (any)
 	{
-		readback.x = x0 - vis.min_x;
-		readback.y = display + y0;
-		readback.w = x1 - x0 + 1;
-		readback.h = y1 - y0 + 1;
+		readback.x = (x0 - vis.min_x) * m_gpu_scale;
+		readback.y = (display + y0) * m_gpu_scale;
+		readback.w = (x1 - x0 + 1) * m_gpu_scale;
+		readback.h = (y1 - y0 + 1) * m_gpu_scale;
+		readback.downsample = m_gpu_scale;
 		readback.out = &bitmap.pix(y0, x0);
 		readback.stride = bitmap.rowpixels();
 		readback.opaque = true;
