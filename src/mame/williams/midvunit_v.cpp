@@ -357,9 +357,19 @@ void midvunit_renderer::process_dma_queue()
 	// the host GPU path takes the quad in place of the scanline renderer
 	if (!m_gpu_checked)
 		gpu_init();
+	// the debug switch MAME_MIDV_FORCE_SOFTWARE_FRAMES=<frame> latches the host GPU path off at that frame
+	static const char *const force_frame = osd_getenv("MAME_MIDV_FORCE_SOFTWARE_FRAMES");
+	if (gpu_active() && force_frame && m_state.m_screen->frame_number() == uint32_t(strtoul(force_frame, nullptr, 10)))
+		gpu_latch_off("MAME_MIDV_FORCE_SOFTWARE_FRAMES");
+
 	if (gpu_active())
 	{
-		gpu_add_quad(vert, pixdata, textured, m_state.m_dma_data[0], m_state.m_dma_data[14]);
+		if (gpu_needs_rows(vert))
+		{
+			gpu_add_rows(vert, pixdata, textured, m_state.m_dma_data[0], m_state.m_dma_data[14]);
+		}
+		else
+			gpu_add_quad(vert, pixdata, textured, m_state.m_dma_data[0], m_state.m_dma_data[14]);
 		return;
 	}
 

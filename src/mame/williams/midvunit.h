@@ -76,10 +76,14 @@ private:
 	static constexpr int GPU_PAGE_WIDTH = 512;      // each page is 512 x 512 indices, the two stacked in the target
 	static constexpr int GPU_PAGE_ROWS = 512;
 	static constexpr int GPU_TARGET_HEIGHT = 2 * GPU_PAGE_ROWS;
+	static constexpr float GPU_SLIVER_HEIGHT = 1.0f / 16.0f; // quads shorter than this are placed from the scanline spans
 
 	bool gpu_init();
 	void gpu_flush_updates();
 	void gpu_add_quad(const vertex_t *vert, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage);
+	bool gpu_row_span(const vertex_t *vert, int32_t row, const rectangle &clip, int32_t &x0, int32_t &x1, float (&param)[2], float (&dpdx)[2]) const;
+	bool gpu_needs_rows(const vertex_t *vert) const;
+	void gpu_add_rows(const vertex_t *vert, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage);
 
 	midvunit_base_state &m_state;
 	palette_device &m_palette;

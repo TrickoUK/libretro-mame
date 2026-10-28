@@ -247,6 +247,199 @@ void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint16_t pixdata, boo
 	}
 }
 
+// The rounding of poly_manager::round_coordinate() (private there): the nearest integer, a half rounds down.
+static int32_t gpu_round(float value)
+{
+	const float ipart = std::floor(value);
+	return int32_t(ipart) + (((value - ipart) > 0.5f) ? 1 : 0);
+}
+
+// The span one scanline of a quad covers, from the edges of poly_manager::render_polygon(): the left and right edges are the
+// two chains from the lowest to the highest vertex, and the pixel span of a row runs between their positions at the centre
+// of the row, rounded and clipped. The parameters are interpolated linearly along each edge and then across the row. Returns
+// false when the row is outside the quad or the clip, or when the span is empty.
+bool midvunit_renderer::gpu_row_span(const vertex_t *vert, int32_t row, const rectangle &clip, int32_t &x0, int32_t &x1, float (&param)[2], float (&dpdx)[2]) const
+{
+	struct edge_t
+	{
+		const vertex_t *v1;
+		const vertex_t *v2;
+		float dxdy;
+		float dpdy[2];
+	};
+
+	// the top and bottom vertices, picked as render_polygon() does
+	int minv = 0;
+	int maxv = 0;
+	for (int vnum = 1; vnum < 4; vnum++)
+	{
+		if (vert[vnum].y < vert[minv].y)
+			minv = vnum;
+		else if (vert[vnum].y > vert[maxv].y)
+			maxv = vnum;
+	}
+	const int32_t miny = std::max<int32_t>(gpu_round(vert[minv].y), clip.top());
+	const int32_t maxy = std::min<int32_t>(gpu_round(vert[maxv].y), clip.bottom() + 1);
+	if (row < miny || row >= maxy)
+		return false;
+
+	// the two chains from the top vertex to the bottom vertex, forward and backward, horizontal edges left out
+	edge_t fedge[3];
+	edge_t bedge[3];
+	int nfedge = 0;
+	int nbedge = 0;
+	for (int curv = minv; curv != maxv; curv = (curv == 3) ? 0 : (curv + 1))
+	{
+		const vertex_t *const v1 = &vert[curv];
+		const vertex_t *const v2 = &vert[(curv == 3) ? 0 : (curv + 1)];
+		if (v1->y == v2->y)
+			continue;
+		const float ooy = 1.0f / (v2->y - v1->y);
+		edge_t &edge = fedge[nfedge++];
+		edge.v1 = v1;
+		edge.v2 = v2;
+		edge.dxdy = (v2->x - v1->x) * ooy;
+		for (int p = 0; p < 2; p++)
+			edge.dpdy[p] = (v2->p[p] - v1->p[p]) * ooy;
+	}
+	for (int curv = minv; curv != maxv; curv = (curv == 0) ? 3 : (curv - 1))
+	{
+		const vertex_t *const v1 = &vert[curv];
+		const vertex_t *const v2 = &vert[(curv == 0) ? 3 : (curv - 1)];
+		if (v1->y == v2->y)
+			continue;
+		const float ooy = 1.0f / (v2->y - v1->y);
+		edge_t &edge = bedge[nbedge++];
+		edge.v1 = v1;
+		edge.v2 = v2;
+		edge.dxdy = (v2->x - v1->x) * ooy;
+		for (int p = 0; p < 2; p++)
+			edge.dpdy[p] = (v2->p[p] - v1->p[p]) * ooy;
+	}
+	if (nfedge == 0 || nbedge == 0)
+		return false;
+
+	// the left chain is the one whose first edge leaves the top vertex with the smaller slope, or starts further left
+	const bool forward_left = (fedge[0].v1 == bedge[0].v1 && fedge[0].dxdy < bedge[0].dxdy) ||
+			(fedge[0].v1 != bedge[0].v1 && fedge[0].v1->x < bedge[0].v1->x);
+	const edge_t *const ledges = forward_left ? fedge : bedge;
+	const edge_t *const redges = forward_left ? bedge : fedge;
+	const int nledges = forward_left ? nfedge : nbedge;
+	const int nredges = forward_left ? nbedge : nfedge;
+
+	// the edge in force at the centre of the row, moving along each chain as render_polygon() does
+	const float fully = float(row) + 0.5f;
+	int li = 0;
+	int ri = 0;
+	while (li + 1 < nledges && fully > ledges[li].v2->y && fully < vert[maxv].y)
+		li++;
+	while (ri + 1 < nredges && fully > redges[ri].v2->y && fully < vert[maxv].y)
+		ri++;
+	const edge_t &ledge = ledges[li];
+	const edge_t &redge = redges[ri];
+
+	const float startx = ledge.v1->x + (fully - ledge.v1->y) * ledge.dxdy;
+	const float stopx = redge.v1->x + (fully - redge.v1->y) * redge.dxdy;
+	int32_t istartx = gpu_round(startx);
+	int32_t istopx = gpu_round(stopx);
+	if (istartx > istopx)
+		std::swap(istartx, istopx);
+	istartx = std::max(istartx, clip.left());
+	istopx = std::min(istopx, clip.right() + 1);
+	if (istartx >= istopx)
+		return false;
+
+	// the parameters at the first pixel centre of the span, and their step along the row
+	const float ldy = fully - ledge.v1->y;
+	const float rdy = fully - redge.v1->y;
+	const float oox = 1.0f / (stopx - startx);
+	for (int p = 0; p < 2; p++)
+	{
+		const float lparam = ledge.v1->p[p] + ldy * ledge.dpdy[p];
+		const float rparam = redge.v1->p[p] + rdy * redge.dpdy[p];
+		dpdx[p] = (rparam - lparam) * oox;
+		param[p] = lparam + (float(istartx) + 0.5f - startx) * dpdx[p];
+	}
+	x0 = istartx;
+	x1 = istopx;
+	return true;
+}
+
+// The device rasterizes positions to a sub-pixel grid no finer than GPU_SLIVER_HEIGHT. A quad is drawn row by row, as the
+// scanline walker draws it, when it is shorter than that grid, or when one of its nearly horizontal edges (less than that
+// grid in height, not exactly horizontal) has an end within the grid of a pixel-centre row. Such an edge snaps onto the
+// centre row on the device, where the rasterizer's tie rule differs from the walker's rule at the centre.
+bool midvunit_renderer::gpu_needs_rows(const vertex_t *vert) const
+{
+	float top = vert[0].y;
+	float bottom = vert[0].y;
+	for (int vnum = 1; vnum < 4; vnum++)
+	{
+		top = std::min(top, vert[vnum].y);
+		bottom = std::max(bottom, vert[vnum].y);
+	}
+	if (bottom - top < GPU_SLIVER_HEIGHT)
+		return true;
+
+	for (int vnum = 0; vnum < 4; vnum++)
+	{
+		const vertex_t &v1 = vert[vnum];
+		const vertex_t &v2 = vert[(vnum + 1) & 3];
+		const float dy = std::abs(v2.y - v1.y);
+		if (dy == 0.0f || dy >= GPU_SLIVER_HEIGHT)
+			continue;
+		for (const float y : { v1.y, v2.y })
+		{
+			if (std::abs(y - std::floor(y) - 0.5f) < GPU_SLIVER_HEIGHT)
+				return true;
+		}
+	}
+	return false;
+}
+
+// Each row of the quad covered by the scanline walker is drawn as a one-pixel-tall quad over the span that the walker gives
+// that row, with the texture coordinates interpolated across it as the walker does.
+void midvunit_renderer::gpu_add_rows(const vertex_t *vert, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage)
+{
+	const rectangle &clip = m_state.m_screen->visible_area();
+	float top = vert[0].y;
+	float bottom = vert[0].y;
+	for (int vnum = 1; vnum < 4; vnum++)
+	{
+		top = std::min(top, vert[vnum].y);
+		bottom = std::max(bottom, vert[vnum].y);
+	}
+
+	for (int32_t row = gpu_round(top); row <= gpu_round(bottom); row++)
+	{
+		int32_t x0, x1;
+		float param[2], dpdx[2];
+		if (!gpu_row_span(vert, row, clip, x0, x1, param, dpdx))
+			continue;
+
+		// the parameters at the span's ends, from the centre-of-pixel values: a value at x is param + (x - (x0 + 0.5)) * dpdx
+		vertex_t span[4];
+		for (int p = 0; p < 2; p++)
+		{
+			const float left = param[p] - 0.5f * dpdx[p];
+			const float right = param[p] + (float(x1 - x0) - 0.5f) * dpdx[p];
+			span[0].p[p] = left;
+			span[1].p[p] = right;
+			span[2].p[p] = right;
+			span[3].p[p] = left;
+		}
+		span[0].x = float(x0);
+		span[0].y = float(row);
+		span[1].x = float(x1);
+		span[1].y = float(row);
+		span[2].x = float(x1);
+		span[2].y = float(row + 1);
+		span[3].x = float(x0);
+		span[3].y = float(row + 1);
+		gpu_add_quad(span, pixdata, textured, flags, texpage);
+	}
+}
+
 // Draws the frame's quads into the target and, when the display page changed, reads the page on screen back into the bitmap.
 // Returns true when the bitmap holds a new picture. On a refusal by the engine the path is latched off and the picture
 // of this frame is left as it was; the next frame is drawn in software.
@@ -255,8 +448,14 @@ bool midvunit_renderer::gpu_screen_update(bitmap_rgb32 &bitmap, bool changed)
 	const rectangle &vis = m_state.m_screen->visible_area();
 	if (!m_gpu_ready)
 		return false;
-	if (bitmap.width() <= vis.max_x || bitmap.height() <= vis.max_y)
+
+	// video_control_w() can declare a visible area larger than one page of the target; the target cannot show it
+	if (vis.max_x >= GPU_PAGE_WIDTH || vis.max_y >= GPU_PAGE_ROWS || bitmap.width() <= vis.max_x || bitmap.height() <= vis.max_y)
+	{
+		gpu_latch_off("visible area larger than a target page");
+		m_state.m_video_changed = true;
 		return false;
+	}
 
 	// the display page starts at the second page of the target when the display bit is set
 	const int display = (m_state.m_page_control & 1) ? GPU_PAGE_ROWS : 0;
