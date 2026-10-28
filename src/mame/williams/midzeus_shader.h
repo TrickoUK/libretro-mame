@@ -20,8 +20,8 @@
     State record, MIDZEUS_SHADER_STATE_WORDS words: kind (0 textured, 1
     solid colour, 2 fill), colour, texture base byte offset, texture width,
     block layout, v offset, palette base byte offset, colour key flag, blend
-    (0 plain, 1 intensity 255/256, 2 srca/256), srca, depth offset, depth
-    test flag.
+    (0 plain, 1 intensity 255/256, 2 srca/256, 3 2 * srca/256), srca, depth
+    offset, depth test flag.
 
 ***************************************************************************/
 #ifndef MAME_WILLIAMS_MIDZEUS_SHADER_H
@@ -55,6 +55,7 @@ constexpr char MIDZEUS_FRAGMENT_SOURCE[] =
 	"#define BLEND_PLAIN 0\n"
 	"#define BLEND_OPAQUE_FACTOR 1\n"
 	"#define BLEND_SRCA_FACTOR 2\n"
+	"#define BLEND_MUL_FACTOR 3\n"
 	"#define WAVERAM_MASK 0x7fffff\n"
 	"int ram_byte(int addr)\n"
 	"{\n"
@@ -135,6 +136,8 @@ constexpr char MIDZEUS_FRAGMENT_SOURCE[] =
 	"		src = (src * 255) >> 8;\n"
 	"	else if (blend == BLEND_SRCA_FACTOR)\n"
 	"		src = (src * state(S_SRCA)) >> 8;\n"
+	"	else if (blend == BLEND_MUL_FACTOR)\n"
+	"		src = (src * (state(S_SRCA) << 1)) >> 8;\n"
 	"	ivec3 c5 = min(src, ivec3(255)) >> 3;\n"
 	"	color = vec4(vec3(expand5(c5)) / 255.0, 1.0);\n"
 	"	return true;\n"
