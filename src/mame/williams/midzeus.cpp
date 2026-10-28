@@ -1417,7 +1417,6 @@ void midzeus_state::midzeus(machine_config &config)
 	SCREEN(config, m_screen);
 	m_screen->set_raw(MIDZEUS_VIDEO_CLOCK / 8, 529, 0, 400, 278, 0, 256);
 	m_screen->set_screen_update(FUNC(midzeus_state::screen_update));
-	m_screen->set_palette(m_palette);
 
 	// sound hardware
 	SPEAKER(config, "speaker", 2).front();

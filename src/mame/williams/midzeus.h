@@ -28,6 +28,7 @@ struct mz_poly_extra_data
 {
 	const void      *palbase;
 	const void      *texbase;
+	const void      *renderbase;
 	uint16_t        solidcolor = 0;
 	uint16_t        voffset = 0;
 	int16_t         zoffset = 0;
@@ -55,9 +56,11 @@ public:
 	void render_poly_solid_fixedz(int32_t scanline, const extent_t& extent, const mz_poly_extra_data& object, int threadid);
 
 	void zeus_draw_quad(int long_fmt, const uint32_t *databuffer, uint32_t texdata, bool logit);
-	void zeus_draw_solid_quad(const rectangle& rect, const vertex_t* vert);
+	void zeus_draw_solid_quad(const rectangle& rect, const vertex_t* vert, mz_poly_extra_data& state);
 
 private:
+	template <int Params> void capture_polygon(const rectangle& clip, const vertex_t* vert, uint32_t numverts, mz_poly_extra_data& state, const render_delegate& callback);
+
 	midzeus_state& m_state;
 };
 
@@ -101,7 +104,7 @@ protected:
 	uint32_t zeus_r(offs_t offset);
 	void zeus_w(offs_t offset, uint32_t data);
 
-	uint32_t screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+	uint32_t screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	attotime time_until_vsync() const;
 	void vsync_changed(int state);
 	virtual void rearm_vsync();

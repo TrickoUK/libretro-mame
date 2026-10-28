@@ -296,7 +296,7 @@ void midzeus_state::exit_handler()
  *
  *************************************/
 
-uint32_t midzeus_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t midzeus_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
 	m_poly->wait("VIDEO_UPDATE");
 
@@ -314,11 +314,11 @@ uint32_t midzeus_state::screen_update(screen_device &screen, bitmap_ind16 &bitma
 
 		for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
 		{
-			uint16_t *const dest = &bitmap.pix(y);
+			uint32_t *const dest = &bitmap.pix(y);
 			for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
 			{
 				uint8_t const tex = get_texel_8bit(base, y, x, m_texel_width);
-				dest[x] = (tex << 8) | tex;
+				dest[x] = m_palette->pen(((tex << 8) | tex) & 0x7fff);
 			}
 		}
 
@@ -330,9 +330,9 @@ uint32_t midzeus_state::screen_update(screen_device &screen, bitmap_ind16 &bitma
 		int const xoffs = screen.visible_area().min_x;
 		for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
 		{
-			uint16_t *const dest = &bitmap.pix(y);
+			uint32_t *const dest = &bitmap.pix(y);
 			for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
-				dest[x] = WAVERAM_READPIX(base, y, x - xoffs) & 0x7fff;
+				dest[x] = m_palette->pen(WAVERAM_READPIX(base, y, x - xoffs) & 0x7fff);
 		}
 	}
 
@@ -616,7 +616,7 @@ void midzeus_state::zeus_register_update(offs_t offset)
 					extra.solidcolor = m_zeusbase[0x00];
 					extra.zoffset = 0x7fff;
 
-					m_poly->zeus_draw_solid_quad(m_zeus_cliprect, vert);
+					m_poly->zeus_draw_solid_quad(m_zeus_cliprect, vert, extra);
 					m_poly->wait("Normal");
 				}
 				else
@@ -1214,27 +1214,38 @@ void midzeus_renderer::zeus_draw_quad(int long_fmt, const uint32_t *databuffer, 
 	extra.transcolor = ((ctrl_word >> 16) & 1) ? 0 : 0x100;
 	extra.palbase = m_state.waveram0_ptr_from_block_addr(m_state.m_zeus_palbase);
 
-	// Near-plane clipping can turn a quad into three to six vertices. Submit
-	// exactly that many: a fourth vertex is uninitialized for a clipped triangle.
 	const render_delegate callback(&midzeus_renderer::render_poly, this);
+	capture_polygon<4>(m_state.m_zeus_cliprect, clipvert, numverts, extra, callback);
+}
+
+// Capture point for every quad, solid fill and clear: the clipped screen-space polygon and its state record. The record is
+// stamped with the draw row base set by register 0x84 at this point. The software back end rasterises the polygon at the next
+// wait() and writes to the row base current then.
+// Near-plane clipping can turn a quad into three to six vertices. Submit exactly that many: a fourth vertex is
+// uninitialized for a clipped triangle.
+template <int Params>
+void midzeus_renderer::capture_polygon(const rectangle& clip, const vertex_t* vert, uint32_t numverts, mz_poly_extra_data& state, const render_delegate& callback)
+{
+	state.renderbase = m_state.m_zeus_renderbase;
+
 	switch (numverts)
 	{
 		case 3:
-			m_state.m_poly->render_polygon<3, 4>(m_state.m_zeus_cliprect, callback, clipvert);
+			render_polygon<3, Params>(clip, callback, vert);
 			break;
 		case 4:
-			m_state.m_poly->render_polygon<4, 4>(m_state.m_zeus_cliprect, callback, clipvert);
+			render_polygon<4, Params>(clip, callback, vert);
 			break;
 		case 5:
-			m_state.m_poly->render_polygon<5, 4>(m_state.m_zeus_cliprect, callback, clipvert);
+			render_polygon<5, Params>(clip, callback, vert);
 			break;
 		case 6:
-			m_state.m_poly->render_polygon<6, 4>(m_state.m_zeus_cliprect, callback, clipvert);
+			render_polygon<6, Params>(clip, callback, vert);
 			break;
 	}
 }
 
-void midzeus_renderer::zeus_draw_solid_quad(const rectangle& rect, const vertex_t *vert)
+void midzeus_renderer::zeus_draw_solid_quad(const rectangle& rect, const vertex_t *vert, mz_poly_extra_data& state)
 {
 	// The quad names its last pixel but poly.h's extents are half-open.
 	// Axis-aligned rectangles got an unambiguous last pixel, so grow it.
@@ -1258,7 +1269,7 @@ void midzeus_renderer::zeus_draw_solid_quad(const rectangle& rect, const vertex_
 				p.y += 1.0f;
 		}
 	}
-	m_state.m_poly->render_polygon<4, 0>(rect, render_delegate(&midzeus_renderer::render_poly_solid_fixedz, this), v);
+	capture_polygon<0>(rect, v, 4, state, render_delegate(&midzeus_renderer::render_poly_solid_fixedz, this));
 }
 
 
