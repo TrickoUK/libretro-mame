@@ -615,7 +615,9 @@ void midzeus_state::zeus_register_update(offs_t offset)
 					// m_zeusbase[0x46] = ??? = 0x00000000
 					// m_zeusbase[0x4c] = ??? = 0x00808080 (brightness?)
 					// m_zeusbase[0x4e] = ??? = 0x00808080 (brightness?)
-					mz_poly_extra_data& extra = m_poly->object_data().next();
+					// the host GPU path copies the record, so it takes a local one and the software polygon list does not grow
+					mz_poly_extra_data gpu_extra {};
+					mz_poly_extra_data &extra = m_poly->gpu_active() ? gpu_extra : m_poly->object_data().next();
 					poly_vertex vert[4];
 
 					vert[0].x = (int16_t)m_zeusbase[0x08];
@@ -1204,7 +1206,9 @@ void midzeus_renderer::zeus_draw_quad(int long_fmt, const uint32_t *databuffer, 
 			clipvert[i].y += 0.0005f;
 	}
 
-	mz_poly_extra_data& extra = m_state.m_poly->object_data().next();
+	// the host GPU path copies the record, so it takes a local one and the software polygon list does not grow
+	mz_poly_extra_data gpu_extra {};
+	mz_poly_extra_data &extra = m_state.m_poly->gpu_active() ? gpu_extra : m_state.m_poly->object_data().next();
 
 	if (ctrl_word & 0x01000000)
 	{
