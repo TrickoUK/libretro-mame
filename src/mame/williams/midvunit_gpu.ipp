@@ -76,7 +76,7 @@ bool midvunit_renderer::gpu_init()
 	return true;
 }
 
-// Called when the frame buffer state the target holds can no longer be trusted: a state load, a reset, or the
+// Called when the frame buffer state the target holds is not valid: a state load, a reset, or the
 // first use. The target is cleared at the next frame, and the texture RAM and the palette are uploaded again in full.
 void midvunit_renderer::gpu_reset()
 {
@@ -91,7 +91,7 @@ void midvunit_renderer::gpu_reset()
 	m_gpu_blobs.clear();
 }
 
-// The target no longer matches the CPU's view of the frame buffer (the CPU read or wrote it, which the adapter does not
+// The target does not match the CPU's view of the frame buffer (the CPU read or wrote it, which the adapter does not
 // mirror). The rest of the session runs in software. Quads queued for the frame that was being built are dropped.
 void midvunit_renderer::gpu_latch_off(const char *reason)
 {

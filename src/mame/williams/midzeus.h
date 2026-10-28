@@ -96,6 +96,7 @@ private:
 	osd::gpu_engine *m_gpu_engine = nullptr;
 	bool m_gpu_checked = false;
 	bool m_gpu_ready = false;
+	bool m_gpu_readback_skip_logged = false;        // the frame skipped for a display base past the target was logged
 	int m_gpu_scale = 1;                            // target samples per native pixel along each side (mame_3d_supersample, 1 to 3)
 	int m_gpu_msaa = 0;                             // coverage samples per target pixel (mame_3d_msaa), 0 for a single sample
 	uint32_t m_gpu_generation = 0;

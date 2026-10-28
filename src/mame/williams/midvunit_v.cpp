@@ -369,7 +369,9 @@ void midvunit_renderer::process_dma_queue()
 			gpu_add_rows(vert, pixdata, textured, m_state.m_dma_data[0], m_state.m_dma_data[14]);
 		}
 		else
+		{
 			gpu_add_quad(vert, pixdata, textured, m_state.m_dma_data[0], m_state.m_dma_data[14]);
+		}
 		return;
 	}
 

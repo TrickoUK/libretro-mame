@@ -273,7 +273,7 @@ bool midzeus_renderer::gpu_init()
 	return true;
 }
 
-// Called when the frame buffer the target holds can no longer be trusted: a state load or a reset. The target is cleared at the next
+// Called when the frame buffer the target holds is not valid: a state load or a reset. The target is cleared at the next
 // frame, wave RAM 0 is uploaded again in full, and the frame buffer's words are stamped in full, so the CPU's copy of the frame
 // buffer is what the next frame starts from.
 void midzeus_renderer::gpu_reset()
@@ -688,8 +688,18 @@ bool midzeus_renderer::gpu_screen_update(bitmap_rgb32 &bitmap, const rectangle &
 	const bool any = (x0 <= x1) && (y0 <= y1);
 
 	const int display = gpu_page_row(m_state.waveram1_ptr_from_expanded_addr(m_state.m_zeusbase[0xcc]));
+
+	// rows past the end of the target have no place in it, so this frame is drawn but not read back
+	const bool fits = (display + y1 + 1) <= GPU_TARGET_ROWS;
+	if (any && !fits && !m_gpu_readback_skip_logged)
+	{
+		m_gpu_readback_skip_logged = true;
+		osd_printf_verbose("midzeus: display base row %d is past the host target, those frames are not read back\n", display);
+	}
+
 	osd::gpu_readback_rect readback;
-	if (any)
+	const bool read = any && fits;
+	if (read)
 	{
 		readback.x = (x0 - vis.min_x) * m_gpu_scale;
 		readback.y = (display + y0) * m_gpu_scale;
@@ -701,10 +711,12 @@ bool midzeus_renderer::gpu_screen_update(bitmap_rgb32 &bitmap, const rectangle &
 		readback.opaque = true;
 	}
 
-	if (!gpu_submit(any ? &readback : nullptr, false))
+	if (!gpu_submit(read ? &readback : nullptr, false))
 	{
 		gpu_latch_off("the engine refused a frame");
 		return false;
 	}
+
+	// a frame that was not read back leaves the bitmap as the last readback wrote it
 	return true;
 }
