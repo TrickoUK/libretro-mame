@@ -2620,6 +2620,7 @@ dharmak
 dhunting
 diamrun
 dicegame
+dicerom
 diehard
 dietgo
 dietgoe
@@ -3806,7 +3807,6 @@ galpani2g
 galpani2gs
 galpani2i
 galpani2i2
-galpani2j
 galpani2k
 galpani2t
 galpani3

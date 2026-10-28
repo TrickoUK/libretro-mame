@@ -616,6 +616,7 @@ gametron/gotya.cpp
 gametron/sbugger.cpp
 gottlieb/exterm.cpp
 gottlieb/gottlieb.cpp
+handheld/class200_lcdc.cpp  // [HELPER]
 handheld/gc71_nes_bootleg.cpp
 handheld/nl_bship.cpp  // [HELPER]
 handheld/nl_sfxphasor.cpp  // [HELPER]
@@ -755,6 +756,7 @@ kaneko/kaneko16_v.cpp  // [HELPER]
 kaneko/kaneko_calc3.cpp  // [HELPER]
 kaneko/kaneko_grap2.cpp  // [HELPER]
 kaneko/kaneko_hit.cpp  // [HELPER]
+kaneko/kaneko_pisces.cpp  // [HELPER]
 kaneko/kaneko_rlespr.cpp  // [HELPER]
 kaneko/kaneko_spr.cpp  // [HELPER]
 kaneko/kaneko_tmap.cpp  // [HELPER]
@@ -2569,6 +2571,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -galkaikap
 -galkoku
 -galkokua
+-galpani2j
 -gamblra5
 -geisha
 -geishanz
