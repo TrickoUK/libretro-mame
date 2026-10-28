@@ -48,6 +48,10 @@ Batocera.
     `gpu_screen_update` call at the top of `screen_update`, the polygon capture and the quad path, the `gpu_*` members
     and the forced-software switches); the adapters are `midzeus_gpu.ipp` and `midvunit_gpu.ipp`, the shaders
     `midzeus_shader.h` and `midvunit_shader.h`. Fork-only, not for upstream.
+  - `src/devices/video/zeus2.cpp`/`zeus2.h` (shared with `thegrid` and `mwskins`, which stay software; the host-GPU hooks: the
+    `zeus2_submit_poly` capture point, the `gpu_*` calls in the fast-clear, frame-write, frame-read and wave RAM / palette
+    handlers, the `gpu_screen_update` call in `screen_update`, `device_post_load` and the reset call; `friend class zeus2_renderer`).
+    The adapters are `zeus2_gpu.ipp` (included at the end of `zeus2.cpp`) and `zeus2_shader.h`. Fork-only, not for upstream.
 - Upstream API changes that have broken fork/libretro code (check these first when a build fails after a sync):
   - `screen_device` is split per type (`screen_svg_device`, vector screens). Use
     `video_output_interface_enumerator`/`is_vector()`, not `screen_type()`. `configure()` takes an `attotime`.

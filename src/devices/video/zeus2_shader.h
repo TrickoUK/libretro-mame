@@ -1,0 +1,166 @@
+// license:BSD-3-Clause
+// copyright-holders:TrickoUK
+/***************************************************************************
+
+    zeus2_shader.h
+
+    Pixel pipeline of the Midway Zeus 2 host-GPU path as a gpu_shader_module
+    (see osd/interface/gpuengine.h). A polygon is a textured or solid quad,
+    a fill (the frame-buffer words the chip writes with a fast clear or a
+    direct write), or an alpha or RGB555 texture. Texels are indices into
+    wave RAM 0 (4 or 8 bits, in the block layouts of the chip) looked up in
+    the palette table and filtered bilinearly. The depth is the chip's
+    integer depth, written to frag_depth.
+
+    Source: my-docs/tools/zeus2.glsl, converted by tools/glsl2header.py.
+    Bindings: "tex_ram" (R32UI, 2048 x 2048, wave RAM 0 as words) and
+    "tex_pal" (R32UI, 256 x 1, the palette table).
+    Varyings are screen-linear: v0 = u / z, v1 = v / z, v2 = depth, v3 = 1 / z.
+
+    State record, ZEUS2_SHADER_STATE_WORDS words: kind, colour, texture base
+    byte offset, texture width, texel mode, colour key flag, depth clear flag,
+    depth floor, blend flag, source alpha.
+
+***************************************************************************/
+#ifndef MAME_VIDEO_ZEUS2_SHADER_H
+#define MAME_VIDEO_ZEUS2_SHADER_H
+
+#pragma once
+
+constexpr int ZEUS2_SHADER_STATE_WORDS = 10;
+constexpr int ZEUS2_SHADER_VARYINGS = 4;
+
+constexpr char ZEUS2_FRAGMENT_SOURCE[] =
+	"#define S_KIND 0\n"
+	"#define S_COLOR 1\n"
+	"#define S_TEXBASE 2\n"
+	"#define S_TEXWIDTH 3\n"
+	"#define S_MODE 4\n"
+	"#define S_TRANSKEY 5\n"
+	"#define S_DEPTH_CLEAR 6\n"
+	"#define S_ZMIN 7\n"
+	"#define S_BLEND 8\n"
+	"#define S_SRCA 9\n"
+	"#define KIND_TEX 0\n"
+	"#define KIND_SOLID 1\n"
+	"#define KIND_FILL 2\n"
+	"#define MODE_4BIT 0\n"
+	"#define MODE_8BIT_4X2 1\n"
+	"#define MODE_8BIT_2X2 2\n"
+	"#define MODE_ALPHA 3\n"
+	"#define MODE_RGB555 4\n"
+	"#define WAVERAM_MASK 0xffffff\n"
+	"int ram_byte(int addr)\n"
+	"{\n"
+	"	addr &= WAVERAM_MASK;\n"
+	"	uint word = texelFetch(tex_ram, ivec2((addr >> 2) & 2047, addr >> 13), 0).r;\n"
+	"	return int((word >> ((addr & 3) * 8)) & 255u);\n"
+	"}\n"
+	"int texel_index(int x, int y)\n"
+	"{\n"
+	"	int base = state(S_TEXBASE);\n"
+	"	int width = state(S_TEXWIDTH);\n"
+	"	int mode = state(S_MODE);\n"
+	"	if (mode == MODE_4BIT)\n"
+	"		return (ram_byte(base + (y / 4) * (width * 4) + ((x / 4) << 3) + ((y & 3) << 1) + ((x / 2) & 1)) >> (4 * (x & 1))) & 15;\n"
+	"	if (mode == MODE_8BIT_4X2)\n"
+	"		return ram_byte(base + (y / 2) * (width * 2) + ((x / 4) << 3) + ((y & 1) << 2) + (x & 3));\n"
+	"	if (mode == MODE_8BIT_2X2)\n"
+	"		return ram_byte(base + (y / 4) * (width * 4) + ((x / 2) << 3) + ((y & 3) << 1) + (x & 1));\n"
+	"	return ram_byte(base + 2 * ((y / 2) * (width * 2) + ((x / 2) << 2) + ((y & 1) << 1) + (x & 1)));\n"
+	"}\n"
+	"int texel_alpha(int x, int y)\n"
+	"{\n"
+	"	int base = state(S_TEXBASE);\n"
+	"	int width = state(S_TEXWIDTH);\n"
+	"	return ram_byte(base + 2 * ((y / 2) * (width * 2) + ((x / 2) << 2) + ((y & 1) << 1) + (x & 1)) + 1);\n"
+	"}\n"
+	"int texel_rgb555(int x, int y)\n"
+	"{\n"
+	"	int base = state(S_TEXBASE);\n"
+	"	int width = state(S_TEXWIDTH);\n"
+	"	int addr = base + 2 * ((y / 2) * (width * 2) + ((x / 2) << 2) + ((y & 1) << 1) + (x & 1));\n"
+	"	int c = ram_byte(addr) | (ram_byte(addr + 1) << 8);\n"
+	"	return ((c & 0x7c00) << 9) | ((c & 0x3e0) << 6) | ((c & 0x1f) << 3);\n"
+	"}\n"
+	"int palette_colour(int index)\n"
+	"{\n"
+	"	return int(texelFetch(tex_pal, ivec2(index, 0), 0).r);\n"
+	"}\n"
+	"ivec3 bilinear(int c0, int c1, int c2, int c3, int fu, int fv)\n"
+	"{\n"
+	"	ivec3 a = ivec3((c0 >> 16) & 255, (c0 >> 8) & 255, c0 & 255);\n"
+	"	ivec3 b = ivec3((c1 >> 16) & 255, (c1 >> 8) & 255, c1 & 255);\n"
+	"	ivec3 c = ivec3((c2 >> 16) & 255, (c2 >> 8) & 255, c2 & 255);\n"
+	"	ivec3 d = ivec3((c3 >> 16) & 255, (c3 >> 8) & 255, c3 & 255);\n"
+	"	ivec3 top = a * (256 - fu) + b * fu;\n"
+	"	ivec3 bottom = c * (256 - fu) + d * fu;\n"
+	"	return (top * (256 - fv) + bottom * fv) >> 16;\n"
+	"}\n"
+	"bool finish(ivec3 src, out vec4 color)\n"
+	"{\n"
+	"	int srca = 256;\n"
+	"	if (state(S_BLEND) != 0)\n"
+	"	{\n"
+	"		srca = state(S_SRCA);\n"
+	"		if (srca == 0)\n"
+	"			return false;\n"
+	"		src = (src * srca) >> 8;\n"
+	"	}\n"
+	"	color = vec4(vec3(src) / 255.0, 1.0);\n"
+	"	return true;\n"
+	"}\n"
+	"bool shade(out vec4 color)\n"
+	"{\n"
+	"	if (state(S_KIND) == KIND_FILL)\n"
+	"	{\n"
+	"		frag_depth = clamp(v2 / 16777216.0, 0.0, 1.0);\n"
+	"		int c = state(S_COLOR);\n"
+	"		color = vec4(float((c >> 16) & 255), float((c >> 8) & 255), float(c & 255), 255.0) / 255.0;\n"
+	"		return true;\n"
+	"	}\n"
+	"	int depth = (state(S_DEPTH_CLEAR) != 0) ? 0xffffff : max(int(v2), state(S_ZMIN));\n"
+	"	depth = max(depth, 0);\n"
+	"	frag_depth = float(depth) / 16777216.0;\n"
+	"	int mode = state(S_MODE);\n"
+	"	if (state(S_KIND) == KIND_SOLID)\n"
+	"	{\n"
+	"		int c = state(S_COLOR);\n"
+	"		return finish(ivec3((c >> 16) & 255, (c >> 8) & 255, c & 255), color);\n"
+	"	}\n"
+	"	float ooz = 1.0 / v3;\n"
+	"	int curu = int(v0 * ooz);\n"
+	"	int curv = int(v1 * ooz);\n"
+	"	int u0 = max(curu >> 8, 0);\n"
+	"	int v0i = max(curv >> 8, 0);\n"
+	"	int fu = curu & 255;\n"
+	"	int fv = curv & 255;\n"
+	"	if (mode == MODE_RGB555)\n"
+	"	{\n"
+	"		int c = texel_rgb555(u0, v0i);\n"
+	"		color = vec4(float((c >> 16) & 255), float((c >> 8) & 255), float(c & 255), 255.0) / 255.0;\n"
+	"		return true;\n"
+	"	}\n"
+	"	if (mode == MODE_ALPHA)\n"
+	"	{\n"
+	"		int a = (texel_alpha(u0, v0i) * (256 - fu) + texel_alpha(u0 + 1, v0i) * fu) * (256 - fv)\n"
+	"			+ (texel_alpha(u0, v0i + 1) * (256 - fu) + texel_alpha(u0 + 1, v0i + 1) * fu) * fv;\n"
+	"		a >>= 16;\n"
+	"		if (a == 0)\n"
+	"			return false;\n"
+	"		ivec3 src = bilinear(palette_colour(texel_index(u0, v0i)), palette_colour(texel_index(u0 + 1, v0i)),\n"
+	"				palette_colour(texel_index(u0, v0i + 1)), palette_colour(texel_index(u0 + 1, v0i + 1)), fu, fv);\n"
+	"		src = (src * a) >> 8;\n"
+	"		color = vec4(vec3(src) / 255.0, float(a) / 256.0);\n"
+	"		return true;\n"
+	"	}\n"
+	"	int t0 = texel_index(u0, v0i);\n"
+	"	int t1 = texel_index(u0 + 1, v0i);\n"
+	"	int t2 = texel_index(u0, v0i + 1);\n"
+	"	int t3 = texel_index(u0 + 1, v0i + 1);\n"
+	"	if (state(S_TRANSKEY) != 0 && (t0 == 0 || t1 == 0 || t2 == 0 || t3 == 0))\n"
+	"		return false;\n"
+	"	return finish(bilinear(palette_colour(t0), palette_colour(t1), palette_colour(t2), palette_colour(t3), fu, fv), color);\n"
+	"}\n";
+
+#endif // MAME_VIDEO_ZEUS2_SHADER_H

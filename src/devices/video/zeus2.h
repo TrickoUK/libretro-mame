@@ -15,6 +15,9 @@
 
 #include "video/rgbutil.h"
 
+#include "interface/gpuengine.h"
+#include "zeus2_shader.h"
+
 #include "endianness.h"
 
 #include <bit>
@@ -79,12 +82,63 @@ public:
 	void zeus2_draw_quad(const uint32_t *databuffer, uint32_t texdata, int logit);
 	void zeus2_draw_mesh_vertex(const uint32_t *databuffer, uint32_t texdata, uint8_t cmd, int logit);
 
+	// host-GPU path (zeus2_gpu.ipp); the software rasteriser is used whenever it is off
+	struct gpu_vertex
+	{
+		float x, y, z, w;
+		uint32_t prim;
+		float v[ZEUS2_SHADER_VARYINGS];
+	};
+
+	bool gpu_active();
+	void gpu_reset();
+	void gpu_latch_off(const char *reason);
+	void gpu_mark_wave_ram(uint32_t word, uint32_t count);
+	void gpu_palette_changed();
+	void gpu_fill(uint32_t addr, uint32_t count, uint32_t colour, int32_t depth);
+	void gpu_frame_write(uint32_t addr, bool write_colour0, uint32_t colour0, bool write_colour1, uint32_t colour1, bool write_depth, int32_t depth);
+	bool gpu_screen_update(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void gpu_frame_read_hook();
+
 private:
 	void zeus2_transform_vertex(vertex_t &vert, float fScale, uint32_t texdata, int logit);
 	void zeus2_render_poly(vertex_t *vert, int numverts, uint32_t texdata, int logit);
+	void zeus2_submit_poly(const zeus2_poly_extra_data &state, const vertex_t *verts, int numverts);
+
+	bool gpu_init();
+	void gpu_flush_wave();
+	void gpu_flush_palette();
+	void gpu_set_clip(int x, int y, int w, int h);
+	void gpu_add_rect(int x0, int x1, int y0, int y1, uint32_t colour, int32_t depth, bool write_colour, bool write_depth);
+	void gpu_fill_words(uint32_t first, uint32_t last, uint32_t colour, int32_t depth);
+	void gpu_write_pixel(uint32_t word, bool write_colour, uint32_t colour, bool write_depth, int32_t depth);
+	bool gpu_add_polygon(const zeus2_poly_extra_data &state, const vertex_t *vert, int numverts);
+	bool gpu_submit(const osd::gpu_readback_rect *readback, bool flush);
 
 	zeus2_device *m_state;
 	vertex_t m_meshvert[3];   // pm3dli microcode vertex slots D, E and F
+
+	bool m_gpu_checked = false;
+	bool m_gpu_ready = false;
+	int m_gpu_scale = 1;                            // target samples per native pixel along each side (mame_3d_supersample, 1 to 3)
+	int m_gpu_msaa = 0;                             // coverage samples per target pixel (mame_3d_msaa), 0 for a single sample
+	uint32_t m_gpu_generation = 0;
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tex_ram = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tex_pal = osd::GPU_NULL_HANDLE;
+	std::vector<uint8_t> m_gpu_row_dirty;           // per texture row of wave RAM 0: written since the last upload
+	int m_gpu_row_min = 2048;                       // the rows with flags, so a flush scans only those (empty range: min above max)
+	int m_gpu_row_max = -1;
+	bool m_gpu_palette_dirty = false;
+	bool m_gpu_target_diverged = false;             // a polygon was drawn on the target since the last reset: the CPU's copy of the frame buffer no longer matches it
+	bool m_gpu_clip_valid = false;                  // the last SET_CLIP is m_gpu_clip_*, in target pixels before the scale
+	int m_gpu_clip_x = 0, m_gpu_clip_y = 0, m_gpu_clip_w = 0, m_gpu_clip_h = 0;
+	std::vector<osd::gpu_command> m_gpu_commands;
+	std::vector<gpu_vertex> m_gpu_vertices;
+	std::vector<uint32_t> m_gpu_state;
+	std::vector<uint32_t> m_gpu_arena;              // copies of the texture rows and the palette, the update commands point into it
+	std::vector<std::pair<size_t, size_t> > m_gpu_patches;  // (command index, arena offset) of each update, set when the frame is sent
 };
 
 /*************************************
@@ -92,6 +146,8 @@ private:
 *************************************/
 class zeus2_device : public device_t, public device_video_interface
 {
+	friend class zeus2_renderer;
+
 public:
 	zeus2_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
@@ -157,6 +213,7 @@ protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
 	virtual void device_stop() override ATTR_COLD;
+	virtual void device_post_load() override ATTR_COLD;
 
 private:
 	static constexpr unsigned WAVERAM0_WIDTH    = 1024;
@@ -286,6 +343,9 @@ public:
 	// Read from frame buffer
 	void frame_read()
 	{
+		// the CPU's copy answers the read unless polygons drawn on the host target have made it differ (gpu_frame_read_hook())
+		if (poly)
+			poly->gpu_frame_read_hook();
 		uint32_t addr = frame_addr_from_phys_addr(m_zeusbase[0x51]);
 		m_zeusbase[0x58] = m_frameColor[addr];
 		m_zeusbase[0x59] = m_frameColor[addr + 1];
@@ -313,6 +373,15 @@ public:
 				m_frameColor[addr + 1] = m_zeusbase[0x59];
 			if (m_zeusbase[0x57] & 0x10)
 				*(uint32_t*)&m_frameDepth[addr] = m_zeusbase[0x5a];
+		}
+
+		if (poly)
+		{
+			// the words this write changed, as the target's stamps need them (colour of the word, colour of the next word, depth)
+			const bool colour1 = (m_zeusbase[0x57] & 0x4) != 0;
+			const uint32_t colour1_value = (m_zeusbase[0x5e] & 0x20) ? m_zeusbase[0x5a] : m_zeusbase[0x59];
+			const bool depth = !(m_zeusbase[0x5e] & 0x20) && (m_zeusbase[0x57] & 0x10);
+			poly->gpu_frame_write(addr, (m_zeusbase[0x57] & 0x1) != 0, m_zeusbase[0x58], colour1, colour1_value, depth, int32_t(m_zeusbase[0x5a]));
 		}
 
 		if (m_zeusbase[0x5e] & 0x40)
