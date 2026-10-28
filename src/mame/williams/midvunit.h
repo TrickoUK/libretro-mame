@@ -77,6 +77,7 @@ private:
 	static constexpr int GPU_PAGE_ROWS = 512;
 	static constexpr int GPU_TARGET_HEIGHT = 2 * GPU_PAGE_ROWS;
 	static constexpr float GPU_SLIVER_HEIGHT = 1.0f / 16.0f; // quads shorter than this are placed from the scanline spans
+	static constexpr float GPU_EDGE_NUDGE = 1.0f / 128.0f;   // right/bottom edge nudge for the device, in pixels
 
 	bool gpu_init();
 	void gpu_flush_updates();

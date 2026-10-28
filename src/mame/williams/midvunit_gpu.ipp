@@ -232,8 +232,18 @@ void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint16_t pixdata, boo
 	gpu_vertex vv[4];
 	for (int i = 0; i < 4; i++)
 	{
-		vv[i].x = vert[i].x * scale;
-		vv[i].y = (vert[i].y + page) * scale;
+		// the walker's right and bottom nudge (make_vertices_inclusive) is 0.001 pixel, below the device's sub-pixel
+		// grid; a vertex carrying it is moved by a larger amount so the device keeps the edge on the pixel centres.
+		// The test relies on make_vertices_inclusive adding exactly 0.001 to vertices that sit on pixel centres (.5)
+		// and on the span vertices of gpu_add_rows staying on whole pixels
+		float x = vert[i].x;
+		float y = vert[i].y;
+		if (std::abs(x - std::floor(x) - 0.501f) < 0.0005f)
+			x += GPU_EDGE_NUDGE;
+		if (std::abs(y - std::floor(y) - 0.501f) < 0.0005f)
+			y += GPU_EDGE_NUDGE;
+		vv[i].x = x * scale;
+		vv[i].y = (y + page) * scale;
 		vv[i].z = 0.0f;
 		vv[i].w = 1.0f;
 		vv[i].prim = prim;
