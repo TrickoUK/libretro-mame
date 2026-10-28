@@ -192,6 +192,16 @@ void midvunit_state::adc_w(uint32_t data)
 }
 
 
+// wheel potentiometer on ADC channel 1; the optional steering assist only applies when the STEERING port exists
+uint8_t midvunit_state::wheel_r(offs_t offset)
+{
+	uint8_t value = m_wheel->read();
+	if (m_steering_config && !machine().side_effects_disabled())
+		value = m_gamepad_steering.apply(value, 0x10, 0x80, 0xf0, m_steering_config->read(), machine().time());
+	return value;
+}
+
+
 
 /*************************************
  *
@@ -777,6 +787,9 @@ static INPUT_PORTS_START( midvunit )
 	PORT_START("WHEEL")     // wheel
 	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_MINMAX(0x10,0xf0) PORT_SENSITIVITY(25) PORT_KEYDELTA(20)
 
+	// gamepad steering assist (fork-only, not hardware); wheel games only, wargods does not include this port
+	PORT_GAMEPAD_STEERING_CONFIG
+
 	PORT_START("ACCEL")     // gas pedal
 	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_SENSITIVITY(25) PORT_KEYDELTA(20)
 
@@ -1194,7 +1207,7 @@ void midvunit_state::midvunit(machine_config &config)
 
 	ADC0844(config, m_adc);
 	m_adc->intr_callback().set_inputline("maincpu", 3);
-	m_adc->ch1_callback().set_ioport("WHEEL");
+	m_adc->ch1_callback().set(FUNC(midvunit_state::wheel_r));
 	m_adc->ch2_callback().set_ioport("ACCEL");
 	m_adc->ch3_callback().set_ioport("BRAKE");
 

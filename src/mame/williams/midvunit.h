@@ -24,6 +24,8 @@
 #include "machine/watchdog.h"
 #include "video/poly.h"
 
+#include "gamepad_steering.h"
+
 #include "emupal.h"
 #include "screen.h"
 
@@ -209,6 +211,8 @@ protected:
 		, m_in1(*this, "IN1")
 		, m_dsw(*this, "DSW")
 		, m_conf(*this, "CONF")
+		, m_wheel(*this, "WHEEL")
+		, m_steering_config(*this, "STEERING")
 	{ }
 
 	virtual void machine_start() override ATTR_COLD;
@@ -216,6 +220,7 @@ protected:
 	uint32_t port0_r();
 	uint32_t adc_r();
 	void adc_w(uint32_t data);
+	uint8_t wheel_r(offs_t offset);
 	void cmos_w(offs_t offset, uint32_t data, uint32_t mem_mask = ~0);
 	uint32_t cmos_r(offs_t offset);
 	uint32_t wheel_board_r();
@@ -240,6 +245,9 @@ protected:
 	required_ioport m_in1;
 	required_ioport m_dsw;
 	required_ioport m_conf;
+	required_ioport m_wheel;
+	optional_ioport m_steering_config;
+	gamepad_steering m_gamepad_steering;
 
 	uint8_t m_adc_shift = 0;
 	uint16_t m_last_port0 = 0;

@@ -32,6 +32,8 @@ The Grid         v1.2   10/18/2000
 
 #include "dcs.h"
 
+#include "gamepad_steering.h"
+
 #include "cpu/adsp2100/adsp2100.h"
 #include "cpu/pic16c5x/pic16c5x.h"
 #include "cpu/tms320c3x/tms320c3x.h"
@@ -140,6 +142,7 @@ public:
 		, m_leds(*this, "led%u", 0U)
 		, m_lamps(*this, "lamp%u", 0U)
 		, m_io_analog(*this, "ANALOG%u", 0U)
+		, m_steering_config(*this, "STEERING")
 	{ }
 
 	void crusnexo(machine_config &config) ATTR_COLD;
@@ -171,6 +174,8 @@ private:
 	output_finder<32> m_leds;
 	output_finder<8> m_lamps;
 	required_ioport_array<4> m_io_analog;
+	optional_ioport m_steering_config;
+	gamepad_steering m_gamepad_steering;
 };
 
 class thegrid_state : public midzeus2_state
@@ -749,7 +754,12 @@ uint32_t crusnexo_state::analog_r(offs_t offset)
 		if (offset < 8 || offset > 11)
 			LOGMASKED(LOG_INPUT, "%06X:analog_r(%X)\n", m_maincpu->pc(), offset);
 	}
-	return m_io_analog[offset & 3]->read();
+	uint32_t value = m_io_analog[offset & 3]->read();
+
+	// ANALOG3 is the wheel; the other channels are the pedals and are left alone
+	if ((offset & 3) == 3 && m_steering_config && !machine().side_effects_disabled())
+		value = m_gamepad_steering.apply(value, 0x10, 0x80, 0xf0, m_steering_config->read(), machine().time());
+	return value;
 }
 
 
@@ -1270,6 +1280,9 @@ static INPUT_PORTS_START( crusnexo )
 
 	PORT_START("ANALOG3")
 	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_MINMAX(0x10,0xf0) PORT_SENSITIVITY(25) PORT_KEYDELTA(20)
+
+	// gamepad steering assist (fork-only, not hardware); applied to ANALOG3 in crusnexo_state::analog_r()
+	PORT_GAMEPAD_STEERING_CONFIG
 
 	PORT_START("ANALOG2")
 	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_SENSITIVITY(25) PORT_KEYDELTA(20)
