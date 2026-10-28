@@ -29,9 +29,18 @@ bool midvunit_renderer::gpu_init()
 		return false;
 	}
 
+	// the options are read when the machine starts, as the core option text says they take effect on a restart
+	m_gpu_msaa = m_state.machine().osd().msaa();
+	m_gpu_texfilter = m_state.machine().osd().texture_filter();
+	m_gpu_scale = std::clamp(m_state.machine().osd().supersample(), 1, 3);
+	while (m_gpu_scale > 1 && GPU_TARGET_HEIGHT * m_gpu_scale > int(m_gpu_engine->caps().max_texture_size))
+		m_gpu_scale--;
+
+	// a sample is taken inside the quad for a pixel the quad only partly covers, so u and v are never extrapolated past its edges
 	osd::gpu_shader_module module;
 	module.name = "midvunit";
 	module.fragment_source = MIDVUNIT_FRAGMENT_SOURCE;
+	module.centroid_mask = (m_gpu_msaa > 0) ? 0x3 : 0;
 	module.varying_count = MIDVUNIT_SHADER_VARYINGS;
 	for (int i = 0; i < MIDVUNIT_SHADER_VARYINGS; i++)
 		module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
@@ -62,7 +71,8 @@ bool midvunit_renderer::gpu_init()
 	m_gpu_shadow_palette = std::make_unique<uint32_t[]>(GPU_PALETTE_ENTRIES);
 	m_gpu_ready = true;
 	gpu_reset();
-	osd_printf_verbose("midvunit: host GPU path on, target %dx%d\n", GPU_PAGE_WIDTH, GPU_TARGET_HEIGHT);
+	osd_printf_info("midvunit: host GPU path on, target %dx%d, %dx supersampling, %d MSAA samples, bilinear %s\n",
+			GPU_PAGE_WIDTH * m_gpu_scale, GPU_TARGET_HEIGHT * m_gpu_scale, m_gpu_scale, m_gpu_msaa, m_gpu_texfilter ? "on" : "off");
 	return true;
 }
 
@@ -200,12 +210,13 @@ void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint16_t pixdata, boo
 
 	gpu_flush_updates();
 
-	// the draw page is stacked below the display page's rows of the target
+	// the draw page is stacked below the display page's rows of the target; the target holds m_gpu_scale samples of each native pixel
 	const int page = (m_state.m_page_control & 4) ? GPU_PAGE_ROWS : 0;
+	const float scale = float(m_gpu_scale);
 	if (page != m_gpu_clip_page)
 	{
 		const rectangle &vis = m_state.m_screen->visible_area();
-		m_gpu_commands.push_back(osd::gpu_command::make_clip(vis.min_x, page + vis.min_y, vis.width(), vis.height()));
+		m_gpu_commands.push_back(osd::gpu_command::make_clip(vis.min_x * m_gpu_scale, (page + vis.min_y) * m_gpu_scale, vis.width() * m_gpu_scale, vis.height() * m_gpu_scale));
 		m_gpu_clip_page = page;
 	}
 
@@ -214,13 +225,15 @@ void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint16_t pixdata, boo
 	m_gpu_state.push_back(pixdata);
 	m_gpu_state.push_back(textured ? uint32_t(texpage) * 256 : 0);
 	m_gpu_state.push_back((flags & 0x2000) != 0);
+	m_gpu_state.push_back(m_gpu_scale);
+	m_gpu_state.push_back(m_gpu_texfilter && textured);
 
 	// the texture coordinates are 16.16 values with the half texel offset; the shader takes them in texel units
 	gpu_vertex vv[4];
 	for (int i = 0; i < 4; i++)
 	{
-		vv[i].x = vert[i].x;
-		vv[i].y = vert[i].y + page;
+		vv[i].x = vert[i].x * scale;
+		vv[i].y = (vert[i].y + page) * scale;
 		vv[i].z = 0.0f;
 		vv[i].w = 1.0f;
 		vv[i].prim = prim;
@@ -457,22 +470,25 @@ bool midvunit_renderer::gpu_screen_update(bitmap_rgb32 &bitmap, bool changed)
 		return false;
 	}
 
-	// the display page starts at the second page of the target when the display bit is set
+	// the display page starts at the second page of the target when the display bit is set; the read-back averages each
+	// native pixel's samples down to one output pixel, and a multisampled target is resolved by the same read-back
 	const int display = (m_state.m_page_control & 1) ? GPU_PAGE_ROWS : 0;
 	osd::gpu_readback_rect readback;
-	readback.x = vis.min_x;
-	readback.y = display + vis.min_y;
-	readback.w = vis.width();
-	readback.h = vis.height();
+	readback.x = vis.min_x * m_gpu_scale;
+	readback.y = (display + vis.min_y) * m_gpu_scale;
+	readback.w = vis.width() * m_gpu_scale;
+	readback.h = vis.height() * m_gpu_scale;
 	readback.out = &bitmap.pix(vis.min_y, vis.min_x);
 	readback.stride = bitmap.rowpixels();
+	readback.downsample = m_gpu_scale;
 	readback.opaque = true;
 
 	osd::gpu_frame frame;
-	frame.target.width = GPU_PAGE_WIDTH;
-	frame.target.height = GPU_TARGET_HEIGHT;
+	frame.target.width = GPU_PAGE_WIDTH * m_gpu_scale;
+	frame.target.height = GPU_TARGET_HEIGHT * m_gpu_scale;
 	frame.target.persistent = true;
 	frame.target.depth = osd::gpu_depth_mode::NONE;
+	frame.target.msaa_samples = m_gpu_msaa;
 	frame.target.generation = m_gpu_generation;
 	frame.vertices = m_gpu_vertices.data();
 	frame.vertex_count = m_gpu_vertices.size();

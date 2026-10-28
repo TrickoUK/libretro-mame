@@ -96,6 +96,9 @@ private:
 	osd::gpu_handle m_gpu_texture = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_palette = osd::GPU_NULL_HANDLE;
 	std::unique_ptr<uint32_t[]> m_gpu_shadow_palette;
+	int m_gpu_scale = 1;                            // target size in each direction, in native pixels (mame_3d_supersample, 1 to 3)
+	int m_gpu_msaa = 0;                             // samples per target pixel (mame_3d_msaa), 0 for a single sample
+	bool m_gpu_texfilter = false;                   // bilinear filtering after the palette lookup (mame_3d_texfilter)
 	bool m_gpu_palette_full = false;
 	uint32_t m_gpu_texture_lo = 0;                  // dirty byte range of the texture RAM, [lo, hi), empty when lo == hi
 	uint32_t m_gpu_texture_hi = 0;
