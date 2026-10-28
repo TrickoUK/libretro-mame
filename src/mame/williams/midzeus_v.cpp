@@ -14,6 +14,11 @@
 
 #include "endianness.h"
 
+#include "interface/gpuengine.h"
+#include "osdepend.h"
+
+#include <cstring>
+
 
 #define LOG_ZEUS    (1U << 1)
 #define LOG_PTR     (1U << 2)
@@ -296,9 +301,18 @@ void midzeus_state::exit_handler()
  *
  *************************************/
 
+void midzeus_state::device_post_load()
+{
+	m_poly->gpu_reset();
+}
+
 uint32_t midzeus_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
 	m_poly->wait("VIDEO_UPDATE");
+
+	// the host GPU path draws the frame's polygons and reads back the rows on screen
+	if (m_poly->gpu_screen_update(bitmap, cliprect))
+		return 0;
 
 	if (DEBUG_KEYS && machine().input().code_pressed(KEYCODE_V)) // waveram drawing case
 	{
@@ -650,6 +664,7 @@ void midzeus_state::zeus_register_update(offs_t offset)
 			// MK4: Written in tandem with 0xcc
 			// MK4: Writes either 0x80 (and 0x000000 to 0xcc) or 0x00 (and 0x800000 to 0xcc)
 			m_zeus_renderbase = waveram1_ptr_from_expanded_addr(m_zeusbase[0x84] << 16);
+			m_poly->gpu_flip();
 			break;
 
 		case 0xb0:
@@ -674,6 +689,11 @@ void midzeus_state::zeus_register_update(offs_t offset)
 						WAVERAM_WRITE16(dest, 2, m_zeusbase[0xb2]);
 					if (m_zeusbase[0xb6] & 0x00800000)
 						WAVERAM_WRITE16(dest, 3, m_zeusbase[0xb2] >> 16);
+
+					// wave RAM 0 holds the textures and palettes the host GPU path samples; the frame buffer is not copied into the target
+					if ((m_zeusbase[0xb6] & 0x80000000) == 0)
+						m_poly->gpu_mark_texture(dest);
+
 					if (m_zeusbase[0xb6] & 0x00020000)
 						m_zeusbase[0xb4]++;
 				}
@@ -686,7 +706,11 @@ void midzeus_state::zeus_register_update(offs_t offset)
 				const uint32_t *src;
 
 				if (m_zeusbase[0xb6] & 0x80000000)
+				{
+					// the CPU reads pixels the target does not hold back, so the host GPU path stops for the rest of the session
+					m_poly->gpu_latch_off("CPU read of the frame buffer");
 					src = (const uint32_t *)waveram1_ptr_from_expanded_addr(m_zeusbase[0xb4]);
+				}
 				else
 					src = (const uint32_t *)waveram0_ptr_from_expanded_addr(m_zeusbase[0xb4]);
 
@@ -722,6 +746,7 @@ void midzeus_state::zeus_register_update(offs_t offset)
 
 		case 0xcc:
 			m_screen->update_partial(m_screen->vpos());
+			m_poly->gpu_flip();
 
 			if (DEBUG_KEYS)
 				m_log_fifo = machine().input().code_pressed(KEYCODE_L);
@@ -1228,6 +1253,13 @@ void midzeus_renderer::capture_polygon(const rectangle& clip, const vertex_t* ve
 {
 	state.renderbase = m_state.m_zeus_renderbase;
 
+	// the host GPU path takes the polygon in place of the software rasteriser; Params is 0 for the solid fill
+	if (gpu_active())
+	{
+		gpu_add_polygon(clip, vert, numverts, state, Params == 0);
+		return;
+	}
+
 	switch (numverts)
 	{
 		case 3:
@@ -1566,3 +1598,5 @@ void midzeus_state::log_waveram(uint32_t length_and_base)
 	for (i = 0; i < numoctets; i++)
 		LOGWAVE("\t%02X: %08X %08X\n", i, ptr[i*2], ptr[i*2+1]);
 }
+
+#include "midzeus_gpu.ipp"

@@ -244,6 +244,7 @@ void midzeus_state::machine_reset()
 	memset(m_disk_asic_jr, 0x0, 0x10 * 4);
 	m_disk_asic_jr[6] = 0xa0; // Rev3 Athens
 
+	m_poly->gpu_reset();
 	rearm_vsync();
 }
 

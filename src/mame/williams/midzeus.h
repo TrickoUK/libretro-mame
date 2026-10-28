@@ -18,6 +18,12 @@
 #include "emupal.h"
 #include "screen.h"
 
+#include "interface/gpuengine.h"
+#include "midzeus_shader.h"
+
+#include <deque>
+#include <vector>
+
 /*************************************
  *
  *  Type definitions
@@ -58,10 +64,46 @@ public:
 	void zeus_draw_quad(int long_fmt, const uint32_t *databuffer, uint32_t texdata, bool logit);
 	void zeus_draw_solid_quad(const rectangle& rect, const vertex_t* vert, mz_poly_extra_data& state);
 
+	// host-GPU path (midzeus_gpu.ipp); the software renderer is used whenever it is off
+	struct gpu_vertex
+	{
+		float x, y, z, w;
+		uint32_t prim;
+		float v[MIDZEUS_SHADER_VARYINGS];
+	};
+
+	bool gpu_active();
+	void gpu_reset();
+	void gpu_latch_off(const char *reason);
+	void gpu_mark_texture(const void *block);
+	void gpu_flip();
+	bool gpu_screen_update(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+
 private:
 	template <int Params> void capture_polygon(const rectangle& clip, const vertex_t* vert, uint32_t numverts, mz_poly_extra_data& state, const render_delegate& callback);
 
+	bool gpu_init();
+	void gpu_flush_textures();
+	void gpu_set_clip(int row, const rectangle &clip);
+	void gpu_add_polygon(const rectangle &clip, const vertex_t *vert, uint32_t numverts, const mz_poly_extra_data &state, bool fill);
+	bool gpu_submit(const osd::gpu_readback_rect *readback, bool flush);
+	int gpu_page_row(const void *block) const;
+
 	midzeus_state& m_state;
+
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	bool m_gpu_checked = false;
+	bool m_gpu_ready = false;
+	uint32_t m_gpu_generation = 0;
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_texture = osd::GPU_NULL_HANDLE;
+	std::unique_ptr<osd::gpu_dirty_region> m_gpu_texture_dirty;
+	int m_gpu_clip_row = -1;                        // page row the last SET_CLIP was offset by, -1 at the start of a frame
+	rectangle m_gpu_clip;
+	std::vector<osd::gpu_command> m_gpu_commands;
+	std::vector<gpu_vertex> m_gpu_vertices;
+	std::vector<uint32_t> m_gpu_state;
+	std::deque<std::vector<uint8_t>> m_gpu_blobs;   // copies the command list points at, kept until the frame is submitted
 };
 
 typedef midzeus_renderer::vertex_t poly_vertex;
@@ -93,6 +135,7 @@ protected:
 	virtual void machine_start() override ATTR_COLD;
 	virtual void machine_reset() override ATTR_COLD;
 	virtual void video_start() override ATTR_COLD;
+	virtual void device_post_load() override;
 
 	void cmos_w(offs_t offset, uint32_t data, uint32_t mem_mask = ~0);
 	uint32_t cmos_r(offs_t offset);
