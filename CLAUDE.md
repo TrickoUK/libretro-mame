@@ -1,1288 +1,331 @@
 # CLAUDE.md
 
-This file guides Claude Code when working in this repository.
+This file guides Claude Code when working in this repository. It holds only what an agent needs on every task.
+History (sync log, per-phase PS1 GPU notes, old plans) lives in `my-docs/activity-log.md`: **do not read it at
+the start of a session**, it is an archive that wastes context. `grep` it only when you need the history of one
+specific system or sync, and append new history there rather than here.
 
 ## What this repo is
 
-A fork of [libretro/mame](https://github.com/libretro/mame) (upstream MAME with a
-`libretro` OSD grafted on), pushed to `TrickoUK/libretro-mame`. It's MAME itself
-(`src/mame`, `src/devices`, `src/emu`) plus a libretro frontend layer in
-`src/osd/libretro`. Regular upstream MAME merges land as commits like
-`Merge tag 'mame0289'...` — expect large, unrelated diffs from upstream syncs
-mixed into history.
+A fork of [libretro/mame](https://github.com/libretro/mame) (upstream MAME with a `libretro` OSD grafted on),
+pushed to `TrickoUK/libretro-mame`. It's MAME itself (`src/mame`, `src/devices`, `src/emu`) plus a libretro
+frontend layer in `src/osd/libretro`. Upstream syncs land as `Merge mamedev master ...` commits, so expect large,
+unrelated diffs in history.
+
+**Project goal**: improve 3D rendering for specific arcade drivers by offloading polygon rasterization to the host
+GPU (Vulkan), instead of MAME's fully-software rendering, plus game fixes and light gun / steering work for
+Batocera.
 
 ### Branches and upstream syncs
 
-- **`arcade-focused`** is the long-term branch for all of this fork's work.
-  **`master`** only tracks libretro/mame upstream. Short task branches get
-  merged into `arcade-focused` and then deleted.
-- **Full mamedev sync, 2026-09-26**: merge commit `845d4f80649` merged mamedev
-  master `mame0289-1156-gb01b8826c2b` (1,156 commits) into `arcade-focused`.
-  The source was the local upstream checkout at
-  `/var/home/bazzite/Projects/upstream/mame`, fetched into
-  `refs/upstream-tmp/master`. The commit message lists every conflict
-  resolution. For the next sync, update that checkout, fetch it the same way
-  and `git merge` it (not cherry-picks), so SHAs stay aligned with upstream.
-- **Follow-up sync, 2026-09-27**: merge commit `4553d69283b` merged mamedev master
-  `mame0289-1168-g1cfb79ea82d` (12 commits). No conflicts, `arcade.flt` unchanged;
-  smoke-tested daytona2, scud, metamrph, mystwarr, hotd, jpark3, brvblade, polystar.
-- **Follow-up sync, 2026-09-30**: merge commit `ad856c8a345` merged mamedev master
-  `mame0289-1217-g67129e77425` (49 commits). No conflicts, `arcade.flt` unchanged (the new
-  driver files are a bingo skeleton and a calculator). Genie regenerated directly, full `-j4`
-  build linked clean; smoke-tested daytona2, scud, metamrph, mystwarr, hotd, jpark3, brvblade,
-  polystar (`my-docs/out/sync1217`).
-- **Follow-up sync, 2026-10-01**: merged mamedev master `mame0289-1243-g6743eb674d0`
-  (26 commits). Conflicts in `voodoo_render.cpp` (upstream's multibase LOD fix replaces ours,
-  identical on Banshee/Voodoo 3) and `konami/viper.cpp` (upstream's differential ADC0838 read;
-  we keep full-range 8-bit pedals and the gamepad steering helper on top, see
-  `my-docs/viper-investigation.md` Fix 5). `arcade.flt` unchanged. Checked with I/O CHECK
-  (gticlub2, xtrial), frame-exact Voodoo snapshots (identical on 7 games) and smoke tests
-  (`my-docs/out/sync1243`).
-- **Follow-up sync, 2026-10-13**: merge commit `6078a3eee1f` merged mamedev master
-  `mame0289-1494-g344d163580b` (130 commits). One conflict, `konami/viper.cpp`: upstream's
-  `e02f3bc0029` gives the driving games' pedals and handbrake full-range 9-bit ports, so the fork's
-  8-bit pedal read path was dropped (only the gamepad steering helper stays). `arcade.flt`
-  regenerated. Full `-j4` build clean. Smoke-tested gticlub2, xtrial and sfrush (90 s, no MIPS
-  compare hang) (`my-docs/out/sync1494*`).
-- **Follow-up sync, 2026-10-14**: merge commit `7a66a604ff6` merged mamedev master
-  `mame0289-1520-gc51cea1d897` (26 commits), after merging libretro/mame master (4 commits,
-  `0ff56bfdbdc`: scheduler-safe state save/restore, option reset between sessions). No conflicts;
-  `arcade.flt` gained `skeleton/highway_m68k.cpp`. Full `-j4` build clean. Booted roundup5 and
-  brvblade only (`my-docs/out/sync1520*`).
-- **Follow-up sync, 2026-10-17**: merge commit `973b018190b` merged mamedev master
-  `mame0289-1607-gb099e27315d` (26 commits). No conflicts, `arcade.flt` unchanged (validated).
-  New `k056734` CPU device and a rewritten `konamigx.cpp`; genie regenerated directly, full `-j8`
-  build linked clean. Smoke-tested daytona2, scud, metamrph, mystwarr, hotd, jpark3, brvblade,
-  polystar, gticlub2 (45 s each, `my-docs/out/sync1607`).
-- **Follow-up sync, 2026-10-17 (later)**: merged mamedev master `mame0289-1612-geb947cba9b9`
-  (5 commits). No conflicts, `arcade.flt` unchanged (validated). It brings in our two merged PRs
-  (#16482 `tc0100scn.cpp` FG line scroll, #16483 `segas32_v.cpp` flipped sprites), so the two local
-  fixes are gone; the merged code was already identical. Also a `tlcs900` CPU cleanup.
-- **Follow-up sync, 2026-10-21**: merge commit `540a87351b5` merged mamedev master
-  `mame0289-1692-gfb2a5089622` (25 commits); libretro/mame master had nothing new. No conflicts,
-  `arcade.flt` unchanged (validated), `arcade-games.txt` gained `gunwarsj`. Upstream took our
-  `roundup5.cpp` MACHINE_NOT_WORKING removal (#16534, identical to the fork) and fixed PowerPC DRC
-  save state (`ppccom.cpp`, `mpc106`, `pci`). Genie regenerated directly (`bus.lua`/`formats.lua`
-  changed), full `-j10` build linked clean. Smoke-tested gticlub2 (black at 45 s, fine at 90 s: slow
-  Viper boot), xtrial, thrild2, polystar (`my-docs/out/sync1692*`).
-- **Follow-up sync, 2026-10-21 (later)**: merge commit `6e082e55191` merged mamedev master
-  `mame0289-1696-g006f4ade8d4` (4 commits). No conflicts, `arcade.flt` unchanged (validated). The one
-  overlap was `voodoo_render.cpp`: upstream's static rasterizers for thrild2/gticlub2 (pure added table
-  entries, `006f4ade8d4`). Full `-j10` build linked clean. Smoke-tested gticlub2, thrild2, xtrial, jpark3
-  (90 s each, `my-docs/out/sync1696`).
-- **Follow-up sync, 2026-10-22**: merge commit `3d38025dee2` merged mamedev master
-  `mame0289-1727-gdddae560fa9` (31 commits); libretro/mame master had nothing new. No conflicts,
-  `arcade.flt` unchanged (validated; the new `rca/nl_studio2.cpp` is a console). `scripts/src/bus.lua`
-  changed, so genie was regenerated directly; full `-j10` build linked clean (119 objects). No smoke tests:
-  the only fork/incoming overlap was `mame.lst`.
-- **Follow-up sync, 2026-10-23 (later)**: merge commit `cca54de5dd8` merged mamedev master
-  `mame0289-1751-gcde9d51c169` (24 commits); libretro/mame master had nothing new. One conflict,
-  `voodoo_render.cpp`: upstream's LOD clamp changes (upper clamp applied last, no level 9 for split
-  textures) landed in the function the fork split into `fetch_texel()`/`sample_texel()`; kept the fork's
-  structure, re-applied both changes in `fetch_texel()` and mirrored them in the GPU shader
-  (`voodoo_shader.h`, source `my-docs/tools/voodoo.glsl`). `arcade.flt` unchanged (validated, 2135 files).
-  `scripts/src/bus.lua` changed, so genie was regenerated directly; full `-j10` build linked clean
-  (201 objects). Smoke-tested gticlub2, jpark3, thrild2, sfrush (90 s each, `my-docs/out/sync1751`).
-- **Follow-up sync, 2026-10-25**: merge commit `f447a0efbef` merged mamedev master
-  `mame0289-1785-g84981cc15cf` (34 commits); libretro/mame master had nothing new. No conflicts,
-  `arcade.flt` unchanged (validated, 2135 files; only `softbox.cpp` moved, and it is not in the filter).
-  `scripts/src/bus.lua` and `video.lua` changed, so genie was regenerated directly; full `-j10` build linked
-  clean. Overlap was Model 2 (SHARC FIFO/halt fixes, `polygons`/`textures` regions now `ROM_REGION32_LE`/
-  `ROM_REGION16_LE`, `apply_focus`/`raster_init` take references, Last Bronx mesh path), `cv1k.cpp` (ATTR_COLD)
-  and `mame.lst`. Smoke-tested hotd, gunblade, daytona, lastbrnx (60 s each, `my-docs/out/sync1785`). The black
-  blob under gunblade's attract-mode helicopter is its landing-gear wheel, not a fault: frames 3480-3520 are
-  pixel-identical between the pre-merge Model 2 files and the merged ones, and the blob is also there with the
-  host-GPU path off.
-- **Follow-up sync, 2026-10-26**: merge commit `d23272a8584` merged mamedev master
-  `mame0289-1795-g6ec57cdad91` (10 commits); libretro/mame master had nothing new. One conflict,
-  `src/devices/cpu/psx/dma.cpp`: kept upstream's zero word-count handling and rewritten reverse-clear loop,
-  and kept the fork's `m_ram_write_cb` call, now made once before the loop with the full word count.
-  `arcade.flt` unchanged (validated, 2135 files). `osdcore.h` gained work-queue API (`WORK_QUEUE_FLAG_COARSE`,
-  `osd_work_item_queue_list`), so nearly everything rebuilt (`osdsync.cpp` merged cleanly with the fork's
-  `thread_mode` hooks); `bus.lua`/`sound.lua` changed, genie regenerated directly; full `-j10` build linked clean.
-  Smoke-tested gdarius2 and starswep (60 s, clean); brvblade booted but its screenshot came out empty and was not
-  re-checked (`my-docs/out/sync1795`).
-- **Follow-up sync, 2026-10-28**: merge commit `ed28edec7ac` merged mamedev master
-  `mame0289-1829-gc91d2b989bb` (34 commits); libretro/mame master had nothing new. No conflicts.
-  `voodoo_2.cpp`/`voodoo_2.h` overlap (upstream's direct-command blt fill replaces the `bltCommand` unimplemented
-  handler; the fork's `gpu_ram_write` line in `packet_type_5` sits beside it and merged cleanly). `arcade.flt`
-  regenerated (validated, 2137 files): new helpers `handheld/class200_lcdc.cpp` and `kaneko/kaneko_pisces.cpp`;
-  `galpani2j` dropped from the exclusions (upstream removed the driver). `scripts/src/bus.lua`/`machine.lua`
-  changed, genie regenerated directly. Full `-j10` build linked clean (253 objects). Smoke-tested jpark3 and
-  gticlub2 (90 s each, both ran clean, screenshots not reviewed) (`my-docs/out/sync1829`).
-- Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
-  compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
-  compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
-  handler, which we drop), `src/devices/video/psx.{cpp,h}` (GPU HLE path),
-  `src/devices/cpu/dspp` (our idle-loop skip), `src/mame/konami/viper.cpp` (analog
-  ADC read and ports, gun reads), `scripts/genie.lua`,
-  `scripts/src/main.lua` and `src/osd/modules/lib/osdobj_common.cpp` (libretro
-  hooks), `src/mame/namco/namcos22_v.cpp` and `namcos22.h` (host-GPU capture hooks: the `m_gpu_collecting` ternary and early
-  returns in `poly3d_drawquad`/`poly3d_drawsprite`, the two `gpu_render_scene` calls in the screen updates; the rest is `namcos22_gpu.ipp`), `src/mame/namco/namcos23.cpp` (host-GPU hooks: the
-  `namcos23_shader.h`/`gpuengine.h` includes, `friend class namcos23_renderer;`, the renderer's `gpu_*` members and the
-  `if (gpu_render(...)) return;` after the sort in `render_flush()`; the rest is `namcos23_gpu.ipp` and `namcos23_shader.h`), `src/mame/snk/hng64_3d.ipp` and `hng64_v.cpp` (the GPU path's engine and submit/collect, and the
-  palette-resolve composite that averages supersampled GPU output; fork-only, not for upstream). The software renderer is upstream again, so only these GPU-path hunks conflict.
-- Upstream API changes in that sync that broke fork/libretro code:
-  - `screen_device` is split per type (`screen_svg_device`, vector screens).
-    Use `video_output_interface_enumerator`/`is_vector()` instead of
-    `screen_type()`.
-  - `screen_device::configure()` takes an `attotime` (`attotime::from_hz()`),
-    not attoseconds.
-  - `emu.h` no longer pulls in `video.h`. Include it wherever
-    `machine().video()` is used.
-  - PS1 GPU VRAM is now a `ram_device` (`m_ram`), wired up with `set_cpu()`.
-    `p_vram` is a raw pointer into it.
-  - DSPP was split into Opera (runs the program once per frame) and Bulldog
-    (free-running, used by M2). The fork's idle-loop skip only runs on
-    Bulldog.
-- After any upstream sync, **regenerate `fork-specific/arcade.flt`** (see "Arcade-only build
-  filter"). genie fails with `Pattern "..." did not match any source files`
-  when upstream has moved files. Then run genie directly and do a full `-j4`
-  build.
+- **`arcade-focused`** is the long-term branch for all of this fork's work. **`master`** only tracks
+  libretro/mame upstream. Short task branches get merged into `arcade-focused` and then deleted.
+- Syncs use the `sync-mame` skill. Always a full `git merge` of the upstream tip (never cherry-picks), so SHAs stay
+  aligned. The last merged upstream tip is kept at `refs/upstream-tmp/master` (fetched from the local checkout at
+  `/var/home/bazzite/Projects/upstream/mame`). The per-sync record is in `my-docs/activity-log.md`, **not here**.
+- After any sync that moves, renames or splits `src/mame/` driver files, regenerate `fork-specific/arcade.flt`
+  (see "Arcade-only build filter"). genie fails with `Pattern "..." did not match any source files` otherwise. If
+  any `scripts/**/*.lua` changed, run genie directly (see "Building"), then do a full build.
+- Conflicts to expect again:
+  - `src/devices/cpu/mips/mips3{,drc}.cpp`: Count writes must not arm the compare timer, or sfrush hangs at ~49 s.
+  - `src/devices/cpu/powerpc`: our ICFI snapshots, compile-time fetch fill and reuse re-snapshot; upstream has its
+    own HID0/ICFI handler, which we drop.
+  - `src/devices/video/psx.{cpp,h}`: GPU HLE path. `src/devices/cpu/dspp`: idle-loop skip (Bulldog only).
+  - `src/mame/konami/viper.cpp`: gamepad steering helper and gun reads. Upstream's 9-bit full-range pedal/handbrake
+    ports replaced the fork's 8-bit path (keep upstream's).
+  - `src/devices/video/voodoo_render.cpp` (fork split texturing into `fetch_texel()`/`sample_texel()`; mirror
+    upstream LOD/sampling fixes there and in the GPU shader `voodoo_shader.h`, source `my-docs/tools/voodoo.glsl`),
+    `voodoo_banshee.cpp`, `voodoo_2.cpp`: prefer upstream's fix where equivalent.
+  - `scripts/genie.lua`, `scripts/src/main.lua`, `src/osd/modules/lib/osdobj_common.cpp`: libretro hooks.
+  - `src/mame/namco/namcos22_v.cpp`/`namcos22.h` (host-GPU capture hooks: the `m_gpu_collecting` ternary, early
+    returns in `poly3d_drawquad`/`poly3d_drawsprite`, the two `gpu_render_scene` calls in the screen updates; the
+    rest is `namcos22_gpu.ipp`), `src/mame/namco/namcos23.cpp` (the `namcos23_shader.h`/`gpuengine.h` includes,
+    `friend class namcos23_renderer;`, the renderer's `gpu_*` members and the `if (gpu_render(...)) return;` after
+    the sort in `render_flush()`; the rest is `namcos23_gpu.ipp`/`namcos23_shader.h`), `src/mame/snk/hng64_3d.ipp`
+    and `hng64_v.cpp` (GPU engine, submit/collect, palette-resolve composite). Fork-only, not for upstream.
+    The software renderers are upstream again, so only these GPU-path hunks conflict.
+- Upstream API changes that have broken fork/libretro code (check these first when a build fails after a sync):
+  - `screen_device` is split per type (`screen_svg_device`, vector screens). Use
+    `video_output_interface_enumerator`/`is_vector()`, not `screen_type()`. `configure()` takes an `attotime`.
+  - `emu.h` no longer pulls in `video.h`; include it wherever `machine().video()` is used.
+  - PS1 GPU VRAM is a `ram_device` (`m_ram`) wired up with `set_cpu()`; `p_vram` is a raw pointer into it.
+  - DSPP is split into Opera (runs the program once per frame) and Bulldog (free-running, used by M2).
 
-### Game fixes carried in the fork (formerly batocera patches)
+### Game fixes carried in the fork
 
-These were batocera `libretro-mame` patches `003`-`007` and moved into the fork
-on 2026-09-26. Batocera now only keeps the upstream-batocera patches `000-makefile`
-and `002-batocera-ini`. Keep these fixes through upstream merges, and check whether
-upstream has fixed the same thing before re-porting one:
-- `plugins/offscreenreload/init.lua`: batocera's lightgun reload auto-bind, which
-  skips the bind when BUTTON2 is already used by gameplay.
-- `src/mame/sega/model2*`: supersample antialiasing of the 3D layer on the host-GPU path
-  (the generic `mame_3d_supersample` core option, off by default; the software renderer is upstream and ignores it); `hotd` has no trigger flash (`init_hotd` ROM patch,
-  Revision A only); `gunblade` gun Y gets `PORT_REVERSE` under `__LIBRETRO__`.
-- `src/mame/taito/opwolf.cpp`: no trigger flash on `opwolf` only. It's a runtime ROM
-  patch about 900 frames in, because the C-chip ROM check rejects a static patch.
+Keep these through upstream merges, and check whether upstream has fixed the same thing before re-porting one:
+- `plugins/offscreenreload/init.lua`: lightgun reload auto-bind, skipped when BUTTON2 is already used by gameplay.
+- `src/mame/sega/model2*`: supersample antialiasing of the 3D layer on the host-GPU path (generic
+  `mame_3d_supersample` option, off by default; the software renderer is upstream and ignores it); `hotd` has no
+  trigger flash (`init_hotd` ROM patch, Revision A only); `gunblade` gun Y gets `PORT_REVERSE` under `__LIBRETRO__`.
+- `src/mame/taito/opwolf.cpp`: no trigger flash on `opwolf` only. It's a runtime ROM patch about 900 frames in,
+  because the C-chip ROM check rejects a static patch.
 
 ### Light guns on Batocera (Sinden)
 
-- The core side is `src/osd/modules/input/input_retro.cpp` (`d8f3c392f0f`). In "free" offscreen mode
-  the reload button shoots off screen, and gun Start/Select also press pad Start/Select. jpark3's
-  port fix is `c79b34ab13b` (`my-docs/viper-investigation.md` Fix 8).
-- It also needs Batocera's RetroArch to use its `udev` input driver. Batocera patch
-  `019-disable-wayland-events-by-wayland.patch` must cover `wayland_vk_ctx.c` (the box runs Vulkan),
-  otherwise every gun shares the same buttons and gun Start/Coin fail. **If gun buttons break
-  after a new image, check RetroArch before the core**: `[udev] Mouse/Touch #N` lines in the box's
-  `es_launch_stderr.log` mean udev input is live. On 2026-09-26 an image shipped a stale RetroArch
-  without the fix (buildroot per-package copies); batocera's `rebuild.sh` now checks for that.
+- The core side is `src/osd/modules/input/input_retro.cpp`. In "free" offscreen mode the reload button shoots off
+  screen, and gun Start/Select also press pad Start/Select. jpark3's port fix: `my-docs/viper-investigation.md`
+  Fix 8.
+- It needs Batocera's RetroArch to use its `udev` input driver (Batocera patch
+  `019-disable-wayland-events-by-wayland.patch` must cover `wayland_vk_ctx.c`, since the box runs Vulkan);
+  otherwise every gun shares the same buttons and gun Start/Coin fail. **If gun buttons break after a new image,
+  check RetroArch before the core**: `[udev] Mouse/Touch #N` lines in the box's `es_launch_stderr.log` mean udev
+  input is live.
 
-**Project goal for this fork**: improve 3D rendering for specific
-arcade drivers by offloading polygon rasterization to the host GPU, instead of
-MAME's normal fully-software rendering. This is a nontrivial architecture
-change, not a shader tweak — see "The core problem" below before starting.
+## Docs to keep updated
 
-## Custom change log (keep it updated)
+Update these in the same change as the work. Docs under `my-docs/` are committed in that nested repo.
 
-`custom-change-log.md` (repo root) is the long-term, dated record of this fork's own
-game/system work. **Whenever a fork change lands on `arcade-focused`** (a game fix, a system
-speed-up, a new core option, a moved-in patch), add an entry under that day's date heading
-(oldest first, new work at the bottom). Use a `###` headline naming the game(s) or system, then
-a few short bullets on the end result a player would notice. Commit the entry together with the
-work. Leave out upstream merges and cherry-picks unless fork work was needed to make them run,
-and leave out investigations that shipped no code unless they reached a conclusion worth keeping
-(like the jpark3 60 fps entry).
-
-## 3D Enhanced Games doc (keep it updated)
-
-`my-docs/3D-Enhanced-Games.md` (in the nested my-docs repo) is the living record of this fork's **major 3D work**: per system,
-what was done, whether it uses the generic `mame_3d_*` options or custom ones (like the `mame_psx_gpu_*`
-set), and which games benefit. **Whenever 3D rendering work lands on `arcade-focused`** (a new 3D system
-made to run, a host-GPU or supersampling feature, a speed-up that makes a 3D system playable, a new or
-changed 3D core option), update that doc (committed in the my-docs repo, at the same time as the work): the system's row in the summary table, its
-section, the settings table, and the game list (bold the games actually checked). Small fixes (sprite
-glitches, boot errors, controls, light guns) do not belong there; they go in `custom-change-log.md` only.
-
-## Light Gun Improvements doc (keep it updated)
-
-`my-docs/Lightgun-improvements.md` (in the nested my-docs repo) is the living record of every game or system where this fork
-made light guns work or work better (mainly for a Sinden on Batocera): per game, the problem, the fix and
-whether it was tested with a real gun or only by script. **Whenever light gun work lands on
-`arcade-focused`** (a gun port change, a trigger-flash patch, aim support, a libretro gun input change),
-update that doc and commit it in the my-docs repo alongside the work and the matching `custom-change-log.md` entry.
+- **`custom-change-log.md`** (repo root): dated record of this fork's own game/system work. Whenever a fork change
+  lands on `arcade-focused`, add an entry under that day's heading (oldest first, new work at the bottom): a `###`
+  headline naming the game(s) or system, then a few short bullets on the end result a player would notice. Commit
+  it with the work. Leave out upstream merges and cherry-picks unless fork work was needed to make them run, and
+  investigations that shipped no code unless they reached a conclusion worth keeping.
+- **`my-docs/3D-Enhanced-Games.md`**: major 3D work only (a new 3D system made to run, a host-GPU or supersampling
+  feature, a speed-up that makes a 3D system playable, a new or changed 3D core option): the system's row in the
+  summary table, its section, the settings table and the game list (bold the games actually checked). Small fixes
+  (sprite glitches, boot errors, controls, light guns) go in `custom-change-log.md` only. Also keep
+  `my-docs/3d-options.md` current when a 3D option is added/changed or a system gains/loses option support.
+- **`my-docs/Lightgun-improvements.md`**: every game or system where light guns work or work better (problem, fix,
+  tested with a real gun or only by script). Update with every gun port change, trigger-flash patch, aim support
+  or libretro gun input change, alongside the matching `custom-change-log.md` entry.
+- **`my-docs/activity-log.md`**: archive of history (sync record, PS1 GPU phases). Append there; never read it
+  routinely.
 
 ## Repo layout cheat sheet
 
-- `my-docs/` — **home for this fork's investigation docs and test tools. It is its own private git
-  repo** (`git@github.com:TrickoUK/mame-working-docs.git`, branch `main`), nested here and hidden from
-  this repo by `/my-docs/` in `.git/info/exclude` (local-only, the same pattern as batocera's `my-docs`).
-  **Commit docs inside it (`cd my-docs && git ...`), never into this repo; ask before pushing.**
-  Documents plus the scripts and tool source worth reusing (those are committed too). Never generated output (comparison screenshots, video, binaries, run results) or scratch files (its `.gitignore` and
-  pre-commit hook enforce that), and no secrets or session info. `my-docs/out/` holds tool results
-  (ignored). Put new write-ups and reusable profiling/test scripts there, not in the repo root. See
-  `my-docs/README.md`; e.g. `my-docs/m2-fix-investigation.md` (Konami M2 performance work) and
-  `my-docs/tools/` (save-state profiling, boot smoke tests, bit-exact per-frame render checks).
-  Run the tools from this repo's root.
+- `my-docs/` — fork investigation docs and test tools. **Its own private git repo**
+  (`git@github.com:TrickoUK/mame-working-docs.git`, branch `main`), nested here and hidden from this repo by
+  `/my-docs/` in `.git/info/exclude`. **Commit docs inside it (`cd my-docs && git ...`), never into this repo; ask
+  before pushing.** Documents plus reusable scripts and tool source only; never generated output (screenshots,
+  video, binaries, run results), scratch files, secrets or session info (its `.gitignore` and pre-commit hook
+  enforce that). `my-docs/out/` holds tool results (ignored). See `my-docs/README.md`; tools are in
+  `my-docs/tools/` (save-state profiling, boot smoke tests, bit-exact render checks). Run tools from this repo's
+  root.
 - `fork-specific/` — **only the files the build needs**: `arcade.flt`, `arcade-games.txt` and
-  `tools/prune_arcade_filter.py` (tracked here; batocera's `libretro-mame.mk` uses `arcade.flt`).
-  Docs and other tools do not go here.
-- `src/mame/<manufacturer>/*.cpp` — per-driver code, organized by manufacturer
-  (e.g. `sega/`, `namco/`, `nintendo/`, `konami/`, `williams/`), not by game
-  name. A driver's video/rasterizer code is usually `<name>_v.cpp` or `<name>_video.cpp`.
-- `src/devices/video/` — shared reusable video chip emulation (e.g. `voodoo*.cpp`).
-- `src/emu/` — core emulation framework: `screen.cpp`/`screen.h` (per-driver
-  update callbacks), `render.cpp`/`render.h`/`rendlay.cpp` (backend-agnostic
-  render primitive compositor).
-- `src/osd/` — platform frontends. `sdl/`, `windows/` are the standalone-MAME
-  OSDs (with BGFX/HLSL/D3D/OpenGL draw backends). `src/osd/libretro/` is
-  **the one this fork builds and the one relevant to this project.**
-- `bgfx/`, `hlsl/` (top-level dirs) — shader chains for the *standalone* SDL/Windows
-  OSD's post-processing (CRT effects, scanlines, etc). **Not used by the
-  libretro build** — see below.
-- `Makefile.libretro` — the build entry point for this fork.
-- `scripts/src/osd/retro.lua`, `retro_modules.lua` — GENie build config for the
-  libretro OSD; what gets compiled in/out of the libretro core.
+  `tools/prune_arcade_filter.py` (Batocera's `libretro-mame.mk` uses `arcade.flt`). Docs and other tools do not go
+  here.
+- `src/mame/<manufacturer>/*.cpp` — per-driver code by manufacturer. A driver's video code is usually
+  `<name>_v.cpp` or `<name>_video.cpp`.
+- `src/devices/video/` — shared video chips (`voodoo*.cpp`, `psx.cpp`). `src/emu/` — core framework (`screen.cpp`,
+  `render.cpp`).
+- `src/osd/libretro/` — **the OSD this fork builds**. `sdl/`, `windows/`, `bgfx/`, `hlsl/` are for standalone MAME
+  and unused here; do not touch them.
+- `Makefile.libretro` is the build entry; `scripts/src/osd/retro.lua`, `retro_modules.lua` configure GENie for
+  the libretro OSD.
 
-## The core problem: this build is 100% software-rendered
+## Rendering architecture
 
-Before writing any GPU-acceleration code, understand this pipeline — it explains
-why "just enable BGFX/OpenGL" isn't a fix:
+Software path: a driver's `screen_update_*` callback fills a `bitmap_rgb32` on the CPU, `render.cpp` composites it,
+and `src/osd/libretro/drawretro.cpp` (via `rendersw.hxx`) hands the raw buffer to libretro's `video_cb`. BGFX/HLSL
+shader chains are not used. So GPU acceleration means replacing a driver's rasterizer with one that issues real
+GPU draws, and returning the result as a bigger normal bitmap. MAME's compositor and the OSD's per-frame geometry
+reporting (`window.cpp`, from the screen's live `visible_area()`) handle a screen larger than its native size
+without core changes.
 
-1. A driver's `screen_update_rgb32`/`ind16` callback (declared via
-   `screen_device::set_screen_update`) fills an in-memory `bitmap_rgb32` purely
-   in software. **This is where 3D drivers rasterize polygons** — Model 2, Model 3,
-   Namco System 22/23, N64's RDP, Voodoo-based games, etc. all do this in C++ on
-   the CPU, no GPU involved at any point.
-2. `screen.cpp` hands that finished bitmap to `render.cpp`, which composites it
-   (plus artwork/bezels/overlays) into a `render_primitive_list` — a flat,
-   backend-agnostic list of textured quads.
-3. An OSD draw module consumes that primitive list. In the standalone SDL/Windows
-   OSD this can be `drawbgfx.cpp`/`drawd3d.cpp`/`drawogl.cpp`, which use the GPU
-   — but **only to blit the already-rasterized 2D image and apply post-processing
-   shaders** (CRT/scanline/HLSL effects from `bgfx/`, `hlsl/`). They never receive
-   3D geometry from the driver; by the time they run, the 3D scene is already a
-   flat bitmap.
-4. **This fork's OSD (`src/osd/libretro/drawretro.cpp`) doesn't even do that much:
-   it uses `rendersw.hxx`, a pure software blitter, to hand a raw RGB buffer to
-   libretro's `video_cb`.** There is no GPU compositing step at all in the current
-   libretro build, let alone GPU-side 3D rasterization.
+- **Host-GPU engine: Vulkan only** (`src/osd/libretro/libretro-internal/retro_vk_device`, `retro_vk_engine`,
+  `retro_vk_shader` `.{h,cpp}`). It uses a **private Vulkan instance and device independent of RetroArch's**; the
+  libretro `RETRO_HW_RENDER` scaffolding in `libretro.cpp` (guarded by `HAVE_OPENGL`, includes a nonexistent
+  `retroogl.c`) is dead and must stay unused. The Vulkan loader is `dlopen()`ed, so there are no build-time
+  Vulkan dependencies. Without a Vulkan 1.3 device the GPU path is off and the system renders in software. The
+  old EGL/OpenGL engine was removed (2026-10-26). Plans/status: `my-docs/gpu-vulkan-only-plan.md`,
+  `my-docs/plans-archived/gpu-vulkan-plan.md`, `my-docs/plans-archived/gpu-3d-renderer-plan.md`.
+- Gated by the **`HAVE_RETRO_GPU_TARGET`** define (on by default on Linux, set in `Makefile.libretro`; pass it
+  empty to leave it out). Never use `HAVE_OPENGL` for this feature. `retromain.cpp`/`libretro.cpp` are compiled
+  twice (once into `libosd_retro.a` via `retro.lua`, once directly into the `mame` project via
+  `scripts/src/main.lua` ~line 414); only the second copy reaches `mame_libretro.so`, so define/file changes must
+  be made in both places. glslang (bgfx's copy, `glslang` project in `scripts/src/3rdparty.lua`) is built in for
+  run-time shader compilation.
+- Generic interface: `src/osd/interface/gpurender.h`; `osd_interface::get_gpu_render_target()` returns nullptr by
+  default so other OSDs need no changes.
+- Every host-GPU path needs a core option (or switch) to fall back to software; keep it working. Generic options
+  are `mame_3d_supersample`, `mame_3d_msaa`, `mame_3d_edge_aa`; PS1 has the `mame_psx_gpu_*` set.
+  `rendersw`-path drivers you have not converted must keep producing output through `bitmap_rgb32`.
+- Treat `src/mame/<mfg>/*_v.cpp` rasterizer rewrites as the highest-risk changes in this codebase.
 
-So GPU acceleration of a driver's 3D rendering requires **replacing that
-driver's software rasterizer** (e.g. `src/mame/sega/model2_v.cpp`) with one that
-issues real GPU draw calls, *and* giving the libretro core a way to present a
-GPU-rendered frame to RetroArch instead of a CPU pixel buffer. Both pieces are
-currently missing/dead in this fork:
+### Sony ZN / PS1 GPU (`psxgpu_device`, `src/devices/video/psx.cpp`)
 
-### Finding: dead OpenGL hardware-render scaffolding
-
-`src/osd/libretro/libretro-internal/libretro.cpp` already has the skeleton of a
-libretro `RETRO_HW_RENDER` integration, but it's inert:
-
-```c
-// retro_load_game(), ~line 938
-//FIXME: re-add way to handle OGL
-#if defined(HAVE_OPENGL) || defined(HAVE_OPENGLES)
-   hw_render.context_type = RETRO_HW_CONTEXT_OPENGL; // or OPENGLES2
-   hw_render.context_reset = context_reset;
-   hw_render.context_destroy = context_destroy;
-   if (!environ_cb(RETRO_ENVIRONMENT_SET_HW_RENDER, &hw_render))
-      return false;
-#endif
-```
-
-`HAVE_OPENGL`/`HAVE_OPENGLES` are **never defined anywhere** in
-`Makefile.libretro` or `scripts/src/osd/*.lua` — confirmed by grep — and the
-`#include "retroogl.c"` at the top of the same file (line ~72) points to a file
-that **does not exist** in this tree. So today the `#else` branch always runs:
-every frame goes out via `video_cb(videoBuffer, ...)` as a plain software
-buffer, and RetroArch is never asked for a GL context
-(`RETRO_ENVIRONMENT_SET_HW_RENDER` is never called).
-
-**This is the natural starting point**: reviving `context_reset`/`context_destroy`,
-defining `HAVE_OPENGL`, writing a real `retroogl.c`/`.cpp`, and wiring
-`RETRO_ENVIRONMENT_SET_HW_RENDER` + `RETRO_HW_RENDER_INTERFACE` is prerequisite
-plumbing before any driver's rasterizer can actually hand triangles to the GPU
-and get them composited into what RetroArch displays.
-
-### Finding: the debugger is stubbed out in this build
-
-`scripts/src/osd/retro_modules.lua` wires `src/osd/modules/debugger/none.cpp`
-(not the Qt/Windows GUI debugger) and forces `USE_QTDEBUG=0`. **MAME's graphical
-debugger is not available in libretro builds.** Instead, this fork has been
-wired up (2026-09-16) to autostart MAME's Lua console/plugin system via
-RetroArch core options — see "Debugging / monitoring progress" below.
-
-## Candidate drivers for GPU-offloaded 3D rendering
-
-### Chosen first target: Sony ZN / PS1 GPU (`psxgpu_device`) — Brave Blade
-
-Decided 2026-09-16 after successfully running it as the baseline smoke test.
-**Game**: Brave Blade (Eighting/Raizing, 2000), romset `brvblade` (World) —
-verified booting and rendering in RetroArch via this fork's core (see the
-2026-09-16 session: `Geometry: 640x480`, GL context created, no crash; one
-non-fatal warning about a missing/undumped ROM chip `78081g503.ic655`,
-unrelated to the core itself). Driver: `src/mame/sony/zn.cpp` (Sony ZN
-hardware = arcade board wrapping the actual PS1 GPU chip, `CXD8561Q`/`CXD8654Q`
-instantiated via `m_gpu` in `zn.cpp`).
-
-**The actual rasterizer to replace is not in `zn.cpp`** — it's the shared
-device `src/devices/video/psx.cpp` (`psxgpu_device`, ~3559 lines + 358-line
-header). This is the real Sony PlayStation 1 GPU emulated in software: a
-single self-contained class with clearly separated primitive-drawing
-functions — `FlatPolygon`, `FlatTexturedPolygon`, `GouraudPolygon`,
-`GouraudTexturedPolygon`, `MonochromeLine`, `GouraudLine`, `FlatRectangle`
-(+8x8/16x16 variants), `Sprite8x8`/`Sprite16x16`, `Dot`/`TexturedDot` — all
-writing into an internally-simulated VRAM buffer, which `update_screen()`
-(the `screen_update_rgb32`-style callback, registered at
-`psx.cpp:3558`) then presents each frame. This matches the general pipeline
-described above exactly, just packaged as a reusable device instead of
-being embedded directly in one driver file.
-
-**Why this is high-leverage**: `psxgpu_device` is shared by far more drivers
-than any other candidate here — `src/mame/konami/konamigq.cpp`, `konamigv.cpp`
-(`nagano98`, in the ROM collection), `ksys573.cpp`, `twinkle.cpp`,
-`src/mame/namco/namcos10.cpp`, `namcos11.cpp` (`starswep`, in the ROM
-collection), `namcos12.cpp`, `src/mame/sony/psx.cpp` (the plain PS1 console
-driver itself), `src/mame/sony/taitogn.cpp`, `src/mame/skeleton/pap2.cpp`,
-`src/mame/tomy/kisssite.cpp`. A working GPU path here benefits every game on
-every one of these boards, not just Brave Blade — easily the biggest
-multiplier of any candidate in this list.
-
-**Test/verify command** (established working baseline):
-```sh
-distrobox enter mame-dev -- retroarch -v -L /var/home/bazzite/Projects/libretro/mame/mame_libretro.so /var/home/bazzite/Projects/mame-roms/roms/brvblade.zip
-```
-
-### Architecture decision: private EGL context, not `RETRO_HW_RENDER` (Phase 1 done, 2026-09-16)
-
-**Superseded (VO.1, 2026-10-26):** the EGL/OpenGL engine and its loader were removed. The Vulkan engine
-(`retro_vk_engine`, below) is now the only host-GPU engine. The EGL reasoning below is kept as history: the private,
-independent-context argument still applies to the Vulkan instance and device.
-
-The dead `RETRO_HW_RENDER` scaffolding above turned out to be a dead end
-worth avoiding, not reviving: investigation for the implementation plan
-found (a) `hw_render`/`context_reset`/`context_destroy`/`do_glflush` are
-referenced *nowhere else* in the tree — this was never functional, building
-it out means writing a full negotiated-context integration with RetroArch's
-own frontend from scratch — and (b) MAME's own render pipeline already
-tolerates a screen reporting a bitmap/resolution bigger than its declared
-native size with **no core changes needed** (`render_texture::set_bitmap()`
-only requires the bitmap contain the visible area; the libretro OSD's own
-`compute_minimum_size()`-driven geometry reporting in `window.cpp` already
-re-derives `fb_width`/`fb_height` from the screen's live `visible_area()`
-every frame and tells RetroArch automatically). So a shared/negotiated GL
-context with RetroArch isn't needed at all.
-
-**Chosen instead**: `psxgpu_device` (and any future driver) can request a
-**private, headless EGL/OpenGL context**, completely independent of
-whatever context RetroArch's own frontend holds — verified safe to create
-and repeatedly recreate *inside the same process* as a live RetroArch
-session without any interference (15/15 iterations over 30s while Brave
-Blade ran, see the plan's Phase 0 status). Render real geometry into an
-off-screen FBO at N× resolution, read it back into a normal (now-larger)
-`bitmap_rgb32`, let MAME's existing compositor and the OSD's existing
-geometry reporting handle the rest unmodified.
-
-**What was built** (Phase 1 of
-`/home/bazzite/.claude/plans/glowing-conjuring-raven.md` — read that file
-for full phase-by-phase detail):
-- `src/osd/interface/gpurender.h` — the generic interface
-  (`osd::gpu_render_target`: `begin_frame`/`upload_texture`/
-  `submit_triangle`/`end_frame_and_readback`), vertex-format-agnostic
-  (position/color/UV triangles only).
-- `osd_interface::get_gpu_render_target()` — new pure-virtual accessor
-  (`src/osd/osdepend.h`), with a shared nullptr-returning default in
-  `osd_common_t` (`src/osd/modules/lib/osdobj_common.h`) so **every other
-  OSD (SDL/Windows) needed zero changes**.
-- The EGL-backed `retro_gpu_target` of Phase 1 (removed in VO.1): EGL/GL were loaded with `dlopen()`/`dlsym()`.
-- Vulkan engine (the only host-GPU engine since VO.1, 2026-10-26): `src/osd/libretro/libretro-internal/retro_vk_device`,
-  `retro_vk_engine` and `retro_vk_shader` `.{h,cpp}`. The Vulkan loader is opened with `dlopen()`, so there are no
-  build-time Vulkan dependencies. Without a Vulkan 1.3 device the GPU path is off and the system renders in software.
-  Status and plan: `my-docs/plans-archived/gpu-vulkan-plan.md`, `my-docs/gpu-vulkan-only-plan.md`.
-- Gated behind a **`HAVE_RETRO_GPU_TARGET`** build define (on by default for Linux
-  builds since 2026-10-23, set in `Makefile.libretro`; pass `HAVE_RETRO_GPU_TARGET=` empty to leave it out) — **not** `HAVE_OPENGL`: that name collides
-  with the pre-existing dead `RETRO_HW_RENDER` code above, which shares the
-  same guard and includes a nonexistent `retroogl.c` — defining
-  `HAVE_OPENGL` for real activates that broken dead code and breaks the
-  build. Use `HAVE_RETRO_GPU_TARGET` for this feature specifically.
-- Build wiring needed touching **two** places for the define/files to
-  actually reach the final linked binary — `retromain.cpp`/`libretro.cpp`
-  are compiled *twice* in this build system (once into `libosd_retro.a` via
-  `retro.lua`'s `osd_retro` project, once more directly into the final
-  `mame` project via `scripts/src/main.lua` ~line 414 — only the second
-  copy's object ends up in `mame_libretro.so`). Missed this once during
-  implementation; a define/files change in only one of the two silently
-  had no effect on the actual binary.
-
-**Build command** (verified working):
-```sh
-MAME_DYNAMIC_LIBSTDCXX=1 HAVE_RETRO_GPU_TARGET=1 make -f Makefile.libretro -j4 SOURCEFILTER=fork-specific/arcade.flt PREMAKE=0
-```
-Two build-system quirks discovered/worked around this session, both
-independent of this feature and likely to bite future work too:
-- **The `Makefile.libretro`/`makefile` wrapper intermittently skips genie
-  regeneration** even with `REGENIE=1` (default) after editing a `.lua`
-  build script — no `Generating "..."` output, stale generated Makefiles
-  silently reused. Root cause not fully found. **Workaround**: after any
-  `.lua` script edit, invoke genie directly to force it —
-  `MAME_DYNAMIC_LIBSTDCXX=1 3rdparty/genie/bin/linux/genie
-  --LIBRETRO_CPU=x86_64 --with-emulator --OPTIMIZE=3 --NOWERROR='1'
-  --target='mame' --subtarget='mame' --build-dir='build'
-  --NO_USE_MIDI='1' --NO_USE_PORTAUDIO='1' --PYTHON_EXECUTABLE='python3'
-  --SOURCEFILTER='fork-specific/arcade.flt' --HAVE_RETRO_GPU_TARGET='1' --osd='retro'
-  --targetos='linux' --PLATFORM='x86' --gcc=linux-gcc --gcc_version=16.2.1
-  gmake` (confirm `Generating "..."` output appears, then `grep` the
-  relevant generated `.make` file for your change) — then build with
-  `PREMAKE=0`.
-- **Generated object rules reference `$(MAKEFILE)` as a prerequisite, but
-  it's never actually defined anywhere** in this build — so it's silently
-  empty, meaning **plain incremental `make` never recompiles an object
-  just because compiler flags/defines changed**, only if the source
-  `.cpp`'s own mtime changed. If you change a `.lua` script's `defines`/
-  flags without touching the affected `.cpp` files, `rm` the specific
-  stale `.o` file(s) before rebuilding or the change silently won't apply.
-- Also: `-j16`/`-j8` full-ish rebuilds twice got killed mid-build during this
-  session (not a real OOM — RAM was free again immediately after), probably by
-  systemd-oomd. Use `-j8` inside the `systemd-run` scope described under
-  "Building"; `-j4` is the fallback without it.
-
-### Phase 2 status: working, correctness/stability solid, performance acceptable but host-limited (2026-09-16)
-
-`psxgpu_device` now routes its four polygon primitives to the Phase 1 GPU
-service (see the plan file for full detail on each). **Confirmed by live
-visual testing: zero on-screen issues** (no crash, no black-frame flicker,
-no ground/sky edge flicker) at 2x internal resolution, with performance
-"a lot better" after the batching work below, though not a rock-solid
-60fps on this specific dev machine (see "Performance: final state" below
-for why that's believed to be host/environment-specific, not a core bug).
-**Every correctness bug below was invisible to a clean compile and even to
-a crash-free soak test — they only showed up from watching actual
-gameplay.** Reinforces: always do a real visual `retroarch -v -L ... <rom>`
-smoke test after touching this code.
-
-1. **Crash** (SIGSEGV in `end_frame_and_readback`, deep in Mesa): caused by
-   leaving `retro_gpu_target`'s private EGL context current on the shared
-   thread across multiple *separate MAME/RetroArch scheduler-visible calls*
-   — RetroArch's frontend can synchronously do its own EGL work (context
-   reinit) *inside* a MAME core call (e.g. when our scaled-resolution
-   `screen.configure()` propagates to `SET_SYSTEM_AV_INFO`), and if our
-   context was still bound at that moment it corrupted RetroArch's own EGL
-   state. Two designs that held the context across multiple *separate*
-   calls (even lazily-reacquired ones) both eventually crashed this way,
-   consistent with a Mesa/driver-level issue - not something fixable via
-   EGL bookkeeping alone - with RetroArch recreating its own context while
-   ours coexists on the GPU. **Fixed, final architecture**: every
-   `retro_gpu_target` call still defaults to acquiring/releasing its own
-   context individually (`scoped_context` in `retro_gpu_target.cpp`, safe
-   on its own) - see item 2 for how this coexists with good performance.
-2. **Performance** ("terribly slow", later "a lot better...but still not
-   full speed"), addressed in three real, independent steps:
-   - `upload_texture()` was decoding+uploading the full 256×256 texture
-     page on *every textured polygon*, not once per frame. **Fixed** via
-     `gpu_maybe_upload_texture_page()` (`psx.cpp`), caching the
-     last-uploaded page/CLUT and skipping re-upload when unchanged.
-   - Per-call EGL context acquisition (~1 `eglMakeCurrent` pair per
-     triangle) was then the dominant cost. **Fixed** by deferring all of a
-     frame's `upload_texture`/`set_clip_rect`/triangle calls into a
-     structured queue (`psxgpu_device::m_gpu_queue`, a `gpu_queued_cmd`
-     list, not opaque closures) and replaying the whole queue in gpu_
-     update_screen() as one tight, synchronous C++ loop bracketed by new
-     `osd::gpu_render_target::begin_batch()`/`end_batch()` calls - one
-     context acquisition per *frame* instead of per *call*. This is safe
-     where holding the context across multiple frame's worth of
-     *separately-scheduled* calls (item 1) was not: control never returns
-     to MAME's scheduler or RetroArch during the replay loop, so the risky
-     interleaving that caused item 1's crash is structurally impossible
-     here, not just unlikely. `scoped_context` checks a `m_batch_active`
-     flag and skips its own acquire/release when a batch already holds the
-     context (see its 4th constructor arg).
-   - Per-*triangle* GL draw-call overhead (one `glBufferData`+
-     `glDrawArrays` each) was still significant even with EGL switching
-     fixed. **Fixed** by having the queue replay loop merge consecutive
-     `TRIANGLE` commands sharing the same textured/blend state into one
-     larger vertex buffer and a single `osd::gpu_render_target::
-     submit_triangles()` call (new method, default implementation loops
-     `submit_triangle()` for any backend that doesn't override it) instead
-     of one draw call per triangle - a run only breaks on an actual state
-     change or an intervening `TEXTURE`/`CLUT` command.
-3. **Correctness** (periodic near-black frames, "game frame → black frame →
-   game frame" with only a few edge/HUD shapes visible on the black ones):
-   `begin_frame()`/`gpu_update_screen()` were unconditionally clearing the
-   GPU target every frame, wrongly assuming every game fully redraws 100%
-   of the screen every refresh. Real PS1 VRAM (and the original
-   VRAM-scanout path) is persistent — a game only erases what it explicitly
-   overdraws. **Fixed** by moving the one-time clear from `begin_frame()`
-   into `resize_target()` (only on actual FBO (re)allocation), so the
-   target now persists content across frames like real VRAM. **Confirmed
-   fixed by live visual testing.**
-4. **Correctness** (flicker specifically on large, edge-of-screen polygons
-   — ground/sky backdrops): the GPU path ignored PS1's draw-area clip
-   rectangle entirely (`n_drawarea_x1/y1/x2/y2`, used extensively by the
-   CPU rasterizer's clipping logic but never passed to the GPU path).
-   Large backdrop polygons are the geometry most likely to extend beyond
-   the current draw area, so as it changed frame-to-frame, unclipped
-   polygons bled into/overwrote regions they shouldn't on the now-
-   persistent framebuffer. **Fixed** via `osd::gpu_render_target::
-   set_clip_rect()` (implemented with `GL_SCISSOR_TEST`/`glScissor` in
-   `retro_gpu_target`), called from `psxgpu_device::
-   gpu_maybe_set_clip_rect()` (cached like the texture-page cache above).
-   Note: `glReadPixels` is itself affected by the scissor box, so
-   `end_frame_and_readback()` temporarily disables `GL_SCISSOR_TEST`
-   around its own readback and restores it after. **Confirmed fixed by
-   live visual testing.**
-
-**Performance: final state (2026-09-16).** After the three fixes in item 2,
-Brave Blade runs noticeably better but still isn't a locked 60fps on this
-dev machine - live testing (`btop`) showed short bursts of a single CPU
-core near 100%, consistent with the still-mostly-single-threaded
-CPU-emulation + GPU-submission pipeline. Investigated and ruled out as the
-cause: the `mame-dev` Distrobox container itself (identical Mesa 26.2.2
-inside and outside, hardware `radeonsi` acceleration confirmed active - not
-falling back to software rendering, no cgroup CPU quota limit, and the host
-CPU does reach its ~4.8GHz max under load rather than being hard-capped -
-Podman/Distrobox containers share the host kernel directly, not a VM, so
-there's little room for a "container tax" here). RetroArch's `video_threaded`
-option was also tried (now left enabled in `~/.config/retroarch/
-retroarch.cfg` - harmless, no measurable difference either way). The
-**one concrete, host-level factor found**: this machine's CPU governor is
-`powersave` **system-wide** (not container-specific - `cat /sys/devices/
-system/cpu/cpu*/cpufreq/scaling_governor`), typically running ~2.2GHz
-rather than its ~4.8GHz max, and Feral GameMode - which would normally push
-games to the `performance` governor - isn't actually registered as a
-running service on this system (`systemctl --user status gamemoded` finds
-nothing), so nothing is currently correcting for this during testing.
-**User's assessment (2026-09-16), after trying the above**: likely
-acceptable in a real/production emulator environment (i.e. this specific
-gap is believed to be a dev-machine power-management artifact, not a flaw
-in the core's rendering path) - deprioritized for now rather than chased
-further. If revisited, the CPU governor is the next concrete thing to
-test (switch to `performance` and re-measure) before looking for further
-code-level optimizations.
-
-See the plan file's Phase 2 status note for full root-cause detail on each,
-including the full crash/stability investigation behind item 1's final
-architecture.
-
-### Phase 3 status: core option done, regression testing partially done (2026-09-16)
-
-- **`mame_psx_gpu_hle` core option** (category "video": disabled/2x/4x,
-  default disabled) toggles the GPU path and its resolution multiplier
-  without a rebuild - added following the exact `mame_lua_console`/
-  `mame_debug_plugin` pattern. `GPU_RES_SCALE` moved from a compile-time
-  constant to a runtime `psxgpu_device::gpu_scale()` query
-  (`osd_interface::gpu_render_scale()`). Verified both states: default
-  (disabled) boots at native resolution with no GPU context created at
-  all (identical to pre-feature behavior); `2x` reproduces the previously
-  verified GPU-rendered behavior exactly.
-- **Regression testing**: `starswep` (Namco System 11) **passed** - clean
-  boot, correct 512x480 scaling with that board's own 1.333 aspect ratio
-  (confirms the scaling isn't accidentally Brave-Blade-specific), stable
-  through an extended soak test. `nagano98` (Konami GV) **could not be
-  tested** at the time. Its zip is tiny (128 bytes) because Konami GV games
-  run from a CD image: the game needs `roms/nagano98/nagano98.chd`, which
-  wasn't in the collection. The user started copying the missing CHDs for
-  the test sets on 2026-09-26 (nagano98, lacrazyc, hyperath, powyak96,
-  btchamp, kdeadeye for Konami GV), so this can be retried.
-
-### Post-Phase-3 fixes: gdarius2 crash + ghosting (2026-09-17)
-
-Found via `gdarius2` (G-Darius Ver.2, `src/mame/sony/zn.cpp`, Sony ZN) at 2x
-GPU scale - two independent bugs, both now fixed and verified (90s soak,
-no crash, no ghosting; `brvblade` re-verified unaffected by either fix):
-
-1. **Crash**: `double free or corruption (!prev)` inside RetroArch's own
-   `video_thread_free()`/`driver_uninit()`, not this core's code (confirmed
-   via `gdb` backtrace - see "Debugging" below for the GDB workaround
-   needed to get one). Root cause: `gdarius2` writes the GP1 display-mode
-   register several times during boot; at 2x scale the resulting
-   resolution exceeded the libretro OSD's hardcoded 720x720
-   `max_width`/`max_height` (`src/osd/libretro/libretro-internal/
-   libretro.cpp`), and crossing that ceiling forces a full
-   `RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO` (`window.cpp`'s
-   `VIDEO_CHANGED_AV_INFO`) instead of the cheap `SET_GEOMETRY` - RetroArch
-   handles that by tearing down and reinitializing its whole video driver,
-   and its threaded video driver has a double-free bug when hit that way.
-   **Fixed** (not by patching RetroArch) by pre-scaling `max_width`/
-   `max_height` by the `mame_psx_gpu_hle` multiplier in `retro_load_game()`,
-   right after `check_variables()`, before the machine starts or any AV-info
-   is ever sent - scaled resolutions then never exceed the declared max, so
-   in-session mode changes stay on the cheap path and never re-trigger
-   RetroArch's fragile reinit.
-2. **Correctness** (frame ghosting: new content draws correctly each frame,
-   e.g. ships moving, but stale previous-frame pixels remain everywhere
-   nothing new was drawn, until a full screen change happens to overwrite
-   them): only the four polygon primitives (`FlatPolygon`,
-   `FlatTexturedPolygon`, `GouraudPolygon`, `GouraudTexturedPolygon`) were
-   ever routed to the GPU target - `FlatRectangle`(+`8x8`/`16x16`),
-   `FlatTexturedRectangle`, and `Sprite8x8`/`Sprite16x16` still only wrote
-   to the software `p_vram` buffer. Games that use a solid `FlatRectangle`
-   to erase/clear regions of the screen each frame (distinct from a full
-   VRAM clear - a common PS1 technique `gdarius2` apparently relies on
-   more than `brvblade` does) had that erase applied only to software VRAM,
-   never reflected in the GPU target's deliberately-persistent framebuffer
-   (see Phase 2 item 3 above), so old GPU-rendered pixels from prior frames
-   stuck around as ghosting. **Fixed** by giving all six of these
-   primitives the same GPU-submission path as the four polygon primitives
-   already had (`gpu_submit_flat_rectangle()`/`gpu_submit_textured_
-   rectangle()` in `psx.cpp`, each rectangle/sprite becoming two triangles).
-   Since `psxgpu_device` is shared across every PS1-based board (see
-   "Active target" above), this was a latent bug for any game on any of
-   those boards that leans on rectangle/sprite primitives, not just
-   `gdarius2` - worth re-testing `starswep`/other already-verified romsets
-   if picking this back up.
-3. **Debugging note**: `gdb` on this `mame-dev` Distrobox hits an internal
-   GDB bug (`ext_lang_guard: Assertion 'is_main_thread()' failed`) when it
-   tries to canonicalize a deeply-templated type name from
-   `mame_libretro.so`'s debug info (a `make_cosine_table<0,1,2,...>` audio
-   DSP table) as soon as any new thread appears - crashes GDB itself, not
-   the target. Workaround that got a real backtrace: `set auto-solib-add
-   off` before `run`, then `sharedlibrary mame_libretro` after the crash to
-   load symbols only for the one library actually needed, avoiding
-   whatever triggers the bad type lookup in the other libraries.
-4. **Correctness, round 2** (same-shaped ghosting bug, found via `starswep`
-   regression-testing item 2 above: 2D-only attract-mode content - no 3D
-   geometry involved at all - visibly ghosted the same way, confirmed via
-   live testing to not happen with the GPU path disabled). The item-2 fix
-   only covered rectangle/sprite primitives; every *other* primitive that
-   can land on screen was still software-only: `Dot`/`TexturedDot`,
-   `MonochromeLine`/`GouraudLine`, GP0 `0x02` "Fill Rectangle in VRAM", GP0
-   `0x80` "Move Image in Frame Buffer" (VRAM-to-VRAM copy), and GP0 `0xA0`
-   "Copy Rectangle (CPU to VRAM)" - the standard way PS1 games DMA
-   pre-rendered 2D art (logos, backgrounds, UI) straight into VRAM, and the
-   dominant cause of this particular bug given the "2D-only, no 3D" shape.
-   **Fixed** by routing all of these to the GPU target too:
-   - `0x02`/`0xA0` are absolute-VRAM-address, no-draw-area-clip commands on
-     real hardware (matching their software implementations, which skip
-     both `n_drawoffset_x/y` and the `n_drawarea_*` clip check) - new
-     `gpu_force_no_clip()` pushes a full-target CLIP command and
-     invalidates the clip cache so the *next* real primitive unconditionally
-     restores the game's actual draw area afterward.
-   - `0xA0` specifically is implemented as a textured-quad "stamp" sampling
-     the whole-VRAM texture (`gpu_submit_image_stamp()`) rather than
-     re-uploading the transferred bytes as a second texture - the transfer
-     still writes `p_vram` exactly as before (now serving only as this
-     frame's `upload_vram()` source, not the visible framebuffer), and
-     since this target's local coordinate space already equals VRAM-
-     absolute address space (every offset-relative primitive ends up at
-     `coord + n_drawoffset` == the VRAM address it's specified relative
-     to), the stamp's destination and its source UV in the VRAM texture
-     are literally the same numbers.
-   - `0x80` (MoveImage) is different: its source may be GPU-rendered
-     content (a polygon/rectangle/sprite from earlier this frame or a
-     prior one) that was *never* written back to `p_vram`, so sampling the
-     VRAM texture would be wrong. Implemented as a real GPU-side
-     framebuffer-to-itself blit instead - new `osd::gpu_render_target::
-     copy_rect()` (default no-op in the interface, `retro_gpu_target`'s
-     implementation uses `glBlitFramebuffer` with the same FBO bound as
-     both read and draw, temporarily disabling the scissor test) - and a
-     new `COPY` kind in `psxgpu_device::m_gpu_queue` so it replays at the
-     correct point in the frame's command order, same as `TEXPARAM`/`CLIP`.
-   - `Dot`/`TexturedDot`/lines *do* respect draw offset and the draw-area
-     clip on real hardware (confirmed in their software implementations),
-     so these go through the normal `gpu_submit_triangle_pair()` path
-     rather than the no-clip one - a 1x1 quad for dots, a thin
-     (half-scaled-pixel-wide) quad along the segment for lines, reusing
-     the existing triangle/blend infrastructure rather than adding a new
-     `GL_LINES` draw path.
-   Verified: `starswep` attract mode no longer ghosts; `gdarius2` and
-   `brvblade` re-confirmed unaffected (both still crash-free, ghosting-free).
-5. **Correctness, round 3 - display-start/double-buffering and overscan
-   border cropping** (found via `raystorm`/RayStorm, Taito, same
-   `src/mame/sony/zn.cpp` board as `gdarius2`): a duplicated strip of the
-   top of the screen reappeared near the bottom, and separately a small
-   block of what turned out to be raw CLUT (palette) data was visible in
-   a corner - neither is a primitive-routing gap like items 2/4 above;
-   both come from `gpu_update_screen()`'s final readback/compositing step
-   never having replicated two things the software display path
-   (`update_screen()`, further down in `psx.cpp`) already does correctly:
-   - **Display-start windowing**: GP1 0x05 lets a game point "display
-     start" anywhere in VRAM - `raystorm` flips `n_displaystarty` between
-     `0` and `240` every frame, real PS1 double buffering (draw into
-     whichever half isn't currently selected, then flip). The GPU path
-     always read back target-local `(0,0)`, ignoring `n_displaystarty`/
-     `m_n_displaystartx` entirely, so the *fixed* window it read from a
-     *persistent* (never-fully-cleared, see Phase 2 item 3) target could
-     miss whichever half was actually current. Also required enlarging
-     the GPU target itself from `n_screenheight` to full `m_vram_height`
-     (previously draw-offset-relative geometry aimed at the "hidden" half
-     of a double-buffered scene landed outside the target and was
-     silently discarded - `gpu_force_no_clip()`'s bounds needed the same
-     enlargement, or it would incorrectly scissor absolute-VRAM commands
-     aimed at that hidden half).
-   - **Overscan border cropping**: the software path only ever shows the
-     `n_vert_disstart`/`n_vert_disend`/`n_horiz_disstart`/`n_horiz_disend`-
-     bounded window and paints solid black everywhere else (with PAL/NTSC
-     `n_overscantop`/`n_overscanleft` constants) - real PS1 games rely on
-     that crop, routinely stashing non-image scratch data (CLUT tables,
-     work buffers) in the border, counting on real hardware never
-     scanning it out. The GPU path showed the *raw* `n_screenwidth` x
-     `n_screenheight` canvas verbatim, so `raystorm`'s CLUT swatch - safely
-     invisible on real hardware and under the software path - became a
-     visible artifact.
-   **Fixed** by porting both algorithms from `update_screen()` into
-   `gpu_update_screen()`: same PAL/NTSC/interlace/`b_reverseflag` branches,
-   same border-fill-then-windowed-copy structure, with the copy step
-   reading from `n_displaystarty`/`m_n_displaystartx` (wrapped modulo the
-   now-larger target) instead of `(0,0)`. Debugging note: got the exact
-   `n_displaystarty`/`n_drawoffset_y` values and target dimensions in play
-   via temporary `fprintf(stderr, ...)` calls at the GP1 0x05 write site
-   and the top of `gpu_update_screen()` - removed once confirmed; worth
-   the same trick again for any future "GPU path shows something
-   different from what should be visible" bug in this device, since
-   VERBOSE-gated `LOGMASKED` calls need a rebuild to toggle and are easy
-   to drown in unrelated log lines otherwise. Verified via screenshot
-   (at the time with `spectacle` - don't: use RetroArch's own screenshot,
-   see "Screenshots" under "Debugging / monitoring progress") across three passes - fixed the vertical jump the
-   display-start fix alone introduced, then fixed the still-remaining
-   duplicate band and CLUT swatch with the border-crop fix; `gdarius2`,
-   `starswep`, `brvblade` re-confirmed unaffected.
-
-### Taito G-NET (`src/mame/sony/taitogn.cpp`) - confirmed working, no code changes needed (2026-09-17)
-
-`taitogn_state` directly inherits `zn_state` (`taitogn.cpp:347-348`) - the
-exact same base class `gdarius2`/`raystorm`/`brvblade` use - and its
-`coh3002t()` machine config calls `zn2()` (`zn.cpp:91-96`), which wires up
-the identical `psxgpu_device` (`CXD8654Q`, 2MB VRAM instead of the 1MB on
-the ZN1 boards tested above - `m_vram_height` comes out to 1024 instead of
-512, already handled dynamically, no special-casing needed). No
-`screen_update` override, no custom video file - `taitogn.cpp` has zero
-driver-specific video code. Confirmed live: booted **RayCrisis** (`raycris`)
-with `mame_psx_gpu_hle = "2x"` already set, clean boot, GPU target
-initialized, `SET_SYSTEM_AV_INFO: 512x480` (correctly 2x-scaled), no
-crashes, reached real attract-mode gameplay.
-
-**G-NET titles are CHD-based** (PC-card flash disk images), unlike the
-ZIP-only ZN1/ZN2 games tested elsewhere in this doc - `raycris`/`raycrisj`
-are the only ones with CHDs in the local collection; `chaoshea`, `shikigam`,
-`spuzbobl` etc. only have the BIOS/flash ROM zips, not their matching CHDs,
-so aren't testable here without those disk images. Loading quirk: pointing
-RetroArch at the `.chd` file directly failed (`Error: unknown option:
-raycris`, a content-parsing bug in this OSD unrelated to the PS1 GPU work) -
-pointing at the **containing directory** instead (e.g.
-`mame-roms/roms/raycris/`) works.
-
-**Long boot sequence is real hardware behavior, not fixable** - real G-NET
-boards re-flash their PC-card contents against onboard flash chips on
-every boot where the cart doesn't already match, taking "approximately 2-3
-minutes" per the driver's own source comment (`taitogn.cpp:17-22`); MAME's
-`intelfsh16_device` emulation faithfully reproduces this. It's a one-time
-cost, not a per-launch one, though: this OSD already persists flash chip
-contents via MAME's standard NVRAM mechanism (`-nvram_directory`, wired up
-in `retro_init.cpp` - confirmed real files being written to
-`<retroarch system dir>/mame/nvram/<gamename>/` on clean exit: `firm`,
-`wave0`-`wave2`, `zoomprog`, `at28c16`). Verified via timing: a clean-NVRAM
-`raycris` boot took ~4 minutes to reach attract-mode gameplay; relaunching
-immediately after (NVRAM now populated from that completed boot) reached
-the same milestone in well under 90 seconds - roughly 3x faster, matching
-what a real cabinet would do on a cart it's already flashed once. **The
-practical guidance, not a bug to chase**: let the very first boot of each
-G-NET title run to completion (don't kill it early) - every launch after
-that will be fast, same as real hardware.
-
-### Next planned work: rendering quality (PGXP-style correction) - not started
-
-**User's intent (2026-09-16): this is the next thing to work on, in a
-future session** (explicitly not the same day Phase 3 finished). Phases
-1-3 above are done and working; this is new, not-yet-started work.
-
-Current GPU path deliberately/inherently reproduces two classic PS1
-visual characteristics: affine texture warping (the vertex shader hardcodes
-`w=1.0`, disabling perspective-correct UV interpolation - see
-`retro_gpu_target.cpp`'s `vertex_shader_src`) and geometry wobble (the
-vertices we render are the same integer-truncated screen coordinates the
-real GPU always received - the CPU-side GTE's low-precision fixed-point
-math is what causes this, and `psxgpu_device`/`psx.cpp` - everything
-touched so far - has never had access to real per-vertex depth to do
-anything about it). Fixing either one for real needs the same missing
-ingredient (real per-vertex depth), which means the same underlying
-technique - **PGXP-style GTE interception** (`src/devices/cpu/psx/gte.cpp`,
-opcodes **RTPS**/**RTPT** - completely different, untouched code from
-Phase 1-3, belonging to `psxcpu_device` not `psxgpu_device`) - would
-address both at once, not two separate projects. Full technical grounding,
-including why running Brave Blade in a console-only PS1 core (e.g. Beetle
-PSX HW) instead was considered and rejected (Brave Blade is Sony ZN-2
-**arcade** hardware, not a retail PS1 game - MAME already solved the hard
-"arcade platform compatibility" part; a console core has none of that),
-is in `/home/bazzite/.claude/plans/glowing-conjuring-raven.md`'s "Phase 4"
-section - **read that before starting**, nothing below is a
-substitute for it.
-
-### PGXP 2D geometry tolerance - seams between background polygons (2026-09-21)
-
-Found via `cbaj` (Cool Boarders Arcade Jam, `zn.cpp`): visible seams between
-background scenery polygons with PGXP on. Cause: `gpu_resolve_polygon_pgxp()`
-reverted a *whole* polygon to native integer x/y if any one vertex had no
-PGXP shadow, so it sat on integer coordinates while its neighbour (sharing
-that edge) stayed on sub-pixel PGXP coordinates. Fixed by porting Beetle PSX
-HW's `pgxp_2d_tol` behaviour (`mednafen/psx/gpu_polygon.c`, the `invalidW`
-branch): on a partial miss keep each vertex's PGXP x/y, force w=1 on the whole
-primitive (that alone prevents the mixed-depth texture "warp"), and revert a
-vertex to native only if it moved more than N native pixels.
-New core option **`mame_psx_gpu_pgxp_tol`** (`legacy`/`disabled`/`0px`-`8px`,
-default **`1px`**; `legacy` = the old all-or-nothing behaviour, `disabled` =
-Beetle's default of never reverting), plumbed through
-`osd_interface::gpu_render_pgxp_tolerance()` into `psxgpu_device::
-m_gpu_pgxp_tolerance` (-2 legacy, -1 disabled, >=0 px). Live-tested by
-comparing on `cbaj`: 1px looked best (better than `disabled` and 4px);
-`brvblade` and `raystorm` re-verified with no regressions. Not yet
-re-tested: `gdarius2`, `starswep`, `raycris`.
-
-### GPU path skipped the PS1 oversized-triangle cull - brvbladej blue screen (2026-09-21)
-
-Found via a `brvbladej` save state (level 2, just before player death): the
-whole play area was covered in flat teal with only "INSERT COIN/S" visible.
-**Not PGXP-related** - reproduced identically with `mame_psx_gpu_pgxp =
-disabled`; software rendering (`mame_psx_gpu_hle = disabled`) was correct.
-A temporary per-frame trace (`fprintf` in `gpu_queue_triangle_pair`, since
-removed) showed 10-14 opaque textured quads per frame with vertices ~+-1000
-native px off-screen. The real GPU (and MAME's software path, `CullVertex`/
-`CULLTRIANGLE`/`FINDTOPLEFT` in `psx.cpp`) silently discards any triangle with
-two vertices >1023 apart in x or y; the four polygon `gpu_submit_*` functions
-returned to the GPU path *before* that cull ran, so those quads got drawn at
-full size. **Fixed** via `psxgpu_device::gpu_polygon_cull_mask()`, passed as
-`cull_mask` through `gpu_submit_triangle_pair()`/`gpu_queue_triangle_pair()`
-(quad = triangles (0,1,2)/(1,2,3), culled independently, on raw S11 native
-coordinates - not PGXP ones). Verified against the same paused state: now
-matches the software frame exactly. Hypotheses ruled out on the way: GP0 E6
-mask bits (never set on any triangle across 760 frames of trace), blend modes
-(all opaque).
-
-**Debug technique worth reusing**: to screenshot a specific game state
-deterministically, copy the `.state` to `~/.config/retroarch/states/MAME/
-<romname>.state`, launch with `-e 0 --appendconfig <file containing
-network_cmd_enable = "true"` and `screenshot_directory = "<dir>"`>`, wait for
-the GPU-target-initialized log line, send `PAUSE_TOGGLE` via UDP to
-127.0.0.1:55355 (python3 socket - no `nc` here), then send `SCREENSHOT` the
-same way (RetroArch's own screen save). A save state restores software
-VRAM only, not the GPU target's persistent framebuffer.
-
-### Beetle PSX HW parity review (2026-09-21)
-
-Rule of thumb from the user: **Beetle PSX HW (`libretro/beetle-psx-libretro`)
-is the gold standard - port its behaviour rather than inventing our own.**
-Reviewed its hardware renderer (`rhi/shaders_gl/command_fragment.glsl.h`,
-`mednafen/psx/gpu*.c`) against the GPU path. Done so far:
-- **Per-texel STP (bit 15) semi-transparency**: two-pass draw (`u_stp_mode`),
-  filtered STP interpolated with the filter weights, opacity < 0.5 dropped,
-  exactly as Beetle's `draw_semi_transparent` split.
-- **Texture window (GP0 E2)**: `set_texture_window()` -> `u_tw_*` uniforms,
-  `(u & and) + off` applied in `fetch_bgr()`. **Not yet observed in any game**
-  (brvblade/raystorm/cbaj/starswep/gdarius2 never write a non-identity window
-  in attract mode) - regression-checked only.
-- **UV nudge for flipped 2D sprites** (`gpu_apply_uv_offsets()`, port of
-  `Calc_UVOffsets_Adjust_Verts`) plus the max-1 UV-clamp trim for likely-2D
-  primitives. Polygons only (Beetle doesn't touch rectangles; the Wild Arms 2
-  special case isn't ported). Triggers on ~2.7% of textured polys in the
-  `brvbladej` level-2 scene; no arcade title with a known visible fix found.
-- **24-bit display mode** (MDEC movies): `gpu_update_screen()` decodes packed
-  24-bit VRAM from `p_p_vram` exactly like the software `update_screen()`
-  branch, replicated by render scale. Found via `tektagt` (Tekken Tag intro
-  FMV rendered as rainbow noise). Fixed.
-- **PGXP vertex cache** (`mame_psx_gpu_pgxp_vcache`, **default on** since
-  2026-09-21 - Beetle's `pgxp_vertex` defaults off, ours was verified on tektagt,
-  raystorm and brvblade first): `gte::pgxp_vcache_write()`/`pgxp_vertex_cache_query()`, a
-  port of `PGXP_CacheVertex`/`PGXP_GetCachedVertex` - per-integer-pixel table of
-  GTE-transformed vertices, session opens on first write after a read,
-  ambiguous cells refuse. Used only when a vertex has no direct RAM-address
-  shadow; returns precise x/y but drops w (Beetle's `valid_w = 0`), so it
-  pairs with the tolerance option (not `legacy`). Measured on `tektagt`:
-  only ~28% of polygon vertices had a direct shadow (412k direct vs 1.05M
-  miss in 55s); the cache recovered ~787k of the misses (~75%), leaving ~317k.
-  Live result: character-limb seams went from obvious to barely noticeable.
-  Checked with it on: tektagt, raystorm, brvblade. Not yet: starswep,
-  gdarius2, raycris, cbaj, Namco/Konami boards.
-- **Interleaved texture pages (type-1 GPU, tpage bit 13 / `n_ti`)**: Konami GQ
-  (`cryptklr`) stores 4bpp/8bpp textures interleaved; `fetch_bgr()` now applies
-  the software `TEXTUREINTERLEAVED4BIT/8BIT` addressing
-  (`set_texture_interleave()`, carried with the texture-window state). Without
-  it every such texture was scrambled into row stripes. The VRAM image stamp
-  is now forced to the identity window / non-interleaved (it samples absolute
-  VRAM, not a real texture). Verified on `cryptklr` (intro cinematic +
-  attract gameplay clean, vertex cache on).
-- **Oversized-triangle cull** uses Beetle/hardware limits (>=1024 in x, >=512
-  in y), not MAME software's 1023-both-axes.
-Known remaining gaps vs Beetle (not done; a mask-bit usage survey across the
-collection was started but paused - only `ts2` (1.68M tris, no flags) and
-`tektagt` (90k tris, no flags) measured): mask bits (GP0 E6 set/check - needs
-framebuffer feedback), dithering (GP0 E1 bit 9; MAME's own software path has
-none either), `line_render` hack (degenerate textured triangles as lines),
-PGXP nclip / widescreen hack, extra filters (JINC2/SABR/xBR), SSAA/adaptive smoothing.
-
-### Other candidates (not currently being worked, kept for reference)
-
-Ranked by how self-contained/impactful their software rasterizer is. Line
-counts are for the whole file at investigation time — expect drift after
-upstream merges.
-
-| Driver | Video/rasterizer file(s) | Test romset(s) available | Notes |
-|---|---|---|---|
-| Sega Model 2 | `src/mame/sega/model2_v.cpp` (~2450 lines) | `daytona`, `vf2`, `fvipers`, `lastbrnx`, `von` | Custom quad/polygon rasterizer, well-isolated from the rest of `model2.cpp`. Good first target. |
-| Sega Model 3 | `src/mame/sega/model3_v.cpp` (~2500 lines) | `daytona2` | Texture-mapped Gouraud triangles, more complex than Model 2. |
-| Namco System 22 (**done 2026-10-24**, see `my-docs/3D-Enhanced-Games.md`) | `src/mame/namco/namcos22_v.cpp` (~2700 lines), `namcos22_gpu.ipp` | `ridgerac`, `timecris`, `acedrive`, `cybrcomm` | Uses the shared legacy software polygon helper (`src/mame/ausnz/poly.h` / `src/devices/video/poly.h`). |
-| Namco System 11 (3D) | `src/mame/namco/namcos11.cpp` | `starswep` | PS1-derived 3D hardware, simpler than System 22/23. |
-| Konami GTI Club-class | `src/mame/konami/gticlub.cpp`, `nwk-tr.cpp`, `hornet.cpp` | `gticlub`, `hangplt`, `thrilld`, `gradius4` | Custom 3D chip (K001005/K001006) does the real rasterizing. **Correction (2026-09-17)**: these files also wire a `generic_voodoo_device` into their memory map (via `konppc_device`), but it's bus/register glue only, not the renderer — confirmed no `K001005`/`K001006` config exists without it and the Voodoo device has no framebuffer/screen of its own here. Not a Voodoo rasterizer target. |
-| Konami (3D, other) | `src/mame/konami/konamigv.cpp` | `nagano98` | PS1-derived GV system (uses `psxgpu_device`, same device already GPU-accelerated for Sony ZN — see "Active target" above). `nagano98` needs its CHD (`nagano98/nagano98.chd`), being added 2026-09-26. |
-| Midway "Vegas Flavor" | `src/mame/williams/midvunit.cpp` | `crusnusa`, `crusnwld`, `offroadc` | **Correction (2026-09-17)**: does **not** use `voodoo*.cpp` — has its own self-contained rasterizer, `midvunit_renderer : poly_manager<...>` in `midvunit_v.cpp`. Custom TMS34010-driven polygon rasterizer, not Voodoo-based. Kept here as a candidate in its own right, not as a Voodoo target. |
-| Midway "Seattle" (Voodoo 1) | `src/mame/williams/seattle.cpp` | `sfrush`, `sfrushrk`, `mace`, `calspeed`, `vaportrx`, `carnevil`, `hyprdriv` | True Voodoo-rasterizer target (`voodoo_render.cpp`, ~2900 lines total). Entry point: `enqueue_triangle()` in `src/devices/video/voodoo.cpp:3015`. Best-covered board in the local ROM collection. |
-| Midway "Vegas" (Voodoo 2) | `src/mame/williams/vegas.cpp` | `gauntleg`, `tenthdeg`, `gauntdl`, `warfa`, `roadburn`, `sf2049`, `cartfury` | Also a true Voodoo target, same device/entry point as Seattle above. Second-best-covered board locally. |
-| Midway "Quicksilver" (Voodoo 2, PCI) | `src/mame/williams/midqslvr.cpp` | none locally (`hydrthnd`, `offrthnd`, `arctthnd` not in collection) | True Voodoo target, PCI-attached like the PC-based systems below rather than a fixed on-board device. |
-| Konami Viper (Voodoo 3/Banshee) | `src/mame/konami/viper.cpp` | `kviper`, `code1d`, `gticlub2`, `jpark3`, `thrild2`, `wcombat`, `xtrial` | True Voodoo target (`voodoo_banshee.cpp`/`voodoo_3_device`). Note: despite the name, `gticlub2` here is unrelated to the K001005-based original `gticlub` above — Viper-era GTI Club 2 really is Voodoo-rendered. |
-| ITEagle (Voodoo 3) | `src/mame/itech/iteagle.cpp` | `iteagle`, `virtpool`, `carnking`, `bbh` | True Voodoo target. |
-| PC-based arcade systems (Voodoo as a real PCI card) | `src/mame/misc/comebaby.cpp`, `funkball.cpp`, `gammagic.cpp`, `magictg.cpp`, `savquest.cpp`, `xtom3d.cpp`, `src/mame/pc/quakeat.cpp`, `src/mame/taito/taitowlf.cpp` | `pumpitup` (+ ~18 variants, `xtom3d.cpp`) is the only one locally available | Embedded-PC arcade systems with genuine Voodoo 1/2/Banshee PCI cards; same `voodoo_render.cpp` pipeline as the dedicated boards above but reached through `voodoo_pci.cpp`. |
-| Midway Zeus | `src/mame/williams/midzeus.cpp` | `mk4`, `invasnab` | Custom "Zeus" 3D chip, not Voodoo. |
-| Nintendo 64 (RDP) / Aleck64 | `src/mame/nintendo/n64_v.h` (~4200 lines), `src/mame/nintendo/aleck64.cpp` | `aleck64` | N64's actual 3D pipeline (RDP) — most complex/most faithfully-emulated candidate, high risk/reward. |
-
-Romset → driver mappings above were confirmed by grepping `GAME(...)` macros
-in `src/mame` against what's actually on disk (see "Test ROMs" below) — re-run
-that check if retargeting to a romset not listed here.
-
-The generic legacy rasterizer helper `poly.h` is used by ~22 files across
-`src/mame` — worth checking as a single integration point if a driver uses it,
-rather than hand-writing GPU replacement code per driver.
-
-There is **no existing GPU-passthrough precedent** in any of these — all are
-pure software rasterizers today. This is genuinely green-field work in this
-codebase, not a matter of flipping on a hidden fast path.
+The first and most shared GPU-offloaded target, used by Sony ZN (`zn.cpp`, Brave Blade), Taito G-NET
+(`taitogn.cpp`), Konami GQ/GV/573/Twinkle, Namco System 10/11/12 and the PS1 console driver. A regression
+affects every board, so test more than one (`brvblade`, `starswep`, `gdarius2`, `raystorm`, `raycris`; `nagano98`
+needs its CHD). Core option `mame_psx_gpu_hle` (disabled/2x/4x). Invariants learned the hard way:
+- The GPU target is a **persistent framebuffer like real VRAM**: clear only on allocation, never per frame.
+- **Every** primitive that lands on screen must reach the GPU target (polygons, rectangles, sprites, dots, lines,
+  GP0 `0x02` fill, `0x80` VRAM copy, `0xA0` CPU-to-VRAM stamp), or stale pixels ghost. `0x02`/`0xA0` ignore the
+  draw-area clip and draw offset (`gpu_force_no_clip()`); `0x80` is a GPU-side copy because its source may exist
+  only on the GPU.
+- Respect the draw-area clip, the **oversized-triangle cull** (>=1024 in x, >=512 in y, on raw native coordinates),
+  display-start windowing (double buffering), overscan border cropping, 24-bit display mode and interleaved
+  texture pages, exactly as the software `update_screen()` does. The target is the full VRAM height.
+- Pre-scale the libretro OSD's `max_width`/`max_height` by the GPU scale in `retro_load_game()`; crossing the
+  ceiling forces a full `SET_SYSTEM_AV_INFO` and RetroArch's threaded video driver crashes on that reinit.
+- PGXP lives in `src/devices/cpu/psx/gte.cpp` (RTPS/RTPT) with options `mame_psx_gpu_pgxp*`
+  (`_tol`, `_vcache`). **Beetle PSX HW (`libretro/beetle-psx-libretro`) is the gold standard: read its source and
+  port its behaviour rather than inventing a fix.**
+- G-NET titles are CHD-based and the first boot reflashes for ~4 minutes (real hardware behaviour); let it finish,
+  later boots take under 90 s. Point RetroArch at the containing directory, not the `.chd`.
 
 ## Building
 
 ```sh
-# Preferred (2026-10-16): -j10 in a scope that systemd-oomd leaves alone
+# Preferred: -j10 in a scope that systemd-oomd leaves alone
 systemd-run --user --scope -p ManagedOOMPreference=omit -- \
   env MAME_DYNAMIC_LIBSTDCXX=1 make -f Makefile.libretro -j10 PREMAKE=0 SOURCEFILTER=fork-specific/arcade.flt
-make -f Makefile.libretro -j4          # fallback without the scope (see -j note below)
+make -f Makefile.libretro -j4          # fallback without the scope
 ```
 
-- **Use `-j10` (the user approved it 2026-10-17; the large 2026-10-17 `-j8` rebuild after an `osdepend.h` edit finished clean) inside the `systemd-run` scope above.** Earlier `-j8`/`-j16` full-ish
-  rebuilds were killed mid-build with RAM free again immediately afterwards (no kernel
-  OOM). `oomctl` shows systemd-oomd monitors the user session at 80% memory pressure for
-  20 s (60% for the Konsole scope), so it is the likely culprit, but the original kills
-  predate a reboot and weren't confirmed. The scope's
-  `ManagedOOMPreference=omit` exempts the build from oomd. A small `-j8` rebuild of 8
-  heavy objects was fine (peak pressure 0.5%); **the next upstream sync is the real
-  test**. If a build still dies with the exemption, oomd wasn't the cause: check
-  `journalctl -u systemd-oomd` and `journalctl -k | grep -i oom`, then go back to `-j4`.
-  Without the scope, stay on `-j4`.
+- Output: `mame_libretro.so` at the repo root. Use `-j10` only inside the `systemd-run` scope (earlier `-j8`/`-j16`
+  builds were killed, probably by systemd-oomd); without the scope use `-j4`. If a build still dies, check
+  `journalctl -u systemd-oomd` and `journalctl -k | grep -i oom`.
+- **Run the build with the Bash tool's `run_in_background`**, output to a log ending in a `BUILD-EXIT=$?` marker.
+  Never write `pgrep -f` wait loops or `pkill -f` (the pattern matches the waiting shell itself).
+- **`MAME_DYNAMIC_LIBSTDCXX=1`** is required on this machine (only the 32-bit static `libstdc++.a` is installed;
+  upstream's `-static-libstdc++` link fails otherwise).
+- `DEBUG=1 make -f Makefile.libretro ...` builds with symbols (`CONFIG=libretrodbg`) for gdb/perf.
+- No `SUBTARGET` is set, so a full build compiles every driver (~4,600 files); always use the arcade filter below.
+- **The make wrapper intermittently skips genie regeneration** after a `.lua` edit. Run genie directly, confirm
+  `Generating "..."` output, grep the generated `.make` file for your change, then build with `PREMAKE=0`:
+  ```sh
+  MAME_DYNAMIC_LIBSTDCXX=1 3rdparty/genie/bin/linux/genie --LIBRETRO_CPU=x86_64 --with-emulator --OPTIMIZE=3 \
+    --NOWERROR='1' --target='mame' --subtarget='mame' --build-dir='build' --NO_USE_MIDI='1' --NO_USE_PORTAUDIO='1' \
+    --PYTHON_EXECUTABLE='python3' --SOURCEFILTER='fork-specific/arcade.flt' --HAVE_RETRO_GPU_TARGET='1' \
+    --osd='retro' --targetos='linux' --PLATFORM='x86' --gcc=linux-gcc --gcc_version=16.2.1 gmake
+  ```
+- Generated object rules depend on `$(MAKEFILE)`, which is never defined, so **changing only a define/flag never
+  recompiles an object**: `rm` the specific stale `.o` files.
+- **After force-killing a build**, run `find build/libretro/obj -name "*.o" -size 0` and delete any hits. Killing
+  just the top-level `make` is not enough; kill the whole process group. A truncated `.o` links "successfully"
+  but gives undefined symbols at `dlopen()` time.
 
-- glslang (bgfx's vendored copy, the `glslang` project in `scripts/src/3rdparty.lua`) is compiled into the core when
-  `HAVE_RETRO_GPU_TARGET` is set, for run-time shader compilation. The Vulkan loader is `dlopen()`ed at run time, so
-  there is no build-time Vulkan dependency.
-- Output: `mame_libretro.so` at the repo root (GENie appends the
-  `_libretro` target suffix; see `scripts/src/main.lua`).
-- `DEBUG=1 make -f Makefile.libretro ...` switches to `CONFIG=libretrodbg`
-  (`SYMBOLS=1 SYMLEVEL=1 OPTIMIZE=g`) — use this when you need gdb/perf
-  symbols on rasterizer code you're rewriting.
-- No `SUBTARGET` is set by default, so **a full build compiles every driver in
-  MAME** (~4,600 source files) — this genuinely takes a long time and pegs all
-  cores; a full `-j16` build was aborted mid-run during initial setup of this
-  project rather than let it run to completion unattended. Prefer the
-  arcade-only filter below while iterating.
-- **`MAME_DYNAMIC_LIBSTDCXX=1`** — set this env var when invoking `make` on
-  this machine. Upstream unconditionally links `-static-libgcc -static-libstdc++`
-  on Linux (`scripts/genie.lua`, "See #137" — for portable prebuilt-core
-  distribution across distros), but this host only has the 32-bit static
-  `libstdc++.a` installed, not 64-bit, so the link fails with `cannot find
-  -lstdc++` without this flag. The opt-out (added to `scripts/genie.lua`) falls
-  back to dynamically linking the system's `libstdc++.so`, which is fine when
-  building and running on the same machine. Full invocation:
-  `MAME_DYNAMIC_LIBSTDCXX=1 make -f Makefile.libretro -j4 SOURCEFILTER=fork-specific/arcade.flt`.
-- **If you ever force-kill a build mid-compile** (e.g. `kill -9 -<pgid>` on a
-  runaway job — note killing just the top-level `make` PID is not enough, its
-  per-directory child `make` processes keep spawning compiler jobs; kill the
-  whole process group), **check for zero-byte object files before trusting the
-  next incremental build**: `find build/libretro/obj -name "*.o" -size 0`.
-  GCC can leave a truncated/empty `.o` on disk when killed mid-write, and
-  incremental `make` won't recompile it (source `.cpp` mtime hasn't changed),
-  silently producing a `.so` that links "successfully" but has undefined
-  symbols at `dlopen()` time in RetroArch (hit this once with
-  `src/mame/atlus/cave.cpp` → `undefined symbol: driver_agallet`). Fix: `rm`
-  the zero-byte `.o` files, rebuild.
+### Arcade-only build filter
 
-### Arcade-only build filter (much faster iteration)
+`fork-specific/arcade.flt` is a `SOURCEFILTER=` list of `src/mame/<mfg>/<driver>.cpp` paths (relative to the repo
+root) restricting the build to video-game driver files. It is tracked in git and used by Batocera builds, so it is
+the only copy. Every GPU candidate driver is arcade and stays in. `fork-specific/tools/prune_arcade_filter.py`
+strips fruit machines, slots/poker/bingo, mahjong, quiz, pinball, mechanical games and consoles/computers (wrongly
+caught video games go in its `KEEP_GAMES`, missed files in `EXCLUDE_FILES`/`EXCLUDE_DIRS`); the remaining romsets
+are listed in `fork-specific/arcade-games.txt`.
 
-`fork-specific/arcade.flt` is a `SOURCEFILTER=` file — a plain list of
-`src/mame/<mfg>/<driver>.cpp` paths, one per line — that restricts the build to
-files declaring at least one `GAME()`/`GAMEL()` (arcade) system, dropping
-console/computer/gambling/mechanical (`CONS`/`COMP`/`SYST`)-only driver files
-entirely. **Every GPU-offload candidate driver in this project (Model 2/3,
-Namco System 22/23, N64/Aleck64, Voodoo-based games) is arcade and stays in.**
-Reference numbers (from `/var/home/bazzite/Projects/libretro/speed-mame/README.md`,
-verified to match this exact checkout byte-for-byte): 2,639 of 4,628 driver
-files kept, ~28% smaller `mame_libretro.so`, dramatically fewer files to
-recompile on a full build.
-
-```sh
-make -f Makefile.libretro -j4 SOURCEFILTER=fork-specific/arcade.flt
-```
-
-`Makefile.libretro` was patched (mirroring its existing `SOURCES=` passthrough)
-to forward `SOURCEFILTER=` to the underlying GENie build — see the
-`TARGETFLAGS` block. The filter is tracked in git (since 2026-09-26; before
-that it was an untracked root `arcade.flt`, with a separate copy in batocera).
-Batocera's `libretro-mame.mk` builds with this same file, so it's the only
-copy. Paths are relative to the repo root (genie joins them with `MAME_DIR`).
-
-**Video games only (2026-09-29)**: `fork-specific/tools/prune_arcade_filter.py` strips
-fruit machines, casino/video slots/poker/bingo/medal games, mahjong/hanafuda, quiz,
-pinball, mechanical games (cranes, pushers, redemption, `MACHINE_MECHANICAL`) and
-console/computer systems. It drops files whose games are all excluded, and adds
-`-name` lines for excluded games in files it keeps (they still compile but aren't in
-the driver list). It keeps any parent/BIOS a kept game needs. Wrongly caught video games
-go in its `KEEP_GAMES`, missed files in `EXCLUDE_FILES`/`EXCLUDE_DIRS`. The remaining
-romsets are listed in `fork-specific/arcade-games.txt`.
-
-**Regenerating** (needed after any upstream merge that renames, moves or splits
-`src/mame/` driver files. The 2026-09-26 mamedev sync needed it. Commit the
-regenerated file with the merge, because batocera builds use it too):
+**Regenerating** (after any upstream merge that renames, moves or splits `src/mame/` driver files; commit it with
+the merge):
 ```sh
 python3 /var/home/bazzite/Projects/libretro/speed-mame/make_arcade_filter.py src/mame fork-specific/arcade.flt
-# then prune it to video games (also rewrites fork-specific/arcade-games.txt):
-python3 fork-specific/tools/prune_arcade_filter.py
-# then validate statically before trusting it:
+python3 fork-specific/tools/prune_arcade_filter.py    # also rewrites fork-specific/arcade-games.txt
 python3 scripts/build/makedep.py -r . filterproject -t mame_arcade -f fork-specific/arcade.flt src/mame/mame.lst > /dev/null
-# expect: exit 0, "N source file(s) found" on stderr, no errors.
+# expect: exit 0, "N source file(s) found" on stderr, no errors
 ```
-The static check alone doesn't catch everything — see
-`/var/home/bazzite/Projects/libretro/speed-mame/README.md` ("Bug found and
-fixed") for a past link-stage failure the generator now avoids (zero-macro
-helper files with no driver macro of their own, pulled in per-directory). A
-real build through to link is the only full proof; watch for `undefined
-reference` warnings even on a `.so` link that exits 0.
+The static check does not catch everything; a real build through to link is the only full proof (watch for
+`undefined reference`). Background: `/var/home/bazzite/Projects/libretro/speed-mame/README.md`.
 
 ## Test ROMs
 
-`/var/home/bazzite/Projects/mame-roms/roms/` contains a working collection of
-~600 romsets and BIOS files (read permission granted for this directory). Use
-it as the source of test content — e.g. `daytona.zip` for Model 2,
-`crusnusa.zip` for a Voodoo-based Midway game. Some drivers need a separate
-BIOS zip alongside the game zip (e.g. `*_bios.zip` files in that directory) —
-check the driver's `ROM_START`/parent-set relationship if a romset fails to
-load. See the candidate driver table above for confirmed available romsets
-per driver.
+**Always launch games (play or testing) from `/var/home/bazzite/Projects/mame-roms/roms/`**: the current WIP set
+with valid CHDs. Some drivers need a separate BIOS zip there; check the driver's `ROM_START` parent relationship
+if a set fails to load. Check a CHD exists before choosing a CHD game. Test ROMs are disposable: delete stale
+`.dif`/nvram/state files that block a test boot without asking.
 
 ## Running/testing in RetroArch
 
-### Finding: the Flatpak RetroArch can't load a host-built core on this machine
-
-RetroArch is installed as a **Flatpak** (`org.libretro.RetroArch`), with the
-`host` filesystem permission — it can read a freshly built `.so` straight out
-of this repo, no need to copy it into its own cores directory. **But this
-host runs glibc 2.43** (bleeding-edge/rolling bazzite), while the Flatpak's
-bundled runtime (`org.kde.Platform` 6.11) only ships **glibc 2.42** — one
-version behind. A core built with this host's toolchain requires symbols
-(`sqrtf`, `acosf`, `atan2f`, `log10f` got a new version in glibc 2.43) the
-Flatpak runtime doesn't have, so it fails to load:
-`libm.so.6: version 'GLIBC_2.43' not found`. No Flatpak runtime update fixes
-this (checked — already latest), and it's not likely to for a while since
-bazzite here is ahead of the Flatpak/Fedora-stable ecosystem.
-
-**Fix in use: a Distrobox container.** A Distrobox named `mame-dev` was
-created from `registry.fedoraproject.org/fedora:rawhide` (glibc 2.44 at time
-of creation — comfortably ahead), with `retroarch` installed inside via
-`sudo dnf install -y retroarch`. Distrobox shares the host's display/audio
-sockets directly (no portal/sandbox runtime mismatch like Flatpak), and
-`/var/home/...` paths are visible inside unchanged since Distrobox shares the
-host `$HOME`.
+The Flatpak RetroArch can't load a host-built core (host glibc 2.43 vs the Flatpak runtime's 2.42). Use the
+**`mame-dev` Distrobox** (Fedora rawhide, RetroArch installed inside, shares `$HOME` and the display):
 
 ```sh
 distrobox enter mame-dev -- retroarch -v -L /var/home/bazzite/Projects/libretro/mame/mame_libretro.so /var/home/bazzite/Projects/mame-roms/roms/daytona.zip
 ```
 
-- **Stall check for single-game runs.** If one game has been running in RetroArch for more than 4 minutes
-  (a smoke test, a screenshot run, a measurement), stop and check whether the run itself has stalled before
-  waiting longer. Attract mode rarely needs that long, so a long session usually means something went wrong:
-  a shader or GL error repeating in the log, a black or frozen frame, a hung boot, a missing ROM/CHD, a
-  blocked dialog. Look at the log tail and take one screenshot, then kill the run (`pkill -x retroarch`, then
-  check `pgrep -x retroarch` is empty) if it is not making progress. Exceptions: a first G-NET boot (about 4
-  minutes), and runs that are meant to be long (soak tests, profiling windows); say so when starting those.
-- `-v` enables verbose frontend logging — useful while iterating on a HW-render path.
-- This RetroArch's config lives at `~/.config/retroarch/` (native install
-  inside the container, shared `$HOME` — so this path is the same whether you
-  read it from inside or outside the container). Per-core option overrides
-  live at `~/.config/retroarch/config/MAME/MAME.opt` (plain `key = "value"`
-  lines, RetroArch rewrites this file, safe to hand-edit between runs).
-- If the Flatpak RetroArch ever becomes usable again on this host (its
-  runtime catches up to glibc 2.43+), its invocation is:
-  `flatpak run org.libretro.RetroArch -v -L <core> <rom>`, config at
-  `~/.var/app/org.libretro.RetroArch/config/retroarch/`.
-- Core options relevant to video are defined in
-  `src/osd/libretro/libretro-internal/libretro_core_options.h` (e.g.
-  `*_alternate_renderer`, `*_altres`, `*_rotation_mode`) — these only affect
-  the software-framebuffer path (scaling/cropping/resolution), not a GPU
-  backend; there's currently nothing here to toggle a hardware renderer on.
+- After any driver-rasterizer or HW-render change, do a real smoke test like this against a romset for that
+  driver. This is accuracy-sensitive code; a clean compile means nothing.
+- **Stall check**: if a single-game run goes past 4 minutes (except a first G-NET boot, or a run meant to be long),
+  look at the log tail and one screenshot; if it is not making progress (repeating shader/GL error, black or
+  frozen frame, hung boot, missing ROM/CHD, blocked dialog), `pkill -x retroarch` and verify `pgrep -x retroarch`
+  is empty. A `timeout` around `distrobox enter` leaves MAME running inside; use `timeout` inside and check
+  `pgrep` after.
+- RetroArch config is `~/.config/retroarch/` (same path inside the container). Per-core option overrides are in
+  `~/.config/retroarch/config/MAME/MAME.opt` (`key = "value"` lines; safe to hand-edit between runs). Core options
+  are defined in `src/osd/libretro/libretro-internal/libretro_core_options.h`.
+- `-v` gives verbose frontend logging.
 
 ## Debugging / monitoring progress
 
-Since the GUI debugger is compiled out (`none.cpp`, see above), MAME's Lua
-console/plugin system is the way to inspect state at runtime. This required
-plumbing (added 2026-09-16) because the libretro OSD didn't wire any of it up
-by default — see "What was added" below if extending it further.
-
-### Using it
-
-Two RetroArch core options control this (category **Debug** in RetroArch's
-Core Options menu, or set directly in
-`~/.config/retroarch/config/MAME/MAME.opt` for the Distrobox RetroArch):
-
-- **`mame_lua_console`** (`disabled`/`enabled`) — passes `-console` to MAME,
-  starting its interactive Lua REPL on stdin/stdout. Only usable when
-  RetroArch itself is launched attached to a real terminal (i.e. run it from
-  a shell, not RetroArch's own GUI launcher) — the console reads/writes that
-  terminal's stdin/stdout directly.
-- **`mame_debug_plugin`** (`none`/`gdbstub`/`cheatfind`/`hiscore`/`timer`) —
-  passes `-plugin <name>`, autostarting one Lua plugin non-interactively (no
-  terminal needed). `gdbstub` (`plugins/gdbstub/`) exposes CPU state via the
-  GDB remote protocol, but **only implements the i386/i486/pentium register
-  map today** — not directly useful for Model 2 (V60/V70), Model 3 (PowerPC),
-  or Namco System 22/23's CPUs without extending its `regmaps` table first.
-
-Both were verified end-to-end against Daytona USA in the `mame-dev` Distrobox:
-clean boot with `mame_debug_plugin = "hiscore"` and separately with
-`mame_lua_console = "enabled"`, matching the same `Geometry:`/no-fatal-error
-signature as a plain run. (RetroArch's own combo-option validation makes a
-true negative test — e.g. a nonexistent plugin name — impossible to construct
-this way: it silently falls back to the option's default rather than passing
-through an invalid string, so absence of a crash there proves RetroArch's
-validation, not MAME's. MAME's own `fatalerror("Could not load plugin: ...")`
-in `src/frontend/mame/mame.cpp` is the real enforcement, confirmed by reading
-the source rather than by triggering it live.)
-
-### What was added (the plumbing itself)
-
-MAME's plugin loading (`src/frontend/mame/mame.cpp::start_luaengine`,
-`pluginopts.cpp`) is core/OSD-agnostic — it was never libretro-specific code
-missing, just nothing telling it to activate. Three things were needed:
-
-1. **Path resolution already worked** — `src/osd/libretro/libretro-internal/retro_init.cpp`'s
-   `Set_Path_Option()` already had a `"-pluginspath"` entry (`opt_name`/`dir_name`
-   arrays, `NB_OPTPATH`) resolving to `<retro_system_directory>/mame/plugins`.
-   Just needed the directory to actually exist there — copied this repo's
-   `plugins/` into `~/.config/retroarch/system/mame/plugins/` (the Distrobox
-   RetroArch's system directory) via `cp -r`. Do the same for any other
-   RetroArch install/environment you test against.
-2. **Two new RetroArch core options** added to
-   `src/osd/libretro/libretro-internal/libretro_core_options.h`
-   (`mame_lua_console`, `mame_debug_plugin`, new "debug" category) — v1/legacy
-   option tables are auto-derived from this at runtime, no need to touch them.
-3. **Wiring**: `check_variables()` in `libretro.cpp` reads the two new RetroArch
-   variables into `lua_console_enable`/`debug_plugin` (declared in
-   `libretro_shared.h`, defined in `retro_init.cpp`); `Set_Default_Option()` in
-   `retro_init.cpp` turns them into `Add_Option("-console")` /
-   `Add_Option("-plugin"); Add_Option(debug_plugin)` — the same pattern every
-   other boolean/string core option in this OSD already uses (mirror
-   `mouse_enable` if adding more).
-
-To add another autostart-able plugin, just add its name to the
-`mame_debug_plugin` value list in `libretro_core_options.h` — no other code
-changes needed, since `-plugin <name>` resolution is generic.
+The graphical debugger is compiled out (`none.cpp`, `USE_QTDEBUG=0`). Use MAME's Lua console/plugins through two
+core options (category **Debug**, or edit `MAME.opt`):
+- **`mame_lua_console`** (`disabled`/`enabled`): passes `-console` (REPL on stdin/stdout; only usable when
+  RetroArch is launched from a real terminal).
+- **`mame_debug_plugin`** (`none`/`gdbstub`/`cheatfind`/`hiscore`/`timer`): passes `-plugin <name>`. `gdbstub` only
+  implements the i386 register map. Plugins are read from `<retroarch system dir>/mame/plugins`
+  (`~/.config/retroarch/system/mame/plugins/`); copy this repo's `plugins/` there. To add a plugin, add its name to
+  the option's value list in `libretro_core_options.h`.
+- Wiring: `check_variables()` in `libretro.cpp` reads them; `Set_Default_Option()` in `retro_init.cpp` turns them
+  into `-console` / `-plugin`. Mirror `mouse_enable` when adding options.
+- **gdb** on the Distrobox hits an internal bug on `mame_libretro.so`'s debug info; workaround: `set
+  auto-solib-add off` before `run`, then `sharedlibrary mame_libretro` after the crash.
+- Temporary `fprintf(stderr, ...)` at the suspect site beats `LOGMASKED` (no rebuild-and-filter) for "GPU path
+  differs from software" bugs; remove it afterwards. To screenshot a deterministic state: copy a `.state` to
+  `~/.config/retroarch/states/MAME/<rom>.state`, launch with `-e 0 --appendconfig <file>` (see below), wait for
+  the log line, send `PAUSE_TOGGLE` then `SCREENSHOT` over UDP to 127.0.0.1:55355 (python3 socket; no `nc`).
+- For performance, prefer host tools (`mangohud`, `radeontop`, RenderDoc) over MAME's own frame timing.
 
 ### Screenshots
 
-**Always use RetroArch's own screenshot** (the UDP `SCREENSHOT` network command with
-`network_cmd_enable = "true"` and `screenshot_directory` in an `--appendconfig` file;
-`profile_run.py --shot-every` and `smoke.py` do this). **Never use a desktop capture tool**
-(`spectacle`, grim, etc.): it grabs whatever window is active, and has captured the user's
-terminal instead of the game. For frame-exact captures, `my-docs/tools/snap_run.sh` uses
-MAME's own `video:snapshot()` (the emulated frame at native resolution).
-
-### Other monitoring options
-
-- **`-v` / verbose RetroArch logging** for frontend-side issues (context
-  creation failures, video driver mismatches).
-- For measuring actual rendering performance changes, prefer host GPU tools
-  (`mangohud`, `nvidia-smi`/`radeontop`, RenderDoc if a real GL/Vulkan context
-  ever gets created) over anything MAME-internal, since MAME's own frame-timing
-  instrumentation assumes/measures the software path.
-- When first reviving the `HAVE_OPENGL` path, a well-placed `fprintf(stderr, ...)`
-  or `osd_printf_verbose` in `context_reset`/`retro_load_game` is the fastest way
-  to confirm whether RetroArch actually granted the HW render context before
-  chasing rendering bugs further downstream.
+**Always use RetroArch's own screenshot** (UDP `SCREENSHOT` with `network_cmd_enable = "true"` and
+`screenshot_directory` in an `--appendconfig` file; `profile_run.py --shot-every` and `smoke.py` do this). **Never
+use a desktop capture tool** (`spectacle`, grim): it grabs the active window and has captured the user's terminal.
+For frame-exact captures use `my-docs/tools/snap_run.sh` (MAME's own `video:snapshot()`).
 
 ## Working conventions for this project
 
-- **Never `pkill -f` or `pgrep -f` with a pattern that appears in the command itself.** The shell
-  running the command has that pattern in its own command line, so it matches and kills itself
-  (exit 144). Match the process name with `-x` (`pkill -x retroarch`), or kill by PID.
+- **Never `pkill -f` or `pgrep -f` with a pattern that appears in the command itself.** The shell running the
+  command matches and kills itself (exit 144). Use `pkill -x retroarch`, or kill by PID.
 
-- **Fix games the way the real hardware works (upstream-PR-able work).** When improving a game
-  or getting a system working, first try a hardware-appropriate solution that keeps to the
-  spirit of the original design. Example: Apache 3's sprite rotation first worked with a large
-  off-screen buffer, but real hardware never did that; the scanline-at-a-time rotation
-  (`tatsumi/tzbx15_sprites.cpp`) matches the chip and is the version fit for an upstream PR.
-  Taking a hack that works and reworking it to model the hardware is the preferred path.
-  Making an imperfect or broken game correct (like Apache 3) is PR-able, so write it to
-  upstream standards: hardware-accurate, no libretro/fork-only hooks in shared code, and keep
-  it separable from fork-only changes.
-  **Exception**: fork-only features that upstream would never take (the PS1 GPU HLE/PGXP path,
-  GPU-path Voodoo supersampling, gamepad steering and similar enhancements) don't need to follow
-  the hardware. There, make it work and make it as efficient as possible.
+- **Fix games the way the real hardware works (upstream-PR-able work).** First try a hardware-appropriate solution
+  that keeps to the spirit of the original design. Example: Apache 3's sprite rotation first worked with a large
+  off-screen buffer, but the scanline-at-a-time rotation (`tatsumi/tzbx15_sprites.cpp`) matches the chip and is
+  fit for an upstream PR. Making an imperfect or broken game correct is PR-able, so write it to upstream
+  standards: hardware-accurate, no libretro/fork-only hooks in shared code, separable from fork-only changes.
+  **Exception**: fork-only features upstream would never take (the PS1 GPU HLE/PGXP path, GPU-path Voodoo
+  supersampling, gamepad steering and similar) don't need to follow the hardware; make them work and efficient.
 
-- **Code comments describe how the hardware works (or is assumed to work), never the edit.** This applies to
-  all work, fork-only or upstream-bound. Write comments about what the chip, board or code does, as if it had always
-  been written that way. No change-describing wording ("now", "no longer", "previously", "instead of", "fixes",
-  "was wrong", "not a ... any more"). Mark inferred hardware behaviour as such ("appears to", "assumed"). What
-  changed and why belongs in the commit message, not the comment. Also, from upstream review (mamedev PR #16437):
-  capitalise `TODO`/`FIXME`/`NOTE`; write TODO items as actions ("verify X against hardware"); yes/no feature DIPs use
-  `DEF_STR( No )`/`DEF_STR( Yes )`; use `auto *const` for obvious pointer types; parenthesise conditional-operator
-  operands that contain binary operators.
+- **Code comments describe how the hardware works (or is assumed to work), never the edit.** This applies to all
+  work. Write comments about what the chip, board or code does, as if it had always been written that way. No
+  change-describing wording ("now", "no longer", "previously", "instead of", "fixes", "was wrong", "not a ... any
+  more"). Mark inferred hardware behaviour as such ("appears to", "assumed"). What changed and why belongs in the
+  commit message. From upstream review (mamedev PR #16437): capitalise `TODO`/`FIXME`/`NOTE`; write TODO items as
+  actions ("verify X against hardware"); yes/no feature DIPs use `DEF_STR( No )`/`DEF_STR( Yes )`; use
+  `auto *const` for obvious pointer types; parenthesise conditional-operator operands that contain binary
+  operators.
 
-- **Follow the MAME C++ coding standards** (https://docs.mamedev.org/contributing/cxx.html) in all new or
-  changed code, fork-only or upstream-bound. Summary of the published rules:
-  - **Existing style wins**: in an existing file, match the style already there. The guide applies to new files
-    and to code with no established style.
-  - **Format**: UTF-8, files end with a newline, printable ASCII only outside comments and strings. Indent with
-    tabs (one per scope, tab stops of 4; continuation lines of a split statement get two tabs; spaces only for
-    alignment within a line). K&R or Allman bracing, consistent within an `if`/`else` chain, no stray blank lines
-    between `if`/`else if`/`else` blocks. A space between a control keyword and its `(`, single spacing around
-    binary operators. `case` labels may align with `switch` or be indented one level (indented is more common).
-    Run `srcclean` on modified files before a PR.
-  - **Naming**: macros, constants (globals, data members, enumerators), device types and enumerators are
-    `SCREAMING_SNAKE_CASE`. Functions, classes, enum type names and public members are `snake_case`. Template
-    parameters are `LlamaCase`. Abstract base classes end in `_base`; concrete `driver_device`s end in `_state`;
-    other concrete devices end in `_device`; device interfaces are `device_..._interface`. Include guards are
-    `MAME_` plus the capitalised path with separators as underscores. Data members may use `m_` (instance) and `s_`
-    (static) prefixes, not on nested classes/structs. Avoid double underscores, `_` + capital, leading underscores
-    and `_t` suffixes in the global namespace (`device_t` is legacy, don't copy it). Device type names live in the
-    global namespace, so make them explicit and unambiguous.
-  - **Literals and variables**: avoid octal; lowercase hex (`0xbadc0de`); binary literals are fine; suffix 64-bit
-    literals with uppercase `LL`; group digits (decimal in threes, hex in fours) where it reads better. Save-state
-    members need a fixed-size type, never plain `int`.
-  - **Scope and const**: declare variables at first use in the narrowest scope. Use `const` for locals and member
-    functions where possible. Constant arrays are `constexpr` in screaming snake case; C-string arrays are `const`
-    arrays of `const` pointers to `const` chars. Enums, structs and classes used by one device go inside its class.
-    Use explicitly sized enums in the class or `#define`s in the source file for device/driver constants, and keep
-    macros out of headers.
-  - **Comments**: English; `//` preferred. No commented-out code in a PR (use `if (false)` for code kept for
-    later, not `#if 0`).
-  - **Helpers**: use `BIT(value, bit)` / `BIT(value, bit, width)` (and the other bit helpers and `eminline.h`
-    functions) instead of hand-written masks and shifts.
-  - **Logging**: `logerror` for developer messages, `osd_printf_verbose` for user-diagnostic messages. Use
-    `logmacro.h` (`VERBOSE`, `LOG`, `LOGMASKED` with `LOG_*` masks starting at bit 1; bit 0 is `LOG_GENERAL`).
-    Set `VERBOSE` to 0 and drop any `LOG_OUTPUT_FUNC` override before a PR.
-  - **File structure**: start with `// license:` (SPDX id) and `// copyright-holders:` comments. `emu.h` is the
-    first include; then same-directory headers, `src/devices`, `src/emu`, `src/lib/formats`, `src/lib/util`, OSD,
-    C++ standard library, C standard library, OS-specific, layout (`.lh`) headers, then task headers such as
-    `logmacro.h` last; alphabetical within each group. Driver classes are declared in the source file inside an
-    anonymous namespace, with only the `GAME`/`COMP`/`CONS` macros outside it.
-  - **Class layout**: one `public`, `protected` and `private` section each where practical, using the least access
-    needed; overrides keep the base class's access. Within a section group constants, types, data members, instance
-    functions, then static functions; in devices separate configuration functions from live signal functions, and
-    group overrides by base class. Use constructor delegation instead of repeating initializer lists.
+- **Follow the MAME C++ coding standards** (https://docs.mamedev.org/contributing/cxx.html) in all new or changed
+  code, fork-only or upstream-bound:
+  - **Existing style wins**: in an existing file, match the style already there.
+  - **Format**: UTF-8, files end with a newline, printable ASCII only outside comments and strings. Tabs (one per
+    scope, tab stops of 4; continuation lines get two tabs; spaces only for alignment within a line). K&R or
+    Allman bracing, consistent within an `if`/`else` chain, no blank lines between `if`/`else if`/`else` blocks. A
+    space between a control keyword and its `(`, single spacing around binary operators. Run `srcclean` on
+    modified files before a PR.
+  - **Naming**: macros, constants, enumerators and device types are `SCREAMING_SNAKE_CASE`. Functions, classes,
+    enum type names and public members are `snake_case`. Template parameters are `LlamaCase`. Abstract bases end
+    in `_base`; concrete `driver_device`s end in `_state`; other devices in `_device`; interfaces are
+    `device_..._interface`. Include guards are `MAME_` plus the capitalised path. Data members may use `m_`/`s_`
+    (not on nested structs). Avoid double underscores, `_` + capital, leading underscores and `_t` suffixes.
+  - **Literals and variables**: avoid octal; lowercase hex; 64-bit literals suffixed `LL`; group digits where it
+    reads better. Save-state members need a fixed-size type, never plain `int`.
+  - **Scope and const**: declare variables at first use in the narrowest scope; `const` where possible. Constant
+    arrays are `constexpr` in screaming snake case. Enums/structs used by one device go inside its class.
+  - **Comments**: English, `//` preferred. No commented-out code in a PR (`if (false)` for code kept for later,
+    not `#if 0`).
+  - **Helpers**: use `BIT(value, bit)` / `BIT(value, bit, width)` and `eminline.h` functions instead of hand-written
+    masks and shifts.
+  - **Logging**: `logerror` for developer messages, `osd_printf_verbose` for user diagnostics. Use `logmacro.h`
+    (`VERBOSE`, `LOG`, `LOGMASKED`, masks from bit 1). Set `VERBOSE` to 0 and drop any `LOG_OUTPUT_FUNC` override
+    before a PR.
+  - **File structure**: start with `// license:` (SPDX) and `// copyright-holders:`. `emu.h` first; then
+    same-directory headers, `src/devices`, `src/emu`, `src/lib/formats`, `src/lib/util`, OSD, C++ standard
+    library, C standard library, OS-specific, layout (`.lh`) headers, then `logmacro.h` last; alphabetical within
+    each group. Driver classes are declared in the source file inside an anonymous namespace, with only the
+    `GAME`/`COMP`/`CONS` macros outside it.
+  - **Class layout**: one `public`, `protected` and `private` section each where practical, least access needed;
+    group constants, types, data members, instance functions, then static functions; use constructor delegation.
 
-- Treat `src/mame/<manufacturer>/*_v.cpp` rasterizer rewrites as the highest-risk
-  changes in this codebase — they must still produce output through the existing
-  `bitmap_rgb32`/render-primitive path for any driver you *haven't* converted,
-  so don't break the software fallback while adding a GPU path. A per-driver or
-  global switch (core option or compile-time) to fall back to software rendering
-  is expected, not optional, until a GPU path is proven correct.
-- **Active target is `src/devices/video/psx.cpp` (`psxgpu_device`)**, exercised
-  via Brave Blade (`brvblade.zip`) on `src/mame/sony/zn.cpp` — see "Chosen
-  first target" above. Since this device is shared by many drivers, changes
-  here have a much bigger blast radius than a single-driver rasterizer: a
-  regression affects every PS1-based board (Konami GQ/GV/573/Twinkle, Namco
-  System 10/11/12, Taito GNET, plain PS1 console), not just Brave Blade. Test
-  against more than one of these before considering a change solid — `nagano98`
-  (`konamigv.cpp`) and `starswep` (`namcos11.cpp`) are both already in the ROM
-  collection and use this same device.
-- If moving on from Sony ZN/PS1, the other candidates below are Model 2
-  (`model2_v.cpp`) as the next-smallest single-driver rasterizer, then Model 3,
-  System 22/23, N64, or Voodoo — those are progressively larger and more
-  historically-accuracy-sensitive.
-- When modifying `src/osd/libretro/libretro-internal/libretro.cpp`'s HW-render
-  block, keep changes scoped to that file and `retro_modules.lua`/`Makefile.libretro`
-  build-flag plumbing — avoid touching the SDL/Windows OSD's BGFX/HLSL code,
-  which is unrelated to this build target and a much larger surface.
-- After any driver-rasterizer or HW-render change, always do a real
-  `distrobox enter mame-dev -- retroarch -v -L mame_libretro.so <rom>` smoke
-  test against a romset from `/var/home/bazzite/Projects/mame-roms/roms/` for
-  that driver — this is emulator accuracy-sensitive code; a clean compile
-  means nothing here.
+- Changes to `src/devices/video/psx.cpp` or other shared devices have a large blast radius; test more than one
+  driver that uses them. When touching the HW-render block in `libretro.cpp`, keep changes scoped to that file
+  and the `retro_modules.lua`/`Makefile.libretro` build-flag plumbing.
