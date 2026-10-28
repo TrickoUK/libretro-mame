@@ -110,6 +110,7 @@ void midvunit_base_state::machine_reset()
 
 	memcpy(m_ram_base, memregion("maindata")->base(), 0x20000*4);
 	m_maincpu->reset();
+	m_poly->gpu_reset();
 }
 
 

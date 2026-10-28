@@ -16,6 +16,11 @@
 
 #include "input.h" // for DMA debug keys
 
+#include "interface/gpuengine.h"
+#include "osdepend.h"
+
+#include <cstring>
+
 #define LOG_DMA             (1U << 1)
 
 #define VERBOSE (0)
@@ -31,9 +36,10 @@
 #define TIME_PER_PIXEL      41e-9
 
 
-midvunit_renderer::midvunit_renderer(midvunit_base_state &state)
+midvunit_renderer::midvunit_renderer(midvunit_base_state &state, palette_device &palette)
 	: poly_manager<float, midvunit_object_data, 2>(state.machine())
 	, m_state(state)
+	, m_palette(palette)
 {
 }
 
@@ -61,7 +67,7 @@ void midvunit_base_state::video_start()
 	m_scanline_timer = timer_alloc(FUNC(midvunit_base_state::scanline_timer_cb), this);
 	m_eoi_timer = timer_alloc(FUNC(midvunit_base_state::eoi_timer_cb), this);
 
-	m_poly = std::make_unique<midvunit_renderer>(*this);
+	m_poly = std::make_unique<midvunit_renderer>(*this, *m_palette);
 
 	save_item(NAME(m_video_regs));
 	save_item(NAME(m_dma_data));
@@ -75,6 +81,7 @@ void midvunit_base_state::video_start()
 void midvunit_base_state::device_post_load()
 {
 	m_video_changed = true;
+	m_poly->gpu_reset();
 }
 
 /*************************************
@@ -347,6 +354,15 @@ void midvunit_renderer::process_dma_queue()
 		}
 	}
 
+	// the host GPU path takes the quad in place of the scanline renderer
+	if (!m_gpu_checked)
+		gpu_init();
+	if (gpu_active())
+	{
+		gpu_add_quad(vert, pixdata, textured, m_state.m_dma_data[0], m_state.m_dma_data[14]);
+		return;
+	}
+
 	// set up the object data for this triangle
 	midvunit_object_data &objectdata = object_data().next();
 	objectdata.destbase = &m_state.m_videoram[(m_state.m_page_control & 4) ? 0x40000 : 0x00000];
@@ -477,6 +493,7 @@ uint32_t midvunit_base_state::scanline_r()
 void midvunit_base_state::videoram_w(offs_t offset, uint32_t data, uint32_t mem_mask)
 {
 	m_poly->wait("Video RAM write");
+	m_poly->gpu_latch_off("CPU write to video RAM");
 	if (!m_video_changed)
 	{
 		int const visbase = (m_page_control & 1) ? 0x40000 : 0x00000;
@@ -490,7 +507,10 @@ void midvunit_base_state::videoram_w(offs_t offset, uint32_t data, uint32_t mem_
 uint32_t midvunit_base_state::videoram_r(offs_t offset)
 {
 	if (!machine().side_effects_disabled())
+	{
 		m_poly->wait("Video RAM read");
+		m_poly->gpu_latch_off("CPU read of video RAM");
+	}
 	return m_videoram[offset];
 }
 
@@ -507,6 +527,7 @@ void midvunit_base_state::paletteram_w(offs_t offset, uint32_t data, uint32_t me
 	COMBINE_DATA(&m_paletteram[offset]);
 	uint32_t const newword = m_paletteram[offset];
 	m_palette->set_pen_color(offset, pal5bit(newword >> 10), pal5bit(newword >> 5), pal5bit(newword >> 0));
+	m_poly->gpu_palette_write(offset);
 }
 
 
@@ -523,6 +544,7 @@ void midvunit_base_state::textureram_w(offs_t offset, uint32_t data)
 	m_poly->wait("Texture RAM write");
 	base[offset * 2] = data;
 	base[offset * 2 + 1] = data >> 8;
+	m_poly->gpu_mark_texture(offset * 2, 2);
 }
 
 
@@ -546,6 +568,14 @@ uint32_t midvunit_base_state::screen_update(screen_device &screen, bitmap_rgb32 
 	uint32_t offset;
 
 	m_poly->wait("Refresh Time");
+
+	// the host GPU path draws the quads of the frame and reads back the page on screen when it changed
+	if (m_poly->gpu_active())
+	{
+		const bool changed = m_video_changed;
+		m_video_changed = false;
+		return (m_poly->gpu_screen_update(bitmap, changed) && changed) ? 0 : UPDATE_HAS_NOT_CHANGED;
+	}
 
 	// if the video didn't change, indicate as much
 	if (!m_video_changed)
@@ -578,3 +608,6 @@ uint32_t midvunit_base_state::screen_update(screen_device &screen, bitmap_rgb32 
 	}
 	return 0;
 }
+
+
+#include "midvunit_gpu.ipp"
