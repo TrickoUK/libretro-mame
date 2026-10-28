@@ -1807,7 +1807,7 @@ void zeus2_renderer::zeus2_render_poly(vertex_t *vert, int numverts, uint32_t te
 			return;
 	}
 
-	zeus2_poly_extra_data& extra = this->object_data().next();
+	zeus2_poly_extra_data extra {};
 
 	extra.ucode_src = m_state->m_curUCodeSrc;
 	extra.tex_src = m_state->zeus_texbase;
@@ -1866,7 +1866,15 @@ void zeus2_renderer::zeus2_render_poly(vertex_t *vert, int numverts, uint32_t te
 		break;
 	}
 
-	render_triangle_fan<4>(m_state->zeus_cliprect, render_delegate(&zeus2_renderer::render_poly_8bit, this), numverts, clipvert);
+	zeus2_submit_poly(extra, clipvert, numverts);
+}
+
+// Every polygon that reaches the rasterizer passes here with its state record and clipped vertices.
+void zeus2_renderer::zeus2_submit_poly(const zeus2_poly_extra_data &state, const vertex_t *verts, int numverts)
+{
+	zeus2_poly_extra_data &extra = this->object_data().next();
+	extra = state;
+	render_triangle_fan<4>(m_state->zeus_cliprect, render_delegate(&zeus2_renderer::render_poly_8bit, this), numverts, verts);
 }
 
 

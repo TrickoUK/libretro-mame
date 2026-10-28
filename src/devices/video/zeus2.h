@@ -82,6 +82,7 @@ public:
 private:
 	void zeus2_transform_vertex(vertex_t &vert, float fScale, uint32_t texdata, int logit);
 	void zeus2_render_poly(vertex_t *vert, int numverts, uint32_t texdata, int logit);
+	void zeus2_submit_poly(const zeus2_poly_extra_data &state, const vertex_t *verts, int numverts);
 
 	zeus2_device *m_state;
 	vertex_t m_meshvert[3];   // pm3dli microcode vertex slots D, E and F
