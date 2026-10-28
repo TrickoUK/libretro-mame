@@ -102,6 +102,14 @@ mixed into history.
   `thread_mode` hooks); `bus.lua`/`sound.lua` changed, genie regenerated directly; full `-j10` build linked clean.
   Smoke-tested gdarius2 and starswep (60 s, clean); brvblade booted but its screenshot came out empty and was not
   re-checked (`my-docs/out/sync1795`).
+- **Follow-up sync, 2026-10-28**: merge commit `ed28edec7ac` merged mamedev master
+  `mame0289-1829-gc91d2b989bb` (34 commits); libretro/mame master had nothing new. No conflicts.
+  `voodoo_2.cpp`/`voodoo_2.h` overlap (upstream's direct-command blt fill replaces the `bltCommand` unimplemented
+  handler; the fork's `gpu_ram_write` line in `packet_type_5` sits beside it and merged cleanly). `arcade.flt`
+  regenerated (validated, 2137 files): new helpers `handheld/class200_lcdc.cpp` and `kaneko/kaneko_pisces.cpp`;
+  `galpani2j` dropped from the exclusions (upstream removed the driver). `scripts/src/bus.lua`/`machine.lua`
+  changed, genie regenerated directly. Full `-j10` build linked clean (253 objects). Smoke-tested jpark3 and
+  gticlub2 (90 s each, both ran clean, screenshots not reviewed) (`my-docs/out/sync1829`).
 - Conflicts to expect again: `src/devices/cpu/mips/mips3{,drc}.cpp` (Count writes must not arm the
   compare timer, or sfrush hangs at ~49 s), `src/devices/cpu/powerpc` (our ICFI snapshots,
   compile-time fetch fill and reuse re-snapshot; upstream has its own HID0/ICFI
