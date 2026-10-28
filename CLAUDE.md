@@ -44,6 +44,10 @@ Batocera.
     the sort in `render_flush()`; the rest is `namcos23_gpu.ipp`/`namcos23_shader.h`), `src/mame/snk/hng64_3d.ipp`
     and `hng64_v.cpp` (GPU engine, submit/collect, palette-resolve composite). Fork-only, not for upstream.
     The software renderers are upstream again, so only these GPU-path hunks conflict.
+  - `src/mame/williams/midzeus_v.cpp`/`midzeus.h` and `midvunit_v.cpp`/`midvunit.h` (host-GPU hooks: the
+    `gpu_screen_update` call at the top of `screen_update`, the polygon capture and the quad path, the `gpu_*` members
+    and the forced-software switches); the adapters are `midzeus_gpu.ipp` and `midvunit_gpu.ipp`, the shaders
+    `midzeus_shader.h` and `midvunit_shader.h`. Fork-only, not for upstream.
 - Upstream API changes that have broken fork/libretro code (check these first when a build fails after a sync):
   - `screen_device` is split per type (`screen_svg_device`, vector screens). Use
     `video_output_interface_enumerator`/`is_vector()`, not `screen_type()`. `configure()` takes an `attotime`.
@@ -139,7 +143,8 @@ without core changes.
 - Generic interface: `src/osd/interface/gpurender.h`; `osd_interface::get_gpu_render_target()` returns nullptr by
   default so other OSDs need no changes.
 - Every host-GPU path needs a core option (or switch) to fall back to software; keep it working. Generic options
-  are `mame_3d_supersample`, `mame_3d_msaa`, `mame_3d_edge_aa`; PS1 has the `mame_psx_gpu_*` set.
+  are `mame_3d_gpu`, `mame_3d_supersample`, `mame_3d_output_scale`, `mame_3d_msaa`, `mame_3d_texfilter` and
+  `mame_3d_aniso`; PS1 has the `mame_psx_gpu_*` set.
   `rendersw`-path drivers you have not converted must keep producing output through `bitmap_rgb32`.
 - Treat `src/mame/<mfg>/*_v.cpp` rasterizer rewrites as the highest-risk changes in this codebase.
 
