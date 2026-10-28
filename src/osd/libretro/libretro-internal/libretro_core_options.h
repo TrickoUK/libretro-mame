@@ -451,7 +451,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_steering_response",
       "Steering Response (Wheel Games)",
       NULL,
-      "Overrides the 'Steering Response' Machine Configuration setting in wheel games with gamepad steering assists (GTI Club 2, Thrill Drive 2, Pole Position, Final Lap series, Road Blasters, Speed Racer, F-1 Super Battle and others). Curves shrink small stick movements around centre while still reaching full lock. 'Game setting' keeps whatever is set in MAME's menu. Other games are unaffected.",
+      "Overrides the 'Steering Response' Machine Configuration setting in wheel games with gamepad steering assists (GTI Club 2, Thrill Drive 2, Pole Position, Final Lap series, Road Blasters, Speed Racer, F-1 Super Battle, Cruis'n USA, Cruis'n World, Off Road Challenge, Cruis'n Exotica and others). Curves shrink small stick movements around centre while still reaching full lock. 'Game setting' keeps whatever is set in MAME's menu. Other games are unaffected.",
       NULL,
       "input",
       {
@@ -468,7 +468,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       CORE_NAME "_steering_smoothing",
       "Steering Smoothing (Wheel Games)",
       NULL,
-      "Overrides the 'Steering Smoothing' Machine Configuration setting in wheel games with gamepad steering assists. Limits how fast the wheel can turn, given as the time from full left to full right. 'Game setting' keeps whatever is set in MAME's menu. Pole Position has no smoothing setting. Other games are unaffected.",
+      "Overrides the 'Steering Smoothing' Machine Configuration setting in wheel games with gamepad steering assists (including Cruis'n USA, Cruis'n World, Off Road Challenge and Cruis'n Exotica). Limits how fast the wheel can turn, given as the time from full left to full right. 'Game setting' keeps whatever is set in MAME's menu. Pole Position has no smoothing setting. Other games are unaffected.",
       NULL,
       "input",
       {
