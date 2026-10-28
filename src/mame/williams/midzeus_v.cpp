@@ -303,7 +303,9 @@ void midzeus_state::exit_handler()
 
 void midzeus_state::device_post_load()
 {
-	m_poly->gpu_reset();
+	// the Zeus 2 boards draw through zeus2_device and never create the polygon renderer
+	if (m_poly)
+		m_poly->gpu_reset();
 }
 
 uint32_t midzeus_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
