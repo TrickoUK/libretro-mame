@@ -194,6 +194,12 @@ bool midzeus_renderer::gpu_active()
 {
 	if (!m_gpu_checked)
 		gpu_init();
+
+	// the debug switch MAME_MIDZ_FORCE_SOFTWARE_FRAMES=<frame> latches the host GPU path off at that frame
+	static const char *const force_frame = osd_getenv("MAME_MIDZ_FORCE_SOFTWARE_FRAMES");
+	if (m_gpu_ready && force_frame && m_state.m_screen->frame_number() == uint32_t(strtoul(force_frame, nullptr, 10)))
+		gpu_latch_off("MAME_MIDZ_FORCE_SOFTWARE_FRAMES");
+
 	return m_gpu_ready;
 }
 
