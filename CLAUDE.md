@@ -76,10 +76,10 @@ Keep these through upstream merges, and check whether upstream has fixed the sam
 
 Update these in the same change as the work. Docs under `my-docs/` are committed in that nested repo.
 
-- **`custom-change-log.md`** (repo root): dated record of this fork's own game/system work. Whenever a fork change
+- **`my-docs/custom-change-log.md`**: dated record of this fork's own game/system work. Whenever a fork change
   lands on `arcade-focused`, add an entry under that day's heading (oldest first, new work at the bottom): a `###`
   headline naming the game(s) or system, then a few short bullets on the end result a player would notice. Commit
-  it with the work. Leave out upstream merges and cherry-picks unless fork work was needed to make them run, and
+  it in `my-docs` with the work. Leave out upstream merges and cherry-picks unless fork work was needed to make them run, and
   investigations that shipped no code unless they reached a conclusion worth keeping.
 - **`my-docs/3D-Enhanced-Games.md`**: major 3D work only (a new 3D system made to run, a host-GPU or supersampling
   feature, a speed-up that makes a 3D system playable, a new or changed 3D core option): the system's row in the
