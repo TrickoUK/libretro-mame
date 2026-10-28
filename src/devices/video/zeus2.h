@@ -98,6 +98,7 @@ public:
 	void gpu_fill(uint32_t addr, uint32_t count, uint32_t colour, int32_t depth);
 	void gpu_frame_write(uint32_t addr, bool write_colour0, uint32_t colour0, bool write_colour1, uint32_t colour1, bool write_depth, int32_t depth);
 	bool gpu_screen_update(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void gpu_frame_read_hook();
 
 private:
 	void zeus2_transform_vertex(vertex_t &vert, float fScale, uint32_t texdata, int logit);
@@ -130,6 +131,7 @@ private:
 	int m_gpu_row_min = 2048;                       // the rows with flags, so a flush scans only those (empty range: min above max)
 	int m_gpu_row_max = -1;
 	bool m_gpu_palette_dirty = false;
+	bool m_gpu_target_diverged = false;             // a polygon was drawn on the target since the last reset: the CPU's copy of the frame buffer no longer matches it
 	bool m_gpu_clip_valid = false;                  // the last SET_CLIP is m_gpu_clip_*, in target pixels before the scale
 	int m_gpu_clip_x = 0, m_gpu_clip_y = 0, m_gpu_clip_w = 0, m_gpu_clip_h = 0;
 	std::vector<osd::gpu_command> m_gpu_commands;
@@ -341,9 +343,9 @@ public:
 	// Read from frame buffer
 	void frame_read()
 	{
-		// the CPU reads the frame buffer: the target cannot be read back into the CPU's copy, so the host path stops here
+		// the CPU's copy answers the read unless polygons drawn on the host target have made it differ (gpu_frame_read_hook())
 		if (poly)
-			poly->gpu_latch_off("CPU frame-buffer read");
+			poly->gpu_frame_read_hook();
 		uint32_t addr = frame_addr_from_phys_addr(m_zeusbase[0x51]);
 		m_zeusbase[0x58] = m_frameColor[addr];
 		m_zeusbase[0x59] = m_frameColor[addr + 1];

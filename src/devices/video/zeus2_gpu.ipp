@@ -217,6 +217,7 @@ void zeus2_renderer::gpu_reset()
 	m_gpu_arena.clear();
 	m_gpu_patches.clear();
 	m_gpu_clip_valid = false;
+	m_gpu_target_diverged = false;
 	if (m_gpu_ready)
 	{
 		std::fill(m_gpu_row_dirty.begin(), m_gpu_row_dirty.end(), uint8_t(1));
@@ -231,7 +232,7 @@ void zeus2_renderer::gpu_latch_off(const char *reason)
 {
 	if (!m_gpu_ready)
 		return;
-	osd_printf_verbose("zeus2: host GPU path off for the rest of the session: %s\n", reason);
+	osd_printf_info("zeus2: host GPU path off for the rest of the session: %s\n", reason);
 	m_gpu_ready = false;
 	m_gpu_engine = nullptr;
 	m_gpu_clip_valid = false;
@@ -240,6 +241,15 @@ void zeus2_renderer::gpu_latch_off(const char *reason)
 	m_gpu_state.clear();
 	m_gpu_arena.clear();
 	m_gpu_patches.clear();
+}
+
+// A CPU read of the frame buffer. The CPU's copy is exact for everything except polygons drawn on the target, since fills and
+// frame writes update it as well. A read after a polygon cannot be answered, so the path stops there; a read before any polygon
+// (the boot frame-buffer test) is answered from the copy.
+void zeus2_renderer::gpu_frame_read_hook()
+{
+	if (m_gpu_ready && m_gpu_target_diverged)
+		gpu_latch_off("CPU frame-buffer read after polygons");
 }
 
 // A CPU write to wave RAM 0 at word index word (count words): their texture rows are uploaded before the next polygon.
@@ -452,6 +462,9 @@ bool zeus2_renderer::gpu_add_polygon(const zeus2_poly_extra_data &state, const v
 	// zclip_if_less() returns at most 8 vertices and zeus2_render_poly() drops anything under 3, so this cannot be hit
 	if (numverts < 3 || numverts > 8)
 		return true;
+
+	// the software frame buffer would hold this polygon's pixels, the CPU copy does not
+	m_gpu_target_diverged = true;
 
 	// the window the polygon is drawn in: the frame base is the flat word of its origin (the row shift is 9 with a single line mode)
 	const int row = int(state.frame_base >> 9);
