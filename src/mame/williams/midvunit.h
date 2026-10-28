@@ -46,7 +46,7 @@ class midvunit_renderer : public poly_manager<float, midvunit_object_data, 2>
 public:
 	midvunit_renderer(midvunit_base_state &state, palette_device &palette);
 	void process_dma_queue();
-	void make_vertices_inclusive(vertex_t *vert);
+	void make_vertices_inclusive(vertex_t *vert, uint8_t *nudged_x = nullptr, uint8_t *nudged_y = nullptr);
 
 	// host-GPU path (midvunit_gpu.ipp)
 	bool gpu_active() const { return m_gpu_ready; }
@@ -81,7 +81,7 @@ private:
 
 	bool gpu_init();
 	void gpu_flush_updates();
-	void gpu_add_quad(const vertex_t *vert, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage);
+	void gpu_add_quad(const vertex_t *vert, uint8_t nudge_x, uint8_t nudge_y, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage);
 	bool gpu_row_span(const vertex_t *vert, int32_t row, const rectangle &clip, int32_t &x0, int32_t &x1, float (&param)[2], float (&dpdx)[2]) const;
 	bool gpu_needs_rows(const vertex_t *vert) const;
 	void gpu_add_rows(const vertex_t *vert, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage);

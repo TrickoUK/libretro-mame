@@ -188,8 +188,9 @@ void midvunit_renderer::gpu_flush_updates()
 }
 
 // Adds one quad the way the scanline renderer would draw it: the same vertices (already made inclusive), the same
-// palette base and mode. The two triangles split the quad along the diagonal from vertex 0 to vertex 2.
-void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage)
+// palette base and mode. The two triangles split the quad along the diagonal from vertex 0 to vertex 2. Bit n of nudge_x
+// and nudge_y marks the vertex n whose x or y make_vertices_inclusive moved to include the right or bottom edge.
+void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint8_t nudge_x, uint8_t nudge_y, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage)
 {
 	// the modes of the chip's textured quads (flags bits 10-11), as the shader's state words
 	constexpr uint32_t MODE_TEX = 0;
@@ -232,15 +233,14 @@ void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint16_t pixdata, boo
 	gpu_vertex vv[4];
 	for (int i = 0; i < 4; i++)
 	{
-		// the walker's right and bottom nudge (make_vertices_inclusive) is 0.001 pixel, below the device's sub-pixel
-		// grid; a vertex carrying it is moved by a larger amount so the device keeps the edge on the pixel centres.
-		// The test relies on make_vertices_inclusive adding exactly 0.001 to vertices that sit on pixel centres (.5)
-		// and on the span vertices of gpu_add_rows staying on whole pixels
+		// the walker includes right and bottom pixel centres by moving those vertices 0.001 pixel (make_vertices_inclusive);
+		// the device's sub-pixel grid is coarser than that, so the same move is applied here at the device's resolution
+		// to the flagged coordinates, which keeps the edge on the pixel centres
 		float x = vert[i].x;
 		float y = vert[i].y;
-		if (std::abs(x - std::floor(x) - 0.501f) < 0.0005f)
+		if (BIT(nudge_x, i))
 			x += GPU_EDGE_NUDGE;
-		if (std::abs(y - std::floor(y) - 0.501f) < 0.0005f)
+		if (BIT(nudge_y, i))
 			y += GPU_EDGE_NUDGE;
 		vv[i].x = x * scale;
 		vv[i].y = (y + page) * scale;
@@ -459,7 +459,8 @@ void midvunit_renderer::gpu_add_rows(const vertex_t *vert, uint16_t pixdata, boo
 		span[2].y = float(row + 1);
 		span[3].x = float(x0);
 		span[3].y = float(row + 1);
-		gpu_add_quad(span, pixdata, textured, flags, texpage);
+		// the span vertices are on whole pixels and take no nudge
+		gpu_add_quad(span, 0, 0, pixdata, textured, flags, texpage);
 	}
 }
 

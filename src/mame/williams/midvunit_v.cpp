@@ -239,11 +239,15 @@ void midvunit_renderer::render_textransmask(int32_t scanline, const extent_t &ex
  *
  *************************************/
 
-void midvunit_renderer::make_vertices_inclusive(vertex_t *vert)
+void midvunit_renderer::make_vertices_inclusive(vertex_t *vert, uint8_t *nudged_x, uint8_t *nudged_y)
 {
 	// build up a mask of right and bottom points
 	// note we assume clockwise orientation here
 	uint8_t rmask = 0, bmask = 0, eqmask = 0;
+	if (nudged_x != nullptr)
+		*nudged_x = 0;
+	if (nudged_y != nullptr)
+		*nudged_y = 0;
 	for (int vnum = 0; vnum < 4; vnum++)
 	{
 		vertex_t *currv = &vert[vnum];
@@ -278,9 +282,17 @@ void midvunit_renderer::make_vertices_inclusive(vertex_t *vert)
 
 		// adjust the points
 		if (rmask & (1 << effvnum))
+		{
 			currv->x += 0.001f;
+			if (nudged_x != nullptr)
+				*nudged_x |= 1 << vnum;
+		}
 		if (bmask & (1 << effvnum))
+		{
 			currv->y += 0.001f;
+			if (nudged_y != nullptr)
+				*nudged_y |= 1 << vnum;
+		}
 	}
 }
 
@@ -302,8 +314,9 @@ void midvunit_renderer::process_dma_queue()
 	vert[3].x = (float)(int16_t)m_state.m_dma_data[8] + 0.5f;
 	vert[3].y = (float)(int16_t)m_state.m_dma_data[9] + 0.5f;
 
-	// make the vertices inclusive of right/bottom points
-	make_vertices_inclusive(vert);
+	// make the vertices inclusive of right/bottom points; the host-GPU path needs to know which vertices were moved
+	uint8_t nudge_x, nudge_y;
+	make_vertices_inclusive(vert, &nudge_x, &nudge_y);
 
 	// set the palette base
 	uint16_t pixdata = m_state.m_dma_data[1];
@@ -370,7 +383,7 @@ void midvunit_renderer::process_dma_queue()
 		}
 		else
 		{
-			gpu_add_quad(vert, pixdata, textured, m_state.m_dma_data[0], m_state.m_dma_data[14]);
+			gpu_add_quad(vert, nudge_x, nudge_y, pixdata, textured, m_state.m_dma_data[0], m_state.m_dma_data[14]);
 		}
 		return;
 	}
