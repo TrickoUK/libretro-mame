@@ -9,6 +9,7 @@
 #include "zeus2.h"
 
 #include "input.h" // for video debug keys
+#include "osdepend.h"
 #include "screen.h"
 
 #include <algorithm>
@@ -138,8 +139,17 @@ void zeus2_device::device_start()
 	save_item(NAME(m_yScale));
 }
 
+// A state load replaces wave RAM and the frame buffer, so the host target starts again from the loaded wave RAM.
+void zeus2_device::device_post_load()
+{
+	if (poly)
+		poly->gpu_reset();
+}
+
 void zeus2_device::device_reset()
 {
+	if (poly)
+		poly->gpu_reset();
 	memset(m_zeusbase, 0, sizeof(m_zeusbase[0]) * 0x80);
 	memset(m_renderRegs, 0, sizeof(m_renderRegs[0]) * 0x50);
 
@@ -224,6 +234,10 @@ uint32_t zeus2_device::screen_update(screen_device &screen, bitmap_rgb32 &bitmap
 {
 	// Wait until configuration is completed before transfering anything
 	if (!(m_zeusbase[0x10] & 0x20))
+		return 0;
+
+	// the host GPU path draws the frame's queue and reads the display rows back; a false return copies them in software below
+	if (poly->gpu_screen_update(bitmap, cliprect))
 		return 0;
 
 	int x, y;
@@ -777,6 +791,7 @@ void zeus2_device::zeus2_register_update(offs_t offset, uint32_t oldval, int log
 				uint32_t *dest = waveram0_ptr_from_expanded_addr(m_zeusbase[0x41]);
 				WAVERAM_WRITE32(dest, 0, m_zeusbase[0x48]);
 				WAVERAM_WRITE32(dest, 1, m_zeusbase[0x49]);
+				poly->gpu_mark_wave_ram(uint32_t(dest - m_waveram.get()), 2);
 				if (logit)
 					logerror("\t[41]=%08X [4E]=%08X", m_zeusbase[0x41], m_zeusbase[0x4e]);
 
@@ -869,6 +884,7 @@ void zeus2_device::zeus2_register_update(offs_t offset, uint32_t oldval, int log
 					m_frameColor[(addr + count) & (WAVERAM1_WIDTH * WAVERAM1_HEIGHT * 2 - 1)] = m_fill_color;
 					m_frameDepth[(addr + count) & (WAVERAM1_WIDTH * WAVERAM1_HEIGHT * 2 - 1)] = m_fill_depth;
 				}
+				poly->gpu_fill(addr, numPixels, m_fill_color, m_fill_depth);
 			}
 			break;
 			case 0x9:
@@ -1016,6 +1032,7 @@ void zeus2_device::load_pal_table(void *wavePtr, uint32_t ctrl, int type, int lo
 			*tablePtr++ = *src++;
 		}
 	}
+	poly->gpu_palette_changed();
 	if (logit) {
 		logerror("\ntable: ");
 		tablePtr = &m_pal_table[addr];
@@ -1872,6 +1889,10 @@ void zeus2_renderer::zeus2_render_poly(vertex_t *vert, int numverts, uint32_t te
 // Every polygon that reaches the rasterizer passes here with its state record and clipped vertices.
 void zeus2_renderer::zeus2_submit_poly(const zeus2_poly_extra_data &state, const vertex_t *verts, int numverts)
 {
+	// the host GPU path takes the polygon before the software polygon list is touched
+	if (gpu_active() && gpu_add_polygon(state, verts, numverts))
+		return;
+
 	zeus2_poly_extra_data &extra = this->object_data().next();
 	extra = state;
 	render_triangle_fan<4>(m_state->zeus_cliprect, render_delegate(&zeus2_renderer::render_poly_8bit, this), numverts, verts);
@@ -2345,3 +2366,5 @@ std::string zeus2_device::tex_info(void)
 	return retVal;
 }
 #endif
+
+#include "zeus2_gpu.ipp"
