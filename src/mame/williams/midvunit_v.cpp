@@ -16,6 +16,11 @@
 
 #include "input.h" // for DMA debug keys
 
+#include "interface/gpuengine.h"
+#include "osdepend.h"
+
+#include <cstring>
+
 #define LOG_DMA             (1U << 1)
 
 #define VERBOSE (0)
@@ -31,9 +36,10 @@
 #define TIME_PER_PIXEL      41e-9
 
 
-midvunit_renderer::midvunit_renderer(midvunit_base_state &state)
+midvunit_renderer::midvunit_renderer(midvunit_base_state &state, palette_device &palette)
 	: poly_manager<float, midvunit_object_data, 2>(state.machine())
 	, m_state(state)
+	, m_palette(palette)
 {
 }
 
@@ -61,7 +67,7 @@ void midvunit_base_state::video_start()
 	m_scanline_timer = timer_alloc(FUNC(midvunit_base_state::scanline_timer_cb), this);
 	m_eoi_timer = timer_alloc(FUNC(midvunit_base_state::eoi_timer_cb), this);
 
-	m_poly = std::make_unique<midvunit_renderer>(*this);
+	m_poly = std::make_unique<midvunit_renderer>(*this, *m_palette);
 
 	save_item(NAME(m_video_regs));
 	save_item(NAME(m_dma_data));
@@ -75,6 +81,7 @@ void midvunit_base_state::video_start()
 void midvunit_base_state::device_post_load()
 {
 	m_video_changed = true;
+	m_poly->gpu_reset();
 }
 
 /*************************************
@@ -232,11 +239,15 @@ void midvunit_renderer::render_textransmask(int32_t scanline, const extent_t &ex
  *
  *************************************/
 
-void midvunit_renderer::make_vertices_inclusive(vertex_t *vert)
+void midvunit_renderer::make_vertices_inclusive(vertex_t *vert, uint8_t *nudged_x, uint8_t *nudged_y)
 {
 	// build up a mask of right and bottom points
 	// note we assume clockwise orientation here
 	uint8_t rmask = 0, bmask = 0, eqmask = 0;
+	if (nudged_x != nullptr)
+		*nudged_x = 0;
+	if (nudged_y != nullptr)
+		*nudged_y = 0;
 	for (int vnum = 0; vnum < 4; vnum++)
 	{
 		vertex_t *currv = &vert[vnum];
@@ -271,9 +282,17 @@ void midvunit_renderer::make_vertices_inclusive(vertex_t *vert)
 
 		// adjust the points
 		if (rmask & (1 << effvnum))
+		{
 			currv->x += 0.001f;
+			if (nudged_x != nullptr)
+				*nudged_x |= 1 << vnum;
+		}
 		if (bmask & (1 << effvnum))
+		{
 			currv->y += 0.001f;
+			if (nudged_y != nullptr)
+				*nudged_y |= 1 << vnum;
+		}
 	}
 }
 
@@ -295,8 +314,9 @@ void midvunit_renderer::process_dma_queue()
 	vert[3].x = (float)(int16_t)m_state.m_dma_data[8] + 0.5f;
 	vert[3].y = (float)(int16_t)m_state.m_dma_data[9] + 0.5f;
 
-	// make the vertices inclusive of right/bottom points
-	make_vertices_inclusive(vert);
+	// make the vertices inclusive of right/bottom points; the host-GPU path needs to know which vertices were moved
+	uint8_t nudge_x, nudge_y;
+	make_vertices_inclusive(vert, &nudge_x, &nudge_y);
 
 	// set the palette base
 	uint16_t pixdata = m_state.m_dma_data[1];
@@ -345,6 +365,27 @@ void midvunit_renderer::process_dma_queue()
 			callback = render_delegate(&midvunit_renderer::render_flat, this);
 			pixdata += (m_state.m_dma_data[0] & 0x00ff);
 		}
+	}
+
+	// the host GPU path takes the quad in place of the scanline renderer
+	if (!m_gpu_checked)
+		gpu_init();
+	// the debug switch MAME_MIDV_FORCE_SOFTWARE_FRAMES=<frame> latches the host GPU path off at that frame
+	static const char *const force_frame = osd_getenv("MAME_MIDV_FORCE_SOFTWARE_FRAMES");
+	if (gpu_active() && force_frame && m_state.m_screen->frame_number() == uint32_t(strtoul(force_frame, nullptr, 10)))
+		gpu_latch_off("MAME_MIDV_FORCE_SOFTWARE_FRAMES");
+
+	if (gpu_active())
+	{
+		if (gpu_needs_rows(vert))
+		{
+			gpu_add_rows(vert, pixdata, textured, m_state.m_dma_data[0], m_state.m_dma_data[14]);
+		}
+		else
+		{
+			gpu_add_quad(vert, nudge_x, nudge_y, pixdata, textured, m_state.m_dma_data[0], m_state.m_dma_data[14]);
+		}
+		return;
 	}
 
 	// set up the object data for this triangle
@@ -477,6 +518,7 @@ uint32_t midvunit_base_state::scanline_r()
 void midvunit_base_state::videoram_w(offs_t offset, uint32_t data, uint32_t mem_mask)
 {
 	m_poly->wait("Video RAM write");
+	m_poly->gpu_latch_off("CPU write to video RAM");
 	if (!m_video_changed)
 	{
 		int const visbase = (m_page_control & 1) ? 0x40000 : 0x00000;
@@ -490,7 +532,10 @@ void midvunit_base_state::videoram_w(offs_t offset, uint32_t data, uint32_t mem_
 uint32_t midvunit_base_state::videoram_r(offs_t offset)
 {
 	if (!machine().side_effects_disabled())
+	{
 		m_poly->wait("Video RAM read");
+		m_poly->gpu_latch_off("CPU read of video RAM");
+	}
 	return m_videoram[offset];
 }
 
@@ -507,6 +552,7 @@ void midvunit_base_state::paletteram_w(offs_t offset, uint32_t data, uint32_t me
 	COMBINE_DATA(&m_paletteram[offset]);
 	uint32_t const newword = m_paletteram[offset];
 	m_palette->set_pen_color(offset, pal5bit(newword >> 10), pal5bit(newword >> 5), pal5bit(newword >> 0));
+	m_poly->gpu_palette_write(offset);
 }
 
 
@@ -523,6 +569,7 @@ void midvunit_base_state::textureram_w(offs_t offset, uint32_t data)
 	m_poly->wait("Texture RAM write");
 	base[offset * 2] = data;
 	base[offset * 2 + 1] = data >> 8;
+	m_poly->gpu_mark_texture(offset * 2, 2);
 }
 
 
@@ -541,11 +588,19 @@ uint32_t midvunit_base_state::textureram_r(offs_t offset)
  *
  *************************************/
 
-uint32_t midvunit_base_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t midvunit_base_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
 	uint32_t offset;
 
 	m_poly->wait("Refresh Time");
+
+	// the host GPU path draws the quads of the frame and reads back the page on screen when it changed
+	if (m_poly->gpu_active())
+	{
+		const bool changed = m_video_changed;
+		m_video_changed = false;
+		return (m_poly->gpu_screen_update(bitmap, changed) && changed) ? 0 : UPDATE_HAS_NOT_CHANGED;
+	}
 
 	// if the video didn't change, indicate as much
 	if (!m_video_changed)
@@ -568,12 +623,16 @@ uint32_t midvunit_base_state::screen_update(screen_device &screen, bitmap_ind16 
 	offset += 512 * (cliprect.min_y - screen.visible_area().min_y);
 
 	// loop over rows
+	// the scan-out looks each 15-bit index up in the palette
 	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
 	{
-		uint16_t *dest = &bitmap.pix(y, cliprect.min_x);
+		uint32_t *dest = &bitmap.pix(y, cliprect.min_x);
 		for (int x = 0; x < width; x++)
-			*dest++ = m_videoram[offset + x] & 0x7fff;
+			*dest++ = m_palette->pen(m_videoram[offset + x] & 0x7fff);
 		offset += 512;
 	}
 	return 0;
 }
+
+
+#include "midvunit_gpu.ipp"

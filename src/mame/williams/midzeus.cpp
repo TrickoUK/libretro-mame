@@ -244,6 +244,9 @@ void midzeus_state::machine_reset()
 	memset(m_disk_asic_jr, 0x0, 0x10 * 4);
 	m_disk_asic_jr[6] = 0xa0; // Rev3 Athens
 
+	// the Zeus 2 boards draw through zeus2_device and never create the polygon renderer
+	if (m_poly)
+		m_poly->gpu_reset();
 	rearm_vsync();
 }
 
@@ -1417,7 +1420,6 @@ void midzeus_state::midzeus(machine_config &config)
 	SCREEN(config, m_screen);
 	m_screen->set_raw(MIDZEUS_VIDEO_CLOCK / 8, 529, 0, 400, 278, 0, 256);
 	m_screen->set_screen_update(FUNC(midzeus_state::screen_update));
-	m_screen->set_palette(m_palette);
 
 	// sound hardware
 	SPEAKER(config, "speaker", 2).front();

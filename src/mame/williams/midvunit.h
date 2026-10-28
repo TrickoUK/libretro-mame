@@ -14,6 +14,10 @@
 
 #include "dcs.h"
 
+#include "interface/gpuengine.h"
+
+#include "midvunit_shader.h"
+
 #include "bus/ata/ataintf.h"
 #include "machine/adc0844.h"
 #include "machine/timer.h"
@@ -22,6 +26,9 @@
 
 #include "emupal.h"
 #include "screen.h"
+
+#include <deque>
+#include <vector>
 
 
 struct midvunit_object_data
@@ -37,9 +44,17 @@ class midvunit_base_state;
 class midvunit_renderer : public poly_manager<float, midvunit_object_data, 2>
 {
 public:
-	midvunit_renderer(midvunit_base_state &state);
+	midvunit_renderer(midvunit_base_state &state, palette_device &palette);
 	void process_dma_queue();
-	void make_vertices_inclusive(vertex_t *vert);
+	void make_vertices_inclusive(vertex_t *vert, uint8_t *nudged_x = nullptr, uint8_t *nudged_y = nullptr);
+
+	// host-GPU path (midvunit_gpu.ipp)
+	bool gpu_active() const { return m_gpu_ready; }
+	void gpu_reset();
+	void gpu_latch_off(const char *reason);
+	void gpu_mark_texture(uint32_t offset, uint32_t bytes);
+	void gpu_palette_write(uint32_t index);
+	bool gpu_screen_update(bitmap_rgb32 &bitmap, bool changed);
 
 private:
 	void render_flat(int32_t scanline, const extent_t &extent, const midvunit_object_data &extradata, int threadid);
@@ -47,7 +62,52 @@ private:
 	void render_textrans(int32_t scanline, const extent_t &extent, const midvunit_object_data &extradata, int threadid);
 	void render_textransmask(int32_t scanline, const extent_t &extent, const midvunit_object_data &extradata, int threadid);
 
+	// vertex layout of the host-GPU path (see osd/interface/gpuengine.h)
+	struct gpu_vertex
+	{
+		float x, y, z, w;
+		uint32_t prim;
+		float v[MIDVUNIT_SHADER_VARYINGS];
+	};
+
+	static constexpr int GPU_TEXTURE_WIDTH = 2048;  // texture RAM bytes per row
+	static constexpr int GPU_TEXTURE_HEIGHT = 2048; // 4 MB: the CPU's texture RAM window is written up to 4 MB in byte offsets
+	static constexpr int GPU_PALETTE_ENTRIES = 0x8000;
+	static constexpr int GPU_PAGE_WIDTH = 512;      // each page is 512 x 512 indices, the two stacked in the target
+	static constexpr int GPU_PAGE_ROWS = 512;
+	static constexpr int GPU_TARGET_HEIGHT = 2 * GPU_PAGE_ROWS;
+	static constexpr float GPU_SLIVER_HEIGHT = 1.0f / 16.0f; // quads shorter than this are placed from the scanline spans
+	static constexpr float GPU_EDGE_NUDGE = 1.0f / 128.0f;   // right/bottom edge nudge for the device, in pixels
+
+	bool gpu_init();
+	void gpu_flush_updates();
+	void gpu_add_quad(const vertex_t *vert, uint8_t nudge_x, uint8_t nudge_y, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage);
+	bool gpu_row_span(const vertex_t *vert, int32_t row, const rectangle &clip, int32_t &x0, int32_t &x1, float (&param)[2], float (&dpdx)[2]) const;
+	bool gpu_needs_rows(const vertex_t *vert) const;
+	void gpu_add_rows(const vertex_t *vert, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage);
+
 	midvunit_base_state &m_state;
+	palette_device &m_palette;
+
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	bool m_gpu_checked = false;
+	bool m_gpu_ready = false;
+	uint32_t m_gpu_generation = 0;
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_texture = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_palette = osd::GPU_NULL_HANDLE;
+	std::unique_ptr<uint32_t[]> m_gpu_shadow_palette;
+	int m_gpu_scale = 1;                            // target size in each direction, in native pixels (mame_3d_supersample, 1 to 3)
+	int m_gpu_msaa = 0;                             // samples per target pixel (mame_3d_msaa), 0 for a single sample
+	bool m_gpu_texfilter = false;                   // bilinear filtering after the palette lookup (mame_3d_texfilter)
+	bool m_gpu_palette_full = false;
+	uint32_t m_gpu_texture_lo = 0;                  // dirty byte range of the texture RAM, [lo, hi), empty when lo == hi
+	uint32_t m_gpu_texture_hi = 0;
+	int m_gpu_clip_page = -1;                       // page the last SET_CLIP covers, -1 at the start of a frame
+	std::vector<osd::gpu_command> m_gpu_commands;
+	std::vector<gpu_vertex> m_gpu_vertices;
+	std::vector<uint32_t> m_gpu_state;
+	std::deque<std::vector<uint32_t>> m_gpu_blobs;  // copies the command list points at, kept until the frame is submitted
 };
 
 class midvunit_base_state : public driver_device
@@ -103,7 +163,7 @@ protected:
 	void tms320c31_control_w(offs_t offset, uint32_t data, uint32_t mem_mask = ~0);
 	uint32_t generic_speedup_r(offs_t offset);
 
-	uint32_t screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
+	uint32_t screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
 	TIMER_CALLBACK_MEMBER(scanline_timer_cb);
 	TIMER_CALLBACK_MEMBER(eoi_timer_cb);

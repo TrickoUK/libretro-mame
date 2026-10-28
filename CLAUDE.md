@@ -44,6 +44,10 @@ Batocera.
     the sort in `render_flush()`; the rest is `namcos23_gpu.ipp`/`namcos23_shader.h`), `src/mame/snk/hng64_3d.ipp`
     and `hng64_v.cpp` (GPU engine, submit/collect, palette-resolve composite). Fork-only, not for upstream.
     The software renderers are upstream again, so only these GPU-path hunks conflict.
+  - `src/mame/williams/midzeus_v.cpp`/`midzeus.h` and `midvunit_v.cpp`/`midvunit.h` (host-GPU hooks: the
+    `gpu_screen_update` call at the top of `screen_update`, the polygon capture and the quad path, the `gpu_*` members
+    and the forced-software switches); the adapters are `midzeus_gpu.ipp` and `midvunit_gpu.ipp`, the shaders
+    `midzeus_shader.h` and `midvunit_shader.h`. Fork-only, not for upstream.
 - Upstream API changes that have broken fork/libretro code (check these first when a build fails after a sync):
   - `screen_device` is split per type (`screen_svg_device`, vector screens). Use
     `video_output_interface_enumerator`/`is_vector()`, not `screen_type()`. `configure()` takes an `attotime`.
@@ -76,10 +80,10 @@ Keep these through upstream merges, and check whether upstream has fixed the sam
 
 Update these in the same change as the work. Docs under `my-docs/` are committed in that nested repo.
 
-- **`custom-change-log.md`** (repo root): dated record of this fork's own game/system work. Whenever a fork change
+- **`my-docs/custom-change-log.md`**: dated record of this fork's own game/system work. Whenever a fork change
   lands on `arcade-focused`, add an entry under that day's heading (oldest first, new work at the bottom): a `###`
   headline naming the game(s) or system, then a few short bullets on the end result a player would notice. Commit
-  it with the work. Leave out upstream merges and cherry-picks unless fork work was needed to make them run, and
+  it in `my-docs` with the work. Leave out upstream merges and cherry-picks unless fork work was needed to make them run, and
   investigations that shipped no code unless they reached a conclusion worth keeping.
 - **`my-docs/3D-Enhanced-Games.md`**: major 3D work only (a new 3D system made to run, a host-GPU or supersampling
   feature, a speed-up that makes a 3D system playable, a new or changed 3D core option): the system's row in the
@@ -139,7 +143,8 @@ without core changes.
 - Generic interface: `src/osd/interface/gpurender.h`; `osd_interface::get_gpu_render_target()` returns nullptr by
   default so other OSDs need no changes.
 - Every host-GPU path needs a core option (or switch) to fall back to software; keep it working. Generic options
-  are `mame_3d_supersample`, `mame_3d_msaa`, `mame_3d_edge_aa`; PS1 has the `mame_psx_gpu_*` set.
+  are `mame_3d_gpu`, `mame_3d_supersample`, `mame_3d_output_scale`, `mame_3d_msaa`, `mame_3d_texfilter` and
+  `mame_3d_aniso`; PS1 has the `mame_psx_gpu_*` set.
   `rendersw`-path drivers you have not converted must keep producing output through `bitmap_rgb32`.
 - Treat `src/mame/<mfg>/*_v.cpp` rasterizer rewrites as the highest-risk changes in this codebase.
 

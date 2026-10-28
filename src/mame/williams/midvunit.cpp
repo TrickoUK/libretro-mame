@@ -110,6 +110,7 @@ void midvunit_base_state::machine_reset()
 
 	memcpy(m_ram_base, memregion("maindata")->base(), 0x20000*4);
 	m_maincpu->reset();
+	m_poly->gpu_reset();
 }
 
 
@@ -1181,7 +1182,6 @@ void midvunit_base_state::midvcommon(machine_config &config)
 	SCREEN(config, m_screen);
 	m_screen->set_raw(MIDVUNIT_VIDEO_CLOCK/2, 666, 0, 512, 432, 0, 400);
 	m_screen->set_screen_update(FUNC(midvunit_base_state::screen_update));
-	m_screen->set_palette(m_palette);
 }
 
 
