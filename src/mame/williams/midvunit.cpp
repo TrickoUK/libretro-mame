@@ -1181,7 +1181,6 @@ void midvunit_base_state::midvcommon(machine_config &config)
 	SCREEN(config, m_screen);
 	m_screen->set_raw(MIDVUNIT_VIDEO_CLOCK/2, 666, 0, 512, 432, 0, 400);
 	m_screen->set_screen_update(FUNC(midvunit_base_state::screen_update));
-	m_screen->set_palette(m_palette);
 }
 
 

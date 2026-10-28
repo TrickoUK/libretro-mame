@@ -541,7 +541,7 @@ uint32_t midvunit_base_state::textureram_r(offs_t offset)
  *
  *************************************/
 
-uint32_t midvunit_base_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+uint32_t midvunit_base_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
 	uint32_t offset;
 
@@ -568,11 +568,12 @@ uint32_t midvunit_base_state::screen_update(screen_device &screen, bitmap_ind16 
 	offset += 512 * (cliprect.min_y - screen.visible_area().min_y);
 
 	// loop over rows
+	// the scan-out looks each 15-bit index up in the palette
 	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
 	{
-		uint16_t *dest = &bitmap.pix(y, cliprect.min_x);
+		uint32_t *dest = &bitmap.pix(y, cliprect.min_x);
 		for (int x = 0; x < width; x++)
-			*dest++ = m_videoram[offset + x] & 0x7fff;
+			*dest++ = m_palette->pen(m_videoram[offset + x] & 0x7fff);
 		offset += 512;
 	}
 	return 0;
