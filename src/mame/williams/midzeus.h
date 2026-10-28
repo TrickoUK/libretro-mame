@@ -76,6 +76,7 @@ public:
 	void gpu_reset();
 	void gpu_latch_off(const char *reason);
 	void gpu_mark_texture(const void *block);
+	void gpu_mark_frame_buffer(const void *block, uint32_t mask);
 	void gpu_flip();
 	bool gpu_screen_update(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
@@ -84,6 +85,7 @@ private:
 
 	bool gpu_init();
 	void gpu_flush_textures();
+	void gpu_flush_frame_buffer();
 	void gpu_set_clip(int row, const rectangle &clip);
 	void gpu_add_polygon(const rectangle &clip, const vertex_t *vert, uint32_t numverts, const mz_poly_extra_data &state, bool fill);
 	bool gpu_submit(const osd::gpu_readback_rect *readback, bool flush);
@@ -98,6 +100,12 @@ private:
 	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
 	osd::gpu_handle m_gpu_texture = osd::GPU_NULL_HANDLE;
 	std::unique_ptr<osd::gpu_dirty_region> m_gpu_texture_dirty;
+	osd::gpu_handle m_gpu_stamp_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_fb_texture = osd::GPU_NULL_HANDLE;
+	std::vector<uint8_t> m_gpu_fb_flags;            // per target pixel: the colour and depth words the CPU wrote since the last flush
+	bool m_gpu_fb_pending = false;
+	int m_gpu_fb_row_min = 0;                       // the rows that hold flags, so a flush scans only those
+	int m_gpu_fb_row_max = -1;
 	int m_gpu_clip_row = -1;                        // page row the last SET_CLIP was offset by, -1 at the start of a frame
 	rectangle m_gpu_clip;
 	std::vector<osd::gpu_command> m_gpu_commands;

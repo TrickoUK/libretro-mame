@@ -14,6 +14,9 @@
 
     Source: my-docs/tools/midzeus.glsl, converted by tools/glsl2header.py.
     Binding: "tex_ram" (R8UI, 4096 x 2048, wave RAM 0 one byte per texel).
+    MIDZEUS_STAMP_SOURCE is the second module, the frame-buffer write stamp
+    (my-docs/tools/midzeus_stamp.glsl): binding "tex_fb" (R16UI, 1024 x 1024,
+    the frame buffer words), one colour or depth plane per draw variant.
     Varyings are screen-linear: v0 = u and v1 = v in texel units, v2 = z in
     the chip's 16.16 units.
 
@@ -140,6 +143,17 @@ constexpr char MIDZEUS_FRAGMENT_SOURCE[] =
 	"		src = (src * (state(S_SRCA) << 1)) >> 8;\n"
 	"	ivec3 c5 = min(src, ivec3(255)) >> 3;\n"
 	"	color = vec4(vec3(expand5(c5)) / 255.0, 1.0);\n"
+	"	return true;\n"
+	"}\n";
+
+constexpr char MIDZEUS_STAMP_SOURCE[] =
+	"bool shade(out vec4 color)\n"
+	"{\n"
+	"	ivec2 p = ivec2(floor(frag_pos()));\n"
+	"	int word = int(texelFetch(tex_fb, ivec2(4 * (p.x / 2) + (p.x & 1) + 2 * VARIANT, p.y), 0).r);\n"
+	"	frag_depth = float(word) / 65536.0;\n"
+	"	ivec3 c = ivec3((word >> 10) & 31, (word >> 5) & 31, word & 31);\n"
+	"	color = vec4(vec3((c << 3) | (c >> 2)) / 255.0, 1.0);\n"
 	"	return true;\n"
 	"}\n";
 

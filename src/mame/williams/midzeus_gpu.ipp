@@ -14,13 +14,19 @@
     as they stood when the chip drew it. The page on screen comes back as
     ordinary pixels when the screen is updated.
 
-    The CPU writes to the frame buffer are not copied into the target, so the
-    target keeps the pixels the chip drew. A CPU read of the frame buffer
-    latches the path off for the rest of the session.
+    The CPU writes to the frame buffer (0xb0/0xb2 with bit 31 of 0xb6 set)
+    reach the target as write stamps. Each written word is flagged per pixel
+    until the next draw or submit. Then the frame buffer's words are uploaded
+    for the flagged blocks, and one stamp draw per plane and rectangle copies
+    the flagged colour or depth words into the target, so the write lands at
+    its point in the command list. Pixels the chip drew and the CPU did not
+    write keep their drawn values. A CPU read of the frame buffer latches the
+    path off for the rest of the session.
 
 ***************************************************************************/
 
 namespace {
+
 
 // state record words, as the shader reads them (midzeus_shader.h)
 enum : uint32_t
@@ -104,6 +110,76 @@ constexpr int GPU_TEXTURE_WIDTH = 4096;
 constexpr int GPU_TEXTURE_HEIGHT = 2048;
 constexpr int GPU_BLOCK_BYTES = 8;
 
+// the frame buffer as 16-bit words: a row is 1024 words, the mirror texture is the frame buffer as the chip holds it
+constexpr int GPU_ROW_WORDS = GPU_ROW_BYTES / 2;
+
+// per-pixel flags of the CPU writes not yet in the target: the colour word and the depth word of the pixel
+enum : uint8_t
+{
+	GPU_FB_COLOUR = 1,
+	GPU_FB_DEPTH = 2
+};
+
+// the variant of the stamp module: the colour plane or the depth plane of the mirror (midzeus_stamp.glsl)
+enum : uint32_t
+{
+	GPU_STAMP_COLOUR = 0,
+	GPU_STAMP_DEPTH = 1
+};
+
+// Calls emit(x0, x1, y0, y1) for rectangles of target pixels whose flags include mask: pixels x0 to x1 - 1 of rows y0 to y1 - 1.
+// A run that matches the run on the row above continues that rectangle, so a region written in whole rows is one rectangle.
+template <typename T>
+void gpu_flag_rects(const std::vector<uint8_t> &flags, int row_min, int row_max, uint8_t mask, T &&emit)
+{
+	struct open_rect
+	{
+		int x0, x1, y0;
+	};
+	std::vector<open_rect> open;
+	std::vector<std::pair<int, int> > runs;
+	for (int y = row_min; y <= row_max + 1; y++)
+	{
+		// row_max + 1 holds no runs, which closes the rectangles still open
+		runs.clear();
+		if (y <= row_max)
+		{
+			const uint8_t *const row = &flags[size_t(y) * GPU_TARGET_WIDTH];
+			for (int x = 0; x < GPU_TARGET_WIDTH; )
+			{
+				if (!(row[x] & mask))
+				{
+					x++;
+					continue;
+				}
+				int x1 = x + 1;
+				while (x1 < GPU_TARGET_WIDTH && (row[x1] & mask))
+					x1++;
+				runs.emplace_back(x, x1);
+				x = x1;
+			}
+		}
+
+		std::vector<open_rect> next;
+		for (const open_rect &r : open)
+		{
+			const auto run = std::find(runs.begin(), runs.end(), std::make_pair(r.x0, r.x1));
+			if (run == runs.end())
+			{
+				emit(r.x0, r.x1, r.y0, y);
+			}
+			else
+			{
+				runs.erase(run);
+				next.push_back(r);
+			}
+		}
+		for (const auto &run : runs)
+			next.push_back({ run.first, run.second, y });
+		open.swap(next);
+	}
+}
+
 } // anonymous namespace
 
 bool midzeus_renderer::gpu_active()
@@ -139,19 +215,39 @@ bool midzeus_renderer::gpu_init()
 	module.binding_format[0] = osd::gpu_texture_format::R8UI;
 	m_gpu_module = m_gpu_engine->create_shader_module(module);
 
+	osd::gpu_shader_module stamp;
+	stamp.name = "midzeus_stamp";
+	stamp.fragment_source = MIDZEUS_STAMP_SOURCE;
+	stamp.varying_count = MIDZEUS_SHADER_VARYINGS;
+	for (int i = 0; i < MIDZEUS_SHADER_VARYINGS; i++)
+		stamp.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+	stamp.state_stride = MIDZEUS_SHADER_STATE_WORDS;
+	stamp.writes_depth = true;
+	stamp.binding_count = 1;
+	stamp.binding_name[0] = "tex_fb";
+	stamp.binding_format[0] = osd::gpu_texture_format::R16UI;
+	m_gpu_stamp_module = m_gpu_engine->create_shader_module(stamp);
+
 	osd::gpu_texture_desc desc;
 	desc.format = osd::gpu_texture_format::R8UI;
 	desc.width = GPU_TEXTURE_WIDTH;
 	desc.height = GPU_TEXTURE_HEIGHT;
 	m_gpu_texture = m_gpu_engine->create_texture(desc);
 
-	if (!m_gpu_module || !m_gpu_texture)
+	osd::gpu_texture_desc fb_desc;
+	fb_desc.format = osd::gpu_texture_format::R16UI;
+	fb_desc.width = GPU_ROW_WORDS;
+	fb_desc.height = GPU_TARGET_ROWS;
+	m_gpu_fb_texture = m_gpu_engine->create_texture(fb_desc);
+
+	if (!m_gpu_module || !m_gpu_texture || !m_gpu_stamp_module || !m_gpu_fb_texture)
 	{
 		m_gpu_engine = nullptr;
 		return false;
 	}
 
 	m_gpu_texture_dirty = std::make_unique<osd::gpu_dirty_region>(GPU_TEXTURE_WIDTH, GPU_TEXTURE_HEIGHT);
+	m_gpu_fb_flags.assign(size_t(GPU_TARGET_WIDTH) * GPU_TARGET_ROWS, 0);
 	m_gpu_ready = true;
 	gpu_reset();
 	osd_printf_info("midzeus: host GPU path on, target %dx%d\n", GPU_TARGET_WIDTH, GPU_TARGET_ROWS);
@@ -159,7 +255,8 @@ bool midzeus_renderer::gpu_init()
 }
 
 // Called when the frame buffer the target holds can no longer be trusted: a state load or a reset. The target is cleared at the next
-// frame, and wave RAM 0 is uploaded again in full.
+// frame, wave RAM 0 is uploaded again in full, and the frame buffer's words are stamped in full, so the CPU's copy of the frame
+// buffer is what the next frame starts from.
 void midzeus_renderer::gpu_reset()
 {
 	m_gpu_generation++;
@@ -170,6 +267,13 @@ void midzeus_renderer::gpu_reset()
 	m_gpu_vertices.clear();
 	m_gpu_state.clear();
 	m_gpu_blobs.clear();
+	if (m_gpu_ready)
+	{
+		std::fill(m_gpu_fb_flags.begin(), m_gpu_fb_flags.end(), uint8_t(GPU_FB_COLOUR | GPU_FB_DEPTH));
+		m_gpu_fb_pending = true;
+		m_gpu_fb_row_min = 0;
+		m_gpu_fb_row_max = GPU_TARGET_ROWS - 1;
+	}
 }
 
 // The path stays off for the rest of the session. The polygons queued for the frame being built are dropped.
@@ -181,6 +285,7 @@ void midzeus_renderer::gpu_latch_off(const char *reason)
 	m_gpu_ready = false;
 	m_gpu_engine = nullptr;
 	m_gpu_clip_row = -1;
+	m_gpu_fb_pending = false;
 	m_gpu_commands.clear();
 	m_gpu_vertices.clear();
 	m_gpu_state.clear();
@@ -196,11 +301,44 @@ void midzeus_renderer::gpu_mark_texture(const void *block)
 	m_gpu_texture_dirty->mark(offset % GPU_TEXTURE_WIDTH, offset / GPU_TEXTURE_WIDTH, GPU_BLOCK_BYTES, 1);
 }
 
+// A CPU write to the frame-buffer block at block. mask holds the words of the write (0xb6 bits 20 to 23): words 0 and 1 are the
+// colour of the block's two pixels, words 2 and 3 their depth. The write is held until the next flush.
+void midzeus_renderer::gpu_mark_frame_buffer(const void *block, uint32_t mask)
+{
+	if (!m_gpu_ready || !(mask & 0x00f00000))
+		return;
+	const uint32_t offset = uint32_t(uintptr_t(block) - uintptr_t(m_state.m_waveram[1].get()));
+	const int row = int(offset / GPU_ROW_BYTES);
+	if (row >= GPU_TARGET_ROWS)
+		return;
+	uint8_t *const flags = &m_gpu_fb_flags[size_t(row) * GPU_TARGET_WIDTH + 2 * ((offset % GPU_ROW_BYTES) / GPU_BLOCK_BYTES)];
+	if (mask & 0x00100000)
+		flags[0] |= GPU_FB_COLOUR;
+	if (mask & 0x00200000)
+		flags[1] |= GPU_FB_COLOUR;
+	if (mask & 0x00400000)
+		flags[0] |= GPU_FB_DEPTH;
+	if (mask & 0x00800000)
+		flags[1] |= GPU_FB_DEPTH;
+
+	if (!m_gpu_fb_pending)
+	{
+		m_gpu_fb_pending = true;
+		m_gpu_fb_row_min = row;
+		m_gpu_fb_row_max = row;
+	}
+	else
+	{
+		m_gpu_fb_row_min = std::min(m_gpu_fb_row_min, row);
+		m_gpu_fb_row_max = std::max(m_gpu_fb_row_max, row);
+	}
+}
+
 // The game flips the render base (0x84) or the display base (0xcc). The queued polygons are sent now, so the queue stays
 // short on frames that are not shown; the rest of the frame goes out with screen_update().
 void midzeus_renderer::gpu_flip()
 {
-	if (!m_gpu_ready || m_gpu_commands.empty())
+	if (!m_gpu_ready || (m_gpu_commands.empty() && !m_gpu_fb_pending))
 		return;
 	if (!gpu_submit(nullptr, true))
 		gpu_latch_off("the engine refused a frame");
@@ -232,6 +370,85 @@ void midzeus_renderer::gpu_flush_textures()
 	update.h = h;
 	update.data = blob.data();
 	m_gpu_commands.push_back(osd::gpu_command::make_update(update));
+}
+
+// The CPU writes to the frame buffer since the last flush, placed at this point of the command list. One texture update per
+// rectangle of blocks copies the frame buffer's words as they stand in the CPU's copy. Then a stamp draw per plane and rectangle
+// copies the flagged words of that plane into the target, clipped to the rectangle and writing only that plane. The update covers
+// whole blocks, so an unflagged word of a block is copied too, but no stamp reads it.
+void midzeus_renderer::gpu_flush_frame_buffer()
+{
+	if (!m_gpu_fb_pending)
+		return;
+	m_gpu_fb_pending = false;
+
+	const uint8_t *const ram = (const uint8_t *)m_state.m_waveram[1].get();
+	const int row_min = m_gpu_fb_row_min;
+	const int row_max = m_gpu_fb_row_max;
+
+	gpu_flag_rects(m_gpu_fb_flags, row_min, row_max, GPU_FB_COLOUR | GPU_FB_DEPTH,
+		[this, ram](int x0, int x1, int y0, int y1)
+		{
+			const int bx0 = x0 / 2;
+			const int bx1 = (x1 + 1) / 2;
+			const int w = 4 * (bx1 - bx0);
+			const int h = y1 - y0;
+			auto &blob = m_gpu_blobs.emplace_back(size_t(w) * h * 2);
+			for (int row = 0; row < h; row++)
+				memcpy(&blob[size_t(row) * w * 2], ram + size_t(y0 + row) * GPU_ROW_BYTES + size_t(bx0) * GPU_BLOCK_BYTES, size_t(w) * 2);
+
+			osd::gpu_texture_update update;
+			update.texture = m_gpu_fb_texture;
+			update.x = 4 * bx0;
+			update.y = y0;
+			update.w = w;
+			update.h = h;
+			update.data = blob.data();
+			m_gpu_commands.push_back(osd::gpu_command::make_update(update));
+		});
+
+	for (uint32_t plane = GPU_STAMP_COLOUR; plane <= GPU_STAMP_DEPTH; plane++)
+	{
+		const uint8_t mask = (plane == GPU_STAMP_COLOUR) ? GPU_FB_COLOUR : GPU_FB_DEPTH;
+		gpu_flag_rects(m_gpu_fb_flags, row_min, row_max, mask,
+			[this, plane](int x0, int x1, int y0, int y1)
+			{
+				// the stamp reads no state, but every primitive needs a record in the frame's table
+				const uint32_t prim = m_gpu_state.size() / MIDZEUS_SHADER_STATE_WORDS;
+				m_gpu_state.resize(m_gpu_state.size() + MIDZEUS_SHADER_STATE_WORDS, 0);
+
+				auto corner = [prim](float x, float y)
+				{
+					gpu_vertex v = {};
+					v.x = x;
+					v.y = y;
+					v.z = 0.0f;
+					v.w = 1.0f;
+					v.prim = prim;
+					return v;
+				};
+				const gpu_vertex a = corner(float(x0), float(y0));
+				const gpu_vertex b = corner(float(x1), float(y0));
+				const gpu_vertex c = corner(float(x1), float(y1));
+				const gpu_vertex d = corner(float(x0), float(y1));
+				const uint32_t first = m_gpu_vertices.size();
+				m_gpu_vertices.insert(m_gpu_vertices.end(), { a, b, c, a, c, d });
+
+				m_gpu_commands.push_back(osd::gpu_command::make_clip(x0, y0, x1 - x0, y1 - y0));
+				osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_stamp_module, first, 6);
+				draw.bindings[0] = m_gpu_fb_texture;
+				draw.variant = plane;
+				draw.depth_func = osd::gpu_depth_func::ALWAYS;
+				draw.depth_write = (plane == GPU_STAMP_DEPTH);
+				draw.color_write = (plane == GPU_STAMP_COLOUR);
+				m_gpu_commands.push_back(draw);
+
+				// the next polygon sets its own clip
+				m_gpu_clip_row = -1;
+			});
+	}
+
+	std::fill(m_gpu_fb_flags.begin() + size_t(row_min) * GPU_TARGET_WIDTH, m_gpu_fb_flags.begin() + size_t(row_max + 1) * GPU_TARGET_WIDTH, 0);
 }
 
 // Sets the scissor to the clip rectangle of a page. The clip is in page coordinates, so the page's first row is added.
@@ -349,6 +566,7 @@ void midzeus_renderer::gpu_add_polygon(const rectangle &clip, const vertex_t *ve
 	words[SW_DEPTH_TEST] = depth_test ? 1 : 0;
 
 	const int row = gpu_page_row(state.renderbase);
+	gpu_flush_frame_buffer();
 	gpu_flush_textures();
 	gpu_set_clip(row, clip);
 
@@ -384,7 +602,7 @@ void midzeus_renderer::gpu_add_polygon(const rectangle &clip, const vertex_t *ve
 	if (!m_gpu_commands.empty())
 	{
 		osd::gpu_command &last = m_gpu_commands.back();
-		if (last.type == osd::gpu_command_type::DRAW && last.first_vertex + last.vertex_count == first && last.depth_func == func && last.depth_write == depth_write && gpu_same_blend(last.blend, blend_state))
+		if (last.type == osd::gpu_command_type::DRAW && last.module == m_gpu_module && last.first_vertex + last.vertex_count == first && last.depth_func == func && last.depth_write == depth_write && gpu_same_blend(last.blend, blend_state))
 		{
 			last.vertex_count += count;
 			return;
@@ -401,6 +619,8 @@ void midzeus_renderer::gpu_add_polygon(const rectangle &clip, const vertex_t *ve
 // Sends the queued frame. A readback is written by this call; flush sends the commands without one, to keep the queue short.
 bool midzeus_renderer::gpu_submit(const osd::gpu_readback_rect *readback, bool flush)
 {
+	gpu_flush_frame_buffer();
+
 	osd::gpu_frame frame;
 	frame.target.width = GPU_TARGET_WIDTH;
 	frame.target.height = GPU_TARGET_ROWS;

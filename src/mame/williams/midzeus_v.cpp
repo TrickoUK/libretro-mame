@@ -690,8 +690,10 @@ void midzeus_state::zeus_register_update(offs_t offset)
 					if (m_zeusbase[0xb6] & 0x00800000)
 						WAVERAM_WRITE16(dest, 3, m_zeusbase[0xb2] >> 16);
 
-					// wave RAM 0 holds the textures and palettes the host GPU path samples; the frame buffer is not copied into the target
-					if ((m_zeusbase[0xb6] & 0x80000000) == 0)
+					// wave RAM 0 holds the textures and palettes the host GPU path samples; frame-buffer words go to the target as stamps
+					if (m_zeusbase[0xb6] & 0x80000000)
+						m_poly->gpu_mark_frame_buffer(dest, m_zeusbase[0xb6] & 0x00f00000);
+					else
 						m_poly->gpu_mark_texture(dest);
 
 					if (m_zeusbase[0xb6] & 0x00020000)
