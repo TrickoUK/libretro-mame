@@ -30,6 +30,12 @@ namespace {
 
 using clock_type = std::chrono::steady_clock;
 
+// the longest a submitted frame may take before the GPU is treated as stopped (a hang or a lost device)
+constexpr uint64_t GPU_WAIT_TIMEOUT_NS = 5ULL * 1000 * 1000 * 1000;
+
+// frames that need under a quarter of the staging buffer, in a row, before the buffer is released to the size they need
+constexpr uint32_t STAGING_SHRINK_FRAMES = 300;
+
 double elapsed_ms(clock_type::time_point from)
 {
 	return std::chrono::duration<double, std::milli>(clock_type::now() - from).count();
@@ -353,9 +359,13 @@ retro_vk_engine::~retro_vk_engine()
 {
 	if (!m_device.valid())
 		return;
+	// a frame the GPU never finished may still use these objects, so they are left alive rather than destroyed under it
+	if (m_hung)
+		return;
 	// nothing may be in flight while its objects are destroyed
 	wait_in_flight();
 	drop_pending();
+	destroy_staging(m_staging);
 	if (m_query_pool != VK_NULL_HANDLE)
 		m_device.fn.destroy_query_pool(m_device.device(), m_query_pool, nullptr);
 	for (auto &t : m_textures)
@@ -748,13 +758,26 @@ bool retro_vk_engine::end_recording(bool wait)
 	return wait ? wait_in_flight() : true;
 }
 
-// Waits for the frame in flight, if there is one, and reads its timestamps.
+// Waits for the frame in flight, if there is one, and reads its timestamps. A frame that has not finished within
+// GPU_WAIT_TIMEOUT_NS has stopped the GPU: its buffers stay in use, so the engine stops for the session.
 bool retro_vk_engine::wait_in_flight()
 {
+	// after a timeout the GPU is treated as stopped, so callers do not wait another period for it
+	if (m_hung)
+		return false;
 	if (!m_in_flight)
 		return true;
+	const VkResult result = m_device.fn.wait_for_fences(m_device.device(), 1, &m_fence, VK_TRUE, GPU_WAIT_TIMEOUT_NS);
+	if (result == VK_TIMEOUT)
+	{
+		m_failed = true;
+		m_hung = true;
+		fprintf(stderr, "[retro_vk_engine] the GPU did not finish a frame in %d s; the Vulkan engine is off for this session\n",
+				int(GPU_WAIT_TIMEOUT_NS / 1000000000ULL));
+		return false;
+	}
 	m_in_flight = false;
-	if (m_device.fn.wait_for_fences(m_device.device(), 1, &m_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS)
+	if (result != VK_SUCCESS)
 	{
 		log_problem("frame", "waiting for the GPU failed");
 		return false;
@@ -995,7 +1018,10 @@ bool retro_vk_engine::record_output_pass(const osd::gpu_readback_rect &r, size_t
 	}
 
 	const VkDevice dev = m_device.device();
-	VkDescriptorBufferInfo buffer = { staging.buffer, 0, VK_WHOLE_SIZE };
+	// the output pass only reads below the frame's total, which is within the storage buffer range limit, so the
+	// range stops at that limit when the staging buffer has grown past it
+	const VkDeviceSize range = std::min<VkDeviceSize>(staging.capacity, m_device.properties().limits.maxStorageBufferRange);
+	VkDescriptorBufferInfo buffer = { staging.buffer, 0, range };
 	const image &source = per_sample ? m_color : readback_image();
 	VkDescriptorImageInfo image = { m_sampler_nearest, source.view, VK_IMAGE_LAYOUT_GENERAL };
 	VkWriteDescriptorSet writes[2] = {};
@@ -1121,6 +1147,34 @@ void retro_vk_engine::unpack_readback(const osd::gpu_readback_rect &r, const uin
 //  Staging
 //**************************************************************************
 
+// The staging buffer belongs to the engine. It grows to the next power of two that holds a frame, and it is released to
+// the size of the frame after STAGING_SHRINK_FRAMES frames in a row that need under a quarter of it. It is only written
+// after submit_pending() has waited for the frame in flight, and it is only replaced when no read-back is pending, so one
+// buffer serves every frame. If the new buffer cannot be allocated, the old one stays in place and the frame is refused.
+bool retro_vk_engine::ensure_staging(size_t bytes)
+{
+	size_t capacity = 1;
+	while (capacity < bytes)
+		capacity <<= 1;
+	if (m_staging.buffer != VK_NULL_HANDLE && m_staging.capacity >= bytes)
+	{
+		if (bytes * 4 >= m_staging.capacity)
+			m_staging_idle = 0;
+		else
+			m_staging_idle++;
+		if (m_staging_idle < STAGING_SHRINK_FRAMES || !m_pending.empty())
+			return true;
+	}
+	staging_buffer grown;
+	if (!create_staging(capacity, grown))
+		return false;
+	destroy_staging(m_staging);
+	m_staging = grown;
+	m_staging_idle = 0;
+	m_staging_high_water = std::max(m_staging_high_water, capacity);
+	return true;
+}
+
 bool retro_vk_engine::create_staging(size_t bytes, staging_buffer &staging)
 {
 	const VkDevice dev = m_device.device();
@@ -1150,6 +1204,7 @@ bool retro_vk_engine::create_staging(size_t bytes, staging_buffer &staging)
 		return false;
 	}
 	staging.data = static_cast<uint8_t *>(mapped);
+	staging.capacity = bytes;
 	return true;
 }
 
@@ -1933,11 +1988,10 @@ bool retro_vk_engine::record_draw(const osd::gpu_command &c, VkPipeline pipeline
 	return true;
 }
 
-// Forgets read-backs that were never collected, and the staging buffer they were read from. Nothing may be in flight.
+// Forgets read-backs that were never collected. The staging buffer stays for the next frame. Nothing may be in flight.
 void retro_vk_engine::drop_pending()
 {
 	m_pending.clear();
-	destroy_staging(m_staging);
 }
 
 // Waits for the frame in flight and writes the pixels of its deferred read-backs.
@@ -2021,11 +2075,12 @@ void retro_vk_engine::profile_report()
 
 	const double n = m_prof.submits;
 	fprintf(stderr, "[retro_vk_engine:%s] %u submits (%u with read-back, %u collect calls): %.1f draw calls, %.0f vertices, "
-			"uploads per submit %.1f KB (textures %.1f, vertices %.1f, state %.1f), read-back %.1f KB\n",
+			"uploads per submit %.1f KB (textures %.1f, vertices %.1f, state %.1f), read-back %.1f KB, "
+			"staging buffer %.1f MB (high water %.1f MB)\n",
 			m_prof_name.c_str(), m_prof.submits, m_prof.readback_submits, m_prof.collects,
 			m_prof.draw_calls / n, m_prof.vertices / n, (m_prof.texture_bytes + m_prof.vertex_bytes + m_prof.state_bytes) / n / 1024.0,
 			m_prof.texture_bytes / n / 1024.0, m_prof.vertex_bytes / n / 1024.0, m_prof.state_bytes / n / 1024.0,
-			m_prof.readback_bytes / n / 1024.0);
+			m_prof.readback_bytes / n / 1024.0, m_staging.capacity / 1048576.0, m_staging_high_water / 1048576.0);
 	auto mean = [](const profile_timing &t) { return t.count ? t.sum / t.count : 0.0; };
 	fprintf(stderr, "[retro_vk_engine:%s] mean/max ms: wait %.3f/%.3f, upload %.3f/%.3f, draw %.3f/%.3f, read-back %.3f/%.3f, "
 			"collect %.3f/%.3f, gpu %.3f/%.3f; submit median %.3f ms, %u slower than 2x median\n",
@@ -2141,7 +2196,7 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		log_problem("frame", "staging buffer larger than the storage buffer limit for the read-back pass");
 		return false;
 	}
-	if (total > 0 && !create_staging(total, m_staging))
+	if (total > 0 && !ensure_staging(total))
 	{
 		log_problem("frame", "staging buffer allocation failed");
 		return false;

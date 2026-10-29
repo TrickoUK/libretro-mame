@@ -110,6 +110,7 @@ private:
 		VkBuffer buffer = VK_NULL_HANDLE;
 		VkDeviceMemory memory = VK_NULL_HANDLE;
 		uint8_t *data = nullptr;
+		size_t capacity = 0;
 	};
 
 	// the two shader stages of one module and variant
@@ -209,6 +210,7 @@ private:
 	void record_readback(const osd::gpu_readback_rect &r, size_t offset, const staging_buffer &staging);
 	bool record_readback_any(const osd::gpu_readback_rect &r, size_t at, const staging_buffer &staging);
 
+	bool ensure_staging(size_t bytes);
 	bool create_staging(size_t bytes, staging_buffer &staging);
 	void destroy_staging(staging_buffer &staging);
 	void write_update(const osd::gpu_texture_update &u, uint8_t *dst) const;
@@ -243,9 +245,14 @@ private:
 	std::vector<VkDescriptorPool> m_desc_pools;
 	size_t m_desc_pool_next = 0;
 	VkDescriptorSet m_last_set = VK_NULL_HANDLE;
-	// the frame in flight: its staging buffer stays alive until its read-backs are collected or the next frame starts
+	// the frame in flight: its staging buffer stays alive until its read-backs are collected or the next frame starts.
+	// The buffer itself outlives the frames; it is only grown, and only written once the frame in flight has finished.
 	bool m_in_flight = false;
+	// a frame the GPU did not finish in time: its objects are left alone at teardown
+	bool m_hung = false;
 	staging_buffer m_staging;
+	uint32_t m_staging_idle = 0;
+	size_t m_staging_high_water = 0;
 	std::vector<pending_readback> m_pending;
 	int m_collect_failures = 0;
 	// GPU timestamps around the command loop, only when MAME_GPU_PROF is set and the queue supports them
