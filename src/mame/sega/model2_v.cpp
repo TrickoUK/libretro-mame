@@ -106,14 +106,10 @@
 #define pv      p[2]
 
 
-// Supersampling factor of the 3D layer (1 = native), from the OSD's 3D supersampling setting. The
-// MAME_MODEL2_SS environment variable overrides it for testing.
+// Supersampling factor of the 3D layer (1 = native), from the OSD's 3D supersampling setting
 int model2_supersample_factor(running_machine &machine)
 {
-	int ss = machine.osd().supersample();
-	if (char const *env = getenv("MAME_MODEL2_SS"))
-		ss = atoi(env);
-	return std::clamp(ss, 1, 4);
+	return std::clamp(machine.osd().supersample(), 1, osd::GPU_MAX_SUPERSAMPLE);
 }
 
 
@@ -699,11 +695,7 @@ bool model2_state::gpu_init()
 			osd::gpu_shader_module module;
 			module.name = "model2";
 			module.fragment_source = MODEL2_FRAGMENT_SOURCE;
-			if (machine().osd().msaa() > 0)
-				module.centroid_mask = 0x7;
-			module.varying_count = MODEL2_SHADER_VARYINGS;
-			for (int i = 0; i < MODEL2_SHADER_VARYINGS; i++)
-				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+			module.set_varyings(MODEL2_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, machine().osd().msaa() > 0);
 			module.state_stride = MODEL2_SHADER_STATE_WORDS;
 			module.binding_count = 4;
 			module.binding_name[0] = "tex_sheets";

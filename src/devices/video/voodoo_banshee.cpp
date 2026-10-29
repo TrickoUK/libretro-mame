@@ -1533,7 +1533,7 @@ void voodoo_banshee_device::recompute_video()
 		logerror("configure screen: htotal: %d vtotal: %d vstart: %d vstop: %d width: %d height: %d misc_vga: %02x alpha_dis %d refresh: %f\n", htotal, vtotal, vstart, vstop, width, height, misc_vga_output, alpha_dis, 1.0 / frame_period);
 
 	// the host-GPU path can present the screen at the render scale (the mame_3d_output_scale option)
-	m_output_scale = (m_gpu && machine().osd().supersample_output()) ? std::clamp(machine().osd().supersample(), 1, 4) : 1;
+	m_output_scale = (m_gpu && machine().osd().supersample_output()) ? std::clamp(machine().osd().supersample(), 1, osd::GPU_MAX_SUPERSAMPLE) : 1;
 	int const os = m_output_scale;
 
 	// configure the screen

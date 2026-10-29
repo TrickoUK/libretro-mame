@@ -61,6 +61,7 @@
 #include "gpurender.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -70,6 +71,18 @@ namespace osd {
 
 constexpr int GPU_MAX_VARYINGS = 16;
 constexpr int GPU_MAX_BINDINGS = 8;
+
+// the largest supersampling factor of any host-GPU target; the colour-target stack does not fit at a larger factor on tall modes
+constexpr int GPU_MAX_SUPERSAMPLE = 3;
+
+// the supersampling factor a target uses: the requested factor, reduced until the largest native extent times it fits the texture size
+inline int gpu_pick_scale(int requested, int largest_native_extent, int max_texture_size)
+{
+	int scale = std::clamp(requested, 1, GPU_MAX_SUPERSAMPLE);
+	while (scale > 1 && largest_native_extent * scale > max_texture_size)
+		scale--;
+	return scale;
+}
 
 // opaque handle to an engine-owned object (texture or shader module);
 // zero is never valid
@@ -142,6 +155,44 @@ struct gpu_blend_state
 	gpu_blend_factor src_alpha = gpu_blend_factor::ONE;
 	gpu_blend_factor dst_alpha = gpu_blend_factor::ZERO;
 	float constant_alpha = 1.0f;
+
+	bool operator==(const gpu_blend_state &that) const
+	{
+		return enable == that.enable
+			&& op == that.op
+			&& src == that.src
+			&& dst == that.dst
+			&& separate_alpha == that.separate_alpha
+			&& src_alpha == that.src_alpha
+			&& dst_alpha == that.dst_alpha
+			&& constant_alpha == that.constant_alpha;
+	}
+
+	// the colour is weighted by the shader's blend_factor output; the alpha channel takes the fragment's alpha
+	static gpu_blend_state weighted()
+	{
+		gpu_blend_state blend;
+		blend.enable = true;
+		blend.src = gpu_blend_factor::SRC1_ALPHA;
+		blend.dst = gpu_blend_factor::ONE_MINUS_SRC1_ALPHA;
+		blend.separate_alpha = true;
+		blend.src_alpha = gpu_blend_factor::ONE;
+		blend.dst_alpha = gpu_blend_factor::ZERO;
+		return blend;
+	}
+
+	// the colour blends by the given factors; the alpha channel takes the fragment's alpha, so the target's alpha is replaced
+	static gpu_blend_state with_opaque_alpha(gpu_blend_factor src, gpu_blend_factor dst)
+	{
+		gpu_blend_state blend;
+		blend.enable = true;
+		blend.src = src;
+		blend.dst = dst;
+		blend.separate_alpha = true;
+		blend.src_alpha = gpu_blend_factor::ONE;
+		blend.dst_alpha = gpu_blend_factor::ZERO;
+		return blend;
+	}
 };
 
 // The pixel pipeline of one system. fragment_source is GLSL that defines
@@ -173,6 +224,17 @@ struct gpu_shader_module
 	int binding_count = 0;
 	const char *binding_name[GPU_MAX_BINDINGS] = {};
 	gpu_texture_format binding_format[GPU_MAX_BINDINGS] = {};
+
+	// all varyings share one interpolation mode; the centroid mask covers every varying when centroid is set
+	void set_varyings(int count, gpu_varying_mode mode, bool centroid)
+	{
+		assert(count >= 0 && count <= GPU_MAX_VARYINGS);
+		count = std::clamp(count, 0, GPU_MAX_VARYINGS);
+		varying_count = count;
+		for (int i = 0; i < count; i++)
+			varying_mode[i] = mode;
+		centroid_mask = centroid ? ((1U << count) - 1U) : 0U;
+	}
 };
 
 struct gpu_target_desc

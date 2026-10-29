@@ -2877,7 +2877,7 @@ void voodoo_1_device::recompute_video_timing(u32 hsyncon, u32 hsyncoff, u32 hvis
 	logerror("Horiz: %d-%d (%d total)  Vert: %d-%d (%d total) -- ", visarea.min_x, visarea.max_x, htotal, visarea.min_y, visarea.max_y, vtotal);
 
 	// the host-GPU path can present the screen at the render scale (the mame_3d_output_scale option)
-	m_output_scale = (m_gpu && machine().osd().supersample_output()) ? std::clamp(machine().osd().supersample(), 1, 4) : 1;
+	m_output_scale = (m_gpu && machine().osd().supersample_output()) ? std::clamp(machine().osd().supersample(), 1, osd::GPU_MAX_SUPERSAMPLE) : 1;
 	int const os = m_output_scale;
 	rectangle const native_visarea = visarea;
 	visarea = rectangle(native_visarea.min_x * os, (native_visarea.max_x + 1) * os - 1, native_visarea.min_y * os, (native_visarea.max_y + 1) * os - 1);

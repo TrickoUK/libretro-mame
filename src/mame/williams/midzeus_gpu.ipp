@@ -82,31 +82,6 @@ static_assert(SW_COUNT == MIDZEUS_SHADER_STATE_WORDS, "state record size");
 // the mode word bit that enables the destination read of ADD1, ADD2 and MUL1 (render_poly())
 constexpr uint32_t GPU_BLEND_DST_BIT = 0x00800000;
 
-// the blend of a draw that combines the pixel the target holds with the shader's output. The alpha channel keeps the fragment's
-// alpha of 1, so the target's alpha does not change.
-osd::gpu_blend_state gpu_blend(osd::gpu_blend_factor src, osd::gpu_blend_factor dst)
-{
-	osd::gpu_blend_state blend;
-	blend.enable = true;
-	blend.src = src;
-	blend.dst = dst;
-	blend.separate_alpha = true;
-	blend.src_alpha = osd::gpu_blend_factor::ONE;
-	blend.dst_alpha = osd::gpu_blend_factor::ZERO;
-	return blend;
-}
-
-bool gpu_same_blend(const osd::gpu_blend_state &a, const osd::gpu_blend_state &b)
-{
-	return a.enable == b.enable
-		&& a.src == b.src
-		&& a.dst == b.dst
-		&& a.constant_alpha == b.constant_alpha
-		&& a.separate_alpha == b.separate_alpha
-		&& a.src_alpha == b.src_alpha
-		&& a.dst_alpha == b.dst_alpha;
-}
-
 // the frame buffer is 2 MB: 512 pixels per row, each with 16 bits of colour and 16 bits of depth, so a row is 2048 bytes and
 // there are 1024 rows
 constexpr int GPU_TARGET_WIDTH = 512;
@@ -219,19 +194,14 @@ bool midzeus_renderer::gpu_init()
 	// the options are read when the machine starts, as the core option text says they take effect on a restart; the target is
 	// reduced to the largest scale whose rows the texture size allows
 	m_gpu_msaa = m_state.machine().osd().msaa();
-	m_gpu_scale = std::clamp(m_state.machine().osd().supersample(), 1, 3);
-	while (m_gpu_scale > 1 && GPU_TARGET_ROWS * m_gpu_scale > int(m_gpu_engine->caps().max_texture_size))
-		m_gpu_scale--;
+	m_gpu_scale = osd::gpu_pick_scale(m_state.machine().osd().supersample(), GPU_TARGET_ROWS, int(m_gpu_engine->caps().max_texture_size));
 
 	// a sample is taken inside the quad for a pixel the quad only partly covers, so u, v and z are never extrapolated past its
 	// edges (z is the depth the shader writes for every covered sample of the pixel)
 	osd::gpu_shader_module module;
 	module.name = "midzeus";
 	module.fragment_source = MIDZEUS_FRAGMENT_SOURCE;
-	module.centroid_mask = (m_gpu_msaa > 0) ? 0x7 : 0;
-	module.varying_count = MIDZEUS_SHADER_VARYINGS;
-	for (int i = 0; i < MIDZEUS_SHADER_VARYINGS; i++)
-		module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+	module.set_varyings(MIDZEUS_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, m_gpu_msaa > 0);
 	module.state_stride = MIDZEUS_SHADER_STATE_WORDS;
 	module.writes_depth = true;
 	module.binding_count = 1;
@@ -242,9 +212,7 @@ bool midzeus_renderer::gpu_init()
 	osd::gpu_shader_module stamp;
 	stamp.name = "midzeus_stamp";
 	stamp.fragment_source = MIDZEUS_STAMP_SOURCE;
-	stamp.varying_count = MIDZEUS_SHADER_VARYINGS;
-	for (int i = 0; i < MIDZEUS_SHADER_VARYINGS; i++)
-		stamp.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+	stamp.set_varyings(MIDZEUS_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, false);
 	stamp.state_stride = MIDZEUS_SHADER_STATE_WORDS;
 	stamp.writes_depth = true;
 	stamp.binding_count = 1;
@@ -538,7 +506,7 @@ void midzeus_renderer::gpu_add_polygon(const rectangle &clip, const vertex_t *ve
 			case BLEND_ADD1:
 				term = GPU_BLEND_SRCA_FACTOR;
 				if (state.blend & GPU_BLEND_DST_BIT)
-					blend_state = gpu_blend(osd::gpu_blend_factor::ONE, osd::gpu_blend_factor::ONE);
+					blend_state = osd::gpu_blend_state::with_opaque_alpha(osd::gpu_blend_factor::ONE, osd::gpu_blend_factor::ONE);
 				break;
 
 			case BLEND_ADD2:
@@ -548,7 +516,7 @@ void midzeus_renderer::gpu_add_polygon(const rectangle &clip, const vertex_t *ve
 				if (state.blend & GPU_BLEND_DST_BIT)
 				{
 					const uint32_t dsta = (state.alpha >> 8) & 0xff;
-					blend_state = gpu_blend(osd::gpu_blend_factor::ONE, osd::gpu_blend_factor::CONSTANT_ALPHA);
+					blend_state = osd::gpu_blend_state::with_opaque_alpha(osd::gpu_blend_factor::ONE, osd::gpu_blend_factor::CONSTANT_ALPHA);
 					blend_state.constant_alpha = float(std::min<uint32_t>(dsta << 1, 256)) / 256.0f;
 				}
 				break;
@@ -557,7 +525,7 @@ void midzeus_renderer::gpu_add_polygon(const rectangle &clip, const vertex_t *ve
 				// the source factor is 2 * srca / 256 and the destination factor is dst / 256 (the blend uses dst / 255); a term
 				// above 255 is clamped, which the chip does not (not seen in attract)
 				term = GPU_BLEND_MUL_FACTOR;
-				blend_state = gpu_blend((state.blend & GPU_BLEND_DST_BIT) ? osd::gpu_blend_factor::DST_COLOR : osd::gpu_blend_factor::ZERO, osd::gpu_blend_factor::ZERO);
+				blend_state = osd::gpu_blend_state::with_opaque_alpha((state.blend & GPU_BLEND_DST_BIT) ? osd::gpu_blend_factor::DST_COLOR : osd::gpu_blend_factor::ZERO, osd::gpu_blend_factor::ZERO);
 				break;
 
 			default:
@@ -631,7 +599,7 @@ void midzeus_renderer::gpu_add_polygon(const rectangle &clip, const vertex_t *ve
 	if (!m_gpu_commands.empty())
 	{
 		osd::gpu_command &last = m_gpu_commands.back();
-		if (last.type == osd::gpu_command_type::DRAW && last.module == m_gpu_module && last.first_vertex + last.vertex_count == first && last.depth_func == func && last.depth_write == depth_write && gpu_same_blend(last.blend, blend_state))
+		if (last.type == osd::gpu_command_type::DRAW && last.module == m_gpu_module && last.first_vertex + last.vertex_count == first && last.depth_func == func && last.depth_write == depth_write && last.blend == blend_state)
 		{
 			last.vertex_count += count;
 			return;

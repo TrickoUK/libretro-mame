@@ -9,7 +9,7 @@
 hng64_poly_renderer::hng64_poly_renderer(hng64_state& state)
 	: poly_manager<float, hng64_poly_data, 7>(state.machine())
 	, m_state(state)
-	, m_ss(std::clamp(state.machine().osd().supersample(), 1, 4))
+	, m_ss(std::clamp(state.machine().osd().supersample(), 1, osd::GPU_MAX_SUPERSAMPLE))
 {
 	// The supersampling is a host-GPU setting: it is only kept when the engine exists at start
 	if (!gpu_init())
@@ -1471,9 +1471,7 @@ bool hng64_poly_renderer::gpu_init()
 			osd::gpu_shader_module module;
 			module.name = "hng64";
 			module.fragment_source = HNG64_FRAGMENT_SOURCE;
-			module.varying_count = HNG64_SHADER_VARYINGS;
-			for (int i = 0; i < HNG64_SHADER_VARYINGS; i++)
-				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+			module.set_varyings(HNG64_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, false);
 			module.state_stride = HNG64_SHADER_STATE_WORDS;
 			module.binding_count = 1;
 			module.binding_name[0] = "tex_rom";
