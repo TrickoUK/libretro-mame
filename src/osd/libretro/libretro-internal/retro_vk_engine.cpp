@@ -1916,6 +1916,7 @@ VkSampler retro_vk_engine::sampler_for(const texture &t) const
 // attachments load what is there, since the clears are recorded before the first draw.
 void retro_vk_engine::begin_rendering(bool use_depth)
 {
+	m_recorded = recorded_state();
 	VkRenderingAttachmentInfo color = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
 	color.imageView = m_color.view;
 	color.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -1958,31 +1959,66 @@ bool retro_vk_engine::record_draw(const osd::gpu_command &c, VkPipeline pipeline
 	if (!allocate_set(c, m, staging, state_at, state_bytes, set))
 		return false;
 
-	VkViewport viewport = { 0.0f, 0.0f, float(m_target.width), float(m_target.height), 0.0f, 1.0f };
-	m_device.fn.cmd_set_viewport(m_cmd, 0, 1, &viewport);
-	VkRect2D scissor = {};
-	scissor.offset.x = m_clip[0];
-	scissor.offset.y = m_clip[1];
-	scissor.extent.width = uint32_t(m_clip[2]);
-	scissor.extent.height = uint32_t(m_clip[3]);
-	m_device.fn.cmd_set_scissor(m_cmd, 0, 1, &scissor);
-	const float blend_constants[4] = { 0.0f, 0.0f, 0.0f, c.blend.constant_alpha };
-	m_device.fn.cmd_set_blend_constants(m_cmd, blend_constants);
+	// The viewport, push constants and vertex buffer are the same for every draw of the frame, and the scissor, blend
+	// constants, pipeline and descriptor set change only when a draw needs something else. Each is recorded when it
+	// differs from the state the open render pass already has.
+	recorded_state &rs = m_recorded;
+	if (!rs.viewport)
+	{
+		VkViewport viewport = { 0.0f, 0.0f, float(m_target.width), float(m_target.height), 0.0f, 1.0f };
+		m_device.fn.cmd_set_viewport(m_cmd, 0, 1, &viewport);
+		rs.viewport = true;
+	}
+	if (!rs.scissor || std::memcmp(rs.clip, m_clip, sizeof(m_clip)) != 0)
+	{
+		VkRect2D scissor = {};
+		scissor.offset.x = m_clip[0];
+		scissor.offset.y = m_clip[1];
+		scissor.extent.width = uint32_t(m_clip[2]);
+		scissor.extent.height = uint32_t(m_clip[3]);
+		m_device.fn.cmd_set_scissor(m_cmd, 0, 1, &scissor);
+		std::memcpy(rs.clip, m_clip, sizeof(m_clip));
+		rs.scissor = true;
+	}
+	if (!rs.blend || rs.blend_alpha != c.blend.constant_alpha)
+	{
+		const float blend_constants[4] = { 0.0f, 0.0f, 0.0f, c.blend.constant_alpha };
+		m_device.fn.cmd_set_blend_constants(m_cmd, blend_constants);
+		rs.blend = true;
+		rs.blend_alpha = c.blend.constant_alpha;
+	}
 
-	m_device.fn.cmd_bind_pipeline(m_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-	m_device.fn.cmd_bind_descriptor_sets(m_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layout, 0, 1, &set, 0, nullptr);
+	if (rs.pipeline != pipeline)
+	{
+		m_device.fn.cmd_bind_pipeline(m_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+		rs.pipeline = pipeline;
+	}
+	if (rs.set != set)
+	{
+		m_device.fn.cmd_bind_descriptor_sets(m_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layout, 0, 1, &set, 0, nullptr);
+		rs.set = set;
+	}
 	if (m_target.msaa_samples > 0 && centre_samples(m_target.msaa_samples))
 		set_sample_locations(c.multisample);
-	const push_constants push = {
-		{ float(m_target.width), float(m_target.height) },
-		1.0f / float(frame.prim_count + 1),
-		frame.target.depth == osd::gpu_depth_mode::ORDER ? 1 : 0,
-		std::max(1, (frame.state_stride + 3) / 4),
-	};
-	m_device.fn.cmd_push_constants(m_cmd, m_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
-
+	if (!rs.push)
+	{
+		const push_constants push = {
+			{ float(m_target.width), float(m_target.height) },
+			1.0f / float(frame.prim_count + 1),
+			frame.target.depth == osd::gpu_depth_mode::ORDER ? 1 : 0,
+			std::max(1, (frame.state_stride + 3) / 4),
+		};
+		m_device.fn.cmd_push_constants(m_cmd, m_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+		rs.push = true;
+	}
 	const VkDeviceSize offset = vertex_at;
-	m_device.fn.cmd_bind_vertex_buffers(m_cmd, 0, 1, &staging.buffer, &offset);
+	if (!rs.vertices || rs.vertex_buffer != staging.buffer || rs.vertex_offset != offset)
+	{
+		m_device.fn.cmd_bind_vertex_buffers(m_cmd, 0, 1, &staging.buffer, &offset);
+		rs.vertices = true;
+		rs.vertex_buffer = staging.buffer;
+		rs.vertex_offset = offset;
+	}
 	m_device.fn.cmd_draw(m_cmd, c.vertex_count, 1, c.first_vertex, 0);
 	m_stats.draw_calls++;
 	return true;

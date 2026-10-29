@@ -272,6 +272,23 @@ private:
 	// dynamic state the draws set: the scissor (SET_CLIP) and whether a render pass is open
 	int m_clip[4] = { 0, 0, 0, 0 };
 	bool m_rendering = false;
+	// the state already recorded in the open render pass. A draw records only what differs from it; begin_rendering()
+	// clears it, and nothing other than draws changes graphics state inside a pass
+	struct recorded_state
+	{
+		bool viewport = false;
+		bool scissor = false;
+		int clip[4] = { 0, 0, 0, 0 };
+		bool blend = false;
+		float blend_alpha = 0.0f;
+		bool push = false;
+		bool vertices = false;
+		VkBuffer vertex_buffer = VK_NULL_HANDLE;
+		VkDeviceSize vertex_offset = 0;
+		VkPipeline pipeline = VK_NULL_HANDLE;
+		VkDescriptorSet set = VK_NULL_HANDLE;
+	};
+	recorded_state m_recorded;
 
 	osd::gpu_engine_caps m_caps;
 	std::string m_renderer;
