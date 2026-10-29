@@ -4800,6 +4800,7 @@ hitnmiss
 hitnmiss2
 hkuranai
 hlddz
+hlqqq
 hmcompm2
 hmcompmx
 hmgeo
@@ -6059,7 +6060,6 @@ maglord
 maglordh
 magmax
 magmaxa
-magreel
 magspeed
 magspot
 magspot2
@@ -8313,6 +8313,7 @@ qbtrktst
 qcrayon2
 qczl
 qhzb
+qiaojidm
 qix
 qix2
 qixa

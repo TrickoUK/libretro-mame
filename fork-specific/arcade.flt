@@ -1052,7 +1052,6 @@ misc/limenko.cpp
 misc/luckybal.cpp
 misc/magicfly.cpp
 misc/magictg.cpp
-misc/magreel.cpp
 misc/magtouch.cpp
 misc/malzak.cpp
 misc/marywu.cpp
@@ -1758,6 +1757,7 @@ sony/news_020_mmu.cpp  // [HELPER]
 sony/news_hid.cpp  // [HELPER]
 sony/news_iop_scsi.cpp  // [HELPER]
 sony/news_lcdfb.cpp  // [HELPER]
+sony/nwb_512.cpp  // [HELPER]
 sony/psxcd.cpp  // [HELPER]
 sony/smc777_kbd.cpp  // [HELPER]
 sony/taito_zm.cpp  // [HELPER]
@@ -3480,6 +3480,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -slvrwolf
 -smartoss
 -smatch03
+-smb_be4k
 -smf
 -smsjoker
 -smsjokera
