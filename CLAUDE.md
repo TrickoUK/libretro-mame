@@ -286,6 +286,16 @@ For frame-exact captures use `my-docs/tools/snap_run.sh` (MAME's own `video:snap
 - **Never `pkill -f` or `pgrep -f` with a pattern that appears in the command itself.** The shell running the
   command matches and kills itself (exit 144). Use `pkill -x retroarch`, or kill by PID.
 
+- **Reply directly to the session that gave you a task.** When another Claude session asks you to do something,
+  send your result to that session with `SendMessage` (to its name, copied from the incoming message's `from`) the
+  moment the task is finished, or blocked, or needs a decision. Do not rely on the requester's idle watch
+  (`notify_when_idle`): it also fires whenever you merely pause for a background build or run, so it cannot tell
+  "done" from "waiting", and the requester ends up polling or being told by the user. The reply states what was
+  done or what failed, the commit SHAs or uncommitted file list, and where the evidence is. Ending a turn while
+  work is still running is fine, but then send a short progress message naming what you are waiting for, and send
+  the final reply when it completes. A requester that gives a task should say this in its brief and treat a
+  missing reply as "not done yet", checking the real state (git, logs, processes) rather than assuming.
+
 - **Fix games the way the real hardware works (upstream-PR-able work).** First try a hardware-appropriate solution
   that keeps to the spirit of the original design. Example: Apache 3's sprite rotation first worked with a large
   off-screen buffer, but the scanline-at-a-time rotation (`tatsumi/tzbx15_sprites.cpp`) matches the chip and is
