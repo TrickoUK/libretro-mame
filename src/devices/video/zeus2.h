@@ -122,6 +122,7 @@ private:
 	bool m_gpu_ready = false;
 	int m_gpu_scale = 1;                            // target samples per native pixel along each side (mame_3d_supersample, 1 to 3)
 	int m_gpu_msaa = 0;                             // coverage samples per target pixel (mame_3d_msaa), 0 for a single sample
+	int m_gpu_aniso = 0;                            // most texture taps per pixel (mame_3d_aniso), 0 for bilinear only
 	uint32_t m_gpu_generation = 0;
 	osd::gpu_engine *m_gpu_engine = nullptr;
 	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;

@@ -158,6 +158,7 @@ bool zeus2_renderer::gpu_init()
 
 	// the options are read when the machine starts; the target is reduced to the largest scale whose rows the engine accepts
 	m_gpu_msaa = m_state->machine().osd().msaa();
+	m_gpu_aniso = m_state->machine().osd().anisotropy();
 	m_gpu_scale = std::clamp(m_state->machine().osd().supersample(), 1, 3);
 	while (m_gpu_scale > 1 && GPU_TARGET_ROWS * m_gpu_scale > m_gpu_engine->caps().max_texture_size)
 		m_gpu_scale--;
@@ -372,6 +373,7 @@ void zeus2_renderer::gpu_add_rect(int x0, int x1, int y0, int y1, uint32_t colou
 	m_gpu_vertices.insert(m_gpu_vertices.end(), { a, b, c, a, c, d });
 
 	osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, first, 6);
+	draw.variant = osd::gpu_aniso_variant(m_gpu_aniso);
 	draw.bindings[0] = m_gpu_tex_ram;
 	draw.bindings[1] = m_gpu_tex_pal;
 	draw.depth_func = osd::gpu_depth_func::ALWAYS;
@@ -570,6 +572,7 @@ bool zeus2_renderer::gpu_add_polygon(const zeus2_poly_extra_data &state, const v
 		}
 	}
 	osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, first, count);
+	draw.variant = osd::gpu_aniso_variant(m_gpu_aniso);
 	draw.bindings[0] = m_gpu_tex_ram;
 	draw.bindings[1] = m_gpu_tex_pal;
 	draw.depth_func = func;
