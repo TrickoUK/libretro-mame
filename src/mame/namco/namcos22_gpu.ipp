@@ -25,11 +25,7 @@ bool namcos22_renderer::gpu_init()
 			module.name = "namcos22";
 			module.fragment_source = NAMCOS22_FRAGMENT_SOURCE;
 			module.blend_factor_output = true;
-			if (m_state.machine().osd().msaa() > 0)
-				module.centroid_mask = 0xf;
-			module.varying_count = NAMCOS22_SHADER_VARYINGS;
-			for (int i = 0; i < NAMCOS22_SHADER_VARYINGS; i++)
-				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+			module.set_varyings(NAMCOS22_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, m_state.machine().osd().msaa() > 0);
 			module.state_stride = NAMCOS22_SHADER_STATE_WORDS;
 			module.binding_count = 6;
 			module.binding_name[0] = "tile_data";
@@ -327,9 +323,7 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 
 	// supersampling: the target is scale times the bitmap in each direction, averaged down on the way back
 	const int max_size = m_gpu_engine->caps().max_texture_size;
-	m_gpu_scale = std::clamp(m_state.machine().osd().supersample(), 1, 4);
-	while (m_gpu_scale > 1 && (bitmap.width() * m_gpu_scale > max_size || bitmap.height() * m_gpu_scale > max_size))
-		m_gpu_scale--;
+	m_gpu_scale = osd::gpu_pick_scale(m_state.machine().osd().supersample(), std::max(bitmap.width(), bitmap.height()), max_size);
 
 	m_gpu_state.clear();
 	m_gpu_vertices.clear();
@@ -428,12 +422,7 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 		if (m_state.m_is_ss22)
 		{
 			// the colour blends by the shader's weight, the alpha channel (priority bits) takes the new value
-			draw.blend.enable = true;
-			draw.blend.src = osd::gpu_blend_factor::SRC1_ALPHA;
-			draw.blend.dst = osd::gpu_blend_factor::ONE_MINUS_SRC1_ALPHA;
-			draw.blend.separate_alpha = true;
-			draw.blend.src_alpha = osd::gpu_blend_factor::ONE;
-			draw.blend.dst_alpha = osd::gpu_blend_factor::ZERO;
+			draw.blend = osd::gpu_blend_state::weighted();
 		}
 		std::vector<osd::gpu_command> draws;
 		draws.reserve(m_gpu_runs.size());

@@ -87,31 +87,6 @@ constexpr float GPU_DEPTH_SCALE = 16777216.0f;
 // consecutive commands above this count are sent without a read-back, so the queue stays short
 constexpr size_t GPU_FLUSH_COMMANDS = 32768;
 
-// the blend of a draw that combines the pixel the target holds with the shader's output. The alpha channel keeps the fragment's
-// alpha, so the target's alpha does not change, except for the alpha texture, whose fragment alpha is its blend factor.
-osd::gpu_blend_state gpu_blend(osd::gpu_blend_factor src, osd::gpu_blend_factor dst)
-{
-	osd::gpu_blend_state blend;
-	blend.enable = true;
-	blend.src = src;
-	blend.dst = dst;
-	blend.separate_alpha = true;
-	blend.src_alpha = osd::gpu_blend_factor::ONE;
-	blend.dst_alpha = osd::gpu_blend_factor::ZERO;
-	return blend;
-}
-
-bool gpu_same_blend(const osd::gpu_blend_state &a, const osd::gpu_blend_state &b)
-{
-	return a.enable == b.enable
-		&& a.src == b.src
-		&& a.dst == b.dst
-		&& a.constant_alpha == b.constant_alpha
-		&& a.separate_alpha == b.separate_alpha
-		&& a.src_alpha == b.src_alpha
-		&& a.dst_alpha == b.dst_alpha;
-}
-
 } // anonymous namespace
 
 bool zeus2_renderer::gpu_active()
@@ -159,18 +134,13 @@ bool zeus2_renderer::gpu_init()
 	// the options are read when the machine starts; the target is reduced to the largest scale whose rows the engine accepts
 	m_gpu_msaa = m_state->machine().osd().msaa();
 	m_gpu_aniso = m_state->machine().osd().anisotropy();
-	m_gpu_scale = std::clamp(m_state->machine().osd().supersample(), 1, 3);
-	while (m_gpu_scale > 1 && GPU_TARGET_ROWS * m_gpu_scale > m_gpu_engine->caps().max_texture_size)
-		m_gpu_scale--;
+	m_gpu_scale = osd::gpu_pick_scale(m_state->machine().osd().supersample(), GPU_TARGET_ROWS, m_gpu_engine->caps().max_texture_size);
 
 	// a sample is taken inside the quad for a pixel the quad only partly covers, so the texture coordinates are never extrapolated
 	osd::gpu_shader_module module;
 	module.name = "zeus2";
 	module.fragment_source = ZEUS2_FRAGMENT_SOURCE;
-	module.centroid_mask = (m_gpu_msaa > 0) ? ((1U << ZEUS2_SHADER_VARYINGS) - 1) : 0;
-	module.varying_count = ZEUS2_SHADER_VARYINGS;
-	for (int i = 0; i < ZEUS2_SHADER_VARYINGS; i++)
-		module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+	module.set_varyings(ZEUS2_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, m_gpu_msaa > 0);
 	module.state_stride = ZEUS2_SHADER_STATE_WORDS;
 	module.writes_depth = true;
 	module.binding_count = 2;
@@ -515,13 +485,15 @@ bool zeus2_renderer::gpu_add_polygon(const zeus2_poly_extra_data &state, const v
 	osd::gpu_blend_state blend_state;
 	if (mode == GPU_MODE_ALPHA)
 	{
-		blend_state = gpu_blend(osd::gpu_blend_factor::ONE, osd::gpu_blend_factor::ONE_MINUS_SRC_ALPHA);
+		// the alpha texture blends by its own alpha, which is carried as the fragment's blend factor; the target's alpha takes the
+		// fragment's alpha only here, and the other modes leave it unchanged
+		blend_state = osd::gpu_blend_state::with_opaque_alpha(osd::gpu_blend_factor::ONE, osd::gpu_blend_factor::ONE_MINUS_SRC_ALPHA);
 	}
 	else if (mode != GPU_MODE_RGB555 && state.blend_enable)
 	{
 		words[SW_BLEND] = 1;
 		words[SW_SRCA] = state.srcAlpha;
-		blend_state = gpu_blend(osd::gpu_blend_factor::ONE, osd::gpu_blend_factor::CONSTANT_ALPHA);
+		blend_state = osd::gpu_blend_state::with_opaque_alpha(osd::gpu_blend_factor::ONE, osd::gpu_blend_factor::CONSTANT_ALPHA);
 		blend_state.constant_alpha = float(std::min<uint32_t>(state.dstAlpha, 0x100)) / 256.0f;
 	}
 
@@ -565,7 +537,7 @@ bool zeus2_renderer::gpu_add_polygon(const zeus2_poly_extra_data &state, const v
 	{
 		osd::gpu_command &last = m_gpu_commands.back();
 		if (last.type == osd::gpu_command_type::DRAW && last.module == m_gpu_module && last.first_vertex + last.vertex_count == first && last.depth_func == func
-				&& last.depth_write == depth_write && last.color_write && gpu_same_blend(last.blend, blend_state))
+				&& last.depth_write == depth_write && last.color_write && last.blend == blend_state)
 		{
 			last.vertex_count += count;
 			return true;

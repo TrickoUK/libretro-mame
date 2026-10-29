@@ -464,11 +464,7 @@ bool gpu_renderer::init(u8 *tmu0_ram, u32 tmu0_size, u8 *tmu1_ram, u32 tmu1_size
 	osd::gpu_shader_module module;
 	module.name = "voodoo";
 	module.fragment_source = VOODOO_FRAGMENT_SOURCE;
-	if (m_machine.osd().msaa() > 0)
-		module.centroid_mask = 0xfff;
-	module.varying_count = gpu_vertex::VARYINGS;
-	for (int i = 0; i < gpu_vertex::VARYINGS; i++)
-		module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+	module.set_varyings(gpu_vertex::VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, m_machine.osd().msaa() > 0);
 	module.state_stride = STATE_WORDS;
 	module.writes_depth = true;
 	module.binding_count = 6;
@@ -532,11 +528,10 @@ void gpu_renderer::configure(u32 rowpixels, u32 rows, int buffers)
 	m_rowpixels = rowpixels;
 	m_rows = rows;
 	m_buffers = buffers;
-	m_scale = std::max(1, m_machine.osd().supersample());
+	m_scale = std::clamp(m_machine.osd().supersample(), 1, osd::GPU_MAX_SUPERSAMPLE);
 	int const limit = m_engine->caps().max_texture_size;
-	// the stack is sized for every slot, so a tall stack at 4x would not fit: 3x is the largest scale that does
-	if (int(rows) * buffers * m_scale > limit)
-		m_scale = std::min(m_scale, 3);
+	// the colour buffers are stacked vertically, every slot sized for the full scale; the scale steps down until both the row and
+	// the whole stack fit the largest texture size
 	while (m_scale > 1 && (int(rowpixels) * m_scale > limit || int(rows) * buffers * m_scale > limit))
 		m_scale--;
 	m_batch.set_geometry(rowpixels, rows);

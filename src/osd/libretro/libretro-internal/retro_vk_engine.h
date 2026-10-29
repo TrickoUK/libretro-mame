@@ -37,7 +37,8 @@ class retro_vk_engine : public osd::gpu_engine
 {
 public:
 	// the device is owned by the caller (the OSD's engine factory) and outlives the engine
-	explicit retro_vk_engine(retro_vk::vk_device &device);
+	// the name only labels the MAME_GPU_PROF report (the system the engine was made for)
+	explicit retro_vk_engine(retro_vk::vk_device &device, const char *name = "");
 	virtual ~retro_vk_engine();
 
 	retro_vk_engine(const retro_vk_engine &) = delete;
@@ -109,6 +110,7 @@ private:
 		VkBuffer buffer = VK_NULL_HANDLE;
 		VkDeviceMemory memory = VK_NULL_HANDLE;
 		uint8_t *data = nullptr;
+		size_t capacity = 0;
 	};
 
 	// the two shader stages of one module and variant
@@ -208,6 +210,7 @@ private:
 	void record_readback(const osd::gpu_readback_rect &r, size_t offset, const staging_buffer &staging);
 	bool record_readback_any(const osd::gpu_readback_rect &r, size_t at, const staging_buffer &staging);
 
+	bool ensure_staging(size_t bytes);
 	bool create_staging(size_t bytes, staging_buffer &staging);
 	void destroy_staging(staging_buffer &staging);
 	void write_update(const osd::gpu_texture_update &u, uint8_t *dst) const;
@@ -242,9 +245,14 @@ private:
 	std::vector<VkDescriptorPool> m_desc_pools;
 	size_t m_desc_pool_next = 0;
 	VkDescriptorSet m_last_set = VK_NULL_HANDLE;
-	// the frame in flight: its staging buffer stays alive until its read-backs are collected or the next frame starts
+	// the frame in flight: its staging buffer stays alive until its read-backs are collected or the next frame starts.
+	// The buffer itself outlives the frames; it is only grown, and only written once the frame in flight has finished.
 	bool m_in_flight = false;
+	// a frame the GPU did not finish in time: its objects are left alone at teardown
+	bool m_hung = false;
 	staging_buffer m_staging;
+	uint32_t m_staging_idle = 0;
+	size_t m_staging_high_water = 0;
 	std::vector<pending_readback> m_pending;
 	int m_collect_failures = 0;
 	// GPU timestamps around the command loop, only when MAME_GPU_PROF is set and the queue supports them
@@ -264,10 +272,67 @@ private:
 	// dynamic state the draws set: the scissor (SET_CLIP) and whether a render pass is open
 	int m_clip[4] = { 0, 0, 0, 0 };
 	bool m_rendering = false;
+	// the state already recorded in the open render pass. A draw records only what differs from it; begin_rendering()
+	// clears it, and nothing other than draws changes graphics state inside a pass
+	struct recorded_state
+	{
+		bool viewport = false;
+		bool scissor = false;
+		int clip[4] = { 0, 0, 0, 0 };
+		bool blend = false;
+		float blend_alpha = 0.0f;
+		bool push = false;
+		bool vertices = false;
+		VkBuffer vertex_buffer = VK_NULL_HANDLE;
+		VkDeviceSize vertex_offset = 0;
+		VkPipeline pipeline = VK_NULL_HANDLE;
+		VkDescriptorSet set = VK_NULL_HANDLE;
+	};
+	recorded_state m_recorded;
 
 	osd::gpu_engine_caps m_caps;
 	std::string m_renderer;
 	osd::gpu_engine_stats m_stats;
+	// MAME_GPU_PROF engine profile: sums over the submits since the last report, printed every 300 submits
+	struct profile_timing
+	{
+		double sum = 0.0;
+		double max = 0.0;
+		uint32_t count = 0;
+
+		void add(double ms)
+		{
+			sum += ms;
+			if (ms > max)
+				max = ms;
+			count++;
+		}
+	};
+	struct profile_window
+	{
+		uint32_t submits = 0;
+		uint32_t readback_submits = 0;
+		uint32_t collects = 0;
+		uint32_t draw_calls = 0;
+		uint32_t vertices = 0;
+		uint64_t texture_bytes = 0;
+		uint64_t vertex_bytes = 0;
+		uint64_t state_bytes = 0;
+		uint64_t readback_bytes = 0;
+		profile_timing wait;
+		profile_timing upload;
+		profile_timing draw;
+		profile_timing readback;
+		profile_timing collect;
+		profile_timing gpu;
+		std::vector<double> submit_ms;
+	};
+	void profile_submit(const osd::gpu_frame &frame, double total_ms);
+	void profile_report();
+	bool m_prof_on = false;
+	std::string m_prof_name;
+	double m_prof_wait_ms = 0.0;
+	profile_window m_prof;
 	bool m_failed = false;
 	int m_submit_failures = 0;
 	int m_problem_count = 0;

@@ -32,11 +32,7 @@ bool namcos23_renderer::gpu_init()
 			module.name = "namcos23";
 			module.fragment_source = NAMCOS23_FRAGMENT_SOURCE;
 			module.blend_factor_output = true;
-			if (m_state.machine().osd().msaa() > 0)
-				module.centroid_mask = 0xf;
-			module.varying_count = NAMCOS23_SHADER_VARYINGS;
-			for (int i = 0; i < NAMCOS23_SHADER_VARYINGS; i++)
-				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+			module.set_varyings(NAMCOS23_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, m_state.machine().osd().msaa() > 0);
 			module.state_stride = NAMCOS23_SHADER_STATE_WORDS;
 			module.binding_count = 5;
 			module.binding_name[0] = "tile_data";
@@ -296,9 +292,7 @@ bool namcos23_renderer::gpu_render(screen_device &screen, bitmap_rgb32 &bitmap)
 
 	// supersampling: the target is scale times the bitmap in each direction, averaged down on the way back
 	const int max_size = m_gpu_engine->caps().max_texture_size;
-	m_gpu_scale = std::clamp(m_state.machine().osd().supersample(), 1, 4);
-	while (m_gpu_scale > 1 && (GPU_SCREEN_WIDTH * m_gpu_scale > max_size || GPU_SCREEN_HEIGHT * m_gpu_scale > max_size))
-		m_gpu_scale--;
+	m_gpu_scale = osd::gpu_pick_scale(m_state.machine().osd().supersample(), std::max(GPU_SCREEN_WIDTH, GPU_SCREEN_HEIGHT), max_size);
 
 	m_gpu_state.clear();
 	m_gpu_vertices.clear();
@@ -366,12 +360,7 @@ bool namcos23_renderer::gpu_render(screen_device &screen, bitmap_rgb32 &bitmap)
 		draw.bindings[2] = m_gpu_palette;
 		draw.bindings[3] = m_gpu_stencil;
 		draw.bindings[4] = m_gpu_picture;
-		draw.blend.enable = true;
-		draw.blend.src = osd::gpu_blend_factor::SRC1_ALPHA;
-		draw.blend.dst = osd::gpu_blend_factor::ONE_MINUS_SRC1_ALPHA;
-		draw.blend.separate_alpha = true;
-		draw.blend.src_alpha = osd::gpu_blend_factor::ONE;
-		draw.blend.dst_alpha = osd::gpu_blend_factor::ZERO;
+		draw.blend = osd::gpu_blend_state::weighted();
 		osd::gpu_command draws[2] = { draw, draw };
 		draws[0].first_vertex = 0;
 		draws[0].vertex_count = stamp_vertices;

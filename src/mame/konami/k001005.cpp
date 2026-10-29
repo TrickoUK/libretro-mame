@@ -39,10 +39,8 @@ k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, devi
 
 	// The scale belongs to the host-GPU path, so it is only raised when the engine exists; without one the
 	// renderer works at native size. Not a hardware setting: the GPU draws at a multiple of the native size and averages down
-	int ss = screen.machine().osd().supersample();
-	if (char const *env = getenv("MAME_K001005_SS"))
-		ss = atoi(env);
-	m_ss = gpu_init() ? std::clamp(ss, 1, 4) : 1;
+	int const ss = screen.machine().osd().supersample();
+	m_ss = gpu_init() ? std::clamp(ss, 1, osd::GPU_MAX_SUPERSAMPLE) : 1;
 	m_draw_ss = m_ss;
 	m_output_scaled = screen.machine().osd().supersample_output() && m_ss > 1;
 
@@ -193,11 +191,7 @@ bool k001005_renderer::gpu_init()
 			osd::gpu_shader_module module;
 			module.name = "k001005";
 			module.fragment_source = K001005_FRAGMENT_SOURCE;
-			if (m_gpu_msaa > 0)
-				module.centroid_mask = 0x1ff;
-			module.varying_count = K001005_SHADER_VARYINGS;
-			for (int i = 0; i < K001005_SHADER_VARYINGS; i++)
-				module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+			module.set_varyings(K001005_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, m_gpu_msaa > 0);
 			module.state_stride = K001005_SHADER_STATE_WORDS;
 			module.binding_count = 2;
 			module.binding_name[0] = "tex_rom";

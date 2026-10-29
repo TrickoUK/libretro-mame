@@ -32,18 +32,13 @@ bool midvunit_renderer::gpu_init()
 	// the options are read when the machine starts, as the core option text says they take effect on a restart
 	m_gpu_msaa = m_state.machine().osd().msaa();
 	m_gpu_texfilter = m_state.machine().osd().texture_filter();
-	m_gpu_scale = std::clamp(m_state.machine().osd().supersample(), 1, 3);
-	while (m_gpu_scale > 1 && GPU_TARGET_HEIGHT * m_gpu_scale > int(m_gpu_engine->caps().max_texture_size))
-		m_gpu_scale--;
+	m_gpu_scale = osd::gpu_pick_scale(m_state.machine().osd().supersample(), GPU_TARGET_HEIGHT, int(m_gpu_engine->caps().max_texture_size));
 
 	// a sample is taken inside the quad for a pixel the quad only partly covers, so u and v are never extrapolated past its edges
 	osd::gpu_shader_module module;
 	module.name = "midvunit";
 	module.fragment_source = MIDVUNIT_FRAGMENT_SOURCE;
-	module.centroid_mask = (m_gpu_msaa > 0) ? 0x3 : 0;
-	module.varying_count = MIDVUNIT_SHADER_VARYINGS;
-	for (int i = 0; i < MIDVUNIT_SHADER_VARYINGS; i++)
-		module.varying_mode[i] = osd::gpu_varying_mode::NOPERSPECTIVE;
+	module.set_varyings(MIDVUNIT_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, m_gpu_msaa > 0);
 	module.state_stride = MIDVUNIT_SHADER_STATE_WORDS;
 	module.binding_count = 2;
 	module.binding_name[0] = "tex_ram";
