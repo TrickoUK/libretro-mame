@@ -34,7 +34,6 @@ double elapsed_ms(clock_type::time_point from)
 {
 	return std::chrono::duration<double, std::milli>(clock_type::now() - from).count();
 }
-
 struct format_info
 {
 	VkFormat vk;
@@ -268,9 +267,11 @@ size_t align_up(size_t value, size_t alignment)
 } // anonymous namespace
 
 
-retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device)
+retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device, const char *name)
 	: m_device(device)
 {
+	m_prof_on = std::getenv("MAME_GPU_PROF") != nullptr;
+	m_prof_name = name ? name : "";
 	if (!m_device.valid())
 	{
 		m_failed = true;
@@ -1360,7 +1361,13 @@ bool retro_vk_engine::submit_frame(const osd::gpu_frame &frame)
 {
 	if (failed())
 		return false;
-	return note_result(submit_pending(frame), m_submit_failures, "submit");
+	if (!m_prof_on)
+		return note_result(submit_pending(frame), m_submit_failures, "submit");
+	m_prof_wait_ms = 0.0;
+	const auto start = clock_type::now();
+	const bool ok = note_result(submit_pending(frame), m_submit_failures, "submit");
+	profile_submit(frame, elapsed_ms(start));
+	return ok;
 }
 
 
@@ -1950,9 +1957,82 @@ bool retro_vk_engine::collect_pending()
 
 bool retro_vk_engine::collect_frame()
 {
+	if (m_prof_on)
+		m_prof.collects++;
 	if (m_pending.empty())
 		return true;
-	return note_result(collect_pending(), m_collect_failures, "collect");
+	const bool ok = note_result(collect_pending(), m_collect_failures, "collect");
+	if (m_prof_on)
+		m_prof.collect.add(m_stats.collect_ms);
+	return ok;
+}
+
+// MAME_GPU_PROF: adds one submit to the window and prints the window every 300 submits. Byte counts are
+// recomputed from the frame, so they are the same whether or not the submit was refused.
+void retro_vk_engine::profile_submit(const osd::gpu_frame &frame, double total_ms)
+{
+	m_prof.submits++;
+	m_prof.submit_ms.push_back(total_ms);
+	m_prof.wait.add(m_prof_wait_ms);
+	m_prof.upload.add(m_stats.upload_ms);
+	m_prof.draw.add(m_stats.draw_ms);
+	m_prof.readback.add(m_stats.readback_ms);
+	if (m_stats.gpu_ms > 0.0)
+		m_prof.gpu.add(m_stats.gpu_ms);
+	m_prof.draw_calls += m_stats.draw_calls;
+
+	const size_t rec_texels = size_t(std::max(1, (frame.state_stride + 3) / 4));
+	m_prof.vertex_bytes += size_t(frame.vertex_count) * (size_t(5 + frame.varyings_per_vertex) * 4);
+	m_prof.state_bytes += std::max<size_t>(1, frame.prim_count) * rec_texels * 16;
+	bool readback = frame.readback_count > 0;
+	for (int i = 0; i < frame.update_count; i++)
+		m_prof.texture_bytes += size_t(frame.updates[i].w) * frame.updates[i].h * texel_bytes(frame.updates[i].texture);
+	for (int i = 0; i < frame.readback_count; i++)
+		m_prof.readback_bytes += readback_bytes(frame.readbacks[i]);
+	for (int i = 0; i < frame.command_count; i++)
+	{
+		const osd::gpu_command &c = frame.commands[i];
+		if (c.type == osd::gpu_command_type::DRAW && c.vertex_count > 0)
+			m_prof.vertices += c.vertex_count;
+		else if (c.type == osd::gpu_command_type::UPDATE_TEXTURE)
+			m_prof.texture_bytes += size_t(c.update.w) * c.update.h * texel_bytes(c.update.texture);
+		else if (c.type == osd::gpu_command_type::READBACK)
+		{
+			m_prof.readback_bytes += readback_bytes(c.readback);
+			readback = true;
+		}
+	}
+	if (readback)
+		m_prof.readback_submits++;
+
+	if (m_prof.submits == 300)
+		profile_report();
+}
+
+void retro_vk_engine::profile_report()
+{
+	std::vector<double> sorted = m_prof.submit_ms;
+	std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2, sorted.end());
+	const double median = sorted[sorted.size() / 2];
+	uint32_t spikes = 0;
+	for (double ms : m_prof.submit_ms)
+		if (ms > 2.0 * median)
+			spikes++;
+
+	const double n = m_prof.submits;
+	fprintf(stderr, "[retro_vk_engine:%s] %u submits (%u with read-back, %u collect calls): %.1f draw calls, %.0f vertices, "
+			"uploads per submit %.1f KB (textures %.1f, vertices %.1f, state %.1f), read-back %.1f KB\n",
+			m_prof_name.c_str(), m_prof.submits, m_prof.readback_submits, m_prof.collects,
+			m_prof.draw_calls / n, m_prof.vertices / n, (m_prof.texture_bytes + m_prof.vertex_bytes + m_prof.state_bytes) / n / 1024.0,
+			m_prof.texture_bytes / n / 1024.0, m_prof.vertex_bytes / n / 1024.0, m_prof.state_bytes / n / 1024.0,
+			m_prof.readback_bytes / n / 1024.0);
+	auto mean = [](const profile_timing &t) { return t.count ? t.sum / t.count : 0.0; };
+	fprintf(stderr, "[retro_vk_engine:%s] mean/max ms: wait %.3f/%.3f, upload %.3f/%.3f, draw %.3f/%.3f, read-back %.3f/%.3f, "
+			"collect %.3f/%.3f, gpu %.3f/%.3f; submit median %.3f ms, %u slower than 2x median\n",
+			m_prof_name.c_str(), mean(m_prof.wait), m_prof.wait.max, mean(m_prof.upload), m_prof.upload.max,
+			mean(m_prof.draw), m_prof.draw.max, mean(m_prof.readback), m_prof.readback.max,
+			mean(m_prof.collect), m_prof.collect.max, mean(m_prof.gpu), m_prof.gpu.max, median, spikes);
+	m_prof = profile_window();
 }
 
 // Records one frame: uploads, the command list, then the trailing read-backs. A frame with read-backs is waited for
@@ -1967,8 +2047,11 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 
 	// The previous frame must finish before its command buffer, descriptor pools and staging are reused. Its
 	// uncollected read-backs are dropped.
+	const auto wait_start = m_prof_on ? clock_type::now() : clock_type::time_point();
 	if (!wait_in_flight())
 		return false;
+	if (m_prof_on)
+		m_prof_wait_ms = elapsed_ms(wait_start);
 	drop_pending();
 	if (m_gpu_ms_ready)
 	{

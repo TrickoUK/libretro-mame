@@ -349,7 +349,7 @@ osd::gpu_engine *retro_osd_interface::get_gpu_engine(const char *system)
 	}
 
 	// An engine keeps its persistent targets, so each one is made for the life of its machine.
-	auto vk_engine = std::make_unique<retro_vk_engine>(*m_vk_device);
+	auto vk_engine = std::make_unique<retro_vk_engine>(*m_vk_device, system);
 	if (vk_engine->failed())
 	{
 		fprintf(stderr, "[retro_gpu] Vulkan engine failed to initialise, this system renders in software\n");

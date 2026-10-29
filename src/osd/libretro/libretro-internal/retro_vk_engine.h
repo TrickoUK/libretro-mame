@@ -37,7 +37,8 @@ class retro_vk_engine : public osd::gpu_engine
 {
 public:
 	// the device is owned by the caller (the OSD's engine factory) and outlives the engine
-	explicit retro_vk_engine(retro_vk::vk_device &device);
+	// the name only labels the MAME_GPU_PROF report (the system the engine was made for)
+	explicit retro_vk_engine(retro_vk::vk_device &device, const char *name = "");
 	virtual ~retro_vk_engine();
 
 	retro_vk_engine(const retro_vk_engine &) = delete;
@@ -268,6 +269,46 @@ private:
 	osd::gpu_engine_caps m_caps;
 	std::string m_renderer;
 	osd::gpu_engine_stats m_stats;
+	// MAME_GPU_PROF engine profile: sums over the submits since the last report, printed every 300 submits
+	struct profile_timing
+	{
+		double sum = 0.0;
+		double max = 0.0;
+		uint32_t count = 0;
+
+		void add(double ms)
+		{
+			sum += ms;
+			if (ms > max)
+				max = ms;
+			count++;
+		}
+	};
+	struct profile_window
+	{
+		uint32_t submits = 0;
+		uint32_t readback_submits = 0;
+		uint32_t collects = 0;
+		uint32_t draw_calls = 0;
+		uint32_t vertices = 0;
+		uint64_t texture_bytes = 0;
+		uint64_t vertex_bytes = 0;
+		uint64_t state_bytes = 0;
+		uint64_t readback_bytes = 0;
+		profile_timing wait;
+		profile_timing upload;
+		profile_timing draw;
+		profile_timing readback;
+		profile_timing collect;
+		profile_timing gpu;
+		std::vector<double> submit_ms;
+	};
+	void profile_submit(const osd::gpu_frame &frame, double total_ms);
+	void profile_report();
+	bool m_prof_on = false;
+	std::string m_prof_name;
+	double m_prof_wait_ms = 0.0;
+	profile_window m_prof;
 	bool m_failed = false;
 	int m_submit_failures = 0;
 	int m_problem_count = 0;
