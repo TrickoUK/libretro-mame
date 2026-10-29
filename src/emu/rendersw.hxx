@@ -851,6 +851,26 @@ private:
 				{
 					// no lookup case
 
+					if constexpr (!Wrap && !BilinearFilter)
+					{
+						if (setup.dvdx == 0)
+						{
+							// with no vertical step across the row, the source row is the same for every
+							// column, so it is selected once and only the horizontal coordinate is clamped
+							s32 const v = std::clamp<s32>(curv >> 16, 0, prim.texture.height - 1);
+							u32 const *const rowbase = reinterpret_cast<u32 const *>(prim.texture.base) + (v * prim.texture.rowpixels);
+							s32 const maxu = prim.texture.width - 1;
+
+							// loop over cols
+							for (s32 x = setup.startx; x < setup.endx; x++)
+							{
+								*dest++ = source32_to_dest(rowbase[std::clamp<s32>(curu >> 16, 0, maxu)]);
+								curu += setup.dudx;
+							}
+							continue;
+						}
+					}
+
 					// loop over cols
 					for (s32 x = setup.startx; x < setup.endx; x++)
 					{
