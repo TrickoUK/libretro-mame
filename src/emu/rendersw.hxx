@@ -15,6 +15,7 @@
 #include "render.h"
 
 #include <array>
+#include <cstring>
 
 template <typename PixelType, int SrcShiftR, int SrcShiftG, int SrcShiftB, int DstShiftR, int DstShiftG, int DstShiftB, bool NoDestRead = false, bool BilinearFilter = false>
 class software_renderer
@@ -860,6 +861,22 @@ private:
 							s32 const v = std::clamp<s32>(curv >> 16, 0, prim.texture.height - 1);
 							u32 const *const rowbase = reinterpret_cast<u32 const *>(prim.texture.base) + (v * prim.texture.rowpixels);
 							s32 const maxu = prim.texture.width - 1;
+
+							// a quad that maps one texel to one pixel, with the row lying inside the texture and the
+							// destination taking the source format unchanged, is a copy of the texels
+							if constexpr (sizeof(PixelType) == sizeof(u32) && SrcShiftR == 0 && SrcShiftG == 0 && SrcShiftB == 0
+									&& DstShiftR == 16 && DstShiftG == 8 && DstShiftB == 0)
+							{
+								s32 const n = setup.endx - setup.startx;
+								s32 const u0 = curu >> 16;
+								if (n > 0 && setup.dudx == 0x10000 && setup.dudy == 0 && setup.dvdy == 0x10000
+										&& (curv >> 16) >= 0 && (curv >> 16) < prim.texture.height
+										&& u0 >= 0 && u0 + n <= prim.texture.width)
+								{
+									std::memcpy(dest, rowbase + u0, size_t(n) * sizeof(u32));
+									continue;
+								}
+							}
 
 							// loop over cols
 							for (s32 x = setup.startx; x < setup.endx; x++)
