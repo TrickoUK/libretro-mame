@@ -15,6 +15,7 @@
 #include "multibyte.h"
 
 #include <cmath>
+#include <iterator>
 #include <sstream>
 
 //#define VERBOSE 1
@@ -741,6 +742,12 @@ void m2_te_device::device_start()
 	// Multi-threaded rasterization work queues - see flush_span_jobs().
 	for (auto &queue : m_render_queue)
 		queue = osd_work_queue_alloc(WORK_QUEUE_FLAG_MULTI | WORK_QUEUE_FLAG_HIGH_FREQ);
+
+	for (int band = 0; band < NUM_RENDER_BANDS; band++)
+	{
+		m_bands[band].dev = this;
+		m_bands[band].band = band;
+	}
 }
 
 
@@ -3376,76 +3383,114 @@ void m2_te_device::queue_span_job(uint32_t wrange, bool omit_right, uint32_t y, 
 	job.snapshot = m_cur_snapshot;
 
 	m_span_jobs[y % NUM_RENDER_BANDS].push_back(std::move(job));
+
+	if (++m_staged_jobs >= PUBLISH_JOB_COUNT)
+		publish_span_jobs();
 }
 
 
 //-------------------------------------------------
 //  render_band - osd_work_item callback: render
-//  every job queued for one band, on whichever
-//  worker thread this item is scheduled on. Jobs
-//  within a band always run in their original
-//  submission order (plain sequential loop), and
-//  different bands never touch the same framebuffer
-//  row, so this needs no locking against other
-//  concurrently-running bands.
+//  every job published for one band, on whichever
+//  worker thread this item is scheduled on. The
+//  item keeps taking published batches until the
+//  band has none left, so jobs within a band always
+//  run in their original submission order on a
+//  single thread, and different bands never touch
+//  the same framebuffer row, so this needs no
+//  locking against other concurrently-running bands.
 //-------------------------------------------------
 
 void *m2_te_device::render_band(void *param, int threadid)
 {
-	band_render_ctx &ctx = *static_cast<band_render_ctx *>(param);
+	band_state &bs = *static_cast<band_state *>(param);
 
-	for (const span_job &job : ctx.dev->m_span_jobs[ctx.band])
+	for (;;)
 	{
-		// Jobs in this list may have been queued under different config
-		// generations (INST_WRITE_REG no longer flushes before applying a
-		// register write - see execute()) - each job renders against the
-		// snapshot that was current when it was queued, not whatever the
-		// live device members hold now.
-		ctx.ps.cfg = job.snapshot.get();
+		{
+			std::lock_guard<std::mutex> guard(bs.lock);
+			if (bs.pending.empty())
+			{
+				bs.scheduled = false;
+				return nullptr;
+			}
+			bs.work.clear();
+			std::swap(bs.work, bs.pending);
+		}
 
-		ctx.dev->walk_span(ctx.ps, job.wrange, job.omit_right, job.y, job.xs, job.xe,
-			job.r, job.g, job.b, job.a, job.uw, job.vw, job.w,
-			job.r2l, job.ddx_r, job.ddx_g, job.ddx_b, job.ddx_a, job.ddx_uw, job.ddx_vw, job.ddx_w);
+		for (const span_job &job : bs.work)
+		{
+			// Jobs in this list may have been queued under different config
+			// generations - each job renders against the snapshot that was
+			// current when it was queued, not whatever the live device
+			// members hold now.
+			bs.ps.cfg = job.snapshot.get();
+
+			bs.dev->walk_span(bs.ps, job.wrange, job.omit_right, job.y, job.xs, job.xe,
+				job.r, job.g, job.b, job.a, job.uw, job.vw, job.w,
+				job.r2l, job.ddx_r, job.ddx_g, job.ddx_b, job.ddx_a, job.ddx_uw, job.ddx_vw, job.ddx_w);
+		}
 	}
-
-	return nullptr;
 }
 
 
 //-------------------------------------------------
-//  flush_span_jobs - dispatch every band's queued
-//  jobs to worker threads, wait for them all to
-//  finish, merge their locally-accumulated status/
-//  statistics into the real device state, then clear
-//  the queues. Register writes no longer need this
-//  mid-list (each queued job carries its own config
-//  snapshot - see render_snapshot/queue_span_job()),
-//  so this is now only called at genuine
-//  synchronization points: list end and the safety
-//  net at the end of execute(), where the CPU
-//  actually needs rendering to be complete (e.g. it
-//  may read the framebuffer right after).
+//  publish_span_jobs - hand the staged jobs of
+//  every band to the workers and start a render
+//  item for each band that is not already being
+//  drained. Rendering then proceeds while the
+//  emulation thread carries on with triangle setup;
+//  flush_span_jobs() waits for it at the points
+//  where the CPU needs the finished picture.
+//-------------------------------------------------
+
+void m2_te_device::publish_span_jobs()
+{
+	m_staged_jobs = 0;
+
+	for (int band = 0; band < NUM_RENDER_BANDS; band++)
+	{
+		std::vector<span_job> &staged = m_span_jobs[band];
+		if (staged.empty())
+			continue;
+
+		band_state &bs = m_bands[band];
+		bool start;
+		{
+			std::lock_guard<std::mutex> guard(bs.lock);
+			if (bs.pending.empty())
+				std::swap(bs.pending, staged);
+			else
+				std::move(staged.begin(), staged.end(), std::back_inserter(bs.pending));
+			start = !bs.scheduled;
+			bs.scheduled = true;
+		}
+		staged.clear();
+
+		if (start)
+			osd_work_item_queue(m_render_queue[band % NUM_RENDER_QUEUES], render_band, &bs, WORK_ITEM_FLAG_AUTO_RELEASE);
+	}
+}
+
+
+//-------------------------------------------------
+//  flush_span_jobs - publish whatever is still
+//  staged, wait for the workers to finish every
+//  band, and merge their locally-accumulated
+//  status/statistics into the real device state.
+//  Register writes do not need this mid-list (each
+//  queued job carries its own config snapshot - see
+//  render_snapshot/queue_span_job()), so it is only
+//  called at genuine synchronization points: list
+//  end and the safety net at the end of execute(),
+//  where the CPU actually needs rendering to be
+//  complete (e.g. it may read the framebuffer right
+//  after).
 //-------------------------------------------------
 
 void m2_te_device::flush_span_jobs()
 {
-	band_render_ctx ctx[NUM_RENDER_BANDS];
-	int active = 0;
-
-	for (int band = 0; band < NUM_RENDER_BANDS; band++)
-	{
-		if (m_span_jobs[band].empty())
-			continue;
-
-		ctx[active].dev = this;
-		ctx[active].band = band;
-		ctx[active].ps = pixel_scratch{};
-		osd_work_item_queue(m_render_queue[active % NUM_RENDER_QUEUES], render_band, &ctx[active], WORK_ITEM_FLAG_AUTO_RELEASE);
-		active++;
-	}
-
-	if (active == 0)
-		return;
+	publish_span_jobs();
 
 	bool done = true;
 	for (auto *queue : m_render_queue)
@@ -3453,28 +3498,23 @@ void m2_te_device::flush_span_jobs()
 	if (!done)
 	{
 		// Real timeout (100s) - a worker thread may still be writing its
-		// band's pixel_scratch/framebuffer rows. Don't touch ctx[]/m_ram
-		// any further this call; better to drop a batch of rendering than
-		// race on it. Should never happen in practice - WORK_QUEUE_FLAG_
-		// HIGH_FREQ makes osd_work_queue_wait() spin-wait for real
-		// completion instead of relying on an event that can be missed for
-		// a queue flushed this frequently (small batches, once per
-		// INST_WRITE_REG) - see git history for the bug this caught.
-		logerror("m2_te_device: render queue wait timed out, dropping this batch\n");
-		for (auto &jobs : m_span_jobs)
-			jobs.clear();
+		// band's pixel_scratch/framebuffer rows. Don't touch the band state
+		// or m_ram any further this call; better to drop a batch of
+		// rendering than race on it. Should never happen in practice -
+		// WORK_QUEUE_FLAG_HIGH_FREQ makes osd_work_queue_wait() spin-wait
+		// for real completion instead of relying on an event that can be
+		// missed for a queue flushed this frequently.
+		logerror("m2_te_device: render queue wait timed out\n");
 		return;
 	}
 
-	for (int i = 0; i < active; i++)
+	for (band_state &bs : m_bands)
 	{
-		m_db.status |= ctx[i].ps.status_bits;
+		m_db.status |= bs.ps.status_bits;
 		for (int s = 0; s < 16; s++)
-			g_statistics[s] += ctx[i].ps.stats[s];
+			g_statistics[s] += bs.ps.stats[s];
+		bs.ps = pixel_scratch{};
 	}
-
-	for (auto &jobs : m_span_jobs)
-		jobs.clear();
 }
 
 

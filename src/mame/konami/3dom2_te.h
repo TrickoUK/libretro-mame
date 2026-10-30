@@ -12,6 +12,8 @@
 
 #include <array>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 /***************************************************************************
     FORWARD DECLARATIONS
@@ -190,16 +192,27 @@ private:
 
 	static constexpr int NUM_RENDER_BANDS = 16;
 
-	// osd_work_item param for render_band(): which band to render and the
-	// pixel_scratch that band's whole run of jobs accumulates into.
-	struct band_render_ctx
+	// Per-band render state shared between the emulation thread (producer)
+	// and whichever worker thread is currently draining the band. The
+	// emulation thread appends published jobs to pending under the lock and
+	// schedules a render_band() item only if none is already draining the
+	// band; the item keeps taking pending batches until it finds none, so a
+	// band's jobs always run in submission order on one thread at a time.
+	// ps accumulates the band's status/statistics until flush_span_jobs()
+	// merges and resets it.
+	struct band_state
 	{
-		m2_te_device *dev;
-		int band;
+		m2_te_device *dev = nullptr;
+		int band = 0;
+		std::mutex lock;
+		std::vector<span_job> pending;
+		std::vector<span_job> work;
+		bool scheduled = false;
 		pixel_scratch ps;
 	};
 
 	void queue_span_job(uint32_t wrange, bool omit_right, uint32_t y, uint32_t xs, uint32_t xe, int32_t r, int32_t g, int32_t b, int32_t a, uint32_t uw, uint32_t vw, uint32_t w);
+	void publish_span_jobs();
 	void flush_span_jobs();
 	static void *render_band(void *param, int threadid);
 
@@ -534,6 +547,12 @@ private:
 	// points (list end and the safety net at the end of execute()), not
 	// before every INST_WRITE_REG - see execute().
 	std::vector<span_job> m_span_jobs[NUM_RENDER_BANDS];
+	band_state m_bands[NUM_RENDER_BANDS];
+	uint32_t m_staged_jobs = 0;
+
+	// Staged jobs are handed to the workers once this many have built up, so
+	// rasterization overlaps triangle setup instead of starting at list end.
+	static constexpr uint32_t PUBLISH_JOB_COUNT = 128;
 
 	// Several queues rather than one: the OSD caps a WORK_QUEUE_FLAG_HIGH_FREQ
 	// queue at min(cores, 4) - 1 = 3 worker threads, so a single queue left
