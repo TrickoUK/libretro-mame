@@ -776,7 +776,6 @@ void m2_te_device::device_post_load()
 void m2_te_device::device_reset()
 {
 	m_state = TE_STOPPED;
-	m_ss_surfaces.clear();
 
 	// TODO
 }
@@ -1205,14 +1204,16 @@ void m2_te_device::setup_triangle(uint32_t flags)
 	se_vtx vc = m_se.vertices[2];
 
 	// Truncate XY coordinates to integers
+	// Native pixel positions first, so every edge of a native pixel lands on
+	// the first sample of its block of samples
 	const float ssf = float(1U << m_ss_shift);
-	va.x = int_trunc(va.x * ssf);
-	vb.x = int_trunc(vb.x * ssf);
-	vc.x = int_trunc(vc.x * ssf);
+	va.x = int_trunc(va.x) * ssf;
+	vb.x = int_trunc(vb.x) * ssf;
+	vc.x = int_trunc(vc.x) * ssf;
 
-	va.y = int_trunc(va.y * ssf);
-	vb.y = int_trunc(vb.y * ssf);
-	vc.y = int_trunc(vc.y * ssf);
+	va.y = int_trunc(va.y) * ssf;
+	vb.y = int_trunc(vb.y) * ssf;
+	vc.y = int_trunc(vc.y) * ssf;
 
 
 	// Scale and truncate colors
@@ -1447,6 +1448,12 @@ void m2_te_device::setup_triangle(uint32_t flags)
 	m_es.slope_vw = ieee754_to_tefix(vw_slope, textbits);
 	m_es.slope_w = ieee754_to_tefix(w_slope, depthbits);
 
+	// Plane gradients per sample row, from the same plane equation as the
+	// slopes (the slope is the change down the long edge)
+	m_ss_ddy_uw = ieee754_to_tefix(-(v1->uw * x23 + v2->uw * x31 + v3->uw * x12) * iaria, textbits);
+	m_ss_ddy_vw = ieee754_to_tefix(-(v1->vw * x23 + v2->vw * x31 + v3->vw * x12) * iaria, textbits);
+	m_ss_ddy_w = ieee754_to_tefix(-(v1->w * x23 + v2->w * x31 + v3->w * x12) * iaria, depthbits);
+
 	m_es.r2l = !scan_lr;
 
 #if TEST_TIMING
@@ -1537,6 +1544,8 @@ void m2_te_device::walk_edges(uint32_t wrange)
 {
 	bool dsp_off = m_es.es_cntl & ESCNTL_DSPOFF;
 	bool du_scan = m_es.es_cntl & ESCNTL_DUSCAN;
+	const uint32_t ss_rows = 1U << m_ss_shift;
+	uint32_t omit_rows = ss_rows;
 	bool omit_right = true;
 	bool scan_lr = m_es.r2l == false;
 
@@ -1616,7 +1625,9 @@ void m2_te_device::walk_edges(uint32_t wrange)
 		queue_span_job(wrange, omit_right, y, xs, xe, r, g, b, a, uw, vw, w);
 
 		// Now update the values
-		omit_right = false;
+		if (omit_rows)
+			omit_rows--;
+		omit_right = omit_rows != 0;
 		cf_short += xystep;
 		cf_long += m_es.xystep_long;
 
@@ -1725,7 +1736,10 @@ void m2_te_device::walk_edges(uint32_t wrange)
 			xe = m_es.x2;
 
 			if (scan_lr)
+			{
+				omit_rows = ss_rows;
 				omit_right = true;
+			}
 		}
 
 		y = next_y;
@@ -3238,15 +3252,16 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 	}
 	else if (m_ss_shift)
 	{
-		// The right end of a span is inclusive, so a native pixel there is
-		// covered by every one of its samples
-		const uint32_t extra = (1U << m_ss_shift) - 1;
+		// The right end of a span is inclusive, so its native pixel is covered
+		// by every sample up to the last one of its block
+		const uint32_t mask = (1U << m_ss_shift) - 1;
 		if (scan_lr)
 		{
-			xe += extra;
+			xe = ((xe - 1) | mask) + 1;
 		}
 		else
 		{
+			const uint32_t extra = (xs | mask) - xs;
 			xs += extra;
 			r += es_ddx_r * extra;
 			g += es_ddx_g * extra;
@@ -3262,6 +3277,10 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 	{
 		g_debug = true;
 	}
+
+	// A span whose end lies before its start has no pixels
+	if (scan_lr ? (int32_t(xe - xs) < 0) : (int32_t(xs - xe) < 0))
+		return;
 
 	// ps is owned by the caller (one instance per render job batch, e.g.
 	// per band when running on a worker thread) and accumulates
@@ -3298,8 +3317,23 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 		{
 			uint32_t u, v;
 
-			// UV and W
-			texcoord_gen(ps, rg, wrange, uw, vw, w, u, v, w16);
+			// UV and W.  Every sample of a native pixel textures at the native
+			// pixel's own position, as the hardware does, so texels are never
+			// filtered between positions the hardware does not sample
+			uint32_t uw_t = uw;
+			uint32_t vw_t = vw;
+			uint32_t w_t = w;
+			if (m_ss_shift)
+			{
+				const uint32_t mask = (1U << m_ss_shift) - 1;
+				const uint32_t fx = sx & mask;
+				const uint32_t fy = sy & mask;
+				uw_t = std::clamp<int32_t>(int32_t(uw - fx * es_ddx_uw - fy * ps.ddy_uw), 0, 0x007fffff);
+				vw_t = std::clamp<int32_t>(int32_t(vw - fx * es_ddx_vw - fy * ps.ddy_vw), 0, 0x007fffff);
+				w_t = std::clamp<int32_t>(int32_t(w - fx * es_ddx_w - fy * ps.ddy_w), 0, 0x007fffff);
+			}
+
+			texcoord_gen(ps, rg, wrange, uw_t, vw_t, w_t, u, v, w16);
 
 			// TODO: FIXME
 			uint32_t lod = lod_calc(u, v, u, v);
@@ -3428,6 +3462,9 @@ void m2_te_device::queue_span_job(uint32_t wrange, bool omit_right, uint32_t y, 
 	job.ddx_g = m_es.ddx_g;
 	job.ddx_b = m_es.ddx_b;
 	job.ddx_a = m_es.ddx_a;
+	job.ddy_uw = m_ss_ddy_uw;
+	job.ddy_vw = m_ss_ddy_vw;
+	job.ddy_w = m_ss_ddy_w;
 	job.ddx_uw = m_es.ddx_uw;
 	job.ddx_vw = m_es.ddx_vw;
 	job.ddx_w = m_es.ddx_w;
@@ -3504,6 +3541,9 @@ void *m2_te_device::render_band(void *param, int threadid)
 			// current when it was queued, not whatever the live device
 			// members hold now.
 			bs.ps.cfg = job.snapshot.get();
+			bs.ps.ddy_uw = job.ddy_uw;
+			bs.ps.ddy_vw = job.ddy_vw;
+			bs.ps.ddy_w = job.ddy_w;
 
 			bs.dev->walk_span(bs.ps, job.wrange, job.omit_right, job.y, job.xs, job.xe,
 				job.r, job.g, job.b, job.a, job.uw, job.vw, job.w,
@@ -3614,7 +3654,8 @@ m2_te_device::ss_surface *m2_te_device::ss_get(uint32_t base, uint32_t stride, u
 {
 	const uint32_t max_native = 2048U >> m_ss_shift;
 
-	if (stride == 0)
+	// The refresh compares whole eight-byte blocks, so rows must not share them
+	if (stride == 0 || ((stride * bpp) & 7) || (base & 7))
 		return nullptr;
 
 	for (auto &sp : m_ss_surfaces)
@@ -3649,10 +3690,14 @@ m2_te_device::ss_surface *m2_te_device::ss_get(uint32_t base, uint32_t stride, u
 	if (base < m_bda->ram_start() || last > uint64_t(m_bda->ram_end()) + 1)
 		return nullptr;
 
-	if (m_ss_surfaces.size() >= 16)
+	// Make room by dropping a surface that no snapshot of this list uses
+	if (m_ss_surfaces.size() >= 32)
 	{
+		auto it = std::find_if(m_ss_surfaces.begin(), m_ss_surfaces.end(), [this] (const auto &p) { return p->gen != m_list_gen; });
+		if (it == m_ss_surfaces.end())
+			return nullptr;
 		flush_span_jobs();
-		m_ss_surfaces.erase(m_ss_surfaces.begin());
+		m_ss_surfaces.erase(it);
 	}
 
 	auto s = std::make_unique<ss_surface>();

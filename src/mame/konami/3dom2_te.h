@@ -174,6 +174,11 @@ private:
 		uint32_t status_bits = 0;
 		uint32_t stats[16] = {};
 
+		// Plane gradients per sample row of the job being drawn (supersampling)
+		uint32_t ddy_uw = 0;
+		uint32_t ddy_vw = 0;
+		uint32_t ddy_w = 0;
+
 		// Which config generation this job's render calls should read from -
 		// set once per job by render_band() from span_job::snapshot before
 		// walk_span() is called, not owned/kept alive by pixel_scratch itself.
@@ -206,6 +211,7 @@ private:
 		uint32_t r2l;
 		uint32_t ddx_r, ddx_g, ddx_b, ddx_a;
 		uint32_t ddx_uw, ddx_vw, ddx_w;
+		uint32_t ddy_uw, ddy_vw, ddy_w;
 
 		// Config generation active when this job was queued (see
 		// render_snapshot) - lets jobs queued under different register-write
@@ -241,6 +247,9 @@ private:
 
 	// Supersampling (log2 of the scale per axis; 0 = off)
 	uint32_t m_ss_shift = 0;
+	uint32_t m_ss_ddy_uw = 0;
+	uint32_t m_ss_ddy_vw = 0;
+	uint32_t m_ss_ddy_w = 0;
 	uint32_t m_list_gen = 0;
 	std::vector<std::unique_ptr<ss_surface>> m_ss_surfaces;
 	ss_surface *ss_get(uint32_t base, uint32_t stride, uint32_t bpp, bool is_z, uint32_t width, uint32_t height, bool create);
