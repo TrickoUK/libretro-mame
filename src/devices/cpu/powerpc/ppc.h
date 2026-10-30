@@ -622,6 +622,7 @@ protected:
 
 	// internal stuff
 	uint8_t               m_cache_dirty;                // true if we need to flush the cache
+	bool                  m_memory_handlers_generated = false;  // true once the memory accessor subroutines exist
 
 	// track what logical pages have compiled code
 	std::vector<uint8_t>  m_codepage_bits;              // 1 bit for each 4K page
@@ -788,6 +789,7 @@ protected:
 	void static_generate_exception(uint8_t exception, int recover, const char *name);
 	void static_generate_memory_accessor(int mode, int size, bool iswrite, bool ismasked, bool isreserve, const char *name, uml::code_handle *&handleptr, uml::code_handle *masked);
 	void static_generate_swap_tgpr();
+	void static_generate_memory_handlers();
 	void static_generate_lsw_entries(int mode);
 	void static_generate_stsw_entries(int mode);
 	void static_generate_fpscr_finish();

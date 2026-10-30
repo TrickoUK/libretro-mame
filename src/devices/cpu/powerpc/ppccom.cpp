@@ -1002,8 +1002,29 @@ void ppc_device::device_start()
 
 		// add the shared floating-point status-flag finalizer
 		static_generate_fpscr_finish();
+	}
+	catch (drcuml_block::abort_compilation &)
+	{
+		fatalerror("Error generating PPC static handlers\n");
+	}
 
-		/* add subroutines for memory accesses */
+	/* mark the cache dirty so it is updated on next execute */
+	m_cache_dirty = true;
+}
+
+/*-------------------------------------------------
+    static_generate_memory_handlers - generate the
+    memory accessor subroutines.  These bake in
+    the fast RAM regions, so they are generated at
+    the first reset, after the driver has added
+    its fast RAM regions
+-------------------------------------------------*/
+
+void ppc_device::static_generate_memory_handlers()
+{
+	try
+	{
+		// add subroutines for memory accesses
 		for (int mode = 0; mode < 8; mode++)
 		{
 			static_generate_memory_accessor(mode, 1, false, false, false, "read8", m_read8[mode], nullptr);
@@ -1032,10 +1053,8 @@ void ppc_device::device_start()
 	{
 		fatalerror("Error generating PPC static handlers\n");
 	}
-
-	/* mark the cache dirty so it is updated on next execute */
-	m_cache_dirty = true;
 }
+
 
 void ppc_device::state_export(const device_state_entry &entry)
 {
@@ -1253,6 +1272,13 @@ void ppc_device::device_stop()
 
 void ppc_device::device_reset()
 {
+	if (m_drcuml && !m_memory_handlers_generated)
+	{
+		static_generate_memory_handlers();
+		m_memory_handlers_generated = true;
+		m_cache_dirty = true;
+	}
+
 	// discard any pending retry request (this getter clears the flag)
 	access_to_be_redone();
 
