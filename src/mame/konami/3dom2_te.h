@@ -221,7 +221,7 @@ private:
 		std::shared_ptr<const render_snapshot> snapshot;
 	};
 
-	static constexpr int NUM_RENDER_BANDS = 16;
+	static constexpr int NUM_RENDER_BANDS = 64;
 
 	// Per-band render state shared between the emulation thread (producer)
 	// and whichever worker thread is currently draining the band. The

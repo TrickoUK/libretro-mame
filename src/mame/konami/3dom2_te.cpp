@@ -3289,6 +3289,11 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 	// functions it calls) fully overwrite the per-pixel fields (x, y, w,
 	// ti, ssb, ...) at the top of every call, so reusing one instance
 	// across many pixels/jobs is safe.
+	bool memo_valid = false;
+	uint32_t memo_u = 0, memo_v = 0, memo_lod = 0;
+	uint32_t memo_rt = 0, memo_gt = 0, memo_bt = 0, memo_at = 0, memo_ssbt = 0;
+	uint32_t memo_reads = 0;
+
 	while (xs != xe)
 	{
 		uint32_t sx = xs;
@@ -3338,7 +3343,38 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 			// TODO: FIXME
 			uint32_t lod = lod_calc(u, v, u, v);
 
-			get_texture_color(ps, rg, u, v, lod, rt, gt, bt, at, ssbt);
+			// The samples of a native pixel share their texture coordinates, so
+			// the last lookup is reused when they repeat
+			if (memo_valid && u == memo_u && v == memo_v && lod == memo_lod)
+			{
+				rt = memo_rt;
+				gt = memo_gt;
+				bt = memo_bt;
+				at = memo_at;
+				ssbt = memo_ssbt;
+#if TEST_TIMING
+				ps.stats[STAT_TEXEL_READS] += memo_reads;
+#endif
+			}
+			else
+			{
+#if TEST_TIMING
+				const uint32_t reads_before = ps.stats[STAT_TEXEL_READS];
+#endif
+				get_texture_color(ps, rg, u, v, lod, rt, gt, bt, at, ssbt);
+#if TEST_TIMING
+				memo_reads = ps.stats[STAT_TEXEL_READS] - reads_before;
+#endif
+				memo_valid = true;
+				memo_u = u;
+				memo_v = v;
+				memo_lod = lod;
+				memo_rt = rt;
+				memo_gt = gt;
+				memo_bt = bt;
+				memo_at = at;
+				memo_ssbt = ssbt;
+			}
 		}
 		else
 		{
