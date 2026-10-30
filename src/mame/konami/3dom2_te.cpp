@@ -3296,6 +3296,7 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 	// ti, ssb, ...) at the top of every call, so reusing one instance
 	// across many pixels/jobs is safe.
 	bool memo_valid = false;
+	uint32_t memo_uw = 0, memo_vw = 0, memo_w = 0;
 	uint32_t memo_u = 0, memo_v = 0, memo_lod = 0;
 	uint32_t memo_rt = 0, memo_gt = 0, memo_bt = 0, memo_at = 0, memo_ssbt = 0;
 #if TEST_TIMING
@@ -3346,14 +3347,25 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 				w_t = std::clamp<int32_t>(int32_t(w - fx * es_ddx_w - fy * ps.ddy_w), 0, 0x007fffff);
 			}
 
-			texcoord_gen(ps, rg, wrange, uw_t, vw_t, w_t, u, v, w16);
-
-			// TODO: FIXME
-			uint32_t lod = lod_calc(u, v, u, v);
-
 			// The samples of a native pixel share their texture coordinates, so
 			// the last lookup is reused when they repeat
-			if (memo_valid && u == memo_u && v == memo_v && lod == memo_lod)
+			uint32_t lod;
+			const bool same_input = memo_valid && uw_t == memo_uw && vw_t == memo_vw && w_t == memo_w;
+			if (same_input)
+			{
+				u = memo_u;
+				v = memo_v;
+				lod = memo_lod;
+			}
+			else
+			{
+				texcoord_gen(ps, rg, wrange, uw_t, vw_t, w_t, u, v, w16);
+
+				// TODO: FIXME
+				lod = lod_calc(u, v, u, v);
+			}
+
+			if (same_input || (memo_valid && u == memo_u && v == memo_v && lod == memo_lod))
 			{
 				rt = memo_rt;
 				gt = memo_gt;
@@ -3374,6 +3386,9 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 				memo_reads = ps.stats[STAT_TEXEL_READS] - reads_before;
 #endif
 				memo_valid = true;
+				memo_uw = uw_t;
+				memo_vw = vw_t;
+				memo_w = w_t;
 				memo_u = u;
 				memo_v = v;
 				memo_lod = lod;
