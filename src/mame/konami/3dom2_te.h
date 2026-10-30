@@ -53,6 +53,7 @@ public:
 protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
+	virtual void device_post_load() override;
 
 	TIMER_CALLBACK_MEMBER(command_done);
 
@@ -504,14 +505,19 @@ private:
 	// Definition of the forward-declared render_snapshot (see its forward
 	// declaration above, near pixel_scratch, for what it's for). Defined
 	// here since it captures m_gc/m_es/m_tm/m_db's types via decltype.
+	struct texture_snapshot
+	{
+		std::array<uint32_t, PIP_RAM_WORDS> pipram;
+		std::array<uint32_t, TEXTURE_RAM_WORDS> tram;
+	};
+
 	struct render_snapshot
 	{
 		decltype(m_gc) gc;
 		decltype(m_es) es;
 		decltype(m_tm) tm;
 		decltype(m_db) db;
-		std::array<uint32_t, PIP_RAM_WORDS> pipram;
-		std::array<uint32_t, TEXTURE_RAM_WORDS> tram;
+		std::shared_ptr<const texture_snapshot> tex;
 	};
 
 	// Register state the per-pixel functions read, copied per span from a
@@ -537,6 +543,12 @@ private:
 	// queued, so they're immune to the live members changing under them.
 	std::shared_ptr<const render_snapshot> m_cur_snapshot;
 	bool m_snapshot_dirty = true;
+
+	// Texture RAM and PIP RAM are copied into a snapshot of their own, only
+	// when load_texture() or a PIP RAM register write has changed them, and
+	// shared by every register snapshot taken until the next change.
+	std::shared_ptr<const texture_snapshot> m_cur_tex;
+	bool m_tex_dirty = true;
 
 	// Multi-threaded rasterization: queued-but-not-yet-rendered scanlines,
 	// bucketed by band (see span_job above), and the OSD work queue used to

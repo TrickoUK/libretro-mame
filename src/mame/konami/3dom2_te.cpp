@@ -752,6 +752,18 @@ void m2_te_device::device_start()
 
 
 //-------------------------------------------------
+//  device_post_load - restored state invalidates
+//  the render and texture snapshots
+//-------------------------------------------------
+
+void m2_te_device::device_post_load()
+{
+	m_snapshot_dirty = true;
+	m_tex_dirty = true;
+}
+
+
+//-------------------------------------------------
 //  device_reset - device-specific reset
 //-------------------------------------------------
 
@@ -900,6 +912,7 @@ void m2_te_device::write(offs_t offset, uint32_t data)
 			if (reg < 0x400 / 4)
 			{
 				m_pipram[reg] = data;
+				m_tex_dirty = true;
 				return;
 			}
 			else if ((reg - 0x400 / 4) < sizeof(m_tm) / 4)
@@ -3141,7 +3154,7 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 	// otherwise assume any of them could modify the snapshot, re-loading and
 	// re-decoding every register after every pixel.  A local whose address
 	// never escapes (the pixel functions are force-inlined) can't alias RAM.
-	const span_regs rg{ ps.cfg->gc, ps.cfg->es, ps.cfg->tm, ps.cfg->db, ps.cfg->tram.data(), ps.cfg->pipram.data() };
+	const span_regs rg{ ps.cfg->gc, ps.cfg->es, ps.cfg->tm, ps.cfg->db, ps.cfg->tex->tram.data(), ps.cfg->tex->pipram.data() };
 
 	const auto &m_gc = rg.gc;
 	const auto &m_tm = rg.tm;
@@ -3368,15 +3381,23 @@ void m2_te_device::queue_span_job(uint32_t wrange, bool omit_right, uint32_t y, 
 	// Reused for every subsequent job until the next write() sets the dirty
 	// flag again, so this is a cheap ~17KB copy per config change, not per
 	// job/scanline.
-	if (m_snapshot_dirty)
+	if (m_snapshot_dirty || m_tex_dirty)
 	{
-		auto snap = std::make_shared<render_snapshot>();
+		if (m_tex_dirty)
+		{
+			auto tex = std::make_shared_for_overwrite<texture_snapshot>();
+			memcpy(tex->pipram.data(), m_pipram.get(), PIP_RAM_WORDS * sizeof(uint32_t));
+			memcpy(tex->tram.data(), m_tram.get(), TEXTURE_RAM_WORDS * sizeof(uint32_t));
+			m_cur_tex = std::move(tex);
+			m_tex_dirty = false;
+		}
+
+		auto snap = std::make_shared_for_overwrite<render_snapshot>();
 		snap->gc = m_gc;
 		snap->es = m_es;
 		snap->tm = m_tm;
 		snap->db = m_db;
-		memcpy(snap->pipram.data(), m_pipram.get(), PIP_RAM_WORDS * sizeof(uint32_t));
-		memcpy(snap->tram.data(), m_tram.get(), TEXTURE_RAM_WORDS * sizeof(uint32_t));
+		snap->tex = m_cur_tex;
 		m_cur_snapshot = std::move(snap);
 		m_snapshot_dirty = false;
 	}
@@ -3878,6 +3899,8 @@ uint32_t m2_te_device::readbits_from_ram(uint32_t & src_addr, uint32_t & bit_off
 
 void m2_te_device::load_texture()
 {
+	m_tex_dirty = true;
+
 	switch (m_tm.texld_cntl & TXTLDCNTL_LDMODE_MASK)
 	{
 		case TXTLDCNTL_LDMODE_TEXLOAD:
