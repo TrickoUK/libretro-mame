@@ -235,6 +235,15 @@ void dspp_device::device_start()
 	space(AS_PROGRAM).specific(m_code);
 	space(AS_DATA).specific(m_data);
 
+	// The Bulldog data map starts with 0x2e0 words of plain RAM
+	m_data_ram_words = (type() == DSPP_BULLDOG) ? 0x2e0 : 0;
+	if (m_data_ram_words)
+	{
+		m_data_ram = static_cast<uint16_t *>(space(AS_DATA).get_read_ptr(0));
+		if (!m_data_ram)
+			m_data_ram_words = 0;
+	}
+
 	// Register our state for the debugger
 	state_add(DSPP_PC,         "PC",        m_core->m_pc);
 	state_add(DSPP_ACC,        "ACC",       m_core->m_acc).mask(0xfffff);
@@ -468,6 +477,9 @@ uint16_t dspp_device::read_op(offs_t pc)
 
 inline uint16_t dspp_device::read_data(offs_t addr)
 {
+	if (addr < m_data_ram_words)
+		return m_data_ram[addr];
+
 	if (!idle_safe_read(addr))
 		m_idle_dirty = true;
 	return m_data.read_word(addr);
@@ -481,6 +493,11 @@ inline uint16_t dspp_device::read_data(offs_t addr)
 inline void dspp_device::write_data(offs_t addr, uint16_t data)
 {
 	m_idle_dirty = true;
+	if (addr < m_data_ram_words)
+	{
+		m_data_ram[addr] = data;
+		return;
+	}
 	m_data.write_word(addr, data);
 }
 

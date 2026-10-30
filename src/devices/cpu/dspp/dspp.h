@@ -310,6 +310,11 @@ protected:
 	int32_t     m_idle_pc;
 private:
 	bool        m_idle_dirty;
+
+	// Plain RAM at the bottom of the data space, read and written directly
+	// instead of through the address space (0 words when the map has no such RAM)
+	uint16_t *  m_data_ram = nullptr;
+	uint32_t    m_data_ram_words = 0;
 	dspp_internal_state m_idle_state;
 
 	// DMA
