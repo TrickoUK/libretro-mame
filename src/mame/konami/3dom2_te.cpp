@@ -3587,6 +3587,10 @@ void m2_te_device::illegal_inst()
 
 void m2_te_device::execute()
 {
+	// The CPU can write texture RAM and PIP RAM directly through its address
+	// map, so take a fresh copy for the snapshots of this list.
+	m_tex_dirty = true;
+
 #if TEST_TIMING
 	memset(g_statistics, 0, sizeof(g_statistics));
 #endif
