@@ -13,6 +13,7 @@
 
 #include "endianness.h"
 #include "multibyte.h"
+#include "osdepend.h"
 
 #include <algorithm>
 #include <cmath>
@@ -737,9 +738,8 @@ void m2_te_device::device_start()
 	save_item(NAME(m_tm.m_regs));
 	save_item(NAME(m_db.m_regs));
 
-	// Supersampling scale from the environment (prototype switch)
-	if (const char *ss = getenv("MAME_M2_SS"))
-		m_ss_shift = (atoi(ss) >= 2) ? 1 : 0;
+	// Supersampling scale from the front end's supersampling setting, limited to 2x
+	m_ss_shift = (machine().osd().supersample() >= 2) ? 1 : 0;
 
 	// Allocate timers
 	m_done_timer = timer_alloc(FUNC(m2_te_device::command_done), this);
