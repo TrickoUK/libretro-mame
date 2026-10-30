@@ -3862,15 +3862,14 @@ void m2_te_device::ss_resolve(render_snapshot &snap)
 
 //-------------------------------------------------
 //  ss_writeback - average the samples that drawing
-//  changed back down into RAM
+//  changed back down into RAM. Runs at list end,
+//  when the workers are idle, so the rows of each
+//  surface are split across them.
 //-------------------------------------------------
 
 void m2_te_device::ss_writeback()
 {
-	const uint32_t sh = m_ss_shift;
-	const uint32_t ss = 1U << sh;
-	const uint32_t count = ss * ss;
-	uint8_t *const ram = static_cast<uint8_t *>(m_bda->ram_ptr());
+	const uint32_t ss = 1U << m_ss_shift;
 
 	for (auto &sp : m_ss_surfaces)
 	{
@@ -3878,71 +3877,126 @@ void m2_te_device::ss_writeback()
 		if (!s.valid)
 			continue;
 
+		// Rows of one surface never share eight-byte RAM blocks (see ss_get()),
+		// so chunks can run in parallel; surfaces go one at a time in case two
+		// of them overlap in RAM.
+		uint32_t dirty_rows = 0;
 		for (uint32_t ny = 0; ny < s.height; ny++)
+			for (uint32_t j = 0; j < ss; j++)
+				if (s.dirty[ny * ss + j])
+				{
+					dirty_rows++;
+					break;
+				}
+		if (dirty_rows == 0)
+			continue;
+		if (dirty_rows < SS_WRITEBACK_MIN_ROWS)
 		{
-			bool any = false;
-			for (uint32_t j = 0; j < ss; j++)
-				any |= s.dirty[ny * ss + j] != 0;
-			if (!any)
-				continue;
-			for (uint32_t j = 0; j < ss; j++)
-				s.dirty[ny * ss + j] = 0;
+			ss_writeback_rows(s, 0, s.height);
+			continue;
+		}
 
-			const uint32_t addr = s.base + ny * s.stride * s.bpp;
-			for (uint32_t nx = 0; nx < s.width; nx++)
+		const uint32_t chunk = std::max<uint32_t>((s.height + SS_WRITEBACK_CHUNKS - 1) / SS_WRITEBACK_CHUNKS, 1);
+		uint32_t items = 0;
+		for (uint32_t y = 0; y < s.height && items < SS_WRITEBACK_CHUNKS; y += chunk)
+			m_wb_items[items++] = ss_writeback_item{ this, &s, y, std::min(y + chunk, s.height) };
+		for (uint32_t i = 0; i < items; i++)
+			osd_work_item_queue(m_render_queue[i % NUM_RENDER_QUEUES], ss_writeback_work, &m_wb_items[i], WORK_ITEM_FLAG_AUTO_RELEASE);
+
+		bool done = true;
+		for (auto *queue : m_render_queue)
+			done = osd_work_queue_wait(queue, osd_ticks_per_second() * 100) && done;
+		if (!done)
+			logerror("m2_te_device: write-back queue wait timed out\n");
+	}
+}
+
+
+void *m2_te_device::ss_writeback_work(void *param, int threadid)
+{
+	const ss_writeback_item &item = *static_cast<const ss_writeback_item *>(param);
+	item.dev->ss_writeback_rows(*item.surf, item.row_begin, item.row_end);
+	return nullptr;
+}
+
+
+//-------------------------------------------------
+//  ss_writeback_rows - average one surface's
+//  changed native rows [row_begin, row_end)
+//  into RAM
+//-------------------------------------------------
+
+void m2_te_device::ss_writeback_rows(ss_surface &s, uint32_t row_begin, uint32_t row_end)
+{
+	const uint32_t sh = m_ss_shift;
+	const uint32_t ss = 1U << sh;
+	const uint32_t count = ss * ss;
+	uint8_t *const ram = static_cast<uint8_t *>(m_bda->ram_ptr());
+
+	for (uint32_t ny = row_begin; ny < row_end; ny++)
+	{
+		bool any = false;
+		for (uint32_t j = 0; j < ss; j++)
+			any |= s.dirty[ny * ss + j] != 0;
+		if (!any)
+			continue;
+		for (uint32_t j = 0; j < ss; j++)
+			s.dirty[ny * ss + j] = 0;
+
+		const uint32_t addr = s.base + ny * s.stride * s.bpp;
+		for (uint32_t nx = 0; nx < s.width; nx++)
+		{
+			const uint32_t *const first = s.data.get() + size_t(ny * ss) * s.pitch + nx * ss;
+			uint32_t out;
+
+			if (s.is_z)
 			{
-				const uint32_t *const first = s.data.get() + size_t(ny * ss) * s.pitch + nx * ss;
-				uint32_t out;
-
-				if (s.is_z)
-				{
-					// Depth is not averaged: keep the first sample
-					out = first[0];
-				}
-				else if (s.bpp == 4)
-				{
-					uint32_t sa = 0, sr = 0, sg = 0, sb = 0, sd = 0;
-					for (uint32_t j = 0; j < ss; j++)
-						for (uint32_t i = 0; i < ss; i++)
-						{
-							const uint32_t p = first[j * s.pitch + i];
-							sd += (p >> 31) & 1;
-							sa += (p >> 24) & 0x7f;
-							sr += (p >> 16) & 0xff;
-							sg += (p >> 8) & 0xff;
-							sb += p & 0xff;
-						}
-					out = ((sd * 2 >= count) ? 0x80000000U : 0) | (((sa + count / 2) / count) << 24) |
-							(((sr + count / 2) / count) << 16) | (((sg + count / 2) / count) << 8) | ((sb + count / 2) / count);
-				}
-				else
-				{
-					uint32_t sr = 0, sg = 0, sb = 0, sd = 0;
-					for (uint32_t j = 0; j < ss; j++)
-						for (uint32_t i = 0; i < ss; i++)
-						{
-							const uint32_t p = first[j * s.pitch + i];
-							sd += (p >> 15) & 1;
-							sr += (p >> 10) & 0x1f;
-							sg += (p >> 5) & 0x1f;
-							sb += p & 0x1f;
-						}
-					out = ((sd * 2 >= count) ? 0x8000U : 0) | (((sr + count / 2) / count) << 10) |
-							(((sg + count / 2) / count) << 5) | ((sb + count / 2) / count);
-				}
-
-				if (s.bpp == 4)
-					m_bda->write_bus32(addr + nx * 4, out);
-				else
-					m_bda->write_bus16(addr + nx * 2, out);
+				// Depth is not averaged: keep the first sample
+				out = first[0];
+			}
+			else if (s.bpp == 4)
+			{
+				uint32_t sa = 0, sr = 0, sg = 0, sb = 0, sd = 0;
+				for (uint32_t j = 0; j < ss; j++)
+					for (uint32_t i = 0; i < ss; i++)
+					{
+						const uint32_t p = first[j * s.pitch + i];
+						sd += (p >> 31) & 1;
+						sa += (p >> 24) & 0x7f;
+						sr += (p >> 16) & 0xff;
+						sg += (p >> 8) & 0xff;
+						sb += p & 0xff;
+					}
+				out = ((sd * 2 >= count) ? 0x80000000U : 0) | (((sa + count / 2) / count) << 24) |
+						(((sr + count / 2) / count) << 16) | (((sg + count / 2) / count) << 8) | ((sb + count / 2) / count);
+			}
+			else
+			{
+				uint32_t sr = 0, sg = 0, sb = 0, sd = 0;
+				for (uint32_t j = 0; j < ss; j++)
+					for (uint32_t i = 0; i < ss; i++)
+					{
+						const uint32_t p = first[j * s.pitch + i];
+						sd += (p >> 15) & 1;
+						sr += (p >> 10) & 0x1f;
+						sg += (p >> 5) & 0x1f;
+						sb += p & 0x1f;
+					}
+				out = ((sd * 2 >= count) ? 0x8000U : 0) | (((sr + count / 2) / count) << 10) |
+						(((sg + count / 2) / count) << 5) | ((sb + count / 2) / count);
 			}
 
-			// Remember what was written so the next refresh only sees other writers
-			const uint32_t off = (s.base - m_bda->ram_start()) + ny * s.stride * s.bpp;
-			const uint32_t lo = off & ~7U;
-			const uint32_t hi = (off + s.width * s.bpp + 7) & ~7U;
-			memcpy(s.native_copy.get() + size_t(ny) * s.row_slot, ram + lo, hi - lo);
+			if (s.bpp == 4)
+				m_bda->write_bus32(addr + nx * 4, out);
+			else
+				m_bda->write_bus16(addr + nx * 2, out);
 		}
+
+		// Remember what was written so the next refresh only sees other writers
+		const uint32_t off = (s.base - m_bda->ram_start()) + ny * s.stride * s.bpp;
+		const uint32_t lo = off & ~7U;
+		const uint32_t hi = (off + s.width * s.bpp + 7) & ~7U;
+		memcpy(s.native_copy.get() + size_t(ny) * s.row_slot, ram + lo, hi - lo);
 	}
 }
 

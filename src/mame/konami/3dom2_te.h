@@ -256,6 +256,20 @@ private:
 	void ss_acquire(ss_surface &s);
 	void ss_resolve(render_snapshot &snap);
 	void ss_writeback();
+	void ss_writeback_rows(ss_surface &s, uint32_t row_begin, uint32_t row_end);
+	static void *ss_writeback_work(void *param, int threadid);
+
+	// One chunk of a surface's write-back, run on a worker thread
+	struct ss_writeback_item
+	{
+		m2_te_device *dev;
+		ss_surface *surf;
+		uint32_t row_begin;
+		uint32_t row_end;
+	};
+	static constexpr uint32_t SS_WRITEBACK_CHUNKS = 24;
+	static constexpr uint32_t SS_WRITEBACK_MIN_ROWS = 16;  // fewer changed rows are written back inline
+	std::array<ss_writeback_item, SS_WRITEBACK_CHUNKS> m_wb_items;
 	uint32_t ss_read(const ss_surface &s, uint32_t x, uint32_t y) const { return (x < s.pitch && y < s.rows) ? s.data[y * s.pitch + x] : 0; }
 	void ss_write(ss_surface &s, uint32_t x, uint32_t y, uint32_t v) { if (x < s.pitch && y < s.rows) { s.data[y * s.pitch + x] = v; s.dirty[y] = 1; } }
 	void flush_span_jobs();
