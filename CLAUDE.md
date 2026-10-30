@@ -29,7 +29,11 @@ Batocera.
 - Conflicts to expect again:
   - `src/devices/cpu/mips/mips3{,drc}.cpp`: Count writes must not arm the compare timer, or sfrush hangs at ~49 s.
   - `src/devices/cpu/powerpc`: our ICFI snapshots, compile-time fetch fill and reuse re-snapshot; upstream has its
-    own HID0/ICFI handler, which we drop.
+    own HID0/ICFI handler, which we drop. Also our memory accessor generation at the first reset
+    (`static_generate_memory_handlers`, so drivers' fast RAM is used); upstream generates them in `device_start`,
+    which silently disables fast RAM. Prefer upstream's fix if it lands (PR branch `ppc-fastram-accessors`).
+  - `src/mame/konami/3dom2_te.{cpp,h}`: fork-only TE worker overlap, texture snapshot and 2x supersampling shadow
+    surfaces (`mame_3d_supersample`); `src/devices/cpu/dspp`: Bulldog data RAM accessed directly.
   - `src/devices/video/psx.{cpp,h}`: GPU HLE path. `src/devices/cpu/dspp`: idle-loop skip (Bulldog only).
   - `src/mame/konami/viper.cpp`: gamepad steering helper and gun reads. Upstream's 9-bit full-range pedal/handbrake
     ports replaced the fork's 8-bit path (keep upstream's).
