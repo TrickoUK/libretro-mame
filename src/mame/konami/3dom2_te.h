@@ -120,6 +120,30 @@ private:
 	struct render_snapshot;
 	struct span_regs;
 
+	// A supersampled copy of one framebuffer or Z buffer that the Triangle
+	// Engine draws into when supersampling is on.  RAM stays the truth: the
+	// samples are refreshed from RAM when a list first draws to the surface
+	// (rows that differ from the last write-back) and averaged back down into
+	// RAM when the list ends.
+	struct ss_surface
+	{
+		uint32_t base = 0;          // RAM address of native row 0
+		uint32_t stride = 0;        // native pixels per RAM row
+		uint32_t bpp = 0;           // bytes per native pixel
+		bool is_z = false;
+		uint32_t width = 0;         // native pixels
+		uint32_t height = 0;
+		uint32_t pitch = 0;         // samples per row
+		uint32_t rows = 0;          // sample rows
+		bool valid = false;
+		uint32_t gen = ~uint32_t(0);    // list generation this surface was last refreshed for
+		uint32_t row_slot = 0;      // bytes of native_copy per native row
+		std::unique_ptr<uint32_t []> data;
+		std::unique_ptr<uint8_t []> native_copy;
+		std::unique_ptr<uint8_t []> dirty;      // one flag per sample row
+		bool touched = false;
+	};
+
 	// Per-render-batch scratch: destination-blender working state (previously
 	// the member field m_dbstate) plus locally-accumulated status/statistics
 	// bits. One instance is owned per render batch (currently: one per
@@ -214,6 +238,17 @@ private:
 
 	void queue_span_job(uint32_t wrange, bool omit_right, uint32_t y, uint32_t xs, uint32_t xe, int32_t r, int32_t g, int32_t b, int32_t a, uint32_t uw, uint32_t vw, uint32_t w);
 	void publish_span_jobs();
+
+	// Supersampling (log2 of the scale per axis; 0 = off)
+	uint32_t m_ss_shift = 0;
+	uint32_t m_list_gen = 0;
+	std::vector<std::unique_ptr<ss_surface>> m_ss_surfaces;
+	ss_surface *ss_get(uint32_t base, uint32_t stride, uint32_t bpp, bool is_z, uint32_t width, uint32_t height, bool create);
+	void ss_acquire(ss_surface &s);
+	void ss_resolve(render_snapshot &snap);
+	void ss_writeback();
+	uint32_t ss_read(const ss_surface &s, uint32_t x, uint32_t y) const { return (x < s.pitch && y < s.rows) ? s.data[y * s.pitch + x] : 0; }
+	void ss_write(ss_surface &s, uint32_t x, uint32_t y, uint32_t v) { if (x < s.pitch && y < s.rows) { s.data[y * s.pitch + x] = v; s.dirty[y] = 1; } }
 	void flush_span_jobs();
 	static void *render_band(void *param, int threadid);
 
@@ -518,6 +553,9 @@ private:
 		decltype(m_tm) tm;
 		decltype(m_db) db;
 		std::shared_ptr<const texture_snapshot> tex;
+		ss_surface *dst_surf = nullptr;
+		ss_surface *z_surf = nullptr;
+		ss_surface *src_surf = nullptr;
 	};
 
 	// Register state the per-pixel functions read, copied per span from a
@@ -530,6 +568,10 @@ private:
 		decltype(m_db) db;
 		const uint32_t *tram;
 		const uint32_t *pipram;
+		ss_surface *dst_surf;
+		ss_surface *z_surf;
+		ss_surface *src_surf;
+		uint32_t ss_shift;
 	};
 
 	// Most-recently-taken snapshot and whether a register write has touched

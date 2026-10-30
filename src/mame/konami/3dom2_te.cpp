@@ -14,6 +14,7 @@
 #include "endianness.h"
 #include "multibyte.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iterator>
 #include <sstream>
@@ -736,6 +737,10 @@ void m2_te_device::device_start()
 	save_item(NAME(m_tm.m_regs));
 	save_item(NAME(m_db.m_regs));
 
+	// Supersampling scale from the environment (prototype switch)
+	if (const char *ss = getenv("MAME_M2_SS"))
+		m_ss_shift = (atoi(ss) >= 2) ? 1 : 0;
+
 	// Allocate timers
 	m_done_timer = timer_alloc(FUNC(m2_te_device::command_done), this);
 
@@ -758,6 +763,7 @@ void m2_te_device::device_start()
 
 void m2_te_device::device_post_load()
 {
+	m_ss_surfaces.clear();
 	m_snapshot_dirty = true;
 	m_tex_dirty = true;
 }
@@ -770,6 +776,7 @@ void m2_te_device::device_post_load()
 void m2_te_device::device_reset()
 {
 	m_state = TE_STOPPED;
+	m_ss_surfaces.clear();
 
 	// TODO
 }
@@ -1198,13 +1205,14 @@ void m2_te_device::setup_triangle(uint32_t flags)
 	se_vtx vc = m_se.vertices[2];
 
 	// Truncate XY coordinates to integers
-	va.x = int_trunc(va.x);
-	vb.x = int_trunc(vb.x);
-	vc.x = int_trunc(vc.x);
+	const float ssf = float(1U << m_ss_shift);
+	va.x = int_trunc(va.x * ssf);
+	vb.x = int_trunc(vb.x * ssf);
+	vc.x = int_trunc(vc.x * ssf);
 
-	va.y = int_trunc(va.y);
-	vb.y = int_trunc(vb.y);
-	vc.y = int_trunc(vc.y);
+	va.y = int_trunc(va.y * ssf);
+	vb.y = int_trunc(vb.y * ssf);
+	vc.y = int_trunc(vc.y * ssf);
 
 
 	// Scale and truncate colors
@@ -2417,12 +2425,14 @@ inline ATTR_FORCE_INLINE void m2_te_device::write_dst_pixel(pixel_scratch &ps, c
 	const auto &m_db = rg.db;
 
 	uint32_t mask = m_db.usergen_ctrl & DBUSERGENCTL_DESTOUT_MASK;
+	const uint32_t nx = ps.x >> rg.ss_shift;
+	const uint32_t ny = ps.y >> rg.ss_shift;
 
 	if (m_db.dst_ctrl & DBDESTCNTL_32BPP)
 	{
-		uint32_t dstaddr = m_db.dst_baseaddr + (ps.y * m_db.dst_xstride + ps.x) * sizeof(uint32_t);
+		uint32_t dstaddr = m_db.dst_baseaddr + (ny * m_db.dst_xstride + nx) * sizeof(uint32_t);
 
-		uint32_t old = m_bda->read_bus32(dstaddr);
+		uint32_t old = rg.dst_surf ? ss_read(*rg.dst_surf, ps.x, ps.y) : m_bda->read_bus32(dstaddr);
 		uint32_t out = 0;
 
 		uint8_t sdsb_a = (old >> 24) & 0xff;
@@ -2435,13 +2445,16 @@ inline ATTR_FORCE_INLINE void m2_te_device::write_dst_pixel(pixel_scratch &ps, c
 		out |= (mask & 2 ? ps.dst.g : sg) << 8;
 		out |= mask & 1 ? ps.dst.b : sb;
 
-		m_bda->write_bus32(dstaddr, out);
+		if (rg.dst_surf)
+			ss_write(*rg.dst_surf, ps.x, ps.y, out);
+		else
+			m_bda->write_bus32(dstaddr, out);
 	}
 	else
 	{
-		uint32_t dstaddr = m_db.dst_baseaddr + (ps.y * m_db.dst_xstride + ps.x) * sizeof(uint16_t);
+		uint32_t dstaddr = m_db.dst_baseaddr + (ny * m_db.dst_xstride + nx) * sizeof(uint16_t);
 
-		uint16_t old = m_bda->read_bus16(dstaddr);
+		uint16_t old = rg.dst_surf ? ss_read(*rg.dst_surf, ps.x, ps.y) : m_bda->read_bus16(dstaddr);
 		uint16_t out = 0;
 
 		uint8_t sdsb_a = (old >> 15) & 0x1;
@@ -2454,7 +2467,10 @@ inline ATTR_FORCE_INLINE void m2_te_device::write_dst_pixel(pixel_scratch &ps, c
 		out |= (mask & 2 ? ps.dst.g >> 3 : sg) << 5;
 		out |= mask & 1 ? ps.dst.b >> 3 : sb;
 
-		m_bda->write_bus16(dstaddr, out);
+		if (rg.dst_surf)
+			ss_write(*rg.dst_surf, ps.x, ps.y, out);
+		else
+			m_bda->write_bus16(dstaddr, out);
 	}
 
 #if TEST_TIMING
@@ -2478,6 +2494,11 @@ inline ATTR_FORCE_INLINE void m2_te_device::destination_blend(pixel_scratch &ps,
 	ps.ti = ti_color;
 	ps.ssb = ssb;
 
+	// x and y address samples; clipping, dithering and the Z offsets work in
+	// native pixels
+	const uint32_t nx = x >> rg.ss_shift;
+	const uint32_t ny = y >> rg.ss_shift;
+
 	bool dis = false;
 	bool zpixout = true;
 	bool zbufout = true;
@@ -2490,13 +2511,15 @@ inline ATTR_FORCE_INLINE void m2_te_device::destination_blend(pixel_scratch &ps,
 	[[maybe_unused]] uint32_t zgel = 0;
 
 	uint32_t zaddr;
+	int32_t zxs = 0;
+	int32_t zys = 0;
 
 	// FBCLIP
 	{
 		uint32_t xclip = (m_db.fbclip & DBFBCLIP_XFBCLIP_MASK) >> DBFBCLIP_XFBCLIP_SHIFT;
 		uint32_t yclip = (m_db.fbclip & DBFBCLIP_YFBCLIP_MASK) >> DBFBCLIP_YFBCLIP_SHIFT;
 
-		fbclipdis = (x >= xclip) || (y >= yclip);
+		fbclipdis = (nx >= xclip) || (ny >= yclip);
 
 		if (fbclipdis)
 			ps.status_bits |= DBSTATUS_FBCLIP;
@@ -2509,7 +2532,7 @@ inline ATTR_FORCE_INLINE void m2_te_device::destination_blend(pixel_scratch &ps,
 		uint32_t ymin = (m_db.y_winclip & DBFBYWINCLIP_YMIN_MASK) >> DBFBYWINCLIP_YMIN_SHIFT;
 		uint32_t ymax = (m_db.y_winclip & DBFBYWINCLIP_YMAX_MASK) >> DBFBYWINCLIP_YMAX_SHIFT;
 
-		bool inside = (x >= xmin) && (x < xmax) && (y >= ymin) && (y < ymax);
+		bool inside = (nx >= xmin) && (nx < xmax) && (ny >= ymin) && (ny < ymax);
 
 		winclipdis = ((m_db.usergen_ctrl & DBUSERGENCTL_WCLIPINEN) && inside) ||
 					((m_db.usergen_ctrl & DBUSERGENCTL_WCLIPOUTEN) && !inside);
@@ -2567,8 +2590,8 @@ inline ATTR_FORCE_INLINE void m2_te_device::destination_blend(pixel_scratch &ps,
 		// Dithering
 		if (m_db.usergen_ctrl & DBUSERGENCTL_DITHEREN)
 		{
-			uint32_t dith_x = x & 3;
-			uint32_t dith_y = y & 3;
+			uint32_t dith_x = nx & 3;
+			uint32_t dith_y = ny & 3;
 
 			uint32_t dith_mtx = dith_y & 2 ? m_db.dither_mat_b : m_db.dither_mat_a;
 			uint32_t idx = 7 ^ (((dith_y & 1) << 2) | dith_x);
@@ -2593,8 +2616,13 @@ inline ATTR_FORCE_INLINE void m2_te_device::destination_blend(pixel_scratch &ps,
 		int32_t x_offs = util::sext((m_db.z_offset & DBZOFFS_XOFFS_MASK) >> DBZOFFS_XOFFS_SHIFT, 12);
 		int32_t y_offs = util::sext((m_db.z_offset & DBZOFFS_YOFFS_MASK) >> DBZOFFS_YOFFS_SHIFT, 12);
 
-		x_offs += ps.x;
-		y_offs += ps.y;
+		const int32_t zx = int32_t(ps.x) + (x_offs << rg.ss_shift);
+		const int32_t zy = int32_t(ps.y) + (y_offs << rg.ss_shift);
+		zxs = zx;
+		zys = zy;
+
+		x_offs += nx;
+		y_offs += ny;
 
 		uint32_t x_clip = (m_db.z_clip & DBZCLIP_XCLIP_MASK) >> DBZCLIP_XCLIP_SHIFT;
 		uint32_t y_clip = (m_db.z_clip & DBZCLIP_YCLIP_MASK) >> DBZCLIP_YCLIP_SHIFT;
@@ -2624,7 +2652,7 @@ inline ATTR_FORCE_INLINE void m2_te_device::destination_blend(pixel_scratch &ps,
 #endif
 
 #if 1 // TODO: Why are we using this?
-		int32_t zdiff = w - m_bda->read_bus16(zaddr);
+		int32_t zdiff = w - (rg.z_surf ? ss_read(*rg.z_surf, uint32_t(zxs), uint32_t(zys)) : m_bda->read_bus16(zaddr));
 #else
 		// Shift W back to 0.23
 		uint16_t oldw = m_bda->read_bus16(zaddr);
@@ -2691,7 +2719,10 @@ inline ATTR_FORCE_INLINE void m2_te_device::destination_blend(pixel_scratch &ps,
 #if TEST_TIMING
 			ps.stats[STAT_ZBUFFER_STORES]++;
 #endif
-			m_bda->write_bus16(zaddr, w & 0xffff);
+			if (rg.z_surf)
+				ss_write(*rg.z_surf, uint32_t(zxs), uint32_t(zys), w & 0xffff);
+			else
+				m_bda->write_bus16(zaddr, w & 0xffff);
 		}
 
 		// Color
@@ -2792,15 +2823,18 @@ inline ATTR_FORCE_INLINE void m2_te_device::select_src_pixel(pixel_scratch &ps, 
 		int32_t x_offs = util::sext((m_db.src_offset & DBSRCOFFS_XOFFS_MASK) >> DBSRCOFFS_XOFFS_SHIFT, 12);
 		int32_t y_offs = util::sext((m_db.src_offset & DBSRCOFFS_YOFFS_MASK) >> DBSRCOFFS_YOFFS_SHIFT, 12);
 
-		x_offs += ps.x;
-		y_offs += ps.y;
+		const uint32_t sxs = uint32_t(int32_t(ps.x) + (x_offs << rg.ss_shift));
+		const uint32_t sys = uint32_t(int32_t(ps.y) + (y_offs << rg.ss_shift));
+
+		x_offs += ps.x >> rg.ss_shift;
+		y_offs += ps.y >> rg.ss_shift;
 
 		uint32_t addr = y_offs * m_db.src_xstride + x_offs;
 
 		if (m_db.src_ctrl & DBSRCCNTL_32BPP)
 		{
 			uint32_t srcaddr = m_db.src_baseaddr + addr * sizeof(uint32_t);
-			uint32_t srcval = m_bda->read_bus32(srcaddr);
+			uint32_t srcval = rg.src_surf ? ss_read(*rg.src_surf, sxs, sys) : m_bda->read_bus32(srcaddr);
 
 			ps.src.a = ((srcval >> 24) & 0x7f) << 1;
 			ps.src.r = (srcval >> 16) & 0xff;
@@ -2815,7 +2849,7 @@ inline ATTR_FORCE_INLINE void m2_te_device::select_src_pixel(pixel_scratch &ps, 
 		else
 		{
 			uint32_t srcaddr = m_db.src_baseaddr + addr * sizeof(uint16_t);
-			uint32_t srcval = m_bda->read_bus16(srcaddr);
+			uint32_t srcval = rg.src_surf ? ss_read(*rg.src_surf, sxs, sys) : m_bda->read_bus16(srcaddr);
 
 			ps.src.r = (srcval >> 10) & 0x1f;
 			ps.src.g = (srcval >> 5) & 0x1f;
@@ -3154,7 +3188,8 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 	// otherwise assume any of them could modify the snapshot, re-loading and
 	// re-decoding every register after every pixel.  A local whose address
 	// never escapes (the pixel functions are force-inlined) can't alias RAM.
-	const span_regs rg{ ps.cfg->gc, ps.cfg->es, ps.cfg->tm, ps.cfg->db, ps.cfg->tex->tram.data(), ps.cfg->tex->pipram.data() };
+	const span_regs rg{ ps.cfg->gc, ps.cfg->es, ps.cfg->tm, ps.cfg->db, ps.cfg->tex->tram.data(), ps.cfg->tex->pipram.data(),
+			ps.cfg->dst_surf, ps.cfg->z_surf, ps.cfg->src_surf, m_ss_shift };
 
 	const auto &m_gc = rg.gc;
 	const auto &m_tm = rg.tm;
@@ -3199,6 +3234,27 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 			uw -= es_ddx_uw;
 			vw -= es_ddx_vw;
 			w -= es_ddx_w;
+		}
+	}
+	else if (m_ss_shift)
+	{
+		// The right end of a span is inclusive, so a native pixel there is
+		// covered by every one of its samples
+		const uint32_t extra = (1U << m_ss_shift) - 1;
+		if (scan_lr)
+		{
+			xe += extra;
+		}
+		else
+		{
+			xs += extra;
+			r += es_ddx_r * extra;
+			g += es_ddx_g * extra;
+			b += es_ddx_b * extra;
+			a += es_ddx_a * extra;
+			uw += es_ddx_uw * extra;
+			vw += es_ddx_vw * extra;
+			w += es_ddx_w * extra;
 		}
 	}
 
@@ -3398,6 +3454,8 @@ void m2_te_device::queue_span_job(uint32_t wrange, bool omit_right, uint32_t y, 
 		snap->tm = m_tm;
 		snap->db = m_db;
 		snap->tex = m_cur_tex;
+		if (m_ss_shift)
+			ss_resolve(*snap);
 		m_cur_snapshot = std::move(snap);
 		m_snapshot_dirty = false;
 	}
@@ -3536,6 +3594,265 @@ void m2_te_device::flush_span_jobs()
 			g_statistics[s] += bs.ps.stats[s];
 		bs.ps = pixel_scratch{};
 	}
+
+	if (m_ss_shift)
+		ss_writeback();
+}
+
+
+
+/***************************************************************************
+    SUPERSAMPLED SURFACES
+***************************************************************************/
+
+//-------------------------------------------------
+//  ss_get - find (or make) the supersampled copy of
+//  a framebuffer or Z buffer
+//-------------------------------------------------
+
+m2_te_device::ss_surface *m2_te_device::ss_get(uint32_t base, uint32_t stride, uint32_t bpp, bool is_z, uint32_t width, uint32_t height, bool create)
+{
+	const uint32_t max_native = 2048U >> m_ss_shift;
+
+	if (stride == 0)
+		return nullptr;
+
+	for (auto &sp : m_ss_surfaces)
+	{
+		ss_surface &s = *sp;
+		if (s.base == base && s.stride == stride && s.bpp == bpp && s.is_z == is_z)
+		{
+			width = std::min(std::max(width, s.width), std::min(stride, max_native));
+			height = std::min(std::max(height, s.height), max_native);
+
+			if (width > s.width || height > s.height)
+			{
+				// Workers may be drawing into the old arrays
+				flush_span_jobs();
+				s.valid = false;
+				s.width = width;
+				s.height = height;
+			}
+			return &s;
+		}
+	}
+
+	if (!create)
+		return nullptr;
+
+	width = std::min(width, std::min(stride, max_native));
+	height = std::min(height, max_native);
+	if (width == 0 || height == 0)
+		return nullptr;
+
+	const uint64_t last = uint64_t(base) + (uint64_t(height - 1) * stride + width) * bpp;
+	if (base < m_bda->ram_start() || last > uint64_t(m_bda->ram_end()) + 1)
+		return nullptr;
+
+	if (m_ss_surfaces.size() >= 16)
+	{
+		flush_span_jobs();
+		m_ss_surfaces.erase(m_ss_surfaces.begin());
+	}
+
+	auto s = std::make_unique<ss_surface>();
+	s->base = base;
+	s->stride = stride;
+	s->bpp = bpp;
+	s->is_z = is_z;
+	s->width = width;
+	s->height = height;
+	m_ss_surfaces.push_back(std::move(s));
+	return m_ss_surfaces.back().get();
+}
+
+
+//-------------------------------------------------
+//  ss_acquire - bring a surface up to date with RAM
+//  before a list draws to it: rows the CPU (or the
+//  previous write-back) left different are
+//  replicated into the samples
+//-------------------------------------------------
+
+void m2_te_device::ss_acquire(ss_surface &s)
+{
+	const uint32_t sh = m_ss_shift;
+	const uint32_t ss = 1U << sh;
+
+	if (!s.valid)
+	{
+		s.pitch = s.width * ss;
+		s.rows = s.height * ss;
+		s.row_slot = s.width * s.bpp + 16;
+		s.data = std::make_unique<uint32_t []>(size_t(s.pitch) * s.rows);
+		s.native_copy = std::make_unique<uint8_t []>(size_t(s.row_slot) * s.height);
+		s.dirty = std::make_unique<uint8_t []>(s.rows);
+		s.touched = false;
+	}
+
+	const uint8_t *const ram = static_cast<const uint8_t *>(m_bda->ram_ptr());
+	const uint32_t ram_off = s.base - m_bda->ram_start();
+
+	for (uint32_t ny = 0; ny < s.height; ny++)
+	{
+		// Compare whole eight-byte blocks: the RAM keeps each block's bytes in
+		// host order, so a row that is not block aligned shares blocks with
+		// its neighbours
+		const uint32_t off = ram_off + ny * s.stride * s.bpp;
+		const uint32_t lo = off & ~7U;
+		const uint32_t hi = (off + s.width * s.bpp + 7) & ~7U;
+		uint8_t *const copy = s.native_copy.get() + size_t(ny) * s.row_slot;
+
+		if (s.valid && !memcmp(copy, ram + lo, hi - lo))
+			continue;
+
+		memcpy(copy, ram + lo, hi - lo);
+
+		const uint32_t addr = s.base + ny * s.stride * s.bpp;
+		for (uint32_t nx = 0; nx < s.width; nx++)
+		{
+			const uint32_t v = (s.bpp == 4) ? m_bda->read_bus32(addr + nx * 4) : m_bda->read_bus16(addr + nx * 2);
+			for (uint32_t j = 0; j < ss; j++)
+			{
+				uint32_t *const dst = s.data.get() + size_t(ny * ss + j) * s.pitch + nx * ss;
+				for (uint32_t i = 0; i < ss; i++)
+					dst[i] = v;
+			}
+		}
+	}
+
+	s.valid = true;
+	s.gen = m_list_gen;
+}
+
+
+//-------------------------------------------------
+//  ss_resolve - pick the supersampled surfaces the
+//  snapshot's draws use, refreshing each from RAM
+//  the first time a list uses it
+//-------------------------------------------------
+
+void m2_te_device::ss_resolve(render_snapshot &snap)
+{
+	const auto &db = snap.db;
+
+	snap.dst_surf = nullptr;
+	snap.z_surf = nullptr;
+	snap.src_surf = nullptr;
+
+	// Destination colour
+	{
+		const uint32_t xclip = (db.fbclip & DBFBCLIP_XFBCLIP_MASK) >> DBFBCLIP_XFBCLIP_SHIFT;
+		const uint32_t yclip = (db.fbclip & DBFBCLIP_YFBCLIP_MASK) >> DBFBCLIP_YFBCLIP_SHIFT;
+		const uint32_t bpp = (db.dst_ctrl & DBDESTCNTL_32BPP) ? 4 : 2;
+		snap.dst_surf = ss_get(db.dst_baseaddr, db.dst_xstride, bpp, false, xclip, yclip, true);
+	}
+
+	// Z buffer
+	if (!(snap.gc.te_master_mode & TEMASTER_MODE_DZBUF) && (db.usergen_ctrl & DBUSERGENCTL_ZBUFEN))
+	{
+		const uint32_t xclip = (db.z_clip & DBZCLIP_XCLIP_MASK) >> DBZCLIP_XCLIP_SHIFT;
+		const uint32_t yclip = (db.z_clip & DBZCLIP_YCLIP_MASK) >> DBZCLIP_YCLIP_SHIFT;
+		snap.z_surf = ss_get(db.z_baseaddr, db.dst_xstride, 2, true, xclip, yclip, true);
+	}
+
+	// Source colour: only a buffer that is already supersampled
+	if ((db.usergen_ctrl & DBUSERGENCTL_SRCINEN) && (db.usergen_ctrl & DBUSERGENCTL_BLENDEN))
+	{
+		const uint32_t bpp = (db.src_ctrl & DBSRCCNTL_32BPP) ? 4 : 2;
+		snap.src_surf = ss_get(db.src_baseaddr, db.src_xstride, bpp, false, 0, 0, false);
+	}
+
+	for (ss_surface *s : { snap.dst_surf, snap.z_surf, snap.src_surf })
+		if (s && (!s->valid || s->gen != m_list_gen))
+			ss_acquire(*s);
+}
+
+
+//-------------------------------------------------
+//  ss_writeback - average the samples that drawing
+//  changed back down into RAM
+//-------------------------------------------------
+
+void m2_te_device::ss_writeback()
+{
+	const uint32_t sh = m_ss_shift;
+	const uint32_t ss = 1U << sh;
+	const uint32_t count = ss * ss;
+	uint8_t *const ram = static_cast<uint8_t *>(m_bda->ram_ptr());
+
+	for (auto &sp : m_ss_surfaces)
+	{
+		ss_surface &s = *sp;
+		if (!s.valid)
+			continue;
+
+		for (uint32_t ny = 0; ny < s.height; ny++)
+		{
+			bool any = false;
+			for (uint32_t j = 0; j < ss; j++)
+				any |= s.dirty[ny * ss + j] != 0;
+			if (!any)
+				continue;
+			for (uint32_t j = 0; j < ss; j++)
+				s.dirty[ny * ss + j] = 0;
+
+			const uint32_t addr = s.base + ny * s.stride * s.bpp;
+			for (uint32_t nx = 0; nx < s.width; nx++)
+			{
+				const uint32_t *const first = s.data.get() + size_t(ny * ss) * s.pitch + nx * ss;
+				uint32_t out;
+
+				if (s.is_z)
+				{
+					// Depth is not averaged: keep the first sample
+					out = first[0];
+				}
+				else if (s.bpp == 4)
+				{
+					uint32_t sa = 0, sr = 0, sg = 0, sb = 0, sd = 0;
+					for (uint32_t j = 0; j < ss; j++)
+						for (uint32_t i = 0; i < ss; i++)
+						{
+							const uint32_t p = first[j * s.pitch + i];
+							sd += (p >> 31) & 1;
+							sa += (p >> 24) & 0x7f;
+							sr += (p >> 16) & 0xff;
+							sg += (p >> 8) & 0xff;
+							sb += p & 0xff;
+						}
+					out = ((sd * 2 >= count) ? 0x80000000U : 0) | (((sa + count / 2) / count) << 24) |
+							(((sr + count / 2) / count) << 16) | (((sg + count / 2) / count) << 8) | ((sb + count / 2) / count);
+				}
+				else
+				{
+					uint32_t sr = 0, sg = 0, sb = 0, sd = 0;
+					for (uint32_t j = 0; j < ss; j++)
+						for (uint32_t i = 0; i < ss; i++)
+						{
+							const uint32_t p = first[j * s.pitch + i];
+							sd += (p >> 15) & 1;
+							sr += (p >> 10) & 0x1f;
+							sg += (p >> 5) & 0x1f;
+							sb += p & 0x1f;
+						}
+					out = ((sd * 2 >= count) ? 0x8000U : 0) | (((sr + count / 2) / count) << 10) |
+							(((sg + count / 2) / count) << 5) | ((sb + count / 2) / count);
+				}
+
+				if (s.bpp == 4)
+					m_bda->write_bus32(addr + nx * 4, out);
+				else
+					m_bda->write_bus16(addr + nx * 2, out);
+			}
+
+			// Remember what was written so the next refresh only sees other writers
+			const uint32_t off = (s.base - m_bda->ram_start()) + ny * s.stride * s.bpp;
+			const uint32_t lo = off & ~7U;
+			const uint32_t hi = (off + s.width * s.bpp + 7) & ~7U;
+			memcpy(s.native_copy.get() + size_t(ny) * s.row_slot, ram + lo, hi - lo);
+		}
+	}
 }
 
 
@@ -3587,6 +3904,8 @@ void m2_te_device::illegal_inst()
 
 void m2_te_device::execute()
 {
+	m_list_gen++;
+	m_snapshot_dirty = true;
 	// The CPU can write texture RAM and PIP RAM directly through its address
 	// map, so take a fresh copy for the snapshots of this list.
 	m_tex_dirty = true;
@@ -3749,14 +4068,17 @@ void m2_te_device::execute()
     Bend - 66 M pix
 */
 
+	// Supersampling draws several samples per native pixel; the modelled
+	// hardware time counts native pixels
+	const uint32_t px_shift = m_ss_shift * 2;
 	uint32_t total_cycles = (g_statistics[STAT_TRIANGLES_PROCESSED] * 100) +
-							(g_statistics[STAT_TEXEL_READS]) +
+							(g_statistics[STAT_TEXEL_READS] >> px_shift) +
 //                          (g_statistics[STAT_PIXELS_PROCESSED]) +
-							(g_statistics[STAT_PIXEL_LOADS]) +
-							(g_statistics[STAT_PIXEL_STORES]) +
+							(g_statistics[STAT_PIXEL_LOADS] >> px_shift) +
+							(g_statistics[STAT_PIXEL_STORES] >> px_shift) +
 							(g_statistics[STAT_TEXEL_BYTES]/4) +
-							(g_statistics[STAT_ZBUFFER_LOADS]) +
-							(g_statistics[STAT_ZBUFFER_STORES]);
+							(g_statistics[STAT_ZBUFFER_LOADS] >> px_shift) +
+							(g_statistics[STAT_ZBUFFER_STORES] >> px_shift);
 #if 0
 	logerror(">>> END OF LIST <<<\n");
 	logerror("Triangles: %u\n", g_statistics[STAT_TRIANGLES_PROCESSED]);
