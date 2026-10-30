@@ -271,7 +271,9 @@ private:
 	static constexpr uint32_t SS_WRITEBACK_MIN_ROWS = 16;  // fewer changed rows are written back inline
 	std::array<ss_writeback_item, SS_WRITEBACK_CHUNKS> m_wb_items;
 	uint32_t ss_read(const ss_surface &s, uint32_t x, uint32_t y) const { return (x < s.pitch && y < s.rows) ? s.data[y * s.pitch + x] : 0; }
-	void ss_write(ss_surface &s, uint32_t x, uint32_t y, uint32_t v) { if (x < s.pitch && y < s.rows) { s.data[y * s.pitch + x] = v; s.dirty[y] = 1; } }
+	// The dirty flags of neighbouring rows share cache lines and the rows are
+	// drawn by different worker threads, so a flag is only stored when it changes
+	void ss_write(ss_surface &s, uint32_t x, uint32_t y, uint32_t v) { if (x < s.pitch && y < s.rows) { s.data[y * s.pitch + x] = v; if (!s.dirty[y]) s.dirty[y] = 1; } }
 	void flush_span_jobs();
 	static void *render_band(void *param, int threadid);
 
