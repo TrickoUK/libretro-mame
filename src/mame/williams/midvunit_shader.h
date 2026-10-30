@@ -20,7 +20,9 @@
     textured with transparent texel 0, 2 textured with the quad colour
     where the texel is set, 3 flat), palette index base, texture base byte
     offset, dither flag, target scale (samples per native pixel in each
-    direction), bilinear flag.
+    direction), bilinear flag, then the
+    smallest u, smallest v, largest u and largest v of the quad's vertices as
+    float bits (the range the texture coordinates are held to).
 
 ***************************************************************************/
 #ifndef MAME_WILLIAMS_MIDVUNIT_SHADER_H
@@ -28,7 +30,7 @@
 
 #pragma once
 
-constexpr int MIDVUNIT_SHADER_STATE_WORDS = 6;
+constexpr int MIDVUNIT_SHADER_STATE_WORDS = 10;
 constexpr int MIDVUNIT_SHADER_VARYINGS = 2;
 
 constexpr char MIDVUNIT_FRAGMENT_SOURCE[] =
@@ -38,6 +40,10 @@ constexpr char MIDVUNIT_FRAGMENT_SOURCE[] =
 	"#define S_DITHER 3\n"
 	"#define S_SCALE 4\n"
 	"#define S_FILTER 5\n"
+	"#define S_UMIN 6\n"
+	"#define S_VMIN 7\n"
+	"#define S_UMAX 8\n"
+	"#define S_VMAX 9\n"
 	"#define MODE_TEX 0\n"
 	"#define MODE_TEXTRANS 1\n"
 	"#define MODE_TEXTRANSMASK 2\n"
@@ -64,9 +70,11 @@ constexpr char MIDVUNIT_FRAGMENT_SOURCE[] =
 	"		color = vec4(vec3(palette_rgb(index & 0x7fff)) / 255.0, 1.0);\n"
 	"		return true;\n"
 	"	}\n"
+	"	vec2 uv = clamp(vec2(v0, v1), vec2(intBitsToFloat(state(S_UMIN)), intBitsToFloat(state(S_VMIN))),\n"
+	"			vec2(intBitsToFloat(state(S_UMAX)), intBitsToFloat(state(S_VMAX))));\n"
 	"	if (state(S_FILTER) != 0)\n"
 	"	{\n"
-	"		vec2 s = vec2(v0, v1) - 0.5;\n"
+	"		vec2 s = uv - 0.5;\n"
 	"		ivec2 t = ivec2(floor(s));\n"
 	"		vec2 f = s - floor(s);\n"
 	"		vec3 sum = vec3(0.0);\n"
@@ -91,7 +99,7 @@ constexpr char MIDVUNIT_FRAGMENT_SOURCE[] =
 	"		color = vec4(sum / share, 1.0);\n"
 	"		return true;\n"
 	"	}\n"
-	"	int texel = texel_at(state(S_TEXBASE), int(floor(v0)), int(floor(v1)));\n"
+	"	int texel = texel_at(state(S_TEXBASE), int(floor(uv.x)), int(floor(uv.y)));\n"
 	"	if (mode != MODE_TEX && texel == 0)\n"
 	"		return false;\n"
 	"	if (mode == MODE_TEX || mode == MODE_TEXTRANS)\n"

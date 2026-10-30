@@ -253,6 +253,10 @@ distrobox enter mame-dev -- retroarch -v -L /var/home/bazzite/Projects/libretro/
   `~/.config/retroarch/config/MAME/MAME.opt` (`key = "value"` lines; safe to hand-edit between runs). Core options
   are defined in `src/osd/libretro/libretro-internal/libretro_core_options.h`.
 - `-v` gives verbose frontend logging.
+- **Run test and comparison runs in fast-forward by default** (`profile_run.py --ff -1`, `snap_run.sh FF=all`, or the
+  fast-forward hotkey), and stop the run as soon as the frames you need are captured. Run at 1x speed only when
+  fast-forward would change the result (timing-, audio- or input-dependent checks, real-time speed measurements).
+  From a save state there is no warm-up, and 30 seconds is enough for a before/after comparison.
 
 ## Debugging / monitoring progress
 

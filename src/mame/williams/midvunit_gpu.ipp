@@ -182,6 +182,13 @@ void midvunit_renderer::gpu_flush_updates()
 	}
 }
 
+// The rounding of poly_manager::round_coordinate() (private there): the nearest integer, a half rounds down.
+static int32_t gpu_round(float value)
+{
+	const float ipart = std::floor(value);
+	return int32_t(ipart) + (((value - ipart) > 0.5f) ? 1 : 0);
+}
+
 // Adds one quad the way the scanline renderer would draw it: the same vertices (already made inclusive), the same
 // palette base and mode. The two triangles split the quad along the diagonal from vertex 0 to vertex 2. Bit n of nudge_x
 // and nudge_y marks the vertex n whose x or y make_vertices_inclusive moved to include the right or bottom edge.
@@ -224,6 +231,56 @@ void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint8_t nudge_x, uint
 	m_gpu_state.push_back(m_gpu_scale);
 	m_gpu_state.push_back(m_gpu_texfilter && textured);
 
+	// The chip covers a pixel when the quad contains its centre, so an upright rectangle always covers whole pixels. On a
+	// supersampled target its edges are moved to the pixel edges the walker's rounding gives, with the texture coordinates
+	// carried along the rectangle's gradient; otherwise an edge on a pixel centre covers half of the pixel's samples.
+	float px[4], py[4], pu[4], pv[4];
+	for (int i = 0; i < 4; i++)
+	{
+		px[i] = vert[i].x;
+		py[i] = vert[i].y;
+		pu[i] = vert[i].p[0];
+		pv[i] = vert[i].p[1];
+	}
+	bool snapped = false;
+	if (m_gpu_scale > 1)
+	{
+		constexpr float TOLERANCE = 0.01f;
+		const auto same = [](float a, float b) { return std::abs(a - b) < TOLERANCE; };
+		const bool upright = (same(vert[0].x, vert[1].x) && same(vert[2].x, vert[3].x) && same(vert[1].y, vert[2].y) && same(vert[3].y, vert[0].y))
+				|| (same(vert[0].y, vert[1].y) && same(vert[2].y, vert[3].y) && same(vert[1].x, vert[2].x) && same(vert[3].x, vert[0].x));
+		const float e1x = vert[1].x - vert[0].x;
+		const float e1y = vert[1].y - vert[0].y;
+		const float e3x = vert[3].x - vert[0].x;
+		const float e3y = vert[3].y - vert[0].y;
+		const float det = e1x * e3y - e3x * e1y;
+		if (std::abs(det) > TOLERANCE)
+		{
+			float gu[2], gv[2]; // texture coordinate step per pixel in x and y
+			const float du1 = vert[1].p[0] - vert[0].p[0];
+			const float du3 = vert[3].p[0] - vert[0].p[0];
+			const float dv1 = vert[1].p[1] - vert[0].p[1];
+			const float dv3 = vert[3].p[1] - vert[0].p[1];
+			gu[0] = (du1 * e3y - du3 * e1y) / det;
+			gu[1] = (du3 * e1x - du1 * e3x) / det;
+			gv[0] = (dv1 * e3y - dv3 * e1y) / det;
+			gv[1] = (dv3 * e1x - dv1 * e3x) / det;
+			if (upright)
+			{
+				for (int i = 0; i < 4; i++)
+				{
+					const float sx = float(gpu_round(vert[i].x));
+					const float sy = float(gpu_round(vert[i].y));
+					pu[i] += gu[0] * (sx - vert[i].x) + gu[1] * (sy - vert[i].y);
+					pv[i] += gv[0] * (sx - vert[i].x) + gv[1] * (sy - vert[i].y);
+					px[i] = sx;
+					py[i] = sy;
+				}
+				snapped = true;
+			}
+		}
+	}
+
 	// the texture coordinates are 16.16 values with the half texel offset; the shader takes them in texel units
 	gpu_vertex vv[4];
 	for (int i = 0; i < 4; i++)
@@ -231,19 +288,33 @@ void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint8_t nudge_x, uint
 		// the walker includes right and bottom pixel centres by moving those vertices 0.001 pixel (make_vertices_inclusive);
 		// the device's sub-pixel grid is coarser than that, so the same move is applied here at the device's resolution
 		// to the flagged coordinates, which keeps the edge on the pixel centres
-		float x = vert[i].x;
-		float y = vert[i].y;
-		if (BIT(nudge_x, i))
+		float x = px[i];
+		float y = py[i];
+		if (!snapped && BIT(nudge_x, i))
 			x += GPU_EDGE_NUDGE;
-		if (BIT(nudge_y, i))
+		if (!snapped && BIT(nudge_y, i))
 			y += GPU_EDGE_NUDGE;
 		vv[i].x = x * scale;
 		vv[i].y = (y + page) * scale;
 		vv[i].z = 0.0f;
 		vv[i].w = 1.0f;
 		vv[i].prim = prim;
-		vv[i].v[0] = textured ? vert[i].p[0] / 65536.0f : 0.0f;
-		vv[i].v[1] = textured ? vert[i].p[1] / 65536.0f : 0.0f;
+		vv[i].v[0] = textured ? pu[i] / 65536.0f : 0.0f;
+		vv[i].v[1] = textured ? pv[i] / 65536.0f : 0.0f;
+	}
+
+	// the range of texture coordinates, in texel units, that the quad's own vertices span
+	{
+		float umin = vert[0].p[0], umax = vert[0].p[0], vmin = vert[0].p[1], vmax = vert[0].p[1];
+		for (int i = 1; i < 4; i++)
+		{
+			umin = std::min(umin, vert[i].p[0]);
+			umax = std::max(umax, vert[i].p[0]);
+			vmin = std::min(vmin, vert[i].p[1]);
+			vmax = std::max(vmax, vert[i].p[1]);
+		}
+		for (const float bound : { umin, vmin, umax, vmax })
+			m_gpu_state.push_back(std::bit_cast<uint32_t>(textured ? bound / 65536.0f : 0.0f));
 	}
 
 	const uint32_t first = m_gpu_vertices.size();
@@ -263,13 +334,6 @@ void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint8_t nudge_x, uint
 		draw.bindings[1] = m_gpu_palette;
 		m_gpu_commands.push_back(draw);
 	}
-}
-
-// The rounding of poly_manager::round_coordinate() (private there): the nearest integer, a half rounds down.
-static int32_t gpu_round(float value)
-{
-	const float ipart = std::floor(value);
-	return int32_t(ipart) + (((value - ipart) > 0.5f) ? 1 : 0);
 }
 
 // The span one scanline of a quad covers, from the edges of poly_manager::render_polygon(): the left and right edges are the
@@ -386,7 +450,9 @@ bool midvunit_renderer::gpu_row_span(const vertex_t *vert, int32_t row, const re
 // The device rasterizes positions to a sub-pixel grid no finer than GPU_SLIVER_HEIGHT. A quad is drawn row by row, as the
 // scanline walker draws it, when it is shorter than that grid, or when one of its nearly horizontal edges (less than that
 // grid in height, not exactly horizontal) has an end within the grid of a pixel-centre row. Such an edge snaps onto the
-// centre row on the device, where the rasterizer's tie rule differs from the walker's rule at the centre.
+// centre row on the device, where the rasterizer's tie rule differs from the walker's rule at the centre. On a supersampled
+// target only the first case is drawn row by row: the rows of a neighbouring quad are whole pixels, which do not meet the
+// sloped edge of a quad drawn as it is, and the gap shows what is behind.
 bool midvunit_renderer::gpu_needs_rows(const vertex_t *vert) const
 {
 	float top = vert[0].y;
@@ -398,6 +464,9 @@ bool midvunit_renderer::gpu_needs_rows(const vertex_t *vert) const
 	}
 	if (bottom - top < GPU_SLIVER_HEIGHT)
 		return true;
+
+	if (m_gpu_scale > 1)
+		return false;
 
 	for (int vnum = 0; vnum < 4; vnum++)
 	{
