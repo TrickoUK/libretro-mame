@@ -20,9 +20,9 @@
     textured with transparent texel 0, 2 textured with the quad colour
     where the texel is set, 3 flat), palette index base, texture base byte
     offset, dither flag, target scale (samples per native pixel in each
-    direction), bilinear flag, then the
-    smallest u, smallest v, largest u and largest v of the quad's vertices as
-    float bits (the range the texture coordinates are held to).
+    direction), bilinear flag, then the smallest u, smallest v, largest u
+    and largest v of the quad's vertices as float bits (the range the
+    texture coordinates are held to).
 
 ***************************************************************************/
 #ifndef MAME_WILLIAMS_MIDVUNIT_SHADER_H

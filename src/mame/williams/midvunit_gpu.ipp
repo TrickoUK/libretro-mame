@@ -249,35 +249,30 @@ void midvunit_renderer::gpu_add_quad(const vertex_t *vert, uint8_t nudge_x, uint
 		const auto same = [](float a, float b) { return std::abs(a - b) < TOLERANCE; };
 		const bool upright = (same(vert[0].x, vert[1].x) && same(vert[2].x, vert[3].x) && same(vert[1].y, vert[2].y) && same(vert[3].y, vert[0].y))
 				|| (same(vert[0].y, vert[1].y) && same(vert[2].y, vert[3].y) && same(vert[1].x, vert[2].x) && same(vert[3].x, vert[0].x));
-		const float e1x = vert[1].x - vert[0].x;
-		const float e1y = vert[1].y - vert[0].y;
-		const float e3x = vert[3].x - vert[0].x;
-		const float e3y = vert[3].y - vert[0].y;
-		const float det = e1x * e3y - e3x * e1y;
-		if (std::abs(det) > TOLERANCE)
+		if (upright)
 		{
-			float gu[2], gv[2]; // texture coordinate step per pixel in x and y
-			const float du1 = vert[1].p[0] - vert[0].p[0];
-			const float du3 = vert[3].p[0] - vert[0].p[0];
-			const float dv1 = vert[1].p[1] - vert[0].p[1];
-			const float dv3 = vert[3].p[1] - vert[0].p[1];
-			gu[0] = (du1 * e3y - du3 * e1y) / det;
-			gu[1] = (du3 * e1x - du1 * e3x) / det;
-			gv[0] = (dv1 * e3y - dv3 * e1y) / det;
-			gv[1] = (dv3 * e1x - dv1 * e3x) / det;
-			if (upright)
+			for (int i = 0; i < 4; i++)
 			{
-				for (int i = 0; i < 4; i++)
+				// the walker steps the parameters along the two edges at a corner, so each corner is carried by its horizontal
+				// neighbour in x and its vertical neighbour in y
+				const int next = (i + 1) & 3;
+				const int prev = (i + 3) & 3;
+				const vertex_t &horizontal = same(vert[i].y, vert[next].y) ? vert[next] : vert[prev];
+				const vertex_t &vertical = same(vert[i].y, vert[next].y) ? vert[prev] : vert[next];
+				const float dx = horizontal.x - vert[i].x;
+				const float dy = vertical.y - vert[i].y;
+				const float sx = float(gpu_round(vert[i].x));
+				const float sy = float(gpu_round(vert[i].y));
+				for (int p = 0; p < 2; p++)
 				{
-					const float sx = float(gpu_round(vert[i].x));
-					const float sy = float(gpu_round(vert[i].y));
-					pu[i] += gu[0] * (sx - vert[i].x) + gu[1] * (sy - vert[i].y);
-					pv[i] += gv[0] * (sx - vert[i].x) + gv[1] * (sy - vert[i].y);
-					px[i] = sx;
-					py[i] = sy;
+					const float step_x = (std::abs(dx) > TOLERANCE) ? (horizontal.p[p] - vert[i].p[p]) / dx : 0.0f;
+					const float step_y = (std::abs(dy) > TOLERANCE) ? (vertical.p[p] - vert[i].p[p]) / dy : 0.0f;
+					(p == 0 ? pu : pv)[i] += step_x * (sx - vert[i].x) + step_y * (sy - vert[i].y);
 				}
-				snapped = true;
+				px[i] = sx;
+				py[i] = sy;
 			}
+			snapped = true;
 		}
 	}
 
