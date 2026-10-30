@@ -1751,6 +1751,16 @@ void ppc_device::snapshot_code_page(uint32_t page, uint32_t physbase)
 	snap.physbase = physbase;
 	if (!snap.words)
 		snap.words = std::make_unique<uint32_t []>(0x1000 / 4);
+
+	// Copy the page straight out of host memory when it is plain RAM or ROM
+	// (the common case), otherwise fetch it a word at a time.
+	const void *const src = (m_cap & PPCCAP_4XX) ? m_cache32.read_ptr(physbase) : m_cache64.read_ptr(physbase);
+	snap.raw = src != nullptr;
+	if (snap.raw)
+	{
+		memcpy(snap.words.get(), src, 0x1000);
+		return;
+	}
 	for (int i = 0; i < 0x1000 / 4; i++)
 		snap.words[i] = m_pr32(physbase + i * 4);
 }
@@ -1768,6 +1778,14 @@ bool ppc_device::icache_flash_invalidate()
 	std::vector<uint32_t> changed;
 	for (auto const &[page, snap] : m_code_snapshots)
 	{
+		if (snap.raw)
+		{
+			const void *const src = (m_cap & PPCCAP_4XX) ? m_cache32.read_ptr(snap.physbase) : m_cache64.read_ptr(snap.physbase);
+			if (!src || memcmp(snap.words.get(), src, 0x1000))
+				changed.push_back(page);
+			continue;
+		}
+
 		for (int i = 0; i < 0x1000 / 4; i++)
 		{
 			if (snap.words[i] != m_pr32(snap.physbase + i * 4))

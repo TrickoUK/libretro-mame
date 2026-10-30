@@ -668,6 +668,7 @@ protected:
 	struct code_page_snapshot
 	{
 		uint32_t physbase;
+		bool raw;                           // words hold the page's host memory bytes, not fetched values
 		std::unique_ptr<uint32_t []> words;
 	};
 	std::unordered_map<uint32_t, code_page_snapshot> m_code_snapshots;    // keyed by effective page number
