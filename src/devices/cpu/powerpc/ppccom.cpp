@@ -968,14 +968,7 @@ void ppc_device::device_start()
 		static_generate_entry_point();
 		static_generate_nocode_handler();
 		static_generate_out_of_cycles();
-		if (m_drcoptions & PPCDRC_BUS_RETRY)
-			static_generate_bus_retry();
 		static_generate_tlb_mismatch();
-		// 601 has a unified cache, so code can self-modify without icbi.
-		// PPCDRC_STRICT_601_SELF_MODIFY causes the write accessors to watch for stores
-		// to compiled code pages.
-		if (m_flavor == PPC_MODEL_601 && (m_drcoptions & PPCDRC_STRICT_601_SELF_MODIFY))
-			static_generate_code_write_reset();
 		if (m_cap & PPCCAP_603_MMU)
 			static_generate_swap_tgpr();
 
@@ -1024,6 +1017,15 @@ void ppc_device::static_generate_memory_handlers()
 {
 	try
 	{
+		// the accessors dispatch to these, so they follow the same option values
+		if (m_drcoptions & PPCDRC_BUS_RETRY)
+			static_generate_bus_retry();
+		// 601 has a unified cache, so code can self-modify without icbi.
+		// PPCDRC_STRICT_601_SELF_MODIFY causes the write accessors to watch for stores
+		// to compiled code pages.
+		if (m_flavor == PPC_MODEL_601 && (m_drcoptions & PPCDRC_STRICT_601_SELF_MODIFY))
+			static_generate_code_write_reset();
+
 		// add subroutines for memory accesses
 		for (int mode = 0; mode < 8; mode++)
 		{
