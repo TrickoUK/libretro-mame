@@ -37,7 +37,13 @@
     - Polystar blending is incorrect (intro)
 */
 
-#define TEST_TIMING     1
+// TEST_TIMING models Triangle Engine busy time: it counts triangles and
+// memory accesses and holds back the end-of-command interrupt for the
+// estimated cycle count. The estimate is uncalibrated and charges each
+// access in turn, far slower than the chip's quoted fill rates, so games
+// wait on it and drop frames (Polystars falls to 30-50 fps in stage 1).
+// With it off, the interrupt is raised as soon as the list finishes.
+#define TEST_TIMING     0
 
 #if TEST_TIMING
 enum
@@ -3292,7 +3298,9 @@ void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right
 	bool memo_valid = false;
 	uint32_t memo_u = 0, memo_v = 0, memo_lod = 0;
 	uint32_t memo_rt = 0, memo_gt = 0, memo_bt = 0, memo_at = 0, memo_ssbt = 0;
+#if TEST_TIMING
 	uint32_t memo_reads = 0;
+#endif
 
 	while (xs != xe)
 	{
@@ -3666,8 +3674,10 @@ void m2_te_device::flush_span_jobs()
 	for (band_state &bs : m_bands)
 	{
 		m_db.status |= bs.ps.status_bits;
+#if TEST_TIMING
 		for (int s = 0; s < 16; s++)
 			g_statistics[s] += bs.ps.stats[s];
+#endif
 		bs.ps = pixel_scratch{};
 	}
 
