@@ -492,8 +492,6 @@ dgrm/pokechmp.cpp
 dooyong/dooyong.cpp
 dooyong/dooyong_tilemap.cpp  // [HELPER]
 dooyong/gundealr.cpp
-dyna/dyna_d0404.cpp
-dyna/dyna_d0703.cpp
 dynax/ddenlovr.cpp
 dynax/dynax.cpp
 dynax/dynax_blitter_rev2.cpp  // [HELPER]
@@ -1531,6 +1529,8 @@ sega/model2_m.cpp  // [HELPER]
 sega/model2_v.cpp  // [HELPER]
 sega/model3.cpp
 sega/model3_m.cpp  // [HELPER]
+sega/model3_pci.cpp  // [HELPER]
+sega/model3_render.cpp  // [HELPER]
 sega/model3_v.cpp  // [HELPER]
 sega/monacogp.cpp
 sega/naomi.cpp  // [HELPER]
@@ -3276,6 +3276,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -potnpkrn
 -potnpkro
 -potnpkrp
+-potnpkrq
 -pottnpkr
 -powercrd
 -premline

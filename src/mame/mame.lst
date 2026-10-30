@@ -18453,6 +18453,7 @@ supereld
 
 @source:dyna/dyna_d0703.cpp
 dynasty
+trip7ba
 
 @source:dyna/dyna_dc4000.cpp
 aladdin
@@ -21626,6 +21627,7 @@ cb3g
 cb3h
 cb3i
 cb3j
+cb3k
 cb3micro
 cb3s51
 cbaai
@@ -32152,6 +32154,7 @@ potnpkrm
 potnpkrn
 potnpkro
 potnpkrp
+potnpkrq
 pottnpkr
 royale
 royalea
@@ -32502,6 +32505,15 @@ ribrac
 @source:misc/lependu.cpp
 codemagik
 lependu
+
+@source:misc/lgtz80.cpp
+arthurkn
+arthurkn100
+circus2
+fruitcat
+mx97iitb
+pharmyst
+
 
 @source:misc/limenko.cpp
 dynabomb
@@ -33615,6 +33627,7 @@ cs9_qps
 cs9_spp
 cspe_qps
 csv1_qps
+drvkrazy
 funcsino
 hangman
 nsupertr3
@@ -33715,6 +33728,9 @@ tomsadvs
 @source:misc/toratora.cpp
 toratora
 toratorab
+
+@source:misc/tr175.cpp
+tr175
 
 @source:misc/triton.cpp
 triton41
@@ -35482,11 +35498,11 @@ galivan
 galivan2
 galivan3
 ninjemak
-ninjemat
 youma
 youma2
 youmab
 youmab2
+youmat
 
 @source:nichibutsu/gomoku.cpp
 gomoku
@@ -44354,13 +44370,6 @@ lft1510
 @source:skeleton/lg-dvd.cpp
 lggp40
 
-@source:skeleton/lgtz80.cpp
-arthurkn
-arthurkn100
-circus2
-fruitcat
-pharmyst
-
 @source:skeleton/licocai.cpp
 licocai
 
@@ -44763,9 +44772,6 @@ tk635
 
 @source:skeleton/tnshc08.cpp
 tnshc08
-
-@source:skeleton/tr175.cpp
-tr175
 
 @source:skeleton/tsispch.cpp
 prose2k

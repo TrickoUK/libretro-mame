@@ -1834,10 +1834,6 @@ clubkrto
 clubpacm
 clubpacma
 cluclu
-cm2005
-cm2005_014h
-cm2005_100h
-cm2005_102u
 cmagica
 cmanhat
 cmcwa
@@ -2964,6 +2960,7 @@ drtomy
 drtoppel
 drtoppelj
 drtoppelu
+drvkrazy
 ds5000
 ds6000
 dsaber
@@ -3035,7 +3032,6 @@ dynamcopb
 dynamcopc
 dynamski
 dynashot
-dynasty
 dyndeka2
 dyndeka2b
 dynduke
@@ -7124,7 +7120,6 @@ ninjaw1
 ninjawj
 ninjawu
 ninjemak
-ninjemat
 nitd
 nitdbl
 nitedrvr
@@ -10630,7 +10625,6 @@ superdbz
 superdq
 superdqa
 superdqs
-supereld
 superg
 supergm3
 supergs
@@ -12453,6 +12447,7 @@ youma
 youma2
 youmab
 youmab2
+youmat
 yoyospel
 yujogs
 yukiwo
