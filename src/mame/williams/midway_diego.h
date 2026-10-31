@@ -36,6 +36,7 @@ private:
 	required_ioport m_switches;
 	required_ioport_array<2> m_analog;
 	required_ioport m_coins;
+	required_ioport m_dsw;
 
 	u8 m_eeprom[128];
 

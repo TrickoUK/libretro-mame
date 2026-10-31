@@ -103,11 +103,32 @@ void i386_device::pentium_wrmsr()          // Opcode 0x0f 30
 
 void i386_device::pentium_rdtsc()          // Opcode 0x0f 31
 {
-	uint64_t ts = m_tsc + (m_base_cycles - m_cycles);
+	uint64_t ts = current_tsc();
 	REG32(EAX) = (uint32_t)(ts);
 	REG32(EDX) = (uint32_t)(ts >> 32);
 
 	CYCLES(CYCLES_RDTSC);
+
+	if (m_rdtsc_idle_skip)
+	{
+		// the same RDTSC read again within a few hundred instructions is a polling loop:
+		// after a few rounds, let time pass in bigger steps
+		int skipped = 0;
+		if ((m_pc == m_rdtsc_last_pc) && ((ts - m_rdtsc_last_ts) < 1000))
+		{
+			if (++m_rdtsc_repeat >= 8 && m_cycles > 0)
+			{
+				skipped = std::min(m_cycles, 20000);
+				m_cycles -= skipped;
+			}
+		}
+		else
+		{
+			m_rdtsc_repeat = 0;
+		}
+		m_rdtsc_last_pc = m_pc;
+		m_rdtsc_last_ts = ts + skipped;
+	}
 }
 
 void i386_device::pentium_ud2()    // Opcode 0x0f 0b

@@ -29,6 +29,10 @@ public:
 	auto smiact() { return m_smiact.bind(); }
 	auto ferr() { return m_ferr_handler.bind(); }
 
+	// speedup for software that busy-waits on RDTSC: a tight loop around one RDTSC consumes
+	// time in larger steps instead of executing every iteration
+	void set_rdtsc_idle_skip(bool enable) { m_rdtsc_idle_skip = enable; }
+
 	uint64_t debug_segbase(int params, const uint64_t *param);
 	uint64_t debug_seglimit(int params, const uint64_t *param);
 	uint64_t debug_segofftovirt(int params, const uint64_t *param);
@@ -349,7 +353,13 @@ protected:
 	uint32_t m_cpu_version;
 	uint32_t m_brand_id;
 	uint32_t m_feature_flags;
-	uint64_t m_tsc;
+	uint64_t m_tsc; // time stamp counter, as an offset from the total number of cycles executed
+	uint64_t current_tsc() const { return m_tsc + total_cycles(); }
+	void set_tsc(uint64_t value) { m_tsc = value - total_cycles(); }
+	bool m_rdtsc_idle_skip = false;
+	uint32_t m_rdtsc_last_pc = 0;
+	uint64_t m_rdtsc_last_ts = 0;
+	uint32_t m_rdtsc_repeat = 0;
 	uint64_t m_perfctr[2];
 
 	// FPU

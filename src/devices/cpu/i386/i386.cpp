@@ -2487,7 +2487,7 @@ void i386_device::zero_state()
 	m_cpu_version = 0;
 	m_brand_id = 0; // Pentium III model 8 onward
 	m_feature_flags = 0;
-	m_tsc = 0;
+	set_tsc(0);
 	m_perfctr[0] = m_perfctr[1] = 0;
 	memset( m_x87_reg, 0, sizeof(m_x87_reg) );
 	m_x87_cw = 0;
@@ -2799,7 +2799,6 @@ void i386_device::execute_run()
 	if (m_halted)
 	{
 		debugger_wait_hook();
-		m_tsc += cycles;
 		m_cycles = 0;
 		return;
 	}
@@ -2892,7 +2891,6 @@ void i386_device::execute_run()
 		if(m_RF && m_auto_clear_RF) m_RF = 0;
 		if(!m_auto_clear_RF) m_auto_clear_RF = true;
 	}
-	m_tsc += (cycles - m_cycles);
 }
 
 /*************************************************************************/

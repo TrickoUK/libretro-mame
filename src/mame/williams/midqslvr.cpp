@@ -389,7 +389,9 @@ void midway_quicksilver2_state::superio_config(device_t *device)
 
 void midway_quicksilver2_state::midqslvr(machine_config &config)
 {
-	PENTIUM2(config, m_maincpu, 100'000'000); // Celeron, downclocked for debugging
+	PENTIUM2(config, m_maincpu, 333'000'000); // Celeron 333
+	// the game's frame timing busy-waits on RDTSC
+	m_maincpu->set_rdtsc_idle_skip(!getenv("HT_NOSKIP")); // TMP env
 	m_maincpu->set_addrmap(AS_PROGRAM, &midway_quicksilver2_state::midqslvr_map);
 	//m_maincpu->set_addrmap(AS_IO, &midway_quicksilver2_state::midqslvr_io);
 	m_maincpu->set_irq_acknowledge_callback("pci:07.0:pic8259_master", FUNC(pic8259_device::inta_cb));
@@ -398,7 +400,8 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 	P87C552(config, "iocpu", 16'000'000).set_disable();
 
 	PCI_ROOT(config, "pci");
-	I82443BX_HOST(config, "pci:00.0", "maincpu", 64*1024*1024);
+	// Celeron on a 66 MHz host bus
+	I82443BX_HOST(config, "pci:00.0", "maincpu", 64*1024*1024).set_host_bus_66mhz(true);
 	I82443BX_BRIDGE(config, "pci:01.0", 0 ); //"pci:01.0:00.0");
 	//I82443BX_AGP   (config, "pci:01.0:00.0");
 

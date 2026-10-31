@@ -20,7 +20,7 @@ uint64_t pentium_device::opcode_rdmsr(bool &valid_msr)
 	case 0x10:
 		valid_msr = true;
 		popmessage("RDMSR: Reading TSC");
-		return m_tsc;
+		return current_tsc();
 		// Event Counters (TODO)
 	case 0x11:  // CESR
 		valid_msr = true;
@@ -63,7 +63,7 @@ void pentium_device::opcode_wrmsr(uint64_t data, bool &valid_msr)
 		break;
 		// Time Stamp Counter
 	case 0x10:
-		m_tsc = data;
+		set_tsc(data);
 		popmessage("WRMSR: Writing to TSC");
 		valid_msr = true;
 		break;
@@ -112,7 +112,7 @@ uint64_t pentium_pro_device::opcode_rdmsr(bool &valid_msr)
 	case 0x10:
 		valid_msr = true;
 		popmessage("RDMSR: Reading TSC");
-		return m_tsc;
+		return current_tsc();
 	case 0x2a: // TMP experiment: EBL_CR_POWERON
 	{
 		valid_msr = true;
@@ -142,7 +142,7 @@ void pentium_pro_device::opcode_wrmsr(uint64_t data, bool &valid_msr)
 	{
 		// Time Stamp Counter
 	case 0x10:
-		m_tsc = data;
+		set_tsc(data);
 		popmessage("WRMSR: Writing to TSC");
 		valid_msr = true;
 		break;

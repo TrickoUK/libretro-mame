@@ -37,7 +37,7 @@ Board to host:
 TODO:
 - The security channel (the board challenges the CPLD on the Voodoo 2 card through the host) is
   never started, so the board never asks for a key load.
-- Verify the switch and analog channel assignments against a cabinet.
+- Verify the analog channel assignment and the DIP switch read (EEPROM address 0) against a board.
 - Lamps, LEDs, coin meters and the force feedback DAC are not output.
 
 **************************************************************************************************/
@@ -57,32 +57,52 @@ midway_diego_device::midway_diego_device(const machine_config &mconfig, const ch
 	, m_switches(*this, "SWITCHES")
 	, m_analog(*this, "ADC%u", 0U)
 	, m_coins(*this, "COINS")
+	, m_dsw(*this, "DSW")
 {
 }
 
 static INPUT_PORTS_START( midway_diego )
+	// names as listed by Hydro Thunder's switch test
 	PORT_START("SWITCHES")
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_UNKNOWN ) PORT_NAME("Switch 0")
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_UNKNOWN ) PORT_NAME("Switch 1")
-	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_UNKNOWN ) PORT_NAME("Switch 2")
-	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_UNKNOWN ) PORT_NAME("Switch 3")
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_UNKNOWN ) PORT_NAME("Switch 4")
-	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_UNKNOWN ) PORT_NAME("Switch 5")
-	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_UNKNOWN ) PORT_NAME("Switch 6")
-	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_UNKNOWN ) PORT_NAME("Switch 7")
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_BUTTON1 ) PORT_NAME("Boost")
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_BUTTON4 ) PORT_NAME("High View")
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_BUTTON3 ) PORT_NAME("Low View")
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_BUTTON2 ) PORT_NAME("Pilot View")
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_SERVICE1 ) PORT_NAME("Credit")
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_VOLUME_DOWN )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_VOLUME_UP )
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_SERVICE ) PORT_NAME("Test")
 
 	PORT_START("COINS")
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_COIN1 )
 	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_COIN2 )
 	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_COIN3 )
 	PORT_BIT( 0x08, IP_ACTIVE_HIGH, IPT_COIN4 )
-	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_SERVICE1 )
+	PORT_BIT( 0x10, IP_ACTIVE_HIGH, IPT_UNUSED )
 
+	PORT_START("DSW")
+	PORT_DIPUNUSED_DIPLOC( 0x01, 0x01, "S1:1" )
+	PORT_DIPUNUSED_DIPLOC( 0x02, 0x02, "S1:2" )
+	PORT_DIPNAME( 0x04, 0x04, "Test Mode" ) PORT_DIPLOCATION("S1:3")
+	PORT_DIPSETTING(    0x04, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x08, 0x08, "Cabinet" ) PORT_DIPLOCATION("S1:4")
+	PORT_DIPSETTING(    0x08, "25\"" )
+	PORT_DIPSETTING(    0x00, "39\"" )
+	PORT_DIPUNUSED_DIPLOC( 0x10, 0x10, "S1:5" )
+	PORT_DIPUNUSED_DIPLOC( 0x20, 0x20, "S1:6" )
+	PORT_DIPUNUSED_DIPLOC( 0x40, 0x40, "S1:7" )
+	// the watchdog output isn't connected in this emulation
+	PORT_DIPNAME( 0x80, 0x80, "Watchdog" ) PORT_DIPLOCATION("S1:8")
+	PORT_DIPSETTING(    0x80, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+
+	// wheel and throttle as named by the analog test (channel order assumed)
 	PORT_START("ADC0")
-	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_SENSITIVITY(100) PORT_KEYDELTA(10)
+	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_SENSITIVITY(100) PORT_KEYDELTA(10) PORT_NAME("Wheel")
 
 	PORT_START("ADC1")
-	PORT_BIT( 0xff, 0x00, IPT_PEDAL ) PORT_SENSITIVITY(100) PORT_KEYDELTA(10)
+	PORT_BIT( 0xff, 0x80, IPT_AD_STICK_Y ) PORT_SENSITIVITY(100) PORT_KEYDELTA(10) PORT_NAME("Throttle") PORT_REVERSE
 INPUT_PORTS_END
 
 ioport_constructor midway_diego_device::device_input_ports() const
@@ -205,7 +225,9 @@ void midway_diego_device::frame_received()
 		u8 const address = frame[5] & 0x7f;
 		if (BIT(frame[5], 7))
 		{
-			m_eeprom_data = m_eeprom[address];
+			// the host reads its DIP switch settings from address 0 (assumed to be answered from S1
+			// rather than the EEPROM; the game caches the complement)
+			m_eeprom_data = address ? m_eeprom[address] : m_dsw->read();
 		}
 		else
 		{
