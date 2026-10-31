@@ -105,6 +105,8 @@ private:
 	int m_sending;
 
 	int m_operation_write_state;
+	u8 m_tmp_index = 0; // TMP experiment
+	u8 m_tmp_regs[256] = { }; // TMP experiment
 	int m_status_read_mode;
 
 	int m_speaker;

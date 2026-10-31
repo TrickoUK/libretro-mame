@@ -135,6 +135,7 @@ DEFINE_DEVICE_TYPE(SST_49LF020,              sst_49lf020_device,              "s
 
 DEFINE_DEVICE_TYPE(SHARP_LH28F400,           sharp_lh28f400_device,           "sharp_lh28f400",           "Sharp LH28F400 Flash")
 DEFINE_DEVICE_TYPE(SHARP_LH28F800SG,         sharp_lh28f800sg_device,         "sharp_lh28f800sg",         "Sharp LH28F800SG Flash")
+DEFINE_DEVICE_TYPE(SHARP_LH28F004SC,         sharp_lh28f004sc_device,         "sharp_lh28f004sc",         "Sharp LH28F004SC Flash")
 DEFINE_DEVICE_TYPE(INTEL_E28F008SA,          intel_e28f008sa_device,          "intel_e28f008sa",          "Intel E28F008SA Flash")
 DEFINE_DEVICE_TYPE(INTEL_TE28F160,           intel_te28f160_device,           "intel_te28f160",           "Intel TE28F160 Flash")
 DEFINE_DEVICE_TYPE(SHARP_LH28F160S3,         sharp_lh28f160s3_device,         "sharp_lh28f160s3",         "Sharp LH28F160S3 Flash")
@@ -272,6 +273,10 @@ amd_29lv200t_device::amd_29lv200t_device(const machine_config &mconfig, const ch
 
 cat28f020_device::cat28f020_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
 	: intelfsh8_device(mconfig, CAT28F020, tag, owner, clock, 0x40000, MFG_CATALYST, 0xbd) { }
+
+// TODO: verify the device ID against a real chip
+sharp_lh28f004sc_device::sharp_lh28f004sc_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: intelfsh8_device(mconfig, SHARP_LH28F004SC, tag, owner, clock, 0x80000, MFG_SHARP, 0x38) { }
 
 intel_e28f008sa_device::intel_e28f008sa_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
 	: intelfsh8_device(mconfig, INTEL_E28F008SA, tag, owner, clock, 0x100000, MFG_INTEL, 0xa2) { m_has_reset_pin = true; }

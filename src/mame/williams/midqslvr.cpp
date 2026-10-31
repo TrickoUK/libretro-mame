@@ -275,11 +275,13 @@ Notes:
 
 #include "emu.h"
 
+#include "midway_diego.h"
+
 #include "bus/isa/isa_cards.h"
 #include "bus/pci/virge_pci.h"
 //#include "bus/rs232/hlemouse.h"
 //#include "bus/rs232/null_modem.h"
-//#include "bus/rs232/rs232.h"
+#include "bus/rs232/rs232.h"
 //#include "bus/rs232/sun_kbd.h"
 //#include "bus/rs232/terminal.h"
 #include "cpu/i386/i386.h"
@@ -289,6 +291,7 @@ Notes:
 #include "machine/i82371eb_isa.h"
 #include "machine/i82371eb_ide.h"
 #include "machine/i82371eb_acpi.h"
+#include "machine/intelfsh.h"
 #include "machine/i82371eb_usb.h"
 #include "machine/pci.h"
 #include "machine/pci-smbus.h"
@@ -302,6 +305,19 @@ namespace {
 #define PCI_J4B1_ID "pci:10.0"
 // J4E1
 #define PCI_AGP_ID "pci:01.0:00.0"
+
+// SPD EEPROM contents of the 64MB PC100-222-620 unbuffered SDRAM DIMM
+// (assumed single-sided, eight 8M x 8 devices, CAS latency 2)
+constexpr u8 PC100_64MB_SPD[128] = {
+	0x80, 0x08, 0x04, 0x0c, 0x09, 0x01, 0x40, 0x00, 0x01, 0xa0, 0x60, 0x00, 0x80, 0x08, 0x00, 0x01,
+	0x8f, 0x04, 0x06, 0x01, 0x01, 0x00, 0x0e, 0xa0, 0x60, 0x00, 0x00, 0x14, 0x14, 0x14, 0x32, 0x10,
+	0x20, 0x10, 0x20, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x05,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x87,
+};
 
 class midway_quicksilver2_state : public driver_device
 {
@@ -348,6 +364,11 @@ void midway_quicksilver2_state::midqslvr_map(address_map &map)
 	map.unmap_value_high();
 }
 
+static void diego_serial_devices(device_slot_interface &device)
+{
+	device.option_add("diego", MIDWAY_DIEGO);
+}
+
 static void isa_internal_devices(device_slot_interface &device)
 {
 	device.option_add("fdc37m707", FDC37M707);
@@ -361,14 +382,9 @@ void midway_quicksilver2_state::superio_config(device_t *device)
 	fdc.gp25_gatea20().set(":pci:07.0", FUNC(i82371eb_isa_device::a20gate_w));
 	fdc.irq1().set(":pci:07.0", FUNC(i82371eb_isa_device::pc_irq1_w));
 	fdc.irq8().set(":pci:07.0", FUNC(i82371eb_isa_device::pc_irq8n_w));
-#if 0
 	fdc.txd1().set(":serport0", FUNC(rs232_port_device::write_txd));
 	fdc.ndtr1().set(":serport0", FUNC(rs232_port_device::write_dtr));
 	fdc.nrts1().set(":serport0", FUNC(rs232_port_device::write_rts));
-	fdc.txd2().set(":serport1", FUNC(rs232_port_device::write_txd));
-	fdc.ndtr2().set(":serport1", FUNC(rs232_port_device::write_dtr));
-	fdc.nrts2().set(":serport1", FUNC(rs232_port_device::write_rts));
-#endif
 }
 
 void midway_quicksilver2_state::midqslvr(machine_config &config)
@@ -386,9 +402,12 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 	I82443BX_BRIDGE(config, "pci:01.0", 0 ); //"pci:01.0:00.0");
 	//I82443BX_AGP   (config, "pci:01.0:00.0");
 
+	SHARP_LH28F004SC(config, "bios");
+
 	i82371eb_isa_device &isa(I82371EB_ISA(config, "pci:07.0", m_maincpu, true));
-	isa.boot_state_hook().set([](u8 data) { /* printf("%02x\n", data); */ });
-	isa.smi().set_inputline("maincpu", INPUT_LINE_SMI);
+	isa.set_bios_flash("bios");
+	isa.boot_state_hook().set([this](u8 data) { logerror("POST %02x\n", data); });
+	isa.apmc().set("pci:07.3", FUNC(i82371eb_acpi_device::apmc_w));
 	isa.a20m().set_inputline("maincpu", INPUT_LINE_A20);
 
 	i82371eb_ide_device &ide(I82371EB_IDE(config, "pci:07.1", m_maincpu));
@@ -397,12 +416,22 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 
 	I82371EB_USB (config, "pci:07.2");
 	I82371EB_ACPI(config, "pci:07.3");
-	ACPI_PIIX4   (config, "pci:07.3:acpi");
-	SMBUS        (config, "pci:07.3:smbus", 0);
+	acpi_piix4_device &pm(ACPI_PIIX4(config, "pci:07.3:acpi"));
+	pm.smi().set_inputline("maincpu", INPUT_LINE_SMI);
+	pm.gpi().set([] () -> u32 { const char *v = getenv("HT_GPI"); return v ? strtoul(v, nullptr, 0) : 0; }); // TMP experiment
+	SMBUS        (config, "pci:07.3:smbus", 0).set_spd_data(PC100_64MB_SPD);
 
 	// FIXME: determine ISA bus clock
 	ISA16_SLOT(config, "board4", 0, "pci:07.0:isabus", isa_internal_devices, "fdc37m707", true).set_option_machine_config("fdc37m707", superio_config);
 	ISA16_SLOT(config, "isa1",   0, "pci:07.0:isabus", pc_isa16_cards, nullptr, false);
+
+	// Diego I/O board on COM1
+	rs232_port_device &serport0(RS232_PORT(config, "serport0", diego_serial_devices, "diego"));
+	serport0.rxd_handler().set("board4:fdc37m707", FUNC(fdc37c93x_device::rxd1_w));
+	serport0.dcd_handler().set("board4:fdc37m707", FUNC(fdc37c93x_device::ndcd1_w));
+	serport0.dsr_handler().set("board4:fdc37m707", FUNC(fdc37c93x_device::ndsr1_w));
+	serport0.ri_handler().set("board4:fdc37m707", FUNC(fdc37c93x_device::nri1_w));
+	serport0.cts_handler().set("board4:fdc37m707", FUNC(fdc37c93x_device::ncts1_w));
 	ISA16_SLOT(config, "isa2",   0, "pci:07.0:isabus", pc_isa16_cards, nullptr, false);
 
 	// YMF740G goes thru "pci:0c.0"
@@ -425,6 +454,8 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 	// "pci:0d.0" J4D2
 	// "pci:0e.0" J4D1
 	PCI_SLOT(config, "pci:1", pci_cards, 14, 0, 1, 2, 3, "virge");
+	// SMC EZ Card 10 (RTL8029 NE2000 clone), the game's network settings expect it at I/O $1020
+	PCI_SLOT(config, "pci:2", pci_cards, 13, 1, 2, 3, 0, "rtl8029as");
 }
 
 // Graphite runs on incompatible HW, consider splitting if things starts to get hairy ...
@@ -448,7 +479,7 @@ void midway_graphite_state::graphite(machine_config &config)
 
 
 ROM_START( hydrthnd )
-	ROM_REGION32_LE(0x80000, "pci:07.0", 0)
+	ROM_REGION(0x80000, "bios", 0)
 	ROM_LOAD( "lh28f004sct.u8b1", 0x000000, 0x080000, CRC(ab04a343) SHA1(ba77933400fe470f45ab187bc0d315922caadb12) )
 
 	ROM_REGION( 0x2000, "iocpu", 0 )   /* Diego board CY7C63513 MCU code */
@@ -459,7 +490,7 @@ ROM_START( hydrthnd )
 ROM_END
 
 ROM_START( hydrthnd101b )
-	ROM_REGION32_LE(0x80000, "pci:07.0", 0)
+	ROM_REGION(0x80000, "bios", 0)
 	ROM_LOAD( "lh28f004sct.u8b1", 0x000000, 0x080000, CRC(ab04a343) SHA1(ba77933400fe470f45ab187bc0d315922caadb12) )
 
 	ROM_REGION( 0x2000, "iocpu", 0 )   /* Diego board CY7C63513 MCU code */
@@ -470,7 +501,7 @@ ROM_START( hydrthnd101b )
 ROM_END
 
 ROM_START( hydrthnd100d )
-	ROM_REGION32_LE(0x80000, "pci:07.0", 0)
+	ROM_REGION(0x80000, "bios", 0)
 	ROM_LOAD( "lh28f004sct.u8b1", 0x000000, 0x080000, CRC(ab04a343) SHA1(ba77933400fe470f45ab187bc0d315922caadb12) )
 
 	ROM_REGION( 0x2000, "iocpu", 0 )   /* Diego board CY7C63513 MCU code */
@@ -481,7 +512,7 @@ ROM_START( hydrthnd100d )
 ROM_END
 
 ROM_START( offrthnd )
-	ROM_REGION32_LE(0x80000, "pci:07.0", 0)
+	ROM_REGION(0x80000, "bios", 0)
 	ROM_LOAD( "lh28f004sct.u8b1", 0x000000, 0x080000, CRC(ab04a343) SHA1(ba77933400fe470f45ab187bc0d315922caadb12) )
 
 	ROM_REGION( 0x2000, "iocpu", 0 )   /* Magicbus board CY7C63513 MCU code */

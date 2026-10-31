@@ -18,6 +18,9 @@ public:
 
 	auto apmc_en() { return m_apmc_en_w.bind(); }
 
+	// write to the APM Control port (I/O 0xb2), decoded by the PCI-to-ISA bridge
+	void apmc_w(u8 data);
+
 protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
@@ -69,7 +72,14 @@ class acpi_piix4_device : public device_t
 public:
 	acpi_piix4_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = XTAL(3'579'545).value());
 
+	auto smi() { return m_smi_w.bind(); }
+	// GPI[21:0] input pins
+	auto gpi() { return m_gpi_r.bind(); }
+
 	void map(address_map &map);
+
+	// APM Control port write with APMC_EN set
+	void apm_event();
 
 protected:
 	virtual void device_start() override;
@@ -77,6 +87,12 @@ protected:
 	virtual void device_validity_check(validity_checker &valid) const override;
 
 private:
+	void update_smi();
+
+	devcb_write_line m_smi_w;
+	devcb_read32 m_gpi_r;
+
+	bool m_smi_state;
 	u16 m_pmsts;
 	u16 m_pmen;
 	u16 m_pmcntrl;

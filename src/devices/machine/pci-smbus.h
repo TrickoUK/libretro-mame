@@ -5,6 +5,8 @@
 
 #include "pci.h"
 
+#include <span>
+
 class smbus_device : public pci_device {
 public:
 	smbus_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock, uint32_t main_id, uint32_t revision, uint32_t subdevice_id)
@@ -13,6 +15,9 @@ public:
 		set_ids(main_id, revision, 0x0c0500, subdevice_id);
 	}
 	smbus_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
+
+	// SPD EEPROM contents of the DIMM in the first socket (a DDR SDRAM module by default)
+	smbus_device &set_spd_data(std::span<const u8> data) { m_spd_data = data; return *this; }
 
 	void map(address_map &map) ATTR_COLD;
 
@@ -57,6 +62,8 @@ private:
 	uint8_t notify_daddr_r();
 	uint8_t notify_dlow_r();
 	uint8_t notify_dhigh_r();
+
+	std::span<const u8> m_spd_data;
 
 	uint16_t slv_data;
 

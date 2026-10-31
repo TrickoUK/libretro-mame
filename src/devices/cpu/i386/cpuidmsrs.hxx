@@ -113,6 +113,12 @@ uint64_t pentium_pro_device::opcode_rdmsr(bool &valid_msr)
 		valid_msr = true;
 		popmessage("RDMSR: Reading TSC");
 		return m_tsc;
+	case 0x2a: // TMP experiment: EBL_CR_POWERON
+	{
+		valid_msr = true;
+		const char *v = getenv("HT_MSR2A");
+		return v ? strtoull(v, nullptr, 0) : 0;
+	}
 		// Performance Counters (TODO)
 	case 0xc1:  // PerfCtr0
 		valid_msr = true;

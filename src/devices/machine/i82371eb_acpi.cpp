@@ -160,6 +160,13 @@ void i82371eb_acpi_device::devactb_w(offs_t offset, u32 data, u32 mem_mask)
 }
 
 
+void i82371eb_acpi_device::apmc_w(u8 data)
+{
+	// APMC_EN
+	if (BIT(m_devactb, 25))
+		m_acpi->apm_event();
+}
+
 u32 i82371eb_acpi_device::devresa_r()
 {
 	return m_devresa;
@@ -217,6 +224,8 @@ void i82371eb_acpi_device::unmap_log_w(offs_t offset, u8 data)
 
 acpi_piix4_device::acpi_piix4_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
 	: device_t(mconfig, ACPI_PIIX4, tag, owner, clock)
+	, m_smi_w(*this)
+	, m_gpi_r(*this, 0)
 {
 }
 
@@ -234,7 +243,7 @@ void acpi_piix4_device::device_start()
 	save_item(NAME(m_glbctl));
 	save_item(NAME(m_devctl));
 	save_item(NAME(m_gporeg));
-
+	save_item(NAME(m_smi_state));
 }
 
 void acpi_piix4_device::device_reset()
@@ -253,6 +262,39 @@ void acpi_piix4_device::device_reset()
 
 	m_gporeg[0] = 0x7fff;
 	m_gporeg[1] = 0xbfff;
+
+	m_smi_state = false;
+	m_smi_w(0);
+}
+
+void acpi_piix4_device::apm_event()
+{
+	// APM_STS
+	m_glbsts |= 1 << 5;
+	update_smi();
+}
+
+void acpi_piix4_device::update_smi()
+{
+	// SMI# is driven while SMI_EN is set and an SMI status bit is pending; a new assertion
+	// needs EOS, which is cleared when SMI# goes active and set again by the SMI handler
+	// TODO: other SMI sources (GLBEN, DEVCTL traps, timers, EXTSMI#)
+	const bool pending = BIT(m_glbctl[0], 0) && BIT(m_glbsts, 5);
+
+	if (!pending)
+	{
+		if (m_smi_state)
+		{
+			m_smi_state = false;
+			m_smi_w(0);
+		}
+	}
+	else if (!m_smi_state && BIT(m_glbctl[1], 0))
+	{
+		m_glbctl[1] &= ~1;
+		m_smi_state = true;
+		m_smi_w(1);
+	}
 }
 
 void acpi_piix4_device::device_validity_check(validity_checker &valid) const
@@ -404,6 +446,7 @@ void acpi_piix4_device::map(address_map &map)
 				m_glbsts &= ~(data & 0x27);
 			}
 			LOG("GBLSTS %04x & %04x -> %04x\n", data, mem_mask, m_glbsts);
+			update_smi();
 		})
 	);
 	// Device Status
@@ -421,7 +464,7 @@ void acpi_piix4_device::map(address_map &map)
 		NAME([this] () { return m_glben; }),
 		NAME([this] (offs_t offset, u16 data, u16 mem_mask) {
 			COMBINE_DATA(&m_glben);
-			LOGACPI("GLBEN %04x & %04x\n");
+			LOGACPI("GLBEN %04x & %04x\n", data, mem_mask);
 			LOGACPIEX("\tBATLOW_EN %d IRQ_RSM_EN %d EXTSMI_EN %d GSTBY_EN %d P4MA_EN %d BM_TRP_EN %d BIOS_EN %d LEGACY_USB_EN %d\n"
 				, BIT(data, 15)
 				, BIT(data, 11)
@@ -440,6 +483,13 @@ void acpi_piix4_device::map(address_map &map)
 		NAME([this] (offs_t offset, u16 data, u16 mem_mask) {
 			COMBINE_DATA(&m_glbctl[offset]);
 			LOGACPI("GLBCTL%d %04x & %04x\n", offset, data, mem_mask);
+			// setting EOS ends the current SMI, a still pending event starts a new one
+			if (offset && BIT(m_glbctl[1], 0) && m_smi_state)
+			{
+				m_smi_state = false;
+				m_smi_w(0);
+			}
+			update_smi();
 			if (offset)
 			{
 				// NOTE: EOS gets automatically cleared on SMI#
@@ -487,7 +537,7 @@ void acpi_piix4_device::map(address_map &map)
 				if (mem_mask == 0xffff)
 					LOG("\tInvalid word access!\n");
 			}
-			return 0;
+			return u16((m_gpi_r() & 0x3fffff) >> (offset * 16));
 		})
 	);
 	map(0x34, 0x37).lrw16(

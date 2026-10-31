@@ -7,7 +7,7 @@
 #pragma once
 
 #include "machine/i82371sb.h"
-#include "machine/mc146818.h"
+#include "machine/ds128x.h"
 
 class i82371eb_isa_device : public i82371sb_isa_device
 {
@@ -28,6 +28,8 @@ public:
 	}
 
 	auto a20m() { return m_a20m_callback.bind(); }
+	// APM Control port writes, which the power management function turns into SMIs
+	auto apmc() { return m_apmc_callback.bind(); }
 	void a20gate_w(int state);
 
 	i82371eb_isa_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
@@ -43,8 +45,11 @@ protected:
 
 	virtual void internal_io_map(address_map &map) override ATTR_COLD;
 private:
-	required_device<mc146818_device> m_rtc;
+	required_device<ds12885ext_device> m_rtc;
 	devcb_write_line m_a20m_callback;
+	devcb_write8 m_apmc_callback;
+
+	u8 m_apmc, m_apms;
 
 	u8 m_serirqc;
 	u8 m_pdmacfg[2], m_pdma_ch[8];
@@ -55,7 +60,7 @@ private:
 	void pdmacfg_w(offs_t offset, u8 data);
 
 	bool m_has_internal_rtc;
-	u8 m_rtc_index;
+	u8 m_rtc_index[2];
 	template <unsigned E> u8 rtc_index_r(offs_t offset);
 	template <unsigned E> void rtc_index_w(offs_t offset, u8 data);
 

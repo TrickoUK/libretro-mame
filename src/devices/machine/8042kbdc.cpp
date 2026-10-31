@@ -453,6 +453,15 @@ void kbdc8042_device::data_w(offs_t offset, uint8_t data)
 			/* preceded by writing 0x60 to port 60h */
 			m_command = data;
 			break;
+
+		case 6: // TMP experiment: B8 index
+			m_tmp_index = data;
+			break;
+
+		case 7: // TMP experiment: BD data
+			logerror("TMP KBC reg[%02x] = %02x\n", m_tmp_index, data);
+			m_tmp_regs[m_tmp_index] = data;
+			break;
 		}
 		m_operation_write_state = 0;
 		break;
@@ -530,6 +539,17 @@ void kbdc8042_device::data_w(offs_t offset, uint8_t data)
 			break;
 		case 0xc2:  /* read input port 7..4 until write to 0x60 */
 			m_status_read_mode = 2;
+			break;
+		case 0xb8: // TMP experiment
+			m_operation_write_state = 6;
+			break;
+		case 0xbd: // TMP experiment
+			m_operation_write_state = 7;
+			break;
+		case 0xba: // TMP experiment
+		case 0xbc:
+			logerror("TMP KBC read %02x reg[%02x] -> %02x\n", data, m_tmp_index, m_tmp_regs[m_tmp_index]);
+			at_8042_receive(m_tmp_regs[m_tmp_index]);
 			break;
 		case 0xca: /* unknown used by savquest (read controller mode AT=0/PS2=1 ?) */
 			at_8042_receive(1);

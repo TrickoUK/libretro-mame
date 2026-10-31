@@ -2701,7 +2701,7 @@ void i386_device::leave_smm()
 	REG32(ESI) = READ32(smram_state + SMRAM_ESI);
 	REG32(EDI) = READ32(smram_state + SMRAM_EDI);
 	m_eip = READ32(smram_state + SMRAM_EIP);
-	m_eflags = READ32(smram_state + SMRAM_EFLAGS);
+	set_flags(READ32(smram_state + SMRAM_EFLAGS));
 	m_cr[3] = READ32(smram_state + SMRAM_CR3);
 	m_cr[0] = READ32(smram_state + SMRAM_CR0);
 
@@ -3298,6 +3298,7 @@ void pentium2_device::device_start()
 
 void pentium2_device::device_reset()
 {
+	logerror("TMP CPU reset from pc=%08x cs=%04x eip=%08x smm=%d\n", m_pc, m_sreg[CS].selector, m_eip, m_smm);
 	zero_state();
 
 	m_sreg[CS].selector = 0xf000;

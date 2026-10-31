@@ -161,6 +161,7 @@ i82371sb_isa_device::i82371sb_isa_device(const machine_config &mconfig, device_t
 	, m_stpclk_callback(*this)
 	, m_boot_state_hook(*this)
 	, m_maincpu(*this, finder_base::DUMMY_TAG)
+	, m_bios_flash(*this, finder_base::DUMMY_TAG)
 	, m_pic8259_master(*this, "pic8259_master")
 	, m_pic8259_slave(*this, "pic8259_slave")
 	, m_dma8237_1(*this, "dma8237_1")
@@ -447,6 +448,21 @@ void i82371sb_isa_device::cthtmr_w(uint8_t data)
 
 void i82371sb_isa_device::map_bios(address_space *memory_space, uint32_t start, uint32_t end)
 {
+	if (m_bios_flash)
+	{
+		const uint32_t mask = m_bios_flash->length() - 1;
+		const uint32_t base = start & mask;
+		memory_space->install_readwrite_handler(start, end,
+				read8sm_delegate(*this, [this, base, mask] (offs_t offset) { return m_bios_flash->read((base + offset) & mask); }, "bios_flash_r"),
+				write8sm_delegate(*this, [this, base, mask] (offs_t offset, u8 data)
+				{
+					// XBCS bit 2: BIOSCS# Write Protect Enable, writes don't reach the flash while clear
+					if (BIT(xbcs, 2))
+						m_bios_flash->write((base + offset) & mask, data);
+				}, "bios_flash_w"));
+		return;
+	}
+
 	uint32_t mask = m_region->bytes() - 1;
 	memory_space->install_rom(start, end, m_region->base() + (start & mask));
 }
@@ -463,7 +479,7 @@ void i82371sb_isa_device::map_extra(
 {
 	// assume that map_extra of the southbridge is called before the one of the northbridge
 	m_isabus->remap(AS_PROGRAM, 0, 1 << 24);
-	map_bios(memory_space, 0xffffffff - m_region->bytes() + 1, 0xffffffff);
+	map_bios(memory_space, 0xffffffff - (m_bios_flash ? m_bios_flash->length() : m_region->bytes()) + 1, 0xffffffff);
 	map_bios(memory_space, 0x000e0000, 0x000fffff);
 	m_isabus->remap(AS_IO, 0, 0xffff);
 	io_space->install_device(0, 0xffff, *this, &i82371sb_isa_device::internal_io_map);
@@ -950,8 +966,20 @@ uint8_t i82371sb_isa_device::reset_control_r(offs_t offset)
 
 void i82371sb_isa_device::reset_control_w(offs_t offset, uint8_t data)
 {
+	logerror("reset_control = %02x\n", data);
+
+	// RCPU (bit 2) starts a reset on its 0 to 1 transition; SRST (bit 1) selects a full system
+	// reset (PCIRST# to every device, which also clears the chipset's lock bits) over a CPU-only one
+	const bool start = BIT(data, 2) && !BIT(reset_control, 2);
 	reset_control = data;
-	logerror("reset_control = %02x\n", reset_control);
+	if (start)
+	{
+		reset_control &= ~0x04;
+		if (BIT(data, 1))
+			machine().schedule_soft_reset();
+		else
+			m_maincpu->pulse_input_line(INPUT_LINE_RESET, attotime::zero);
+	}
 }
 
 void i82371sb_isa_device::update_smireq_line()
