@@ -465,7 +465,8 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 #endif
 	// "pci:0d.0" J4D2
 	// "pci:0e.0" J4D1
-	PCI_SLOT(config, "pci:1", pci_cards, 14, 0, 1, 2, 3, "virge");
+	// the cabinet has no VGA card; an S3 ViRGE ("-pci:1 virge") shows the BIOS and ETS text output for debugging
+	PCI_SLOT(config, "pci:1", pci_cards, 14, 0, 1, 2, 3, nullptr);
 	// SMC EZ Card 10 (RTL8029 NE2000 clone), the game's network settings expect it at I/O $1020
 	PCI_SLOT(config, "pci:2", pci_cards, 13, 1, 2, 3, 0, "rtl8029as");
 }
@@ -499,6 +500,80 @@ void midway_graphite_state::graphite(machine_config &config)
 }
 
 
+// PIIX4 RTC CMOS of a configured Quicksilver II board: the BIOS setup defaults with a valid checksum, as the
+// BIOS leaves them after its first boot. With an unconfigured CMOS (dead battery) the BIOS stops at
+// "0251 CMOS checksum bad" and waits for F1. The clock itself is set from the host time.
+#define QUICKSILVER2_CMOS \
+	ROM_REGION( 0x80, "pci:07.0:rtc", 0 ) \
+	ROM_FILL( 0x0a, 1, 0x26 ) \
+	ROM_FILL( 0x0b, 1, 0x02 ) \
+	ROM_FILL( 0x0d, 1, 0x80 ) \
+	ROM_FILL( 0x10, 1, 0x40 ) \
+	ROM_FILL( 0x11, 1, 0x1e ) \
+	ROM_FILL( 0x12, 1, 0xf0 ) \
+	ROM_FILL( 0x13, 1, 0x40 ) \
+	ROM_FILL( 0x14, 1, 0x03 ) \
+	ROM_FILL( 0x15, 1, 0x80 ) \
+	ROM_FILL( 0x16, 1, 0x02 ) \
+	ROM_FILL( 0x18, 1, 0xfc ) \
+	ROM_FILL( 0x19, 1, 0x01 ) \
+	ROM_FILL( 0x1c, 1, 0x32 ) \
+	ROM_FILL( 0x1d, 1, 0x08 ) \
+	ROM_FILL( 0x1e, 1, 0x08 ) \
+	ROM_FILL( 0x1f, 1, 0x08 ) \
+	ROM_FILL( 0x20, 1, 0xc8 ) \
+	ROM_FILL( 0x21, 1, 0xa3 ) \
+	ROM_FILL( 0x22, 1, 0xe0 ) \
+	ROM_FILL( 0x23, 1, 0x36 ) \
+	ROM_FILL( 0x24, 1, 0x50 ) \
+	ROM_FILL( 0x27, 1, 0xda ) \
+	ROM_FILL( 0x28, 1, 0xb6 ) \
+	ROM_FILL( 0x29, 1, 0x06 ) \
+	ROM_FILL( 0x2a, 1, 0xf8 ) \
+	ROM_FILL( 0x2b, 1, 0x84 ) \
+	ROM_FILL( 0x2c, 1, 0xc3 ) \
+	ROM_FILL( 0x2d, 1, 0x78 ) \
+	ROM_FILL( 0x2e, 1, 0x0a ) \
+	ROM_FILL( 0x2f, 1, 0x78 ) \
+	ROM_FILL( 0x31, 1, 0xfc ) \
+	ROM_FILL( 0x32, 1, 0x20 ) \
+	ROM_FILL( 0x33, 1, 0xc0 ) \
+	ROM_FILL( 0x34, 1, 0xc2 ) \
+	ROM_FILL( 0x3c, 1, 0x02 ) \
+	ROM_FILL( 0x3f, 1, 0xa0 ) \
+	ROM_FILL( 0x40, 1, 0xd1 ) \
+	ROM_FILL( 0x41, 1, 0xe2 ) \
+	ROM_FILL( 0x42, 1, 0x07 ) \
+	ROM_FILL( 0x46, 1, 0xd0 ) \
+	ROM_FILL( 0x47, 1, 0xb3 ) \
+	ROM_FILL( 0x4b, 1, 0x06 ) \
+	ROM_FILL( 0x4c, 1, 0x09 ) \
+	ROM_FILL( 0x4d, 1, 0x04 ) \
+	ROM_FILL( 0x54, 1, 0x22 ) \
+	ROM_FILL( 0x55, 1, 0x1a ) \
+	ROM_FILL( 0x56, 1, 0xeb ) \
+	ROM_FILL( 0x57, 1, 0x23 ) \
+	ROM_FILL( 0x58, 1, 0x1a ) \
+	ROM_FILL( 0x59, 1, 0xeb ) \
+	ROM_FILL( 0x5a, 1, 0x43 ) \
+	ROM_FILL( 0x5b, 1, 0x19 ) \
+	ROM_FILL( 0x5c, 1, 0xeb ) \
+	ROM_FILL( 0x5d, 1, 0x0b ) \
+	ROM_FILL( 0x5e, 1, 0xf8 ) \
+	ROM_FILL( 0x5f, 1, 0x4b ) \
+	ROM_FILL( 0x6a, 1, 0x0a ) \
+	ROM_FILL( 0x6b, 1, 0x84 ) \
+	ROM_FILL( 0x6c, 1, 0xc1 ) \
+	ROM_FILL( 0x71, 1, 0x0c ) \
+	ROM_FILL( 0x72, 1, 0x80 ) \
+	ROM_FILL( 0x73, 1, 0x19 ) \
+	ROM_FILL( 0x74, 1, 0x27 ) \
+	ROM_FILL( 0x75, 1, 0x40 ) \
+	ROM_FILL( 0x76, 1, 0x09 ) \
+	ROM_FILL( 0x78, 1, 0x64 ) \
+	ROM_FILL( 0x7a, 1, 0xc6 ) \
+	ROM_FILL( 0x7b, 1, 0x01 )
+
 ROM_START( hydrthnd )
 	ROM_REGION(0x80000, "bios", 0)
 	ROM_LOAD( "lh28f004sct.u8b1", 0x000000, 0x080000, CRC(ab04a343) SHA1(ba77933400fe470f45ab187bc0d315922caadb12) )
@@ -508,6 +583,8 @@ ROM_START( hydrthnd )
 
 	DISK_REGION( "pci:07.1:ide1:0:hdd" )
 	DISK_IMAGE( "hydro", 0,  BAD_DUMP SHA1(d481d178782943c066b41764628a419cd55f676d) )
+
+	QUICKSILVER2_CMOS
 ROM_END
 
 ROM_START( hydrthnd101b )
@@ -519,6 +596,8 @@ ROM_START( hydrthnd101b )
 
 	DISK_REGION( "pci:07.1:ide1:0:hdd" )
 	DISK_IMAGE( "hydro_101b", 0,  SHA1(182a7966c40676031c92dbfbd1b8e594a505a930) )
+
+	QUICKSILVER2_CMOS
 ROM_END
 
 ROM_START( hydrthnd100d )
@@ -530,6 +609,8 @@ ROM_START( hydrthnd100d )
 
 	DISK_REGION( "pci:07.1:ide1:0:hdd" )
 	DISK_IMAGE( "hydro_100d", 0,  SHA1(5462f7197b3c510b791093e938a614e706aaed4a) )
+
+	QUICKSILVER2_CMOS
 ROM_END
 
 ROM_START( offrthnd )
@@ -541,6 +622,8 @@ ROM_START( offrthnd )
 
 	DISK_REGION( "pci:07.1:ide1:0:hdd" )
 	DISK_IMAGE( "offrthnd", 0, BAD_DUMP SHA1(d88f1c5b75361a1e310565a8a5a09c674a4a1a22) )
+
+	QUICKSILVER2_CMOS
 ROM_END
 
 ROM_START( arctthnd )

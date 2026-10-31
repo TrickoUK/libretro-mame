@@ -28,8 +28,8 @@ Board to host:
   1, 2: five 3-bit rolling coin drop counters (0 idle, then 1-7 wrapping back to 1):
      c0 = b2 bits 2-0, c1 = b2 bits 5-3, c2 = b2 bits 7-6 + b1 bit 0, c3 = b1 bits 3-1,
      c4 = b1 bits 6-4
-  3: ADC channel 1
-  4: ADC channel 0
+  3: ADC channel 0 (wheel, 0x80 centre, lower is left)
+  4: ADC channel 1 (throttle, 0x80 neutral, higher is forward)
   5: EEPROM read data
   6: switches, active low
   7: unused
@@ -37,7 +37,7 @@ Board to host:
 TODO:
 - The security channel (the board challenges the CPLD on the Voodoo 2 card through the host) is
   never started, so the board never asks for a key load.
-- Verify the analog channel assignment and the DIP switch read (EEPROM address 0) against a board.
+- Verify the DIP switch read (EEPROM address 0) against a board.
 - Lamps, LEDs, coin meters and the force feedback DAC are not output.
 
 **************************************************************************************************/
@@ -97,7 +97,7 @@ static INPUT_PORTS_START( midway_diego )
 	PORT_DIPSETTING(    0x80, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
 
-	// wheel and throttle as named by the analog test (channel order assumed)
+	// wheel and throttle as named by the analog test
 	PORT_START("ADC0")
 	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_SENSITIVITY(100) PORT_KEYDELTA(10) PORT_NAME("Wheel")
 
@@ -257,8 +257,8 @@ void midway_diego_device::send_frame()
 	frame[0] = m_host_control & 0x50;
 	frame[1] = BIT(m_coin_count[2], 2) | (m_coin_count[3] << 1) | (m_coin_count[4] << 4);
 	frame[2] = m_coin_count[0] | (m_coin_count[1] << 3) | ((m_coin_count[2] & 0x03) << 6);
-	frame[3] = m_analog[1]->read();
-	frame[4] = m_analog[0]->read();
+	frame[3] = m_analog[0]->read();
+	frame[4] = m_analog[1]->read();
 	frame[5] = m_eeprom_data;
 	frame[6] = m_switches->read();
 	frame[7] = 0;
