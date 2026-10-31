@@ -8,6 +8,9 @@
 
 #include "corefloat.h"
 
+#include "interface/gpuengine.h"
+#include "osdepend.h"
+
 #include <glm/geometric.hpp>
 
 #define LOG_TGP (1U << 1)
@@ -19,6 +22,8 @@
 // Model 1 geometrizer TGP and rasterizer simulation
 enum { FRAC_SHIFT = 16 };
 enum { MOIRE = 0x01000000 };
+
+#include "model1_gpu.ipp"
 
 uint32_t model1_state::readi(int adr) const
 {
@@ -80,16 +85,20 @@ void model1_state::view_t::project_point(point_t *p) const
 {
 	p->xx = p->x / p->z;
 	p->yy = p->y / p->z;
-	p->s.x = xc + (p->xx * zoomx + viewx);
-	p->s.y = yc - (p->yy * zoomy + viewy);
+	p->fx = xc + (p->xx * zoomx + viewx);
+	p->fy = yc - (p->yy * zoomy + viewy);
+	p->s.x = p->fx;
+	p->s.y = p->fy;
 }
 
 void model1_state::view_t::project_point_direct(point_t *p) const
 {
 	p->xx = p->x /*/ p->z*/;
 	p->yy = p->y /*/ p->z*/;
-	p->s.x = xc + p->xx;
-	p->s.y = yc - p->yy;
+	p->fx = xc + p->xx;
+	p->fy = yc - p->yy;
+	p->s.x = p->fx;
+	p->s.y = p->fy;
 }
 
 void model1_state::draw_hline(bitmap_rgb32 &bitmap, int x1, int x2, int y, int color)
@@ -581,6 +590,12 @@ void model1_state::draw_quads(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 	view->x2 = std::min(view->x2, cliprect.right());
 	view->y1 = std::max(view->y1, cliprect.top());
 	view->y2 = std::min(view->y2, cliprect.bottom());
+
+	if (m_gpu_renderer && m_gpu_renderer->collecting())
+	{
+		m_gpu_renderer->add_batch(*view, &m_quadind[0], count);
+		count = 0;
+	}
 
 	for (int i = 0; i < count; i++)
 	{
@@ -1736,6 +1751,7 @@ void model1_state::video_start()
 	m_pointpt = &m_pointdb[0];
 	m_quadpt = &m_quaddb[0];
 	m_listctl[0] = m_listctl[1] = 0;
+	m_gpu_renderer.reset(new model1_renderer(*this));
 
 	m_clipfn[0].m_isclipped = &model1_state::fclip_isc_bottom;
 	m_clipfn[0].m_clip = &model1_state::fclip_clip_bottom;
@@ -1856,7 +1872,8 @@ uint32_t model1_state::screen_update_model1(screen_device &screen, bitmap_rgb32 
 
 	// 3D objects (0x01) and direct polys (0x02) render below the HUD tilemaps,
 	// sharing the per-viewport z-sort.
-	tgp_render(bitmap, cliprect, RENDER_BELOW_HUD);
+	if (!m_gpu_renderer || !m_gpu_renderer->render_below_hud(bitmap, cliprect))
+		tgp_render(bitmap, cliprect, RENDER_BELOW_HUD);
 
 	// HUD tilemaps (cat1): cockpit struts, grid lines, radar screen background.
 	m_tiles->draw(screen, bitmap, cliprect, 7, 0, 0);
