@@ -29,6 +29,7 @@ public:
 
 	template <typename T> void set_cpu_tag(T &&tag) { cpu.set_tag(std::forward<T>(tag)); }
 	void set_ram_size(int ram_size);
+	u32 *ram_base() { return ram.data(); }
 
 	void smi_act_w(int state);
 

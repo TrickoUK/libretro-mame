@@ -30,6 +30,8 @@
 
 #include "softfloat3/bochs_ext/softfloat3_ext.h"
 
+#include "multibyte.h"
+
 #define LOG_MSR             (1U << 1)
 #define LOG_INVALID_OPCODE  (1U << 2)
 #define LOG_LIMIT_CHECK     (1U << 3)
@@ -348,7 +350,8 @@ uint8_t i386_device::FETCH()
 	if(!translate_address(m_CPL,TR_FETCH,&address,&error))
 		PF_THROW(error);
 
-	value = mem_pr8(address & m_a20_mask);
+	address &= m_a20_mask;
+	value = fastram_hit(address, 1) ? m_fastram[address - m_fastram_start] : mem_pr8(address);
 #ifdef DEBUG_MISSING_OPCODE
 	m_opcode_bytes[m_opcode_bytes_length] = value;
 	m_opcode_bytes_length = (m_opcode_bytes_length + 1) & 15;
@@ -370,7 +373,7 @@ uint16_t i386_device::FETCH16()
 		if(!translate_address(m_CPL,TR_FETCH,&address,&error))
 			PF_THROW(error);
 		address &= m_a20_mask;
-		value = mem_pr16(address);
+		value = fastram_hit(address, 2) ? get_u16le(&m_fastram[address - m_fastram_start]) : mem_pr16(address);
 		m_eip += 2;
 		m_pc += 2;
 	}
@@ -392,7 +395,7 @@ uint32_t i386_device::FETCH32()
 			PF_THROW(error);
 
 		address &= m_a20_mask;
-		value = mem_pr32(address);
+		value = fastram_hit(address, 4) ? get_u32le(&m_fastram[address - m_fastram_start]) : mem_pr32(address);
 		m_eip += 4;
 		m_pc += 4;
 	}
@@ -408,6 +411,8 @@ uint8_t i386_device::READ8PL(uint32_t ea, uint8_t privilege)
 		PF_THROW(error);
 
 	address &= m_a20_mask;
+	if (fastram_hit(address, 1))
+		return m_fastram[address - m_fastram_start];
 	return m_program->read_byte(address);
 }
 
@@ -426,7 +431,7 @@ uint16_t i386_device::READ16PL(uint32_t ea, uint8_t privilege)
 			PF_THROW(error);
 
 		address &= m_a20_mask;
-		value = m_program->read_word(address);
+		value = fastram_hit(address, 2) ? get_u16le(&m_fastram[address - m_fastram_start]) : m_program->read_word(address);
 		break;
 
 	case 1:
@@ -460,7 +465,7 @@ uint32_t i386_device::READ32PL(uint32_t ea, uint8_t privilege)
 			PF_THROW(error);
 
 		address &= m_a20_mask;
-		value = m_program->read_dword(address);
+		value = fastram_hit(address, 4) ? get_u32le(&m_fastram[address - m_fastram_start]) : m_program->read_dword(address);
 		break;
 
 	case 1:
@@ -621,7 +626,10 @@ void i386_device::WRITE8PL(uint32_t ea, uint8_t privilege, uint8_t value)
 		PF_THROW(error);
 
 	address &= m_a20_mask;
-	m_program->write_byte(address, value);
+	if (fastram_hit(address, 1))
+		m_fastram[address - m_fastram_start] = value;
+	else
+		m_program->write_byte(address, value);
 }
 
 void i386_device::WRITE16PL(uint32_t ea, uint8_t privilege, uint16_t value)
@@ -637,7 +645,10 @@ void i386_device::WRITE16PL(uint32_t ea, uint8_t privilege, uint16_t value)
 			PF_THROW(error);
 
 		address &= m_a20_mask;
-		m_program->write_word(address, value);
+		if (fastram_hit(address, 2))
+			put_u16le(&m_fastram[address - m_fastram_start], value);
+		else
+			m_program->write_word(address, value);
 		break;
 
 	case 1:
@@ -667,7 +678,10 @@ void i386_device::WRITE32PL(uint32_t ea, uint8_t privilege, uint32_t value)
 			PF_THROW(error);
 
 		address &= m_a20_mask;
-		m_program->write_dword(address, value);
+		if (fastram_hit(address, 4))
+			put_u32le(&m_fastram[address - m_fastram_start], value);
+		else
+			m_program->write_dword(address, value);
 		break;
 
 	case 1:
@@ -2790,6 +2804,15 @@ void i386_device::i386_set_a20_line(int state)
 	vtlb_flush_dynamic();
 }
 
+void i386_device::set_fastram(offs_t start, offs_t end, void *base)
+{
+	if (machine().debug_flags & DEBUG_FLAG_ENABLED)
+		return;
+	m_fastram = reinterpret_cast<u8 *>(base);
+	m_fastram_start = start;
+	m_fastram_size = end - start + 1;
+}
+
 void i386_device::execute_run()
 {
 	int cycles = m_cycles;
@@ -3296,7 +3319,6 @@ void pentium2_device::device_start()
 
 void pentium2_device::device_reset()
 {
-	logerror("TMP CPU reset from pc=%08x cs=%04x eip=%08x smm=%d\n", m_pc, m_sreg[CS].selector, m_eip, m_smm);
 	zero_state();
 
 	m_sreg[CS].selector = 0xf000;

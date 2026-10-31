@@ -33,6 +33,10 @@ public:
 	// time in larger steps instead of executing every iteration
 	void set_rdtsc_idle_skip(bool enable) { m_rdtsc_idle_skip = enable; }
 
+	// speedup: plain RAM at physical addresses start-end is accessed directly through base
+	// (call once the RAM exists; ignored while the debugger is enabled, so watchpoints keep working)
+	void set_fastram(offs_t start, offs_t end, void *base);
+
 	uint64_t debug_segbase(int params, const uint64_t *param);
 	uint64_t debug_seglimit(int params, const uint64_t *param);
 	uint64_t debug_segofftovirt(int params, const uint64_t *param);
@@ -353,6 +357,11 @@ protected:
 	uint32_t m_cpu_version;
 	uint32_t m_brand_id;
 	uint32_t m_feature_flags;
+	u8 *m_fastram = nullptr;
+	offs_t m_fastram_start = 0;
+	offs_t m_fastram_size = 0;
+	bool fastram_hit(offs_t address, unsigned bytes) const { return m_fastram && ((address - m_fastram_start) <= (m_fastram_size - bytes)); }
+
 	uint64_t m_tsc; // time stamp counter, as an offset from the total number of cycles executed
 	uint64_t current_tsc() const { return m_tsc + total_cycles(); }
 	void set_tsc(uint64_t value) { m_tsc = value - total_cycles(); }
