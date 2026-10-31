@@ -56,6 +56,10 @@ Batocera.
     `zeus2_submit_poly` capture point, the `gpu_*` calls in the fast-clear, frame-write, frame-read and wave RAM / palette
     handlers, the `gpu_screen_update` call in `screen_update`, `device_post_load` and the reset call; `friend class zeus2_renderer`).
     The adapters are `zeus2_gpu.ipp` (included at the end of `zeus2.cpp`) and `zeus2_shader.h`. Fork-only, not for upstream.
+  - `src/mame/sega/model1.h`/`model1_v.cpp` (host-GPU hooks: `fx`/`fy` in `point_t`, the `model1_renderer` forward
+    declaration, `friend` and `m_gpu_renderer` with its deleter; the `fx`/`fy` stores in `project_point`/`project_point_direct`,
+    the `collecting()` hand-off in `draw_quads`, the `render_below_hud` call in `screen_update_model1`, the renderer creation in
+    `video_start` and the `#include "model1_gpu.ipp"` near the top). The rest is `model1_gpu.ipp`/`model1_shader.h`. Fork-only.
 - Upstream API changes that have broken fork/libretro code (check these first when a build fails after a sync):
   - `screen_device` is split per type (`screen_svg_device`, vector screens). Use
     `video_output_interface_enumerator`/`is_vector()`, not `screen_type()`. `configure()` takes an `attotime`.
