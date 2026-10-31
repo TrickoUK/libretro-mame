@@ -30,7 +30,7 @@
 class model1_renderer
 {
 public:
-	model1_renderer(model1_state &state) : m_state(state) { }
+	explicit model1_renderer(model1_state &state) : m_state(state) { }
 	~model1_renderer();
 
 	bool collecting() const { return m_collecting; }
@@ -53,6 +53,9 @@ private:
 	{
 		double x, y;
 	};
+
+	// moves a position on a pixel boundary into the pixel it truncates to
+	static constexpr double LINE_BIAS = 1.0 / 256.0;
 
 	bool init();
 	point2 screen_position(const model1_state::point_t &p) const;
@@ -199,11 +202,10 @@ void model1_renderer::add_polygon(const point2 *points, int count, u32 prim)
 // truncates to.
 void model1_renderer::add_line(point2 a, point2 b, u32 prim)
 {
-	constexpr double BIAS = 1.0 / 256.0;
-	a.x += BIAS;
-	a.y += BIAS;
-	b.x += BIAS;
-	b.y += BIAS;
+	a.x += LINE_BIAS;
+	a.y += LINE_BIAS;
+	b.x += LINE_BIAS;
+	b.y += LINE_BIAS;
 	const double dx = b.x - a.x;
 	const double dy = b.y - a.y;
 	point2 quad[4];
@@ -238,16 +240,19 @@ void model1_renderer::add_line(point2 a, point2 b, u32 prim)
 // right edge inclusive, on every row from the truncated top to the truncated bottom. The GPU covers pixel centres,
 // so the quad is grown by half a native pixel on each side (the convex hull of its corners moved to the corners of
 // a pixel-sized square) to cover the same pixels; thin strips keep their width and supersampling smooths the edges
-// of the grown outline.
+// of the grown outline. The small shift puts a position on a pixel boundary into the pixel it truncates to, as for
+// lines.
 void model1_renderer::add_covering_polygon(const point2 *points, u32 prim)
 {
 	point2 cand[16];
 	for (int i = 0; i < 4; i++)
 	{
-		cand[i * 4 + 0] = { points[i].x - 0.5, points[i].y - 0.5 };
-		cand[i * 4 + 1] = { points[i].x + 0.5, points[i].y - 0.5 };
-		cand[i * 4 + 2] = { points[i].x + 0.5, points[i].y + 0.5 };
-		cand[i * 4 + 3] = { points[i].x - 0.5, points[i].y + 0.5 };
+		const double x = points[i].x + LINE_BIAS;
+		const double y = points[i].y + LINE_BIAS;
+		cand[i * 4 + 0] = { x - 0.5, y - 0.5 };
+		cand[i * 4 + 1] = { x + 0.5, y - 0.5 };
+		cand[i * 4 + 2] = { x + 0.5, y + 0.5 };
+		cand[i * 4 + 3] = { x - 0.5, y + 0.5 };
 	}
 	std::sort(std::begin(cand), std::end(cand), [] (const point2 &a, const point2 &b) { return (a.x < b.x) || (a.x == b.x && a.y < b.y); });
 
