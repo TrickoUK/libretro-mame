@@ -55,7 +55,7 @@ private:
 	};
 
 	// moves a position on a pixel boundary into the pixel it truncates to
-	static constexpr double LINE_BIAS = 1.0 / 256.0;
+	static constexpr double EDGE_BIAS = 1.0 / 256.0;
 
 	bool init();
 	point2 screen_position(const model1_state::point_t &p) const;
@@ -202,10 +202,10 @@ void model1_renderer::add_polygon(const point2 *points, int count, u32 prim)
 // truncates to.
 void model1_renderer::add_line(point2 a, point2 b, u32 prim)
 {
-	a.x += LINE_BIAS;
-	a.y += LINE_BIAS;
-	b.x += LINE_BIAS;
-	b.y += LINE_BIAS;
+	a.x += EDGE_BIAS;
+	a.y += EDGE_BIAS;
+	b.x += EDGE_BIAS;
+	b.y += EDGE_BIAS;
 	const double dx = b.x - a.x;
 	const double dy = b.y - a.y;
 	point2 quad[4];
@@ -247,8 +247,8 @@ void model1_renderer::add_covering_polygon(const point2 *points, u32 prim)
 	point2 cand[16];
 	for (int i = 0; i < 4; i++)
 	{
-		const double x = points[i].x + LINE_BIAS;
-		const double y = points[i].y + LINE_BIAS;
+		const double x = points[i].x + EDGE_BIAS;
+		const double y = points[i].y + EDGE_BIAS;
 		cand[i * 4 + 0] = { x - 0.5, y - 0.5 };
 		cand[i * 4 + 1] = { x + 0.5, y - 0.5 };
 		cand[i * 4 + 2] = { x + 0.5, y + 0.5 };
