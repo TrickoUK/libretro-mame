@@ -624,7 +624,6 @@ protected:
 
 	// internal stuff
 	uint8_t               m_cache_dirty;                // true if we need to flush the cache
-	bool                  m_memory_handlers_generated = false;  // true once the memory accessor subroutines exist
 
 	// track what logical pages have compiled code
 	std::vector<uint8_t>  m_codepage_bits;              // 1 bit for each 4K page

@@ -1274,10 +1274,10 @@ void ppc_device::device_stop()
 
 void ppc_device::device_reset()
 {
-	if (m_drcuml && !m_memory_handlers_generated)
+	// the memory accessors are generated once, after the driver has added its fast RAM regions
+	if (!m_read8[0])
 	{
 		static_generate_memory_handlers();
-		m_memory_handlers_generated = true;
 		m_cache_dirty = true;
 	}
 
