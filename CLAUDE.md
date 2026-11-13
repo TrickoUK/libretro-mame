@@ -289,6 +289,11 @@ Full plan and rationale: `my-docs/upstream-pr-test-build.md`.
 - **Validate**: `./mame -validate <set>` for each affected set (the check upstream reviewers care about), then a boot with
   `-rompath /var/home/bazzite/Projects/mame-roms/roms -video none -sound none -nothrottle -seconds_to_run 60 <set>`
   (use `-video soft -snapshot_directory ... -str 60` for a visual check). Run `srcclean` on changed files first.
+- **Self-review**: after the standalone check passes, run the `mame-review` skill (`.claude/skills/mame-review/`, from
+  github.com/rb6502/mame-ai-tips, not an official mamedev tool) on `refs/upstream-tmp/master..<branch>`, fix Blocking and
+  Tidy findings, rerun. `srcclean` is built in the worktree with `make TOOLS=1` (same command plus `TOOLS=1 REGENIE=1`) and
+  lives at `.../mame-pr-test/srcclean`; it rewrites in place, so run it only on copies. The `mame-pr` skill drives the whole
+  sequence: branch, build/validate (3b), review (3c), push.
 - This checks portability and cleanliness of the software-rendered change only; input, light guns and host-GPU paths still
   need the libretro core. Run the binary inside the container (`-video soft` opens an SDL window on the desktop and works there).
 
