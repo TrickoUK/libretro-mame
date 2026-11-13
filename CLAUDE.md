@@ -266,6 +266,32 @@ distrobox enter mame-dev -- retroarch -v -L /var/home/bazzite/Projects/libretro/
   fast-forward would change the result (timing-, audio- or input-dependent checks, real-time speed measurements).
   From a save state there is no warm-up, and 30 seconds is enough for a before/after comparison.
 
+## Standalone upstream MAME check (before an upstream PR)
+
+To prove a PR branch is clean in plain MAME (no libretro OSD, no fork hooks), build it as standalone upstream MAME.
+Full plan and rationale: `my-docs/upstream-pr-test-build.md`.
+- **Container**: the `mame-pr-build` Distrobox (Fedora latest, created 2026-11-13, holds only the toolchain and SDL/Qt/ALSA
+  `-devel` packages; shares `$HOME`). Never install these on the Bazzite host. `mame-dev` is for RetroArch only; the older
+  `upstream-mame-build` box predates this setup and is not used for it.
+- **Tree**: the persistent worktree `/var/home/bazzite/Projects/upstream/mame-pr-test` (detached, from the upstream
+  checkout). Bring the PR branch in from this repo with
+  `git -C <worktree> fetch /var/home/bazzite/Projects/libretro/mame <branch> && git -C <worktree> checkout --detach FETCH_HEAD`; do not build in this repo or in the upstream checkout's own tree. Its objects
+  and a dedicated ccache (`~/.cache/ccache-mame-pr`) are kept, so later PRs only rebuild what changed.
+- **Build only the touched driver(s)** (minutes, not hours). Run with `run_in_background`, a `BUILD-EXIT=$?` marker and
+  `nice`; use `-j10` on an idle machine, `-j4`/`-j6` while a Batocera build is running:
+  ```sh
+  distrobox enter mame-pr-build -- bash -c 'cd /var/home/bazzite/Projects/upstream/mame-pr-test &&
+    export CCACHE_DIR=$HOME/.cache/ccache-mame-pr &&
+    nice -n 19 make SOURCES=src/mame/<mfg>/<driver>.cpp REGENIE=1 OVERRIDE_CC="ccache gcc" OVERRIDE_CXX="ccache g++" -j10'
+  ```
+  Output is `./mame` in the worktree root. `REGENIE=1` is needed whenever `SOURCES` changes. Add every driver file the change
+  touches (shared devices: also a second driver that uses them).
+- **Validate**: `./mame -validate <set>` for each affected set (the check upstream reviewers care about), then a boot with
+  `-rompath /var/home/bazzite/Projects/mame-roms/roms -video none -sound none -nothrottle -seconds_to_run 60 <set>`
+  (use `-video soft -snapshot_directory ... -str 60` for a visual check). Run `srcclean` on changed files first.
+- This checks portability and cleanliness of the software-rendered change only; input, light guns and host-GPU paths still
+  need the libretro core. Run the binary inside the container (`-video soft` opens an SDL window on the desktop and works there).
+
 ## Debugging / monitoring progress
 
 The graphical debugger is compiled out (`none.cpp`, `USE_QTDEBUG=0`). Use MAME's Lua console/plugins through two
