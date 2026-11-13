@@ -33,6 +33,9 @@ i82371eb_isa_device::i82371eb_isa_device(const machine_config &mconfig, const ch
 	, m_rtc(*this, "rtc")
 	, m_a20m_callback(*this)
 	, m_apmc_callback(*this)
+	, m_ext_gatea20(0)
+	, m_fast_gatea20(0)
+	, m_port92(0)
 {
 	// 0x060100 - Bridge device, PCI-to-ISA bridge
 	// TODO: above can change to 0x068000 if positive decode is used.
@@ -65,6 +68,9 @@ void i82371eb_isa_device::device_start()
 	save_item(NAME(m_rtc_index));
 	save_item(NAME(m_apmc));
 	save_item(NAME(m_apms));
+	save_item(NAME(m_ext_gatea20));
+	save_item(NAME(m_fast_gatea20));
+	save_item(NAME(m_port92));
 }
 
 void i82371eb_isa_device::device_reset()
@@ -80,6 +86,8 @@ void i82371eb_isa_device::device_reset()
 	m_rtc_index[0] = m_rtc_index[1] = 0;
 	m_apmc = 0;
 	m_apms = 0;
+	m_fast_gatea20 = 0;
+	m_port92 = 0;
 }
 
 

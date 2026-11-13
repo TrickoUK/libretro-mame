@@ -173,6 +173,7 @@ enum
 #define PPCDRC_STRICT_601_SELF_MODIFY 0x0010        // check for self-modifying code on 601 in the write handler (fairly large performance impact & does not work with RAM bypass)
 #define PPCDRC_MACOS_CACHE_HACK       0x0020        // HACK for Mac OS relying on data cache behavior; see ppccom_dcbz_check() for details
 #define PPCDRC_BUS_RETRY              0x0040        // honor cpu_device::retry_access() on aligned I/O instructions
+#define PPCDRC_BUS_ERROR              0x0080        // take a machine check exception when an access calls bus_error()
 
 // common sets of options
 #define PPCDRC_COMPATIBLE_OPTIONS   (PPCDRC_STRICT_VERIFY | PPCDRC_FLUSH_PC | PPCDRC_ACCURATE_SINGLES)
@@ -239,10 +240,13 @@ public:
 
 	void ppc_set_dcstore_callback(write32sm_delegate callback);
 
-	void set_drc_cache_size(size_t bytes) { m_cache.set_size(bytes); }
+	void set_drc_cache_size(size_t bytes) { m_drcuml.set_cache_size(bytes); }
 	void ppcdrc_set_options(uint32_t options);
+	void bus_error() noexcept { m_bus_error = true; }
 	void ppcdrc_add_fastram(offs_t start, offs_t end, uint8_t readonly, void *base);
 	void ppcdrc_add_hotspot(offs_t pc, uint32_t opcode, uint32_t cycles);
+
+	virtual void signal_external_write(offs_t physical_address, u32 length) override;
 
 	virtual TIMER_CALLBACK_MEMBER(decrementer_int_callback);
 	TIMER_CALLBACK_MEMBER(ppc4xx_buffered_dma_callback);
@@ -293,7 +297,7 @@ protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
 	virtual void device_stop() override ATTR_COLD;
-	virtual void device_post_load() override;
+	virtual void device_post_load() override ATTR_COLD;
 
 	// device_execute_interface overrides
 	virtual uint32_t execute_min_cycles() const noexcept override { return 1; }
@@ -607,9 +611,8 @@ protected:
 	void (*m_optable[64])(uint32_t);
 
 	// core state
-	drc_cache           m_cache;                        // pointer to the DRC code cache
-	std::unique_ptr<drcuml_state>      m_drcuml;        // DRC UML generator state
-	std::unique_ptr<frontend>          m_drcfe;         // pointer to the DRC front-end state
+	drcuml_state          m_drcuml;                     // DRC code generator state
+	std::unique_ptr<frontend> m_drcfe;                  // pointer to the DRC front-end
 	uint32_t              m_drcoptions;                 // configurable DRC options
 
 	// parameters for subroutines
@@ -629,6 +632,13 @@ protected:
 	std::vector<uint8_t>  m_codepage_bits;              // 1 bit for each 4K page
 	uint32_t              m_codewrite_skip_page = ~uint32_t(0);   // 601 write-watch: page to leave unmarked for one recompile
 
+	// For signal_external_write(): which physical pages have compiled code, and the
+	// logical pages of the blocks compiled from them.  Only tracked once another
+	// bus master has reported a write.
+	bool                  m_track_physical_code;
+	std::vector<uint8_t>  m_physpage_bits;              // 1 bit for each 4K page
+	std::unordered_map<uint32_t, std::vector<uint32_t>> m_physpage_logical;
+
 	// Code reuse cache.  The PCI PowerMac 68K DRC frequently regenerates the exact
 	// same code at the exact same address, so keep a cache of translations.  Entries
 	// record the physical address and a signature over every word of the sequence, and
@@ -640,7 +650,7 @@ protected:
 	// so the checks are recorded in m_entry_checks and re-verified before the code is handed back.
 	struct reuse_entry
 	{
-		drccodeptr code;
+		drcuml_state::hash_codeptr code;
 		offs_t physpc;
 		uint32_t sig;
 		uint32_t checkfirst; // first of this block's entry checks in m_entry_checks
@@ -661,6 +671,7 @@ protected:
 	void note_code_page(uint32_t page) { if (page != m_codewrite_skip_page) { m_codepage_bits[page >> 3] |= 1 << (page & 7); m_core->m_codepage_any = 1; } }
 	bool code_page_has_code(offs_t addr) const { uint32_t const page = (addr >> 12) & 0xfffff; return BIT(m_codepage_bits[page >> 3], page & 7); }
 	bool invalidate_code_range(offs_t start, offs_t end);
+	void note_physical_code(const opcode_desc *desclist);
 
 	// 603-family instruction cache flash invalidate (HID0[ICFI]): code can be
 	// replaced by writers the DRC never sees (DMA, another CPU), and software
@@ -689,6 +700,8 @@ protected:
 	uml::code_handle *   m_nocode;                     // nocode exception handler
 	uml::code_handle *   m_out_of_cycles;              // out of cycles exception handler
 	uml::code_handle *   m_bus_retry;                  // unwind an I/O instruction the bus asked us to redo
+	bool                 m_bus_error = false;          // the bus ended the current access with an error
+	bool                 m_checkstop = false;
 	uml::code_handle *   m_tlb_mismatch;               // tlb mismatch handler
 	uml::code_handle *   m_swap_tgpr;                  // swap TGPR handler
 	uml::code_handle *   m_lsw[8][32];                 // lsw entries
@@ -748,6 +761,7 @@ protected:
 		uint32_t            cycles;                     // accumulated cycles
 		uint8_t             checkints;                  // need to check interrupts before next instruction
 		uint8_t             checksoftints;              // need to check software interrupts before next instruction
+		bool                checkbuserror;              // take a machine check if the current instruction's access bus-errored
 		uml::code_label     labelnum;                   // index for local labels
 	};
 
@@ -771,7 +785,7 @@ protected:
 	void ppc4xx_spu_update_irq_states();
 	void ppc4xx_spu_rx_data(uint8_t data);
 	void ppc4xx_spu_timer_reset();
-	void alloc_handle(drcuml_state *drcuml, uml::code_handle **handleptr, const char *name);
+	void alloc_handle(uml::code_handle **handleptr, const char *name);
 	void load_fast_iregs(drcuml_block &block);
 	void save_fast_iregs(drcuml_block &block);
 	void load_fast_fregs(drcuml_block &block);
@@ -797,6 +811,7 @@ protected:
 	void generate_set_fmod(drcuml_block &block);
 	void generate_update_mode(drcuml_block &block);
 	void generate_update_cycles(drcuml_block &block, compiler_state *compiler, uml::parameter param, bool allow_exception);
+	void generate_bus_error_check(drcuml_block &block, compiler_state *compiler, uml::parameter param);
 	void generate_recompile_if(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, uml::parameter flag, int exitcode);
 	void generate_translation_check(drcuml_block &block, compiler_state *compiler, const opcode_desc *seqhead, uint8_t mode);
 	void generate_checksum_block(drcuml_block &block, compiler_state *compiler, const opcode_desc *seqhead, const opcode_desc *seqlast);
