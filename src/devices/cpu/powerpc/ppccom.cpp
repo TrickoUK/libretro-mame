@@ -245,10 +245,10 @@ ppc_device::ppc_device(
 	, m_dcstore_cb(*this)
 	, m_ext_dma_read_cb(*this)
 	, m_ext_dma_write_cb(*this)
-	, m_cache(CACHE_SIZE + sizeof(internal_ppc_state))
-	, m_drcuml(nullptr)
+	, m_drcuml(*this, CACHE_SIZE + sizeof(internal_ppc_state))
 	, m_drcfe(nullptr)
 	, m_drcoptions(0)
+	, m_track_physical_code(false)
 	, m_reservation_mask(~uint32_t(reservation_size - 1))
 	, m_dasm(powerpc_disassembler())
 {
@@ -572,13 +572,17 @@ static inline int is_snan_double(double x)
 
 void ppc_device::device_start()
 {
+	/* initialize the UML generator */
+	uint32_t flags = 0;
+	m_drcuml.initialize(flags, 8, 32, 2, COMPILE_FORWARDS_BYTES);
+
 	// allocate the core from the near cache
-	m_cache.allocate_cache(mconfig().options().drc_rwx());
-	m_core = m_cache.alloc_near<internal_ppc_state>();
+	m_core = m_drcuml.cache_alloc_near<internal_ppc_state>();
 	memset(m_core, 0, sizeof(internal_ppc_state));
 
 	// init bitmap of which logical pages have compiled code
 	m_codepage_bits.assign(CODEPAGE_SIZE, 0);    // 0x1'0000'0000 / 4096 = 0x10'0000
+	m_physpage_bits.assign(CODEPAGE_SIZE, 0);
 
 	m_entry = nullptr;
 	m_nocode = nullptr;
@@ -792,6 +796,7 @@ void ppc_device::device_start()
 
 	/* register for save states */
 	save_item(NAME(m_core->pc));
+	save_item(NAME(m_checkstop));
 	save_item(NAME(m_core->r));
 	save_item(NAME(m_core->f));
 	save_item(NAME(m_core->cr));
@@ -876,54 +881,50 @@ void ppc_device::device_start()
 
 	set_icountptr(m_core->icount);
 
-	uint32_t flags = 0;
-	/* initialize the UML generator */
-	m_drcuml = std::make_unique<drcuml_state>(*this, m_cache, flags, 8, 32, 2, COMPILE_FORWARDS_BYTES);
-
 	/* add symbols for our stuff */
-	m_drcuml->symbol_add(&m_core->pc, sizeof(m_core->pc), "pc");
-	m_drcuml->symbol_add(&m_core->icount, sizeof(m_core->icount), "icount");
+	m_drcuml.symbol_add(&m_core->pc, sizeof(m_core->pc), "pc");
+	m_drcuml.symbol_add(&m_core->icount, sizeof(m_core->icount), "icount");
 	for (int regnum = 0; regnum < 32; regnum++)
 	{
 		char buf[10];
 		snprintf(buf, 10, "r%d", regnum);
-		m_drcuml->symbol_add(&m_core->r[regnum], sizeof(m_core->r[regnum]), buf);
+		m_drcuml.symbol_add(&m_core->r[regnum], sizeof(m_core->r[regnum]), buf);
 		snprintf(buf, 10, "fpr%d", regnum);
-		m_drcuml->symbol_add(&m_core->f[regnum], sizeof(m_core->f[regnum]), buf);
+		m_drcuml.symbol_add(&m_core->f[regnum], sizeof(m_core->f[regnum]), buf);
 	}
 	for (int regnum = 0; regnum < 8; regnum++)
 	{
 		char buf[10];
 		snprintf(buf, 10, "cr%d", regnum);
-		m_drcuml->symbol_add(&m_core->cr[regnum], sizeof(m_core->cr[regnum]), buf);
+		m_drcuml.symbol_add(&m_core->cr[regnum], sizeof(m_core->cr[regnum]), buf);
 	}
-	m_drcuml->symbol_add(&m_core->xerso, sizeof(m_core->xerso), "xerso");
-	m_drcuml->symbol_add(&m_core->fpscr, sizeof(m_core->fpscr), "fpscr");
-	m_drcuml->symbol_add(&m_core->msr, sizeof(m_core->msr), "msr");
-	m_drcuml->symbol_add(&m_core->sr, sizeof(m_core->sr), "sr");
-	m_drcuml->symbol_add(&m_core->spr[SPR_XER], sizeof(m_core->spr[SPR_XER]), "xer");
-	m_drcuml->symbol_add(&m_core->spr[SPR_LR], sizeof(m_core->spr[SPR_LR]), "lr");
-	m_drcuml->symbol_add(&m_core->spr[SPR_CTR], sizeof(m_core->spr[SPR_CTR]), "ctr");
-	m_drcuml->symbol_add(&m_core->spr, sizeof(m_core->spr), "spr");
-	m_drcuml->symbol_add(&m_dcr, sizeof(m_dcr), "dcr");
-	m_drcuml->symbol_add(&m_core->param0, sizeof(m_core->param0), "param0");
-	m_drcuml->symbol_add(&m_core->param1, sizeof(m_core->param1), "param1");
-	m_drcuml->symbol_add(&m_core->irq_pending, sizeof(m_core->irq_pending), "irq_pending");
-	m_drcuml->symbol_add(&m_core->mode, sizeof(m_core->mode), "mode");
-	m_drcuml->symbol_add(&m_core->arg0, sizeof(m_core->arg0), "arg0");
-	m_drcuml->symbol_add(&m_arg1, sizeof(m_arg1), "arg1");
-	m_drcuml->symbol_add(&m_core->updateaddr, sizeof(m_core->updateaddr), "updateaddr");
-	m_drcuml->symbol_add(&m_core->swcount, sizeof(m_core->swcount), "swcount");
-	m_drcuml->symbol_add(&m_core->tempaddr, sizeof(m_core->tempaddr), "tempaddr");
-	m_drcuml->symbol_add(&m_core->tempdata, sizeof(m_core->tempdata), "tempdata");
-	m_drcuml->symbol_add(&m_core->fp0, sizeof(m_core->fp0), "fp0");
-	m_drcuml->symbol_add(&m_fpmode, sizeof(m_fpmode), "fpmode");
-	m_drcuml->symbol_add(&m_sz_cr_table, sizeof(m_sz_cr_table), "sz_cr_table");
-	m_drcuml->symbol_add(&m_cmp_cr_table, sizeof(m_cmp_cr_table), "cmp_cr_table");
-	m_drcuml->symbol_add(&m_cmpl_cr_table, sizeof(m_cmpl_cr_table), "cmpl_cr_table");
-	m_drcuml->symbol_add(&m_fcmp_cr_table, sizeof(m_fcmp_cr_table), "fcmp_cr_table");
-	m_drcuml->symbol_add(&m_core->reserve, sizeof(m_core->reserve), "reserve");
-	m_drcuml->symbol_add(&m_core->reserve_address, sizeof(m_core->reserve_address), "reserve_address");
+	m_drcuml.symbol_add(&m_core->xerso, sizeof(m_core->xerso), "xerso");
+	m_drcuml.symbol_add(&m_core->fpscr, sizeof(m_core->fpscr), "fpscr");
+	m_drcuml.symbol_add(&m_core->msr, sizeof(m_core->msr), "msr");
+	m_drcuml.symbol_add(&m_core->sr, sizeof(m_core->sr), "sr");
+	m_drcuml.symbol_add(&m_core->spr[SPR_XER], sizeof(m_core->spr[SPR_XER]), "xer");
+	m_drcuml.symbol_add(&m_core->spr[SPR_LR], sizeof(m_core->spr[SPR_LR]), "lr");
+	m_drcuml.symbol_add(&m_core->spr[SPR_CTR], sizeof(m_core->spr[SPR_CTR]), "ctr");
+	m_drcuml.symbol_add(&m_core->spr, sizeof(m_core->spr), "spr");
+	m_drcuml.symbol_add(&m_dcr, sizeof(m_dcr), "dcr");
+	m_drcuml.symbol_add(&m_core->param0, sizeof(m_core->param0), "param0");
+	m_drcuml.symbol_add(&m_core->param1, sizeof(m_core->param1), "param1");
+	m_drcuml.symbol_add(&m_core->irq_pending, sizeof(m_core->irq_pending), "irq_pending");
+	m_drcuml.symbol_add(&m_core->mode, sizeof(m_core->mode), "mode");
+	m_drcuml.symbol_add(&m_core->arg0, sizeof(m_core->arg0), "arg0");
+	m_drcuml.symbol_add(&m_arg1, sizeof(m_arg1), "arg1");
+	m_drcuml.symbol_add(&m_core->updateaddr, sizeof(m_core->updateaddr), "updateaddr");
+	m_drcuml.symbol_add(&m_core->swcount, sizeof(m_core->swcount), "swcount");
+	m_drcuml.symbol_add(&m_core->tempaddr, sizeof(m_core->tempaddr), "tempaddr");
+	m_drcuml.symbol_add(&m_core->tempdata, sizeof(m_core->tempdata), "tempdata");
+	m_drcuml.symbol_add(&m_core->fp0, sizeof(m_core->fp0), "fp0");
+	m_drcuml.symbol_add(&m_fpmode, sizeof(m_fpmode), "fpmode");
+	m_drcuml.symbol_add(&m_sz_cr_table, sizeof(m_sz_cr_table), "sz_cr_table");
+	m_drcuml.symbol_add(&m_cmp_cr_table, sizeof(m_cmp_cr_table), "cmp_cr_table");
+	m_drcuml.symbol_add(&m_cmpl_cr_table, sizeof(m_cmpl_cr_table), "cmpl_cr_table");
+	m_drcuml.symbol_add(&m_fcmp_cr_table, sizeof(m_fcmp_cr_table), "fcmp_cr_table");
+	m_drcuml.symbol_add(&m_core->reserve, sizeof(m_core->reserve), "reserve");
+	m_drcuml.symbol_add(&m_core->reserve_address, sizeof(m_core->reserve_address), "reserve_address");
 
 	/* initialize the front-end helper */
 	m_drcfe = std::make_unique<frontend>(*this, COMPILE_BACKWARDS_BYTES, COMPILE_FORWARDS_BYTES, SINGLE_INSTRUCTION_MODE ? 1 : COMPILE_MAX_SEQUENCE);
@@ -939,7 +940,7 @@ void ppc_device::device_start()
 	if (!DISABLE_FAST_REGISTERS)
 	{
 		drcbe_info beinfo;
-		m_drcuml->get_backend_info(beinfo);
+		m_drcuml.get_backend_info(beinfo);
 		if (beinfo.direct_iregs > 5)
 			m_regmap[0] = uml::I5;
 		if (beinfo.direct_iregs > 6)
@@ -975,6 +976,7 @@ void ppc_device::device_start()
 		/* append exception handlers for various types */
 		static_generate_exception(EXCEPTION_RESET,     true,  "exception_reset");
 		static_generate_exception(EXCEPTION_MACHCHECK, true,  "exception_machine_check");
+		static_generate_exception(EXCEPTION_MACHCHECK, false, "exception_machine_check_norecover");
 		static_generate_exception(EXCEPTION_DSI,       true,  "exception_dsi");
 		static_generate_exception(EXCEPTION_ISI,       true,  "exception_isi");
 		static_generate_exception(EXCEPTION_EI,        true,  "exception_ei");
@@ -1247,23 +1249,39 @@ void ppc_device::state_string_export(const device_state_entry &entry, std::strin
 
 
 /*-------------------------------------------------
-    device_post_load - a state load rewrites RAM
-    behind the DRC's back, so blocks compiled from
-    the old contents must not be reused
--------------------------------------------------*/
-
-void ppc_device::device_post_load()
-{
-	m_cache_dirty = true;
-}
-
-
-/*-------------------------------------------------
     ppccom_exit - common cleanup/exit
 -------------------------------------------------*/
 
 void ppc_device::device_stop()
 {
+}
+
+
+/*-------------------------------------------------
+    device_post_load - rebuild the DRC mode,
+    which is only updated when the MSR changes
+-------------------------------------------------*/
+
+void ppc_device::device_post_load()
+{
+	// same as generate_update_mode()
+	const u32 msr = m_core->msr;
+	u32 mode = (m_flavor == PPC_MODEL_601) ? BIT(m_core->spr[SPR603_HID0], 3) : (msr & MSR_LE);
+
+	if ((m_cap & PPCCAP_OEA) || (m_flavor == PPC_MODEL_403GCX))
+	{
+		mode |= (msr & MSROEA_DR) ? 0x02 : 0;
+	}
+
+	if (m_cap & PPCCAP_4XX)
+	{
+		mode |= (msr & MSR4XX_PE) ? 0x02 : 0;
+	}
+	mode |= (msr & MSR_PR) ? 0x04 : 0;
+	m_core->mode = mode;
+
+	// the compiled code may be for different memory contents
+	m_cache_dirty = true;
 }
 
 
@@ -1274,6 +1292,8 @@ void ppc_device::device_stop()
 
 void ppc_device::device_reset()
 {
+	m_checkstop = false;
+
 	// the memory accessors are generated once, after the driver has added its fast RAM regions
 	if (!m_read8[0])
 	{
@@ -1326,6 +1346,14 @@ void ppc_device::device_reset()
 		// initialize the 603e HID1 register; PC0-PC3 are a read-only view of the PLL_CFG pins
 		// PLL_CFG0-3 encodings indexed by twice the CPU:bus ratio (0 = no such setting)
 		static constexpr uint8_t pll_cfg[13] = {0, 0, 0x1, 0xc, 0x4, 0x6, 0x8, 0xe, 0xa, 0x7, 0xb, 0x9, 0xd};
+		uint32_t const ratio = m_system_clock ? ((uint64_t(clock()) * 4 + m_system_clock) / (uint64_t(m_system_clock) * 2)) : 0;
+		m_core->spr[SPR603_HID1] = (ratio < std::size(pll_cfg)) ? (uint32_t(pll_cfg[ratio]) << 28) : 0;
+	}
+	else if (m_flavor == PPC_MODEL_750)
+	{
+		// The 740/750 HID1 register is different from the 603e
+		// Source: MPC750 hardware specifications, table 17 (indexed by twice the CPU:bus ratio)
+		static constexpr uint8_t pll_cfg[17] = {0, 0, 0x3, 0, 0, 0, 0x8, 0xe, 0xa, 0x7, 0xb, 0x9, 0xd, 0x5, 0x2, 0x1, 0xc};
 		uint32_t const ratio = m_system_clock ? ((uint64_t(clock()) * 4 + m_system_clock) / (uint64_t(m_system_clock) * 2)) : 0;
 		m_core->spr[SPR603_HID1] = (ratio < std::size(pll_cfg)) ? (uint32_t(pll_cfg[ratio]) << 28) : 0;
 	}
@@ -1753,7 +1781,7 @@ bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 
 		if (BIT(m_codepage_bits[page >> 3], page & 7))
 		{
-			m_drcuml->hash_invalidate_range(page << 12, (page << 12) | 0xfff);
+			m_drcuml.hash_invalidate_range(page << 12, (page << 12) | 0xfff);
 			m_code_snapshots.erase(page);
 			invalidated = true;
 		}
@@ -2509,6 +2537,16 @@ void ppc_device::ppccom_execute_mtspr()
 				return;
 			case SPR4XX_TBHI:
 				set_timebase((get_timebase() & ~u64(0x00000000ffffffffU)) | ((uint64_t)(m_core->param1 & 0x00ffffff) << 32));
+				return;
+		}
+	}
+
+	if (m_flavor == PPC_MODEL_750)
+	{
+		switch (m_core->param0)
+		{
+			/* read-only */
+			case SPR603_HID1:
 				return;
 		}
 	}

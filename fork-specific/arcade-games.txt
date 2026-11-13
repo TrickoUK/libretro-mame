@@ -97,9 +97,9 @@
 4enlineb
 4enraya
 4enrayaa
+4funin1
 4in1
 4in1a
-4in1b
 4in1boot
 4roses
 4rosesa
@@ -1742,7 +1742,6 @@ citybomb
 citybombj
 citycon
 citycona
-cjbq
 cjddz
 cjddz213cn
 cjddz215cn
@@ -1753,7 +1752,6 @@ cjddzp206cn
 cjddzps
 cjddzs
 cjddzsa
-cjddzsp
 cjdh2
 cjdh2a
 cjdh2b
@@ -1763,7 +1761,6 @@ cjdh6th
 cjdh6tha
 cjdlz
 cjdn
-cjgdy
 cjjl
 cjlddz
 cjsjh
@@ -2234,7 +2231,6 @@ cyvernj
 czeroize
 dacholer
 dadandrn
-dahuaxy
 dai2kaku
 dai3wksi
 daikaiju
@@ -3844,7 +3840,6 @@ galxwars
 galxwars2
 galxwarst
 galxwarst2
-gamebox
 gamecst2
 gamecstl
 gametngk
@@ -4557,6 +4552,7 @@ gunforcej
 gunforceu
 gunfront
 gunfrontj
+gunfrontup
 gunhard
 gunhohki
 gunlock
@@ -4633,6 +4629,8 @@ halleysc87
 halleyscj
 halleyscja
 halleyscjp
+hallow2nd
+hallow2nda
 hamaway
 hamboy
 hammer
@@ -4795,8 +4793,6 @@ hitme1
 hitnmiss
 hitnmiss2
 hkuranai
-hlddz
-hlqqq
 hmcompm2
 hmcompmx
 hmgeo
@@ -4855,6 +4851,7 @@ hotd4a
 hotdex
 hotdo
 hotdogst
+hotdogstbl
 hotdp
 hotgmkmp
 hotmemry
@@ -4912,7 +4909,6 @@ hunchbkg
 hunchbks
 hunchbks2
 huncholy
-huoqilin
 hustle
 hustler
 hustlerb
@@ -4947,7 +4943,6 @@ hydrap2
 hydrthnd
 hydrthnd100d
 hydrthnd101b
-hyleyuan
 hypbbc2p
 hypbbc2pk
 hyperath
@@ -5182,7 +5177,6 @@ jetwavej
 jgakuen
 jgakuen1
 jhg3d
-jhzb
 jigkmgri
 jigkmgria
 jin
@@ -5293,6 +5287,7 @@ jumppop
 jumppope
 jumpshot
 jumpshotp
+junghero
 jungleby
 jungleh
 junglehbr
@@ -5308,7 +5303,6 @@ jungsub
 junofrst
 junofrstg
 jurassic99
-jxry
 jyangoku
 jzth
 kabukikl
@@ -5827,8 +5821,6 @@ lgpalt
 lgtnfght
 lgtnfghta
 lgtnfghtu
-lhfy
-lhtb
 lhzb3in1
 lhzb4
 lhzb4dhb
@@ -6460,7 +6452,6 @@ missw96b
 missw96c
 mizubaku
 mjleague
-mjzhizun
 mk
 mk2
 mk2chal
@@ -7156,11 +7147,15 @@ nova2001h
 nova2001u
 npcartv1
 npcramen
+npcramen2
+npdalmtn
 npeurver
 npeurver2
 npfpit
 npft
 npmillen
+npminani
+npobake
 npotogib
 nppopeye
 nprinces
@@ -7173,8 +7168,10 @@ npskv
 npsprg98
 npsprgv4
 npspscv
+npspstc
 npssr2
 npusagif
+npwint97
 nrallyx
 nrallyxb
 nratechu
@@ -7802,6 +7799,8 @@ photoply99nl
 photoply99sp
 photopsxsp
 photopsxusp
+photosafa
+photosafaa
 photoy2k
 photoy2k102j
 photoy2k103j
@@ -8307,7 +8306,6 @@ qberttst
 qbtrktst
 qcrayon2
 qczl
-qhzb
 qiaojidm
 qix
 qix2
@@ -9813,7 +9811,6 @@ sliver
 slivera
 slmdunkj
 slmdunkjd
-slqzsp
 slrasslt
 slrassltj
 slrassltj1
@@ -10603,6 +10600,7 @@ sundance
 supbtime
 supbtimea
 supbtimej
+supcolr2
 supcrash
 supduck
 super21
@@ -10745,7 +10743,6 @@ swtrilgya
 swtrilgyp
 sxevious
 sxeviousj
-sydh
 sys246
 sys256
 sys573
@@ -11611,11 +11608,6 @@ undrfirej
 undrfireu
 uniwars
 uniwarsa
-unkfr004
-unkfr004a
-unkfr004b
-unkfr004c
-unkfr009
 unkh8gam
 unkhaiwei
 unkhomin
@@ -12414,8 +12406,6 @@ xybots1
 xybotsf
 xybotsg
 xycs
-xyddz
-xydn
 xyonix
 xypdk
 xyxcxysj
@@ -12434,7 +12424,8 @@ yellowcbb
 yellowcbj
 yesnoj
 yiear
-yiear2
+yiearg
+yieari
 yieartf
 yorijori
 yosakdon
@@ -12517,7 +12508,6 @@ zingzipbl
 zintrckb
 zipzap
 zipzapa
-zjddz
 znpwfv
 znpwfvt
 zoar

@@ -642,6 +642,7 @@ igs/igs023_video.cpp  // [HELPER]
 igs/igs025.cpp  // [HELPER]
 igs/igs027a.cpp  // [HELPER]
 igs/igs028.cpp  // [HELPER]
+igs/igs036.cpp  // [HELPER]
 igs/igs036crypt.cpp  // [HELPER]
 igs/igs_fear.cpp
 igs/igs_m027.cpp
@@ -1050,6 +1051,7 @@ misc/limenko.cpp
 misc/luckybal.cpp
 misc/magicfly.cpp
 misc/magictg.cpp
+misc/magictg_pinkeye.cpp  // [HELPER]
 misc/magtouch.cpp
 misc/malzak.cpp
 misc/marywu.cpp
@@ -1700,7 +1702,6 @@ skeleton/design.cpp
 skeleton/digilog_kbd.cpp  // [HELPER]
 skeleton/elcirculo.cpp
 skeleton/flashvga2.cpp
-skeleton/gamebox.cpp
 skeleton/happyvideo.cpp
 skeleton/highway_m68k.cpp
 skeleton/iam2.cpp
@@ -2204,6 +2205,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -baddog
 -baile
 -bakatono
+-bakuhato
 -bakuhatu
 -ballch
 -bananadr
@@ -2346,7 +2348,11 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -cj3play
 -cjbj
 -cjbj122
+-cjbq
+-cjddzsp
+-cjddzsp122cn
 -cjffruit
+-cjgdy
 -cjplus
 -cjsxp
 -club90s
@@ -2455,6 +2461,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -cworld2j
 -cworld2ja
 -cworld2jb
+-dahuaxy
 -daichuka
 -daichukaa
 -daichukab
@@ -2595,6 +2602,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -goldnpkf
 -goldnpkg
 -goldnpkh
+-goldnpki
 -goldnpkr
 -goldpyr
 -goldpyru
@@ -2678,6 +2686,8 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -hjingi
 -hjingia
 -hkagerou
+-hlddz
+-hlqqq
 -hnageman
 -hnkochou
 -hnoridur
@@ -2701,6 +2711,8 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -hrtthrob
 -htengoku
 -htsubaki
+-huoqilin
+-hyleyuan
 -hyouban
 -hypreac2
 -hypreact
@@ -2762,6 +2774,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -jantouki
 -janyuki
 -jestmagi
+-jhzb
 -jinpaish
 -jituroku
 -jjpoker
@@ -2774,6 +2787,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -jokercar
 -jokercrd
 -jokercrdf
+-jokerush
 -jokpoker
 -jokpokera
 -jokpokerb
@@ -2825,6 +2839,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -junai2
 -jungjuic
 -jungleani
+-jxry
 -k7_olym
 -k7_olym30
 -kaguya
@@ -2882,6 +2897,8 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -lhdmg
 -lhdmgp
 -lhdmgp200c3m
+-lhfy
+-lhtb
 -lhzb3
 -lhzb3106c5m
 -lhzb3p
@@ -3085,6 +3102,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -mjxysl
 -mjyougo
 -mjzb
+-mjzhizun
 -mkeibaou
 -mkoiuraa
 -mladyhtr
@@ -3213,6 +3231,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -petshopa
 -phantpay
 -phantpyc
+-phnxjokr
 -pitboss2
 -pitbossm
 -pitbossma
@@ -3223,6 +3242,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -pitbosssb
 -pitbosssc
 -pitbosssm
+-pk5_07sb
 -pkgnsh
 -pkgnshdx
 -pkladies
@@ -3296,6 +3316,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -qgakumon
 -qgh
 -qgundam
+-qhzb
 -qiwang
 -qjinsei
 -qlgs
@@ -3478,6 +3499,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -slotouji
 -slotoujia
 -slqz3
+-slqzsp
 -slvrwolf
 -smartoss
 -smatch03
@@ -3540,6 +3562,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -swisspkr
 -sxyreac2
 -sxyreact
+-sydh
 -taiwanmb
 -tarzan2
 -tbss
@@ -3573,6 +3596,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -topbana
 -torarech
 -tortufam
+-touksysp
 -tourpgum
 -touryuu
 -touryuua
@@ -3685,6 +3709,14 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -witchcrdj
 -witchgme
 -witchgmea
+-witchgmeb
+-witchgmec
+-witchgmed
+-witchgmee
+-witchgmef
+-witchgmeg
+-witchgmeh
+-witchgmei
 -witchjol
 -witchryl
 -wizways
@@ -3716,6 +3748,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -wldwitcht
 -wldwitchu
 -wldwitchv
+-wldwitchw
 -wnpost
 -wofch
 -wpksoc
@@ -3741,6 +3774,8 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -wupndownc
 -wupndownd
 -xsedae
+-xyddz
+-xydn
 -xymg
 -xymga
 -yarunara
@@ -3752,4 +3787,5 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -yuyugogo
 -zhongguo
 -zidav630e
+-zjddz
 -zokumahj
