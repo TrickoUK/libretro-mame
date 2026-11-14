@@ -33,10 +33,16 @@ Batocera.
     main tree (`git merge <task>`), `git -C ../mame-task switch --detach arcade-focused` and delete the branch.
   - PR branch: created in `mame-pr` (the `mame-pr` skill does this); it is built only in the standalone tree, see
     "Standalone upstream MAME check". An upstream-based checkout in a tree with a build would invalidate that build.
-  - Long-running work gets its own worktree with its own build (`git worktree add ../mame-<name> <branch>`).
+  - Long-running work gets its own worktree with its own build: `wt switch --create <branch>` (worktrunk; makes
+    `../mame-<branch>` from `arcade-focused` and links it up), or `git worktree add ../mame-<name> <branch>` followed
+    by `my-docs/tools/worktree_setup.sh <path>`.
+  - **worktrunk** (`wt`, config in `~/.config/worktrunk/config.toml`, not in this repo): its default branch is set
+    to `arcade-focused`; `wt list` shows every tree; `wt merge` is configured as a plain merge commit that keeps
+    the worktree (no squash, rebase or auto-commit). `wt remove` deletes the worktree, its build and a merged
+    branch: never run it on `mame-task`, `mame-pr` or a tree whose build is still wanted.
   - Each worktree has `my-docs` and `.claude/skills` as symlinks to the main tree's (`/my-docs` is in
     `.git/info/exclude`), a copy of `.claude/settings.local.json`, and its Claude project memory directory
-    symlinked to the main tree's. Set a new worktree up the same way. Tools under `my-docs/tools` use the main
+    symlinked to the main tree's (`my-docs/tools/worktree_setup.sh` does all of it and worktrunk runs it for new trees). Tools under `my-docs/tools` use the main
     tree's absolute paths by default: pass the worktree's own core (`CORE=`, `--core`) when testing its build.
   - Build, genie and test commands in this file run from the root of whichever tree is being built.
 - Syncs use the `sync-mame` skill. Always a full `git merge` of the upstream tip (never cherry-picks), so SHAs stay
