@@ -20,6 +20,25 @@ Batocera.
 
 - **`arcade-focused`** is the long-term branch for all of this fork's work. **`master`** only tracks
   libretro/mame upstream. Short task branches get merged into `arcade-focused` and then deleted.
+- **Worktrees** (all under `/var/home/bazzite/Projects/libretro/`, one branch per tree, so work can run in parallel):
+
+  | Tree | Holds | Build |
+  |---|---|---|
+  | `mame` (this repo's main tree) | `arcade-focused`, always. Never switch it to another branch. | yes |
+  | `mame-task` | the current short task branch; detached at `arcade-focused` when idle | yes, reused between tasks |
+  | `mame-pr` | the current upstream PR branch; detached at `refs/upstream-tmp/master` when idle | never (source only) |
+  | `mame-hydro` | `hydro` (long-running Hydro Thunder speed work) | yes |
+
+  - Short task: `git -C ../mame-task switch -c <task> arcade-focused`, work and build there, then merge from the
+    main tree (`git merge <task>`), `git -C ../mame-task switch --detach arcade-focused` and delete the branch.
+  - PR branch: created in `mame-pr` (the `mame-pr` skill does this); it is built only in the standalone tree, see
+    "Standalone upstream MAME check". An upstream-based checkout in a tree with a build would invalidate that build.
+  - Long-running work gets its own worktree with its own build (`git worktree add ../mame-<name> <branch>`).
+  - Each worktree has `my-docs` and `.claude/skills` as symlinks to the main tree's (`/my-docs` is in
+    `.git/info/exclude`), a copy of `.claude/settings.local.json`, and its Claude project memory directory
+    symlinked to the main tree's. Set a new worktree up the same way. Tools under `my-docs/tools` use the main
+    tree's absolute paths by default: pass the worktree's own core (`CORE=`, `--core`) when testing its build.
+  - Build, genie and test commands in this file run from the root of whichever tree is being built.
 - Syncs use the `sync-mame` skill. Always a full `git merge` of the upstream tip (never cherry-picks), so SHAs stay
   aligned. The last merged upstream tip is kept at `refs/upstream-tmp/master` (fetched from the local checkout at
   `/var/home/bazzite/Projects/upstream/mame`). The per-sync record is in `my-docs/activity-log.md`, **not here**.
@@ -275,7 +294,9 @@ Full plan and rationale: `my-docs/upstream-pr-test-build.md`.
   `upstream-mame-build` box predates this setup and is not used for it.
 - **Tree**: the persistent worktree `/var/home/bazzite/Projects/upstream/mame-pr-test` (detached, from the upstream
   checkout). Bring the PR branch in from this repo with
-  `git -C <worktree> fetch /var/home/bazzite/Projects/libretro/mame <branch> && git -C <worktree> checkout --detach FETCH_HEAD`; do not build in this repo or in the upstream checkout's own tree. Its objects
+  `git -C <worktree> fetch /var/home/bazzite/Projects/libretro/mame <branch> && git -C <worktree> checkout --detach FETCH_HEAD`
+  (the branch itself is made in the `mame-pr` worktree, which shares this repo's branches); do not build in this
+  repo's trees or in the upstream checkout's own tree. Its objects
   and a dedicated ccache (`~/.cache/ccache-mame-pr`) are kept, so later PRs only rebuild what changed.
 - **Build only the touched driver(s)** (minutes, not hours). Run with `run_in_background`, a `BUILD-EXIT=$?` marker and
   `nice`; use `-j14` on an idle machine, `-j4`/`-j6` while a Batocera build is running:
