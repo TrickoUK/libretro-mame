@@ -108,25 +108,33 @@ void apache3_state::apache3_road_x_w(offs_t offset, uint8_t data)
     (rN is the Nth word written):
 
       horizontal  start r0:r4 (low byte of r0 = bits 16-23, r4 = bits 0-15), +r2 per pixel, +r6 per line
-      sky         start r1:r5 (r1 = bits 8-23, low byte of r5 = bits 0-7),   +r3 per pixel, +r7 per line
+      depth       start r1:r5 (r1 = bits 8-23, low byte of r5 = bits 0-7),   +r3 per pixel, +r7 per line
       ground      start r9:r10 (r9 = bits 8-23, low byte of r10 = bits 0-7), +r8 per pixel, +r11 per line
 
     The per-pixel and per-line steps appear to be the cos and sin of the bank angle (scaled 1.0 for
-    the ground, by a game-set sky scale for the sky, and with an extra shear term for the horizontal
-    accumulator). The ground accumulator is the distance below the horizon, which picks a row of
-    the ground pattern RAM (512 pixels x 256 rows, 2 bits per pixel, pre-scaled for perspective and
-    mirrored about the centre). Above the horizon the same accumulator goes negative and its low 7
-    bits appear to address the sky gradient (palette entries 0x100-0x17f): one entry per line, the
-    lightest at the horizon. The gradient keeps the same height whatever the pitch, while the words
-    the game writes for the sky accumulator follow it, so they do not appear to select the gradient.
+    the ground, by a game-set height scale for the depth, and with an extra shear term for the
+    horizontal accumulator). The ground accumulator is the distance below the horizon, which picks
+    a row of the ground pattern RAM (512 pixels x 256 rows, 2 bits per pixel, pre-scaled for
+    perspective and mirrored about the centre). Above the horizon the same accumulator goes negative
+    and its low 7 bits appear to address the sky gradient (palette entries 0x100-0x17f): one entry
+    per line, the lightest at the horizon.
+
+    The depth accumulator crosses zero on the horizon with the ground accumulator, and the game sets
+    its steps in inverse proportion to the helicopter's height. It appears to address the stripe
+    PROM, which holds the low 8 bits of the distance to each row of ground seen from a fixed height
+    (the upper half of the PROM is empty). Adding the counter written to /LINCS, which the game
+    advances with the distance flown, and taking bits 5-6 gives one of four stripe shades, so the
+    stripes pass at the speed of the objects standing on the ground whatever the height.
 */
 void apache3_state::draw_ground(bitmap_rgb32 &dst, const rectangle &cliprect)
 {
 	// 24-bit accumulator: a 16-bit word in bits 8-23 plus the low byte of another word in bits 0-7
 	auto const acc24 = [] (uint16_t hi, uint16_t lo) { return util::sext((uint32_t(hi) << 8) | (lo & 0xff), 24); };
 	int32_t const h0 = util::sext((uint32_t(m_apache3_rotate_ctrl[0] & 0xff) << 16) | m_apache3_rotate_ctrl[4], 24);
+	int32_t const z0 = acc24(m_apache3_rotate_ctrl[1], m_apache3_rotate_ctrl[5]);
 	int32_t const g0 = acc24(m_apache3_rotate_ctrl[9], m_apache3_rotate_ctrl[10]);
 	int32_t const h_dx = int16_t(m_apache3_rotate_ctrl[2]), h_dy = int16_t(m_apache3_rotate_ctrl[6]);
+	int32_t const z_dx = int16_t(m_apache3_rotate_ctrl[3]), z_dy = int16_t(m_apache3_rotate_ctrl[7]);
 	int32_t const g_dx = int16_t(m_apache3_rotate_ctrl[8]), g_dy = int16_t(m_apache3_rotate_ctrl[11]);
 
 	pen_t const *const pens = m_palette->pens();
@@ -135,6 +143,7 @@ void apache3_state::draw_ground(bitmap_rgb32 &dst, const rectangle &cliprect)
 	{
 		uint32_t *const dest = &dst.pix(y);
 		int32_t h = h0 + y * h_dy + cliprect.left() * h_dx;
+		int32_t z = z0 + y * z_dy + cliprect.left() * z_dx;
 		int32_t g = g0 + y * g_dy + cliprect.left() * g_dx;
 		for (int x = cliprect.left(); x <= cliprect.right(); x++)
 		{
@@ -157,10 +166,12 @@ void apache3_state::draw_ground(bitmap_rgb32 &dst, const rectangle &cliprect)
 					uint8_t const pixels = m_apache3_g_ram[(r << 7) | (hval >> 2)] & 0xff;
 					pix = (pixels >> ((hval & 3) << 1)) & 3;
 				}
-				int const ln = ((m_apache3_prom[r] + m_apache3_road_z) >> 5) & 3;
+				int const depth = std::clamp(z >> 8, 0, 0x1ff);
+				int const ln = ((m_apache3_prom[depth] + m_apache3_road_z) >> 5) & 3;
 				dest[x] = pens[0x200 + (side ? 0x10 : 0) + (pix << 2) + ln];
 			}
 			h += h_dx;
+			z += z_dx;
 			g += g_dx;
 		}
 	}
