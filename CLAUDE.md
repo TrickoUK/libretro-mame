@@ -185,13 +185,13 @@ needs its CHD). Core option `mame_psx_gpu_hle` (disabled/2x/4x). Invariants lear
 ## Building
 
 ```sh
-# Preferred: -j10 in a scope that systemd-oomd leaves alone
+# Preferred: -j14 in a scope that systemd-oomd leaves alone
 systemd-run --user --scope -p ManagedOOMPreference=omit -- \
-  env MAME_DYNAMIC_LIBSTDCXX=1 make -f Makefile.libretro -j10 PREMAKE=0 SOURCEFILTER=fork-specific/arcade.flt
+  env MAME_DYNAMIC_LIBSTDCXX=1 make -f Makefile.libretro -j14 PREMAKE=0 SOURCEFILTER=fork-specific/arcade.flt
 make -f Makefile.libretro -j4          # fallback without the scope
 ```
 
-- Output: `mame_libretro.so` at the repo root. Use `-j10` only inside the `systemd-run` scope (earlier `-j8`/`-j16`
+- Output: `mame_libretro.so` at the repo root. Use `-j14` only inside the `systemd-run` scope (earlier `-j8`/`-j16`
   builds were killed, probably by systemd-oomd); without the scope use `-j4`. If a build still dies, check
   `journalctl -u systemd-oomd` and `journalctl -k | grep -i oom`.
 - **Run the build with the Bash tool's `run_in_background`**, output to a log ending in a `BUILD-EXIT=$?` marker.
@@ -278,11 +278,11 @@ Full plan and rationale: `my-docs/upstream-pr-test-build.md`.
   `git -C <worktree> fetch /var/home/bazzite/Projects/libretro/mame <branch> && git -C <worktree> checkout --detach FETCH_HEAD`; do not build in this repo or in the upstream checkout's own tree. Its objects
   and a dedicated ccache (`~/.cache/ccache-mame-pr`) are kept, so later PRs only rebuild what changed.
 - **Build only the touched driver(s)** (minutes, not hours). Run with `run_in_background`, a `BUILD-EXIT=$?` marker and
-  `nice`; use `-j10` on an idle machine, `-j4`/`-j6` while a Batocera build is running:
+  `nice`; use `-j14` on an idle machine, `-j4`/`-j6` while a Batocera build is running:
   ```sh
   distrobox enter mame-pr-build -- bash -c 'cd /var/home/bazzite/Projects/upstream/mame-pr-test &&
     export CCACHE_DIR=$HOME/.cache/ccache-mame-pr &&
-    nice -n 19 make SOURCES=src/mame/<mfg>/<driver>.cpp REGENIE=1 OVERRIDE_CC="ccache gcc" OVERRIDE_CXX="ccache g++" -j10'
+    nice -n 19 make SOURCES=src/mame/<mfg>/<driver>.cpp REGENIE=1 OVERRIDE_CC="ccache gcc" OVERRIDE_CXX="ccache g++" -j14'
   ```
   Output is `./mame` in the worktree root. `REGENIE=1` is needed whenever `SOURCES` changes. Add every driver file the change
   touches (shared devices: also a second driver that uses them).
