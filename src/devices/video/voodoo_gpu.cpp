@@ -675,6 +675,8 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 
 	// texture RAM and table updates
 	std::vector<osd::gpu_texture_update> updates;
+	int taken[2][4] = {};
+	bool took[2] = { false, false };
 	for (int i = 0; i < 2; i++)
 	{
 		int x, y, w, h;
@@ -682,6 +684,11 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 			continue;
 		if (m_ram[i] && m_dirty[i]->take(x, y, w, h))
 		{
+			took[i] = true;
+			taken[i][0] = x;
+			taken[i][1] = y;
+			taken[i][2] = w;
+			taken[i][3] = h;
 			osd::gpu_texture_update &u = updates.emplace_back();
 			u.texture = m_tmu_tex[i];
 			u.x = 0;
@@ -925,6 +932,17 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 	}
 	m_serial++;
 	m_batch.reset();
+	if (!ok)
+	{
+		// The target lacks this batch: the texture rows it carried go up with the next frame, the target is cleared
+		// (a new generation) and the device draws its colour buffers into it again.
+		for (int i = 0; i < 2; i++)
+			if (took[i])
+				m_dirty[i]->mark(taken[i][0], taken[i][1], taken[i][2], taken[i][3]);
+		m_generation++;
+		if (m_target_lost)
+			m_target_lost();
+	}
 	return ok;
 }
 

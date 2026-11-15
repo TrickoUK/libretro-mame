@@ -30,6 +30,7 @@
 
 #include "interface/gpuengine.h"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -230,6 +231,10 @@ public:
 	void texture_write(int tmu, u32 offs, u32 bytes);
 	void invalidate();
 
+	// called when the engine refused a flush, after the batch is dropped and the target is due to be cleared:
+	// the device queues its colour buffers into the new batch so the target matches video RAM again
+	void set_target_lost(std::function<void ()> callback) { m_target_lost = std::move(callback); }
+
 	// submit the batch; with a buffer and output it also reads rows of that
 	// buffer back as rgb32 (row_count 0 = all rows). read_first reads before the
 	// batch is drawn, which is only right when the batch does not write that buffer;
@@ -280,6 +285,7 @@ private:
 	int m_scale = 1;
 	u32 m_generation = 1;
 	u32 m_serial = 0;
+	std::function<void ()> m_target_lost;
 };
 
 } // namespace voodoo

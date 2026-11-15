@@ -1022,6 +1022,11 @@ void voodoo_1_device::device_start()
 			m_gpu = std::make_unique<voodoo::gpu_renderer>(machine(), engine);
 			if (!m_gpu->init(tmumem[0], tmusize[0] * 1024 * 1024, BIT(m_chipmask, 2) ? tmumem[1] : nullptr, BIT(m_chipmask, 2) ? tmusize[1] * 1024 * 1024 : 0))
 				m_gpu.reset();
+			else
+			{
+				// a refused flush clears the target; the buffers in m_fbram are drawn into it again
+				m_gpu->set_target_lost([this] () { gpu_sync_up(); m_gpu_epoch++; });
+			}
 			m_gpu_compare = getenv("MAME_VOODOO_GPU_CMP") != nullptr;
 			m_gpu_parallel = true;
 		}
