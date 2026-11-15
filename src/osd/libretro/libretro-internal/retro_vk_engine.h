@@ -197,6 +197,7 @@ private:
 	void destroy_image(image &img);
 	bool transition_to_general(const image &img);
 	bool ensure_target(const osd::gpu_target_desc &target, bool &clear_color, bool &clear_depth);
+	bool ensure_scratch();
 	void release_target();
 
 	bool begin_recording();
@@ -344,11 +345,14 @@ private:
 	uint64_t m_texture_budget = 512ULL * 1024 * 1024;
 
 	// render target: BGRA8 colour (the byte order a BGRA read-back produces), optional D32 depth, and a
-	// same-size copy used by COPY_RECT so overlapping rectangles copy from the original pixels. A multisampled
-	// target has its colour, depth and copy at the sample count; m_resolve is the single-sample colour that
-	// read-backs read, filled from m_color by record_resolve()
+	// same-size copy used by COPY_RECT so overlapping rectangles copy from the original pixels, allocated by
+	// ensure_scratch() on the first frame that copies. A multisampled target has its colour, depth and copy at
+	// the sample count; m_resolve is the single-sample colour that read-backs read, filled from m_color by
+	// record_resolve()
 	osd::gpu_target_desc m_target;
 	bool m_target_valid = false;
+	// a frame has had a COPY_RECT, so the MSAA budget counts the copy image
+	bool m_copies_seen = false;
 	// the target was allocated or its generation changed, and no frame that clears it has been submitted yet
 	bool m_clear_pending = false;
 	image m_color;

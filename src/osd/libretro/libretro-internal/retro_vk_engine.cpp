@@ -671,9 +671,7 @@ bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &cl
 		const int samples = std::max(target.msaa_samples, 1);
 		const VkImageUsageFlags color_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 		bool ok = create_image(m_color, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT, samples)
-				&& create_image(m_scratch, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT, samples)
-				&& transition_to_general(m_color)
-				&& transition_to_general(m_scratch);
+				&& transition_to_general(m_color);
 		if (ok && target.msaa_samples > 0)
 			ok = create_image(m_resolve, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)
 					&& transition_to_general(m_resolve);
@@ -710,6 +708,29 @@ bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &cl
 	clear_depth = m_clear_pending || target.depth == osd::gpu_depth_mode::ORDER || !target.persistent;
 	m_target = target;
 	m_target_valid = true;
+	return true;
+}
+
+// Allocates the copy image that COPY_RECT goes through, at the target's size and sample count, the first time a frame
+// on this target copies. Only systems that copy inside the target pay for it.
+bool retro_vk_engine::ensure_scratch()
+{
+	if (m_scratch.handle != VK_NULL_HANDLE)
+		return true;
+	const int samples = std::max(m_target.msaa_samples, 1);
+	const VkImageUsageFlags color_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	if (!create_image(m_scratch, VK_FORMAT_B8G8R8A8_UNORM, m_target.width, m_target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT, samples)
+			|| !transition_to_general(m_scratch))
+	{
+		destroy_image(m_scratch);
+		log_problem("render target", "copy image allocation failed");
+		return false;
+	}
+	if (m_target.msaa_samples > 0)
+	{
+		fprintf(stderr, "[retro_vk_engine] target %dx%d, %d samples: copy image %.1f MB\n",
+				m_target.width, m_target.height, m_target.msaa_samples, double(m_target.width) * m_target.height * samples * 4.0 / 1048576.0);
+	}
 	return true;
 }
 
@@ -1231,8 +1252,8 @@ bool retro_vk_engine::sample_count_supported(int samples, bool sampled) const
 }
 
 // Reduces the requested sample count to what the device supports and to the memory budget for the target (colour and
-// depth samples plus the single-sample resolve image). One sample is not
-// multisampling, so it becomes none.
+// depth samples, the copy image's samples once the engine has seen a COPY_RECT, plus the single-sample resolve image).
+// One sample is not multisampling, so it becomes none.
 void retro_vk_engine::fit_msaa(osd::gpu_target_desc &target)
 {
 	const int requested = target.msaa_samples;
@@ -1241,7 +1262,7 @@ void retro_vk_engine::fit_msaa(osd::gpu_target_desc &target)
 		samples /= 2;
 
 	const uint64_t pixels = uint64_t(std::max(target.width, 0)) * std::max(target.height, 0);
-	const uint64_t sample_bytes = (target.depth != osd::gpu_depth_mode::NONE) ? 8 : 4;
+	const uint64_t sample_bytes = ((target.depth != osd::gpu_depth_mode::NONE) ? 8 : 4) + (m_copies_seen ? 4 : 0);
 	while (samples >= 2 && pixels * samples * sample_bytes + pixels * 4 > m_msaa_budget)
 	{
 		samples /= 2;
@@ -2151,11 +2172,17 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 	}
 
 	const auto upload_start = clock_type::now();
+	bool copies = false;
+	for (int i = 0; i < frame.command_count && !copies; i++)
+		copies = frame.commands[i].type == osd::gpu_command_type::COPY_RECT;
+	m_copies_seen = m_copies_seen || copies;
 	osd::gpu_target_desc target = frame.target;
 	fit_msaa(target);
 	bool clear_color = false;
 	bool clear_depth = false;
 	if (!ensure_target(target, clear_color, clear_depth))
+		return false;
+	if (copies && !ensure_scratch())
 		return false;
 
 	// nothing of the previous frame is in flight, so its descriptor sets can all be freed
