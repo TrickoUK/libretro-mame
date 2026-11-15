@@ -679,6 +679,8 @@ protected:
 	bool gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprect, rgb_t const *pens);
 	std::unique_ptr<voodoo::gpu_renderer> m_gpu;
 	std::vector<u32> m_gpu_image;            // front buffer as read back, rgb32
+	std::vector<u32> m_gpu_sync_image;       // gpu_sync_down(): rows of a buffer as read back, rgb32 at the native resolution
+	std::vector<std::pair<u32, u32>> m_gpu_sync_ranges;   // gpu_sync_down(): the rows it reads (first, count)
 	bool m_gpu_shadow_dirty[GPU_SLOTS] = { };        // the GPU drew into the buffer since m_fbram was last updated from it
 	bool m_gpu_dirty_row[GPU_SLOTS][1024] = { };     // per row of each buffer, in 16-row groups checked together
 	u32 m_gpu_slot_offs[GPU_SLOTS] = { ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U };  // shared-memory models: RAM offset of the buffer in each slot

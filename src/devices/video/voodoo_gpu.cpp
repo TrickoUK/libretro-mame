@@ -679,6 +679,33 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 
 
 //-------------------------------------------------
+//  flush_rows - submit the batch and read row
+//  ranges of a colour buffer back at the native
+//  resolution (each native pixel the average of
+//  its block at the render scale)
+//-------------------------------------------------
+
+bool gpu_renderer::flush_rows(int buffer, u32 *out, std::pair<u32, u32> const *ranges, int count)
+{
+	if (!usable() || m_rowpixels == 0)
+		return false;
+	m_row_readbacks.clear();
+	for (int i = 0; i < count; i++)
+	{
+		osd::gpu_readback_rect &r = m_row_readbacks.emplace_back();
+		r.x = 0;
+		r.y = (buffer * m_rows + ranges[i].first) * m_scale;
+		r.w = m_rowpixels * m_scale;
+		r.h = ranges[i].second * m_scale;
+		r.out = out + size_t(ranges[i].first) * m_rowpixels;
+		r.stride = m_rowpixels;
+		r.downsample = m_scale;
+	}
+	return submit_batch(buffer, m_row_readbacks.data(), count, false);
+}
+
+
+//-------------------------------------------------
 //  submit_batch - build one engine frame from the
 //  batch, with the given read-backs at its end
 //  (or one read-back first, see flush())

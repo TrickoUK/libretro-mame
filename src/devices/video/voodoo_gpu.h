@@ -34,6 +34,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 
@@ -247,6 +248,10 @@ public:
 	bool flush(int read_buffer = -1, u32 *out = nullptr, u32 first_row = 0, u32 row_count = 0, bool read_first = false,
 			u32 out_stride = 0, bool opaque = false, u8 const *channel_lut = nullptr, int downsample = 1, u32 col_count = 0);
 
+	// submit the batch and read row ranges (first row, row count) of a buffer back in one frame, at the native
+	// resolution: out holds the whole buffer as rgb32, rowpixels per row, and only the given rows are written
+	bool flush_rows(int buffer, u32 *out, std::pair<u32, u32> const *ranges, int count);
+
 	// true if any command of the batch can change the colour of the buffer slot
 	bool batch_writes_buffer(int buffer) const;
 
@@ -295,6 +300,7 @@ private:
 	std::vector<osd::gpu_texture_update> m_updates;
 	std::vector<gpu_vertex> m_verts;
 	std::vector<osd::gpu_command> m_commands;
+	std::vector<osd::gpu_readback_rect> m_row_readbacks;
 };
 
 } // namespace voodoo
