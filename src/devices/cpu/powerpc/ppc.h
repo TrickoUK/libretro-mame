@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 
 /***************************************************************************
@@ -676,22 +677,25 @@ protected:
 	// Instruction cache flash invalidate (HID0[ICFI], every OEA part except the
 	// 601): code can be replaced by writers the DRC never sees (DMA, another
 	// CPU), and software then invalidates the whole icache instead of issuing
-	// icbi.  Keep a copy of every writable page code was compiled from (pages
-	// that can't be written can't change), so an ICFI only discards code from
-	// pages whose bytes changed, rather than flushing the entire cache each time.
-	// If a page's memory no longer matches its snapshot when more code is
-	// compiled from it, the page holds blocks from two versions of its bytes, so
-	// the snapshot is marked dirty and the next ICFI discards the page regardless.
-	// Snapshots stay across TLB and icbi invalidations, which can leave blocks
-	// entered from a neighbouring page that still hold code from the page; only
-	// an ICFI that discards the page or a full cache flush removes them.
+	// icbi.  Keep a copy of every writable physical page code was compiled from
+	// (pages that can't be written can't change), with the effective pages the
+	// code was compiled at, so an ICFI only discards code from pages whose bytes
+	// changed, rather than flushing the entire cache each time.  Snapshots are
+	// per physical page, so code compiled under an earlier mapping of an
+	// effective page stays covered after the page is remapped.  If a page's
+	// memory no longer matches its snapshot when more code is compiled from it,
+	// the page holds blocks from two versions of its bytes, so the snapshot is
+	// marked dirty and the next ICFI discards the page regardless.  Snapshots
+	// stay across icbi and other invalidations; only an ICFI that discards the
+	// page or a full cache flush removes them.
 	struct code_page_snapshot
 	{
 		offs_t physbase;
 		bool dirty;                         // code was compiled from bytes that differ from these
 		std::unique_ptr<uint8_t []> bytes;  // the page's host memory contents
+		std::vector<uint32_t> logical;      // effective pages code was compiled from this page at
 	};
-	std::unordered_map<uint32_t, code_page_snapshot> m_code_snapshots;    // keyed by effective page number
+	std::unordered_map<uint32_t, code_page_snapshot> m_code_snapshots;    // keyed by physical page number
 	bool has_icache_flash_invalidate() const;
 	const uint8_t *code_page_memory(offs_t physbase) const;
 	bool code_snapshot_matches(const code_page_snapshot &snap) const;

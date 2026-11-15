@@ -1756,9 +1756,15 @@ void ppc_device::ppc_check_translation(ppc_entry_check *chk)
 
 bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 {
-	// A sequence starting on an earlier page can extend into this range, but
-	// invalidate_range() backs the start up by the maximum sequence length to
-	// catch those, so only the pages actually touched need to be considered.
+	// A block holds sequences from up to COMPILE_BACKWARDS_BYTES before its
+	// entry point to COMPILE_FORWARDS_BYTES after it, and branches between them
+	// are local jumps that skip the hash entry's checks.  So for each page with
+	// code, drop the hash entries of every sequence that can share a block with
+	// code from the page, not just those in the page itself; the hash table
+	// backs the start up by a further sequence length, which catches sequences
+	// that start before the range and run into it.  Neighbouring pages keep
+	// their code page bits, as their contents didn't change.  For a large range
+	// the widened ranges of adjacent pages simply overlap.
 	uint32_t page = start >> 12;
 	uint32_t const lastpage = end >> 12;
 	bool invalidated = false;
@@ -1774,7 +1780,11 @@ bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 
 		if (BIT(m_codepage_bits[page >> 3], page & 7))
 		{
-			m_drcuml.hash_invalidate_range(page << 12, (page << 12) | 0xfff);
+			offs_t const pagestart = page << 12;
+			offs_t const pageend = pagestart | 0xfff;
+			m_drcuml.hash_invalidate_range(
+					pagestart - std::min<offs_t>(pagestart, COMPILE_BACKWARDS_BYTES),
+					pageend + std::min<offs_t>(~pageend, COMPILE_BACKWARDS_BYTES + COMPILE_FORWARDS_BYTES));
 			invalidated = true;
 		}
 		page++;
@@ -1831,8 +1841,9 @@ bool ppc_device::code_snapshot_matches(const code_page_snapshot &snap) const
 
 /*-------------------------------------------------
     snapshot_code_page - remember the contents of
-    a writable page the DRC is compiling code from
-    (see icache_flash_invalidate)
+    a writable physical page the DRC is compiling
+    code from, and the effective page it is
+    compiling it at (see icache_flash_invalidate)
 -------------------------------------------------*/
 
 void ppc_device::snapshot_code_page(uint32_t page, offs_t physbase)
@@ -1843,24 +1854,27 @@ void ppc_device::snapshot_code_page(uint32_t page, offs_t physbase)
 	if (!mem)
 		return;
 
-	auto const [it, inserted] = m_code_snapshots.try_emplace(page);
+	auto const [it, inserted] = m_code_snapshots.try_emplace(physbase >> 12);
 	code_page_snapshot &snap = it->second;
-	if (!inserted && (snap.physbase == physbase))
+	if (inserted)
 	{
-		// Blocks compiled from this page earlier used the snapshot's bytes, and
-		// the code being compiled uses what memory holds now.  If the two differ,
-		// the snapshot can no longer vouch for every block compiled from the
-		// page, so the next ICFI has to discard them all.
-		if (!snap.dirty && !code_snapshot_matches(snap))
-			snap.dirty = true;
+		snap.physbase = physbase;
+		snap.dirty = false;
+		snap.bytes = std::make_unique<uint8_t []>(0x1000);
+		memcpy(snap.bytes.get(), mem, 0x1000);
+		snap.logical.push_back(page);
 		return;
 	}
 
-	snap.physbase = physbase;
-	snap.dirty = false;
-	if (!snap.bytes)
-		snap.bytes = std::make_unique<uint8_t []>(0x1000);
-	memcpy(snap.bytes.get(), mem, 0x1000);
+	if (std::find(snap.logical.begin(), snap.logical.end(), page) == snap.logical.end())
+		snap.logical.push_back(page);
+
+	// Blocks compiled from this page earlier used the snapshot's bytes, and the
+	// code being compiled uses what memory holds now.  If the two differ, the
+	// snapshot can no longer vouch for every block compiled from the page, so
+	// the next ICFI has to discard them all.
+	if (!snap.dirty && !code_snapshot_matches(snap))
+		snap.dirty = true;
 }
 
 
@@ -1898,32 +1912,24 @@ void ppc_device::snapshot_sequence_pages(const opcode_desc *first, const opcode_
 
 bool ppc_device::icache_flash_invalidate()
 {
-	std::vector<uint32_t> changed;
-	for (auto const &[page, snap] : m_code_snapshots)
+	bool discarded = false;
+	for (auto it = m_code_snapshots.begin(); it != m_code_snapshots.end(); )
 	{
-		if (snap.dirty || !code_snapshot_matches(snap))
-			changed.push_back(page);
-	}
+		code_page_snapshot const &snap = it->second;
+		if (!snap.dirty && code_snapshot_matches(snap))
+		{
+			++it;
+			continue;
+		}
 
-	for (uint32_t const page : changed)
-	{
-		offs_t const start = page << 12;
-		offs_t const end = start | 0xfff;
-		invalidate_code_range(start, end);
-		m_code_snapshots.erase(page);
-
-		// A block holds sequences from up to COMPILE_BACKWARDS_BYTES before its
-		// entry point to COMPILE_FORWARDS_BYTES after it, and branches between
-		// them are local jumps that skip the hash entry's checks.  So also drop
-		// the hash entries of every sequence that can share a block with code
-		// from this page; the hash table itself backs the start up by a further
-		// sequence length.  The neighbouring pages' contents didn't change, so
-		// their snapshots and code page bits stay.
-		offs_t const widestart = start - std::min<offs_t>(start, COMPILE_BACKWARDS_BYTES);
-		offs_t const wideend = end + std::min<offs_t>(~end, COMPILE_BACKWARDS_BYTES + COMPILE_FORWARDS_BYTES);
-		m_drcuml.hash_invalidate_range(widestart, wideend);
+		// discard the code compiled from this physical page at every effective
+		// address it was compiled at
+		for (uint32_t const page : snap.logical)
+			invalidate_code_range(page << 12, (page << 12) | 0xfff);
+		it = m_code_snapshots.erase(it);
+		discarded = true;
 	}
-	return !changed.empty();
+	return discarded;
 }
 
 

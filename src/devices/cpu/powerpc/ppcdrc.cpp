@@ -511,33 +511,24 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 				&& reuse_entry_checks(reuse->second.checkfirst, reuse->second.checkcount)
 				&& m_drcuml.hash_set_codeptr(mode, pc, reuse->second.code))
 		{
-			// mark the pages this sequence covers as having valid code again
-			const opcode_desc *seqend = desclist;
-			while ((seqend != nullptr) && !seqend->end_sequence())
+			// The reused code is the whole block generated for this window, so
+			// mark the pages of every sequence in it as having valid code again,
+			// as a fresh compile does
+			const opcode_desc *desclast = desclist;
+			uint32_t lastpage = ~uint32_t(0);
+			for (const opcode_desc *desc = desclist; desc != nullptr; desc = desc->next())
 			{
-				seqend = seqend->next();
-			}
-
-			if (seqend == nullptr)
-			{
-				seqend = desclist;
-			}
-
-			for (uint32_t pg = desclist->pc >> 12; pg <= (seqend->pc >> 12); pg++)
-			{
-				note_code_page(pg);
+				if ((desc->pc >> 12) != lastpage)
+				{
+					lastpage = desc->pc >> 12;
+					note_code_page(lastpage);
+				}
+				desclast = desc;
 			}
 			note_physical_code(desclist);
 
-			// The reused code is the whole block generated for this window:
-			// snapshot the pages of every sequence in it, as a fresh compile
-			// does, so a later icache flash invalidate still notices if any of
-			// this code is replaced
-			const opcode_desc *desclast = desclist;
-			while (desclast->next() != nullptr)
-			{
-				desclast = desclast->next();
-			}
+			// and snapshot them, so a later icache flash invalidate still
+			// notices if any of this code is replaced
 			snapshot_sequence_pages(desclist, desclast);
 			m_codewrite_skip_page = ~uint32_t(0);
 			m_last_reuse = reusekey;
