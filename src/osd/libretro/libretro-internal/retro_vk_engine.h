@@ -349,6 +349,8 @@ private:
 	// read-backs read, filled from m_color by record_resolve()
 	osd::gpu_target_desc m_target;
 	bool m_target_valid = false;
+	// the target was allocated or its generation changed, and no frame that clears it has been submitted yet
+	bool m_clear_pending = false;
 	image m_color;
 	image m_depth;
 	image m_scratch;

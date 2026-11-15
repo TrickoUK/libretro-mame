@@ -654,14 +654,14 @@ void retro_vk_engine::destroy_shader_module(osd::gpu_handle handle)
 //**************************************************************************
 
 // Allocates the target when its size or depth mode changes, and reports whether
-// the target must be cleared before this frame's commands.
+// the target must be cleared before this frame's commands. The clear of a new
+// target or generation stays pending (m_clear_pending) until a frame that
+// records it has been submitted, so a frame refused after this call leaves it
+// to the next frame.
 bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &clear_color, bool &clear_depth)
 {
 	const bool realloc = !m_target_valid || target.width != m_target.width || target.height != m_target.height
 			|| target.depth != m_target.depth || target.msaa_samples != m_target.msaa_samples;
-
-	clear_color = !target.persistent;
-	clear_depth = target.depth == osd::gpu_depth_mode::ORDER || !target.persistent;
 
 	if (realloc)
 	{
@@ -699,15 +699,15 @@ bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &cl
 			fprintf(stderr, "[retro_vk_engine] target %dx%d, %d samples: colour+depth %.1f MB, resolve %.1f MB\n",
 					target.width, target.height, target.msaa_samples, pixels * samples * (4.0 + depth_bytes) / 1048576.0, pixels * 4.0 / 1048576.0);
 		}
-		clear_color = true;
-		clear_depth = true;
+		m_clear_pending = true;
 	}
 	else if (target.persistent && target.generation != m_target.generation)
 	{
-		clear_color = true;
-		clear_depth = true;
+		m_clear_pending = true;
 	}
 
+	clear_color = m_clear_pending || !target.persistent;
+	clear_depth = m_clear_pending || target.depth == osd::gpu_depth_mode::ORDER || !target.persistent;
 	m_target = target;
 	m_target_valid = true;
 	return true;
@@ -2361,6 +2361,7 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 	m_stats.draw_ms = elapsed_ms(draw_start);
 	if (!ok)
 		return false;
+	m_clear_pending = false;
 	if (m_gpu_ms_ready)
 	{
 		m_stats.gpu_ms = m_last_gpu_ms;
