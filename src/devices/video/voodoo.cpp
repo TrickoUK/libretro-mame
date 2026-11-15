@@ -1024,8 +1024,7 @@ void voodoo_1_device::device_start()
 				m_gpu.reset();
 			else
 			{
-				// a refused flush clears the target; the buffers in m_fbram are drawn into it again
-				m_gpu->set_target_lost([this] () { gpu_sync_up(); m_gpu_epoch++; });
+				m_gpu->set_target_lost([this] () { gpu_target_lost(); });
 			}
 			m_gpu_compare = getenv("MAME_VOODOO_GPU_CMP") != nullptr;
 			m_gpu_parallel = true;
@@ -3281,6 +3280,38 @@ void voodoo_1_device::gpu_sync_up()
 		m_gpu_shadow_dirty[buffer] = false;
 		std::fill(std::begin(m_gpu_dirty_row[buffer]), std::end(m_gpu_dirty_row[buffer]), false);
 	}
+}
+
+
+//-------------------------------------------------
+//  gpu_target_lost - the engine refused a flush,
+//  so the target lacks that batch: m_fbram is
+//  brought up to date from the target as it
+//  stands, then the target is cleared and the
+//  colour buffers are drawn into it again
+//-------------------------------------------------
+
+void voodoo_1_device::gpu_target_lost()
+{
+	// a read-back below that is refused as well comes back here
+	if (m_gpu_recovering)
+		return;
+	m_gpu_recovering = true;
+	// while the software renderer still draws alongside, m_fbram is already complete
+	if (!m_gpu_parallel && m_gpu->rows() != 0)
+	{
+		for (int buffer = 0; buffer < GPU_SLOTS; buffer++)
+		{
+			if (gpu_slot_offset(buffer) == ~0U)
+				continue;
+			gpu_mark_rows(buffer, 0, m_gpu->rows() - 1);
+			gpu_sync_down(buffer);
+		}
+	}
+	m_gpu->new_generation();
+	gpu_sync_up();
+	m_gpu_epoch++;
+	m_gpu_recovering = false;
 }
 
 

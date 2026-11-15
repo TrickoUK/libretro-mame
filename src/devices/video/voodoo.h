@@ -673,6 +673,7 @@ protected:
 	void gpu_sync_down(int buffer, u32 first_row = 0, u32 last_row = 1023);
 	void gpu_mark_rows(int buffer, s32 first_row, s32 last_row);
 	void gpu_sync_up();
+	void gpu_target_lost();
 	void gpu_latch(char const *reason);
 	void gpu_configure();
 	bool gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprect, rgb_t const *pens);
@@ -700,7 +701,8 @@ protected:
 		bool same_picture(gpu_direct_copy const &o) const { return serial == o.serial && front == o.front && pen_generation == o.pen_generation && pens == o.pens && width == o.width && height == o.height && epoch == o.epoch; }
 	};
 	gpu_direct_copy m_gpu_direct[2];
-	u32 m_gpu_epoch = 0;                     // changes when the GPU contents are replaced (state load)
+	u32 m_gpu_epoch = 0;                     // changes when the GPU contents are replaced (state load, refused flush)
+	bool m_gpu_recovering = false;           // gpu_target_lost() is running
 	u32 m_pen_generation = 0;                // changes whenever m_pen is recomputed
 	std::vector<u32> m_gpu_out;              // the finished picture (scaled to the output, through the pens), by bitmap row
 	std::vector<u8> m_gpu_out_valid;         // per bitmap row: m_gpu_out holds the finished row

@@ -934,14 +934,15 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 	m_batch.reset();
 	if (!ok)
 	{
-		// The target lacks this batch: the texture rows it carried go up with the next frame, the target is cleared
-		// (a new generation) and the device draws its colour buffers into it again.
+		// The target lacks this batch: the texture rows it carried go up with the next frame, and the device
+		// replaces the target's contents (see set_target_lost()).
 		for (int i = 0; i < 2; i++)
 			if (took[i])
 				m_dirty[i]->mark(taken[i][0], taken[i][1], taken[i][2], taken[i][3]);
-		m_generation++;
 		if (m_target_lost)
 			m_target_lost();
+		else
+			m_generation++;
 	}
 	return ok;
 }
