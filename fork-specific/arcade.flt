@@ -105,8 +105,8 @@ apple/v8.cpp  // [HELPER]
 apple/valkyrie.cpp  // [HELPER]
 apple/vasp.cpp  // [HELPER]
 apple/ymca.cpp  // [HELPER]
+astrocorp/astro_cpucode.cpp  // [HELPER]
 astrocorp/astropc.cpp
-astrocorp/hummer.cpp
 atari/a2600.cpp  // [MIXED]
 atari/akkaarrh.cpp
 atari/antic.cpp  // [HELPER]
@@ -625,7 +625,6 @@ handheld/tama_mix.cpp
 handheld/unknown_bftetris_lcdc.cpp  // [HELPER]
 hominn/hominn_980924.cpp
 hominn/hominn_mcs51.cpp
-huangyeh/hy-268a.cpp
 huangyeh/hy-9802.cpp
 ice/calchase.cpp
 ice/frenzyxprss.cpp
@@ -1316,6 +1315,7 @@ nintendo/n64_m.cpp  // [HELPER]
 nintendo/n64_v.cpp  // [HELPER]
 nintendo/n8080.cpp
 nintendo/n8080_a.cpp  // [HELPER]
+nintendo/nds_wifi.cpp  // [HELPER]
 nintendo/nes_arcade_bl.cpp
 nintendo/nes_vt09_soc.cpp  // [HELPER]
 nintendo/nes_vt32_soc.cpp  // [HELPER]
@@ -2351,6 +2351,8 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -cjbq
 -cjddzsp
 -cjddzsp122cn
+-cjddzsp126cn
+-cjddzsp127cn
 -cjffruit
 -cjgdy
 -cjplus
@@ -2543,6 +2545,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -endrichsa
 -endrichsb
 -excitbj
+-extradrw
 -falcnwld
 -falcnwlda
 -falcnwldb
@@ -3086,11 +3089,14 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -mjreacha
 -mjreachbl
 -mjreachp2
+-mjrking
+-mjrkingl
 -mjschuka
 -mjsikakb
 -mjsikakc
 -mjsikakd
 -mjsikaku
+-mjstama
 -mjswacad
 -mjswacads
 -mjtenho
@@ -3534,6 +3540,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -statusbj
 -steaser
 -strker
+-sttakkyu
 -stvboy
 -sucasino
 -suchie2
@@ -3778,6 +3785,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -xydn
 -xymg
 -xymga
+-xyxcxysj
 -yarunara
 -yosimotm
 -yosimoto

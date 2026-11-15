@@ -41,6 +41,7 @@
 1945kiiio
 1945kiiipt
 19in1
+19in1u
 19xx
 19xxa
 19xxar1
@@ -106,6 +107,7 @@
 500gp
 600
 60in1
+60in1u
 64street
 64streetj
 64streetja
@@ -1745,6 +1747,7 @@ citycona
 cjddz
 cjddz213cn
 cjddz215cn
+cjddz216cn
 cjddz217cn
 cjddzlf
 cjddzp
@@ -3231,7 +3234,6 @@ exsafarb
 exsafarc
 extdwnhl
 exterm
-extradrw
 extrmatn
 extrmatnj
 extrmatnu
@@ -5142,7 +5144,6 @@ jackler
 jackrabt
 jackrabt2
 jackrabts
-jackvent
 jailbrek
 jailbrekb
 jajamaru
@@ -7729,7 +7730,6 @@ pengojpm
 pengomc1
 pengomc2
 pengopac
-pengprty
 penky
 penkyi
 penta
@@ -10426,6 +10426,7 @@ stakwin
 stakwin2
 stakwindev
 stankatk
+staratk
 staraudi
 starblad
 starbladj
@@ -12059,6 +12060,7 @@ wcbowl16
 wcbowl161
 wcbowl165
 wcbowldx
+wcbowldx200
 wccf116
 wccf1dup
 wccf212e
@@ -12405,10 +12407,8 @@ xybots0
 xybots1
 xybotsf
 xybotsg
-xycs
 xyonix
 xypdk
-xyxcxysj
 yachtmn
 yamagchi
 yamato
