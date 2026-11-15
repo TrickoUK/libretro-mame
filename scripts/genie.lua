@@ -406,6 +406,11 @@ newoption {
 }
 
 newoption {
+	trigger = "HAVE_RETRO_GPU_TARGET",
+	description = "Enable the libretro OSD's host-GPU 3D renderer (dlopen-based EGL/GL; Makefile.libretro turns it on for Linux).",
+}
+
+newoption {
 	trigger = "PLATFORM",
 	description = "Target machine platform (x86,arm,...)",
 }
@@ -433,6 +438,21 @@ newoption {
 newoption {
 	trigger = "PROJECT",
 	description = "Select projects to be built. Will look into project folder for files.",
+}
+
+newoption {
+	trigger = "LIBRETRO_IOS",
+	description = "Specify iOS target when building using libretro"
+}
+
+newoption {
+	trigger = "LIBRETRO_TVOS",
+	description = "Specify tvOS target when building using libretro"
+}
+
+newoption {
+	trigger = "LIBRETRO_OSX_ARM64",
+	description = "Specify cross compile OSX for arm64 target when building using libretro"
 }
 
 dofile ("extlib.lua")
@@ -481,6 +501,10 @@ else
 	configurations {
 		"Debug",
 		"Release",
+		-- BEGIN libretro overrides to MAME's GENie build
+		"libretrodbg",
+		"libretro",
+		-- END libretro overrides to MAME's GENie build
 	}
 
 	platforms {
@@ -520,6 +544,22 @@ configuration { "Release", "vs20*" }
 			"Symbols",
 		}
 	end
+
+-- Force Visual Studio targets to use bundled SDL2
+if string.sub(_ACTION,1,4) == "vs20" and _OPTIONS["osd"]=="sdl" then
+	if _OPTIONS["with-bundled-sdl2"]==nil then
+		_OPTIONS["with-bundled-sdl2"] = "1"
+	end
+end
+-- Build SDL2 for Android
+if _OPTIONS["osd"] == "retro" then
+-- RETRO HACK no sdl for libretro android
+else
+if _OPTIONS["targetos"] == "android" then
+	_OPTIONS["with-bundled-sdl2"] = "1"
+end
+end
+-- RETRO HACK END no sdl for libretro android
 
 configuration {}
 
@@ -572,6 +612,36 @@ configuration { "gmake or ninja or jcdb" }
 	}
 
 dofile ("toolchain.lua")
+
+-- RETRO HACK
+if _OPTIONS["osd"]=="retro" then
+	if string.sub(_ACTION,1,4) ~= "vs20" then
+		buildoptions {
+			"-fPIC"
+		}
+	end
+
+	configuration { "*" }
+		defines {
+			"__LIBRETRO__",
+			"NDEBUG",
+		}
+
+	if _OPTIONS["LIBRETRO_IOS"] == "1" or _OPTIONS["LIBRETRO_TVOS"] then
+		defines {
+			"TARGET_OS_IPHONE"
+		}
+	end
+end
+-- RETRO HACK
+
+if _OPTIONS["targetos"]=="windows" then
+	configuration { "x64" }
+		defines {
+			"X64_WINDOWS_ABI",
+		}
+	configuration { }
+end
 
 -- Avoid error when invoking genie --help.
 if (_ACTION == nil) then return false end
@@ -649,7 +719,8 @@ else
 	defines {
 		"LSB_FIRST",
 	}
-	if _OPTIONS["targetos"]=="macosx" then
+	-- This really isint neeeded anymore ive updated the makefiles to test this with the hack removed, lets just get the builds working first
+	if _OPTIONS["targetos"]=="macosx"  and _OPTIONS["LIBRETRO_IOS"] ~= "1" and _OPTIONS["LIBRETRO_TVOS"] ~= "1" and _OPTIONS["LIBRETRO_OSX_ARM64"]~= "1" then
 		configuration { "arm64" }
 			buildoptions {
 				"-arch arm64",
@@ -951,6 +1022,17 @@ if _OPTIONS["MAP"] then
 		}
 
 	end
+end
+
+-- On Linux targets link libgcc and libstdc++ statically.  See #137
+-- Opt out with MAME_DYNAMIC_LIBSTDCXX=1 for local dev builds on a host that
+-- lacks a 64-bit static libstdc++.a (e.g. only the 32-bit multilib one is
+-- installed) - fine when building and running on the same machine, since
+-- there's no cross-distro libstdc++ ABI mismatch to guard against.
+if _OPTIONS["targetos"]=="linux" and os.getenv("MAME_DYNAMIC_LIBSTDCXX") == nil then
+		linkoptions {
+			"-static-libgcc -static-libstdc++"
+		}
 end
 
 

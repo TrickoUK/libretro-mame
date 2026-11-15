@@ -21,6 +21,10 @@
 #include "lauxlib.h"
 #include "lualib.h"
 
+#if defined(__APPLE__)
+    #include "TargetConditionals.h"
+#endif
+
 
 /*
 ** {==================================================================
@@ -140,6 +144,10 @@
 
 
 static int os_execute (lua_State *L) {
+  #if defined(__APPLE__) && (TARGET_OS_IOS || TARGET_OS_WATCH || TARGET_OS_TV)
+  // Calling system() is not allowed on iOS
+  return 1;
+  #else
   const char *cmd = luaL_optstring(L, 1, NULL);
   int stat;
   errno = 0;
@@ -150,6 +158,7 @@ static int os_execute (lua_State *L) {
     lua_pushboolean(L, stat);  /* true if there is a shell */
     return 1;
   }
+  #endif
 }
 
 

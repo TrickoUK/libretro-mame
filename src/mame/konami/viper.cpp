@@ -403,6 +403,8 @@ The golf club acts like a LED gun. PCB power input is 12V.
 #include "sound/dmadac.h"
 #include "video/voodoo_banshee.h"
 
+#include "gamepad_steering.h"
+
 #include "emupal.h"
 #include "screen.h"
 #include "speaker.h"
@@ -648,6 +650,7 @@ public:
 		m_io_ports(*this, "IN%u", 0U),
 		m_analog_input(*this, "AN%u", 0U),
 		m_gun_input(*this, "GUN%u", 0U),
+		m_steering_config(*this, "STEERING"),
 		m_io_ppp_sensors(*this, "SENSOR%u", 1U),
 		m_dmadac(*this, { "dacr", "dacl" })
 	{
@@ -829,6 +832,17 @@ private:
 	required_ioport_array<4> m_analog_input;
 	required_ioport_array<4> m_gun_input;
 	u16 gun_r(int which);
+	optional_ioport m_steering_config;
+	gamepad_steering m_gamepad_steering;
+
+	// motorised steering wheel, only during the boot device check (see wheel_motor_w)
+	bool m_wheel_motor_check = false;
+	u8 m_wheel_motor_cmd = 0;
+	double m_wheel_motor_pos = 0.0;
+	attotime m_wheel_motor_time;
+	attotime m_wheel_motor_deadline;
+	void wheel_motor_w(offs_t offset, u64 data, u64 mem_mask);
+	void wheel_motor_update();
 	optional_ioport_array<4> m_io_ppp_sensors;
 	required_device_array<dmadac_sound_device, 2> m_dmadac;
 };
@@ -965,7 +979,22 @@ uint8_t viper_state::i2cdr_r(offs_t offset)
 						// negative difference reads as 0. The games read both polarities and
 						// rebuild the position as 0x100 + first - second.
 						// ANn holds CH(2n+1) - CH(2n) as a 9-bit signed value.
-						const s32 diff = util::sext(m_analog_input[m_i2c.addr_latch & 0x3]->read(), 9);
+						const unsigned channel = m_i2c.addr_latch & 0x3;
+						s32 diff = util::sext(m_analog_input[channel]->read(), 9);
+
+						// the wheel turned by its motor during the boot device check
+						if (channel == 0 && m_wheel_motor_check)
+						{
+							wheel_motor_update();
+							diff = std::clamp<s32>(diff + s32(m_wheel_motor_pos), -255, 255);
+						}
+
+						// optional gamepad steering assists (see gamepad_steering.h). The game swings the
+						// front wheels to the commanded angle almost at once, and above 60 km/h anything
+						// past ~20 degrees puts the car on two wheels, so a stick flick rolls the car.
+						if (channel == 0 && m_steering_config)
+							diff = s32(m_gamepad_steering.apply(diff + 0x100, 0x001, 0x100, 0x1ff, m_steering_config->read(), machine().time())) - 0x100;
+
 						res = std::clamp<s32>(BIT(m_i2c.addr_latch, 2) ? diff : -diff, 0, 0xff);
 					}
 					else
@@ -1827,6 +1856,51 @@ void viper_state::unk_serial_w(offs_t offset, uint64_t data, uint64_t mem_mask)
 
 /*****************************************************************************/
 
+// Force feedback wheel motor (k-type). The game writes one byte: bit 7 drives the motor, bit 4
+// picks the direction and bits 0-3 the torque. With "Calibrate Controls On Boot" on, code1d's
+// boot DEVICE CHECK ramps the torque to the left (0x80-0x8e, "<<<<<") and then to the right
+// (0x90-0x9e, ">>>>>"), watching the wheel ADC to find the stops, then drives the wheel back to
+// the centre and releases it (0x00). Without a wheel that moves, the check stops with DEVICE
+// ERROR STEERING WHEEL and the game has no steering/pedal calibration (every input reads 0).
+// So until the motor is first released after being driven, the wheel turns with the motor at a
+// speed proportional to the torque and stops at full lock. After that the steering reading is
+// the player's input only: in play the game buzzes the motor for road feel (0x89/0x99), which
+// must not move a gamepad player's steering.
+void viper_state::wheel_motor_w(offs_t offset, u64 data, u64 mem_mask)
+{
+	if (!ACCESSING_BITS_56_63)
+		return;
+
+	const u8 cmd = data >> 56;
+	if (m_wheel_motor_check)
+	{
+		wheel_motor_update();
+		if (BIT(m_wheel_motor_cmd, 7) && !BIT(cmd, 7))
+			m_wheel_motor_check = false;
+	}
+	m_wheel_motor_cmd = cmd;
+}
+
+void viper_state::wheel_motor_update()
+{
+	const attotime now = machine().time();
+	const double dt = (now - m_wheel_motor_time).as_double();
+	m_wheel_motor_time = now;
+
+	// the check runs within the first ~30 s, never leave it on for longer
+	if (now > m_wheel_motor_deadline)
+		m_wheel_motor_check = false;
+
+	if (!m_wheel_motor_check || !BIT(m_wheel_motor_cmd, 7))
+		return;
+
+	// positive is towards the left (ANn = CH(2n+1) - CH(2n)). At 40 units/s per torque step the
+	// wheel reaches a stop within about 2 s of the ramp passing torque 2
+	const double speed = 40.0 * (m_wheel_motor_cmd & 0x0f);
+	m_wheel_motor_pos += (BIT(m_wheel_motor_cmd, 4) ? -speed : speed) * dt;
+	m_wheel_motor_pos = std::clamp(m_wheel_motor_pos, -255.0, 255.0);
+}
+
 // GUN0-3 are P1 X, P1 Y, P2 X, P2 Y. For the optical gun games (jpark3, p911, wcombat) only the
 // low 11 (X) or 9 (Y) bits are position; the base ports define all 16 bits as active-low unused,
 // which made X read 0xf800|x and Y 0xfe00|y. jpark3 keeps X & 0xfff and Y & 0x3ff, and with bit 11
@@ -1866,7 +1940,7 @@ void viper_state::viper_map(address_map &map)
 	map(0xffe00000, 0xffe0000f).rw(m_duart_com, FUNC(pc16552_device::read), FUNC(pc16552_device::write));
 	map(0xffe08000, 0xffe08007).nopw(); // timestamp? watchdog?
 	map(0xffe10000, 0xffe10007).rw(FUNC(viper_state::input_r), FUNC(viper_state::output_w));
-	map(0xffe20000, 0xffe20007).nopw(); // motor k-type for deluxe force feedback (xtrial, gticlub2, jpark3)
+	map(0xffe20000, 0xffe20007).w(FUNC(viper_state::wheel_motor_w)); // motor k-type for deluxe force feedback (xtrial, gticlub2, jpark3)
 	map(0xffe28000, 0xffe28007).nopw(); // ppp2nd/boxingm extended leds
 	map(0xffe28000, 0xffe28007).nopr(); // sscopex busy flag for secondary screen?
 	// boxingm reads and writes here to read the pad sensor values, 2nd adc?
@@ -2104,6 +2178,9 @@ INPUT_PORTS_START( thrild2 )
 
 	PORT_MODIFY("AN2")
 	PORT_BIT( 0x1ff, 0x000, IPT_PEDAL2 ) PORT_NAME("Brake Pedal") PORT_MINMAX(0x101,0x0ff) PORT_SENSITIVITY(50) PORT_KEYDELTA(50) PORT_REVERSE
+
+	// not a hardware setting: eases steering with a gamepad stick
+	PORT_GAMEPAD_STEERING_CONFIG
 INPUT_PORTS_END
 
 INPUT_PORTS_START( gticlub2 )
@@ -2566,6 +2643,12 @@ void viper_state::machine_start()
 	save_item(NAME(m_i2c.addr_latch));
 	save_item(NAME(m_i2c.rw));
 
+	save_item(NAME(m_wheel_motor_check));
+	save_item(NAME(m_wheel_motor_cmd));
+	save_item(NAME(m_wheel_motor_pos));
+	save_item(NAME(m_wheel_motor_time));
+	save_item(NAME(m_wheel_motor_deadline));
+
 	save_item(STRUCT_MEMBER(m_epic.irq, vector));
 	save_item(STRUCT_MEMBER(m_epic.irq, priority));
 	save_item(STRUCT_MEMBER(m_epic.irq, destination)); // written but never read
@@ -2586,6 +2669,13 @@ void viper_state::machine_reset()
 
 	m_i2c.state = I2C_STATE_ADDRESS_CYCLE;
 	m_i2c.timer->reset();
+
+	// the boot device check only runs with "Calibrate Controls On Boot" on (code1d's default)
+	m_wheel_motor_check = BIT(m_io_ports[2]->read(), 2);
+	m_wheel_motor_cmd = 0;
+	m_wheel_motor_pos = 0.0;
+	m_wheel_motor_time = machine().time();
+	m_wheel_motor_deadline = machine().time() + attotime::from_seconds(60);
 
 	ide_hdd_device *hdd = m_ata->subdevice<ata_slot_device>("0")->subdevice<ide_hdd_device>("hdd");
 	uint16_t *identify_device = hdd->identify_device_buffer();

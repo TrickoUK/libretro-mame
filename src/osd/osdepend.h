@@ -29,7 +29,7 @@
 
 // forward references
 class input_type_entry;
-namespace osd { class midi_input_port; class midi_output_port; }
+namespace osd { class midi_input_port; class midi_output_port; class gpu_engine; }
 namespace ui { class menu_item; }
 
 
@@ -114,6 +114,130 @@ public:
 	// network interface
 	virtual std::unique_ptr<osd::network_device> open_network_device(int id, osd::network_handler &handler) = 0;
 	virtual std::vector<osd::network_device_info> list_network_devices() = 0;
+
+	// GPU render interface - get_gpu_engine() returns nullptr if
+	// this OSD/build doesn't support it, or if it does but the user has
+	// disabled it (e.g. via a frontend core option); callers must always
+	// have a software fallback. gpu_render_available() is a cheap query -
+	// no runtime GPU context creation - safe to call early (e.g. to decide
+	// a screen's declared resolution before any actual rendering happens)
+	// without the ordering hazards that come with eagerly constructing a
+	// real GPU context too early relative to the host frontend's own
+	// graphics setup (see psxgpu_device::updatevisiblearea()). It reflects
+	// both build-time support AND the user's current on/off choice, so a
+	// caller only needs this one check.
+	virtual bool gpu_render_available() const { return false; }
+
+	// Frame-based GPU engine (interface/gpuengine.h). `system` names the
+	// requesting emulated system (for example "model2") so the OSD can apply
+	// that system's enable option. Each call returns an engine of its own, so
+	// two devices in one machine (a board with two Voodoo chips) never share a
+	// render target; a device calls this once and keeps the pointer for the
+	// life of the machine. Returns nullptr when the OSD has no engine, the
+	// system's option is off or no GPU context could be created; callers keep
+	// their software renderer then.
+	virtual osd::gpu_engine *get_gpu_engine(const char *system) { return nullptr; }
+
+	// The resolution multiplier a caller should scale by when
+	// gpu_render_available() is true (e.g. 2 or 4 for 2x/4x internal
+	// resolution) - user-selectable where the OSD supports it (see the
+	// retro OSD's mame_psx_gpu_hle core option). Meaningless/unspecified
+	// when gpu_render_available() is false; default of 1 here covers that
+	// case safely for any caller that queries it regardless.
+	virtual int gpu_render_scale() const { return 1; }
+
+	// Whether GTE-sourced GPU polygon vertices should be corrected using
+	// PGXP-style geometry correction (see the retro OSD's
+	// mame_psx_gpu_pgxp core option and CLAUDE.md Phase 4) - meaningless/
+	// unspecified when gpu_render_available() is false, same as
+	// gpu_render_scale(); default of false covers that case safely.
+	virtual bool gpu_render_pgxp_enabled() const { return false; }
+
+	// PGXP 2D geometry tolerance (see the retro OSD's mame_psx_gpu_pgxp_tol
+	// core option, mirroring Beetle PSX HW's pgxp_2d_tol): governs
+	// polygons where at least one vertex has no PGXP depth information.
+	// -2 = legacy (whole polygon reverts to native integer coordinates),
+	// -1 = keep every PGXP-corrected vertex position as-is (Beetle's
+	// "disabled"), N >= 0 = keep a PGXP position only if it lies within
+	// N native pixels of the native coordinate, else revert that vertex.
+	// Meaningless when gpu_render_pgxp_enabled() is false.
+	virtual int gpu_render_pgxp_tolerance() const { return -2; }
+
+	// PGXP vertex cache (see gte::set_pgxp_vertex_cache_enabled() and the
+	// retro OSD's mame_psx_gpu_pgxp_vcache core option, mirroring Beetle
+	// PSX HW's pgxp_vertex): lets a polygon vertex with no direct PGXP
+	// shadow recover a precise position from another GTE-transformed
+	// vertex that landed on the same integer pixel. Off by default.
+	virtual bool gpu_render_pgxp_vertex_cache() const { return false; }
+
+	// MSAA sample count the GPU render target should use (e.g. 4 for 4x
+	// MSAA, 0 to disable) - user-selectable where the OSD supports it (see
+	// the retro OSD's mame_psx_gpu_msaa core option). Read once, at
+	// the first (lazy) construction of the engine target -
+	// changing it takes effect on the next restart, same as
+	// gpu_render_scale()/gpu_render_pgxp_enabled(). Meaningless/
+	// unspecified when gpu_render_available() is false; default of 0
+	// covers that case safely.
+	virtual int gpu_render_msaa_samples() const { return 0; }
+
+	// Texture filtering mode for the GPU render target (0 = disabled/
+	// nearest, PS1-accurate; 1 = bilinear; 2 = trilinear) - user-selectable
+	// where the OSD supports it (see the retro OSD's mame_psx_gpu_texfilter
+	// core option). Read once, at the first (lazy)
+	// construction of the engine target, same as gpu_render_msaa_samples().
+	// Meaningless/unspecified when gpu_render_available() is false;
+	// default of 0 covers that case safely.
+	virtual int gpu_render_texfilter() const { return 0; }
+
+	// Filtering-exclusion mode for sprite/rectangle primitives and for
+	// polygon primitives heuristically detected as 2D content (see
+	// psxgpu_device::gpu_detect_2d_polygon()) - 0 = disabled (no
+	// exclusion, filtered the same as everything else), 1 = exclude only
+	// opaque draws, 2 = exclude both opaque and semi-transparent draws.
+	// User-selectable where the OSD supports it (see the retro OSD's
+	// mame_psx_gpu_filter_exclude_sprite/_2d_polygon core options) -
+	// mirrors Beetle PSX HW's filter_exclude_sprite/filter_exclude_2d_polygon
+	// options of the same name/shape. Unlike gpu_render_texfilter() (baked
+	// into the GPU target's shader at construction), these are cheap,
+	// per-primitive queries safe to call every frame, same as
+	// gpu_render_scale() - not read once at construction. Meaningless/
+	// unspecified when gpu_render_available() is false; default of 0
+	// (no exclusion) covers that case safely.
+	virtual int gpu_render_filter_exclude_sprite() const { return 0; }
+	virtual int gpu_render_filter_exclude_2d_polygon() const { return 0; }
+
+	// 3D supersampling enhancement (see the retro OSD's mame_3d_supersample
+	// core option), for every 3D renderer that supports it: 1 = off
+	// (hardware-accurate), N >= 2 = supersample by N in each direction. The
+	// Voodoo averages up to an NxN grid of texture samples per minified
+	// pixel; the Konami K001005 renders the whole 3D layer at N times the
+	// native size and averages it down.
+	virtual int supersample() const { return 1; }
+
+	// Output scale of the supersampled 3D layer (see the retro OSD's
+	// mame_3d_output_scale core option): false = average the layer down to
+	// the native screen size, true = present the screen at supersample() times
+	// the native size. Only meaningful when supersample() > 1, and only read
+	// by renderers that can present a larger screen (Sega Model 2 today).
+	virtual bool supersample_output() const { return false; }
+
+	// 3D multisample anti-aliasing (see the retro OSD's mame_3d_msaa core
+	// option), for every 3D renderer on the host-GPU path: 0 = off, else the
+	// sample count requested for the GPU render target. Reduced to what the
+	// GPU supports; the software renderers ignore it.
+	virtual int msaa() const { return 0; }
+
+	// 3D texture filtering enhancement (see the retro OSD's mame_3d_texfilter
+	// core option), for every 3D renderer that supports it (the Konami
+	// K001005 today): true = bilinear filter textures in games that don't ask
+	// for it themselves; false = off (hardware-accurate).
+	virtual bool texture_filter() const { return false; }
+
+	// 3D anisotropic texture filtering (see the retro OSD's mame_3d_aniso
+	// core option), for every 3D renderer on the host-GPU path that samples
+	// textures itself: 0 = off, else the most texture taps per pixel along
+	// the long axis of the pixel's texture footprint.
+	virtual int anisotropy() const { return 0; }
 
 protected:
 	virtual ~osd_interface() { }

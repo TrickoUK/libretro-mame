@@ -2,9 +2,13 @@
 // copyright-holders:David Haywood
 #include "emu.h"
 #include "k001005.h"
+
+#include "osdepend.h"
 #include "screen.h"
 
 #include "corefloat.h"
+
+#include <cmath>
 
 /*****************************************************************************/
 /* Konami K001005 Polygon Renderer (KS10071) */
@@ -24,11 +28,24 @@
 
 k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, device_t *k001006)
 	: poly_manager<float, k001005_polydata, 10>(screen.machine())
+	, m_gpu_machine(screen.machine())
 {
 	m_k001006 = k001006;
 
-	int const width = 512;
-	int const height = 384;
+	m_force_bilinear = screen.machine().osd().texture_filter();
+	m_gpu_msaa = screen.machine().osd().msaa();
+	if (char const *env = getenv("MAME_K001005_TEXFILTER"))
+		m_force_bilinear = atoi(env) != 0;
+
+	// The scale belongs to the host-GPU path, so it is only raised when the engine exists; without one the
+	// renderer works at native size. Not a hardware setting: the GPU draws at a multiple of the native size and averages down
+	int const ss = screen.machine().osd().supersample();
+	m_ss = gpu_init() ? std::clamp(ss, 1, osd::GPU_MAX_SUPERSAMPLE) : 1;
+	m_draw_ss = m_ss;
+	m_output_scaled = screen.machine().osd().supersample_output() && m_ss > 1;
+
+	int const width = NATIVE_WIDTH * m_ss;
+	int const height = NATIVE_HEIGHT * m_ss;
 
 	m_fb[0].allocate(width, height);
 	m_fb[1].allocate(width, height);
@@ -77,9 +94,13 @@ k001005_renderer::k001005_renderer(device_t &parent, screen_device &screen, devi
 	// save state
 	parent.save_pointer(NAME(m_3dfifo), 0x10000);
 	parent.save_item(NAME(m_3dfifo_ptr));
-	parent.save_item(NAME(m_fb[0]));
-	parent.save_item(NAME(m_fb[1]));
-	parent.save_item(NAME(m_zb));
+	// The supersampled buffers are big, and the next frame redraws them anyway
+	if (m_ss == 1)
+	{
+		parent.save_item(NAME(m_fb[0]));
+		parent.save_item(NAME(m_fb[1]));
+		parent.save_item(NAME(m_zb));
+	}
 	parent.save_item(NAME(m_fb_page));
 	parent.save_item(NAME(m_light_r));
 	parent.save_item(NAME(m_light_g));
@@ -122,17 +143,280 @@ void k001005_renderer::push_data(uint32_t data)
 
 void k001005_renderer::swap_buffers()
 {
+	// a frame still in flight belongs to the page about to be reused
+	gpu_collect();
+
+	// the polygons of the finished frame go to the GPU now, into the buffer they were drawn for
+	if (!m_gpu_runs.empty())
+		gpu_submit();
+
 	m_fb_page ^= 1;
 
-	m_fb[m_fb_page].fill(0, m_cliprect);
+	// A GPU-drawn page is written by the read-back alone: the native-size area at native output scale, the whole
+	// page otherwise. The depth buffer is only used by the software renderer.
+	// A page is native (one pixel per native pixel, in the top-left corner of the buffers) when the GPU averaged
+	// it down, or when software draws it because there is no engine. draw() enlarges such a page to the screen.
+	bool const gpu = gpu_init();
+	m_draw_ss = gpu ? m_ss : 1;
+	bool const native_page = m_ss > 1 && (!gpu || !m_output_scaled);
+	rectangle const clear = native_page ? rectangle(0, m_cliprect.width() / m_ss - 1, 0, m_cliprect.height() / m_ss - 1) : m_cliprect;
+	m_fb[m_fb_page].fill(0, clear);
+	m_page_share[m_fb_page] = false;
+	m_page_native[m_fb_page] = native_page;
 
-	float const zvalue = 10000000000.0F;
-	m_zb.fill(*(int*)&zvalue, m_cliprect);
+	if (!gpu)
+	{
+		float const zvalue = 10000000000.0F;
+		m_zb.fill(*(int*)&zvalue, clear);
+	}
 }
 
 bool k001005_renderer::fifo_filled()
 {
 	return m_3dfifo_ptr > 0;
+}
+
+
+bool k001005_renderer::gpu_init()
+{
+	if (!m_gpu_checked)
+	{
+		m_gpu_checked = true;
+		k001006_device *const k001006 = downcast<k001006_device *>(m_k001006);
+		m_gpu_engine = m_gpu_machine.osd().get_gpu_engine("k001005");
+		if (m_gpu_engine && (!k001006 || k001006->texture_page_count() * 512 > m_gpu_engine->caps().max_texture_size))
+			m_gpu_engine = nullptr;
+		if (m_gpu_engine)
+		{
+			osd::gpu_shader_module module;
+			module.name = "k001005";
+			module.fragment_source = K001005_FRAGMENT_SOURCE;
+			module.set_varyings(K001005_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, m_gpu_msaa > 0);
+			module.state_stride = K001005_SHADER_STATE_WORDS;
+			module.binding_count = 2;
+			module.binding_name[0] = "tex_rom";
+			module.binding_format[0] = osd::gpu_texture_format::R8UI;
+			module.binding_name[1] = "palette";
+			module.binding_format[1] = osd::gpu_texture_format::R32UI;
+			m_gpu_module = m_gpu_engine->create_shader_module(module);
+
+			osd::gpu_texture_desc desc;
+			desc.format = osd::gpu_texture_format::R8UI;
+			desc.width = 512;
+			desc.height = k001006->texture_page_count() * 512;
+			m_gpu_tex_rom = m_gpu_engine->create_texture(desc);
+			desc.format = osd::gpu_texture_format::R32UI;
+			desc.width = 256;
+			desc.height = 8;
+			m_gpu_palette = m_gpu_engine->create_texture(desc);
+
+			if (!m_gpu_module || !m_gpu_tex_rom || !m_gpu_palette)
+				m_gpu_engine = nullptr;
+			else
+				m_gpu_shadow_palette = make_unique_clear<uint32_t []>(0x800);
+		}
+	}
+	return m_gpu_engine != nullptr && !m_gpu_engine->failed();
+}
+
+// Queues the triangles of one polygon, with the state the scanline routine would have read.
+void k001005_renderer::gpu_add_polygon(k001005_polydata const &extra, rectangle const &cliprect, bool textured, bool vertex_color, bool is_quad, int v0, int v1, int v2, int v3)
+{
+	k001006_device *const k001006 = downcast<k001006_device *>(m_k001006);
+	bool const bilinear = m_force_bilinear || k001006->bilinear_enabled();
+	bool const z_compare = BIT(extra.cmd, 2);
+	bool const fb_blend = BIT(~extra.cmd, 1);
+
+	uint32_t const prim = m_gpu_state.size() / K001005_SHADER_STATE_WORDS;
+	uint32_t const flags = (textured ? 1 : 0) | (vertex_color ? 2 : 0) | (extra.fog_enable ? 4 : 0) | (bilinear ? 8 : 0)
+			| (extra.texture_mirror ? 16 : 0) | (fb_blend ? 32 : 0);
+	m_gpu_state.insert(m_gpu_state.end(), {
+			flags,
+			uint32_t(extra.texture_x * 8),
+			uint32_t(extra.texture_y * 8),
+			uint32_t(extra.texture_width),
+			uint32_t(extra.texture_height),
+			uint32_t(extra.texture_page),
+			uint32_t(extra.texture_palette * 256),
+			uint32_t(extra.diffuse_light),
+			uint32_t(extra.ambient_light),
+			uint32_t(extra.fog_color),
+			uint32_t(extra.poly_color),
+			uint32_t(cliprect.min_x),
+			uint32_t(cliprect.min_y),
+			uint32_t(cliprect.max_x),
+			uint32_t(cliprect.max_y),
+			0 });
+
+	// quads are two triangles, other polygons the triangle of the last three vertices
+	int const quad[6] = { v0, v1, v2, v2, v3, v0 };
+	int const strip[3] = { v1, v2, v3 };
+	int const *const order = is_quad ? quad : strip;
+	int const vertex_count = is_quad ? 6 : 3;
+
+	uint32_t const start = m_gpu_vertices.size();
+	for (int i = 0; i < vertex_count; i++)
+	{
+		vertex_t const &src = m_vertexb[order[i]];
+		k001005_gpu_vertex &dst = m_gpu_vertices.emplace_back();
+		dst.x = src.x;
+		dst.y = src.y;
+		dst.z = src.p[POLY_Z];
+		dst.w = 1.0F;
+		dst.prim = prim;
+		dst.v[0] = src.p[POLY_DIFF];
+		dst.v[1] = src.p[POLY_FOG];
+		dst.v[2] = textured ? src.p[POLY_U] : 0.0F;
+		dst.v[3] = textured ? src.p[POLY_V] : 0.0F;
+		dst.v[4] = src.p[POLY_W];
+		dst.v[5] = vertex_color ? src.p[POLY_R] : 0.0F;
+		dst.v[6] = vertex_color ? src.p[POLY_G] : 0.0F;
+		dst.v[7] = vertex_color ? src.p[POLY_B] : 0.0F;
+		dst.v[8] = vertex_color ? src.p[POLY_A] : 0.0F;
+	}
+
+	// consecutive polygons with the same depth test and blend state share a draw
+	uint32_t const added = m_gpu_vertices.size() - start;
+	if (!m_gpu_runs.empty() && m_gpu_runs.back().z_compare == z_compare && m_gpu_runs.back().fb_blend == fb_blend)
+		m_gpu_runs.back().vertex_count += added;
+	else
+		m_gpu_runs.push_back({ start, added, z_compare, fb_blend });
+}
+
+// Draws the queued polygons into the frame buffer the software renderer would have drawn them into.
+void k001005_renderer::gpu_submit()
+{
+	k001006_device *const k001006 = downcast<k001006_device *>(m_k001006);
+
+	// depth is a linear remap of the vertex z to the range the GPU compares
+	float zmin = FLT_MAX, zmax = -FLT_MAX;
+	for (k001005_gpu_vertex const &vertex : m_gpu_vertices)
+	{
+		if (std::isfinite(vertex.z))
+		{
+			zmin = std::min(zmin, vertex.z);
+			zmax = std::max(zmax, vertex.z);
+		}
+	}
+	float const zscale = (zmax > zmin) ? (0.99F / (zmax - zmin)) : 0.0F;
+	for (k001005_gpu_vertex &vertex : m_gpu_vertices)
+		vertex.z = std::isfinite(vertex.z) ? (0.005F + (vertex.z - zmin) * zscale) : 0.995F;
+
+	// the K001006 pens change at any time, the texture pages never do
+	osd::gpu_texture_update updates[2];
+	int update_count = 0;
+	if (m_gpu_full_upload)
+	{
+		osd::gpu_texture_update &u = updates[update_count++];
+		u.texture = m_gpu_tex_rom;
+		u.w = 512;
+		u.h = k001006->texture_page_count() * 512;
+		u.data = k001006->texture_pages();
+		u.pitch_bytes = 512;
+	}
+	{
+		uint32_t pens[0x800];
+		for (int i = 0; i < 0x800; i++)
+			pens[i] = k001006->pen_color(i);
+		if (m_gpu_full_upload || memcmp(pens, m_gpu_shadow_palette.get(), sizeof(pens)))
+		{
+			memcpy(m_gpu_shadow_palette.get(), pens, sizeof(pens));
+			osd::gpu_texture_update &u = updates[update_count++];
+			u.texture = m_gpu_palette;
+			u.w = 256;
+			u.h = 8;
+			u.data = m_gpu_shadow_palette.get();
+			u.pitch_bytes = 256 * sizeof(uint32_t);
+		}
+	}
+	m_gpu_full_upload = false;
+
+	std::vector<osd::gpu_command> commands;
+	for (gpu_run const &run : m_gpu_runs)
+	{
+		osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, run.first_vertex, run.vertex_count);
+		draw.variant = osd::gpu_aniso_variant(m_gpu_machine.osd().anisotropy());
+		draw.bindings[0] = m_gpu_tex_rom;
+		draw.bindings[1] = m_gpu_palette;
+		draw.depth_func = run.z_compare ? osd::gpu_depth_func::LEQUAL : osd::gpu_depth_func::ALWAYS;
+		draw.depth_write = true;
+		// only geometry with a depth compare has its edges multisampled
+		draw.multisample = run.z_compare;
+		if (run.fb_blend)
+		{
+			draw.blend.enable = true;
+			draw.blend.src = osd::gpu_blend_factor::SRC_ALPHA;
+			draw.blend.dst = osd::gpu_blend_factor::ONE_MINUS_SRC_ALPHA;
+		}
+		commands.push_back(draw);
+	}
+
+	bitmap_rgb32 &target = m_fb[m_fb_page];
+	osd::gpu_readback_rect readback;
+	readback.x = 0;
+	readback.y = 0;
+	readback.w = target.width();
+	readback.h = target.height();
+	readback.out = &target.pix(0, 0);
+	readback.stride = target.rowpixels();
+	// Rendering at a multiple of the native size without an output scale: the GPU averages each block of samples
+	// down to one native pixel, into the top-left of the page. The layer is transparent where nothing was drawn,
+	// so the samples of an edge pixel are averaged over the drawn ones only, with the drawn share in alpha.
+	bool const native_out = m_ss > 1 && !m_output_scaled;
+	if (native_out)
+		readback.downsample = m_ss;
+	if (native_out || m_gpu_msaa > 0)
+	{
+		readback.coverage = true;
+		readback.coverage_share = true;
+	}
+
+	osd::gpu_frame frame;
+	frame.target.width = target.width();
+	frame.target.height = target.height();
+	frame.target.depth = osd::gpu_depth_mode::REAL;
+	frame.target.msaa_samples = m_gpu_msaa;
+	frame.target.msaa_per_sample = m_gpu_msaa > 0;
+	frame.updates = updates;
+	frame.update_count = update_count;
+	frame.vertices = m_gpu_vertices.data();
+	frame.vertex_count = m_gpu_vertices.size();
+	frame.varyings_per_vertex = K001005_SHADER_VARYINGS;
+	frame.prim_state = m_gpu_state.data();
+	frame.prim_count = m_gpu_state.size() / K001005_SHADER_STATE_WORDS;
+	frame.state_stride = K001005_SHADER_STATE_WORDS;
+	frame.commands = commands.data();
+	frame.command_count = commands.size();
+	frame.readbacks = &readback;
+	frame.readback_count = 1;
+	frame.defer_readback = true;
+	if (m_gpu_engine->submit_frame(frame))
+	{
+		m_gpu_pending = true;
+		m_page_share[m_fb_page] = native_out || m_gpu_msaa > 0;
+		m_page_native[m_fb_page] = native_out;
+	}
+	else
+	{
+		// the textures may not have reached the GPU, and this frame stays empty
+		m_gpu_full_upload = true;
+		m_fb[m_fb_page].fill(0, m_cliprect);
+		m_page_native[m_fb_page] = false;
+	}
+
+	m_gpu_state.clear();
+	m_gpu_vertices.clear();
+	m_gpu_runs.clear();
+}
+
+// Waits for the frame submitted at the last buffer swap and fills the page it was drawn for.
+void k001005_renderer::gpu_collect()
+{
+	if (!m_gpu_pending)
+		return;
+	m_gpu_pending = false;
+	if (!m_gpu_engine->collect_frame())
+		m_gpu_full_upload = true;
 }
 
 
@@ -241,8 +525,20 @@ void k001005_renderer::draw_scanline_generic(int32_t scanline, const extent_t& e
 					uint32_t const tex10 = k001006->fetch_texel(tex_page, palette_index, texel_u0, texel_v1);
 					uint32_t const tex11 = k001006->fetch_texel(tex_page, palette_index, texel_u1, texel_v1);
 
-					texel = rgbaint_t::bilinear_filter(tex00, tex01, tex10, tex11, ufrac * 16, vfrac * 16);
-					texel_alpha = tex00 >> 24;
+					// The hardware appears to keep the silhouette of cut-outs: transparency comes from the
+					// nearest texel, and transparent neighbours borrow its colour instead of bleeding black
+					uint32_t tex[4] = { tex00, tex01, tex10, tex11 };
+					uint32_t const nearest = tex[((vfrac >= 9) ? 2 : 0) | ((ufrac >= 9) ? 1 : 0)];
+					texel_alpha = nearest >> 24;
+					if (texel_alpha != 0)
+					{
+						for (uint32_t &t : tex)
+						{
+							if ((t >> 24) == 0)
+								t = nearest;
+						}
+					}
+					texel = rgbaint_t::bilinear_filter(tex[0], tex[1], tex[2], tex[3], ufrac * 16, vfrac * 16);
 				}
 			}
 
@@ -401,16 +697,19 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 	render_delegate rd_scan_vertex_color_tex = render_delegate(&k001005_renderer::draw_scanline_generic<true, true>, this);
 	render_delegate rd_scan_color = render_delegate(&k001005_renderer::draw_scanline_generic<false, false>, this);
 
-	int const viewport_min_x = std::clamp(256 + m_viewport_min_x + m_viewport_center_x, m_cliprect.min_x, m_cliprect.max_x);
-	int const viewport_max_x = std::clamp(256 + m_viewport_max_x + m_viewport_center_x + 1, m_cliprect.min_x, m_cliprect.max_x);
-	int const viewport_min_y = std::clamp(200 + m_viewport_min_y - m_viewport_center_y, m_cliprect.min_y, m_cliprect.max_y);
-	int const viewport_max_y = std::clamp(200 + m_viewport_max_y - m_viewport_center_y + 1, m_cliprect.min_y, m_cliprect.max_y);
+	int const viewport_min_x = std::clamp(256 + m_viewport_min_x + m_viewport_center_x, 0, NATIVE_WIDTH - 1);
+	int const viewport_max_x = std::clamp(256 + m_viewport_max_x + m_viewport_center_x + 1, 0, NATIVE_WIDTH - 1);
+	int const viewport_min_y = std::clamp(200 + m_viewport_min_y - m_viewport_center_y, 0, NATIVE_HEIGHT - 1);
+	int const viewport_max_y = std::clamp(200 + m_viewport_max_y - m_viewport_center_y + 1, 0, NATIVE_HEIGHT - 1);
 
-	rectangle cliprect(viewport_min_x, viewport_max_x, viewport_min_y, viewport_max_y);
+	// The clip rectangle is inclusive, so the last native pixel covers up to the last sample
+	rectangle cliprect(viewport_min_x * m_draw_ss, (viewport_max_x + 1) * m_draw_ss - 1, viewport_min_y * m_draw_ss, (viewport_max_y + 1) * m_draw_ss - 1);
 
 	int const start_index = index;
 
 	uint32_t const *const fifo = m_3dfifo.get();
+
+	bool const gpu = gpu_init();
 
 	bool const has_texture = (cmd & 0x18) != 0;
 	bool const has_vertex_color = BIT(cmd, 8);
@@ -444,7 +743,9 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 
 	while ((fifo[index] & 0xffff0000) != 0x80000000 && index < m_3dfifo_ptr)
 	{
-		k001005_polydata& extra = object_data().next();
+		// the host GPU path copies the polygon out, so it takes a local record and the software object data is left alone
+		k001005_polydata gpu_extra {};
+		k001005_polydata &extra = gpu ? gpu_extra : object_data().next();
 
 		bool last_vertex = false;
 		bool is_quad = false;
@@ -464,8 +765,8 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 			int y = (fifo[index] >> 16) & 0x1fff;
 			y |= ((y & 0x1000) ? 0xffffe000 : 0);
 
-			m_vertexb[m_vertexb_ptr].x = ((float)(x) / 16.0f) + 256.0f;
-			m_vertexb[m_vertexb_ptr].y = ((float)(-y) / 16.0f) + 200.0f;
+			m_vertexb[m_vertexb_ptr].x = (((float)(x) / 16.0f) + 256.0f) * m_draw_ss;
+			m_vertexb[m_vertexb_ptr].y = (((float)(-y) / 16.0f) + 200.0f) * m_draw_ss;
 
 			is_quad = BIT(fifo[index], 14);
 			last_vertex = BIT(fifo[index], 15);
@@ -625,7 +926,11 @@ int k001005_renderer::parse_polygon(int index, uint32_t cmd)
 		// No texture, constant color:   Z, Fog, Diffuse
 		// Texture, constant color:      Z, Fog, Diffuse, U, V, W
 		// Per-vertex color:             Z, Fog, Diffuse, U, V, W, R, G, B, A
-		if (is_quad)
+		if (gpu)
+		{
+			gpu_add_polygon(extra, cliprect, has_texture, has_vertex_color, is_quad, v0, v1, v2, v3);
+		}
+		else if (is_quad)
 		{
 			if (has_vertex_color)
 			{
@@ -689,17 +994,146 @@ void k001005_renderer::render_polygons()
 
 void k001005_renderer::draw(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
+	gpu_collect();
+
+	// a page the GPU averaged already has one pixel per native pixel
+	int const ss = m_page_native[m_fb_page ^ 1] ? 1 : m_ss;
+	int const samples = ss * ss;
+	bitmap_rgb32 const &page = m_fb[m_fb_page ^ 1];
+
+	// A page drawn with multisampling holds the average colour of the drawn samples of each pixel and the
+	// share of the pixel they cover in alpha. A partly covered pixel is blended over what is behind the layer
+	// by that share, which anti-aliases the edge.
+	bool const share = m_page_share[m_fb_page ^ 1];
+
+	// Blends the colour channels of src over back, share_sum out of share_max of the pixel being drawn
+	auto const blend = [] (uint32_t src, uint32_t back, uint32_t share_sum, uint32_t share_max) -> uint32_t
+	{
+		uint32_t const clear = share_max - share_sum;
+		uint32_t const a = (share_sum * 255 + (back >> 24) * clear) / share_max;
+		uint32_t const r = (share_sum * ((src >> 16) & 0xff) + ((back >> 16) & 0xff) * clear) / share_max;
+		uint32_t const g = (share_sum * ((src >> 8) & 0xff) + ((back >> 8) & 0xff) * clear) / share_max;
+		uint32_t const b = (share_sum * (src & 0xff) + (back & 0xff) * clear) / share_max;
+		return (a << 24) | (r << 16) | (g << 8) | b;
+	};
+
+	if (m_output_scaled)
+	{
+		// The screen has one pixel per sample; a native page is enlarged with sharp pixels
+		int const enlarge = m_page_native[m_fb_page ^ 1] ? m_ss : 1;
+		for (int j = cliprect.min_y; j <= cliprect.max_y; j++)
+		{
+			uint32_t *const bmp = &bitmap.pix(j);
+			uint32_t const *const src = &page.pix((j - cliprect.min_y) / enlarge, 0);
+
+			for (int i = cliprect.min_x; i <= cliprect.max_x; i++)
+			{
+				uint32_t const p = src[(i - cliprect.min_x) / enlarge];
+				if (p & 0xff000000)
+				{
+					if (share && (p >> 24) != 0xff)
+						bmp[i] = blend(p, bmp[i], p >> 24, 255);
+					else
+						bmp[i] = p;
+				}
+			}
+		}
+		return;
+	}
+
 	for (int j = cliprect.min_y; j <= cliprect.max_y; j++)
 	{
 		uint32_t *const bmp = &bitmap.pix(j);
-		uint32_t const *const src = &m_fb[m_fb_page ^ 1].pix(j - cliprect.min_y);
+		int const src_y = (j - cliprect.min_y) * ss;
 
 		for (int i = cliprect.min_x; i <= cliprect.max_x; i++)
 		{
-			if (src[i - cliprect.min_x] & 0xff000000)
+			int const src_x = (i - cliprect.min_x) * ss;
+
+			if (ss == 1)
 			{
-				bmp[i] = src[i - cliprect.min_x];
+				uint32_t const src = page.pix(src_y, src_x);
+				if (src & 0xff000000)
+				{
+					if (share && (src >> 24) != 0xff)
+						bmp[i] = blend(src, bmp[i], src >> 24, 255);
+					else
+						bmp[i] = src;
+				}
+				continue;
 			}
+
+			if (share)
+			{
+				// Each page pixel counts for its covered share, 255 being all of it
+				uint32_t weight = 0, r = 0, g = 0, b = 0;
+				for (int sy = 0; sy < ss; sy++)
+				{
+					uint32_t const *const src = &page.pix(src_y + sy, src_x);
+					for (int sx = 0; sx < ss; sx++)
+					{
+						uint32_t const p = src[sx];
+						uint32_t const w = p >> 24;
+						weight += w;
+						r += w * ((p >> 16) & 0xff);
+						g += w * ((p >> 8) & 0xff);
+						b += w * (p & 0xff);
+					}
+				}
+
+				if (weight == 0)
+					continue;
+
+				// colour of the drawn samples, then blended by the share of the output pixel they cover
+				uint32_t const drawn = (0xff << 24) | ((r / weight) << 16) | ((g / weight) << 8) | (b / weight);
+				bmp[i] = (weight == uint32_t(samples) * 255) ? drawn : blend(drawn, bmp[i], weight, samples * 255);
+				continue;
+			}
+
+			// Average the samples the 3D layer drew. Where only some were drawn (a polygon edge
+			// or a cut-out in a texture), the average is blended over what is behind the layer
+			// by that share, which anti-aliases the edge.
+			int covered = 0;
+			uint32_t a = 0, r = 0, g = 0, b = 0;
+			for (int sy = 0; sy < ss; sy++)
+			{
+				uint32_t const *const src = &page.pix(src_y + sy, src_x);
+				for (int sx = 0; sx < ss; sx++)
+				{
+					uint32_t const p = src[sx];
+					if (p & 0xff000000)
+					{
+						covered++;
+						a += p >> 24;
+						r += (p >> 16) & 0xff;
+						g += (p >> 8) & 0xff;
+						b += p & 0xff;
+					}
+				}
+			}
+
+			if (covered == 0)
+				continue;
+
+			if (covered < samples)
+			{
+				// Colour is the average of the drawn samples, weighted by how many were drawn
+				uint32_t const back = bmp[i];
+				uint32_t const clear = samples - covered;
+				a = (a + (back >> 24) * clear) / samples;
+				r = (r + ((back >> 16) & 0xff) * clear) / samples;
+				g = (g + ((back >> 8) & 0xff) * clear) / samples;
+				b = (b + (back & 0xff) * clear) / samples;
+			}
+			else
+			{
+				a /= samples;
+				r /= samples;
+				g /= samples;
+				b /= samples;
+			}
+
+			bmp[i] = (a << 24) | (r << 16) | (g << 8) | b;
 		}
 	}
 }
@@ -734,6 +1168,18 @@ void k001005_device::device_start()
 	m_fifo = std::make_unique<uint32_t[]>(0x800);
 
 	m_renderer = std::make_unique<k001005_renderer>(*this, screen(), m_k001006);
+
+	// The 2D layers draw at native size, so the scaled screen gets them enlarged from a native-size bitmap
+	m_output_scale = m_renderer->output_scaled() ? m_renderer->supersample() : 1;
+	if (m_output_scale > 1)
+	{
+		rectangle const visarea = screen().visible_area();
+		m_layer.allocate(screen().width(), screen().height());
+		screen().configure(screen().width() * m_output_scale, screen().height() * m_output_scale,
+				rectangle(visarea.min_x * m_output_scale, (visarea.max_x + 1) * m_output_scale - 1,
+					visarea.min_y * m_output_scale, (visarea.max_y + 1) * m_output_scale - 1),
+				screen().frame_period());
+	}
 
 	save_pointer(NAME(m_ram[0]), 0x140000);
 	save_pointer(NAME(m_ram[1]), 0x140000);
@@ -770,6 +1216,22 @@ void k001005_device::device_stop()
 /*****************************************************************************
     DEVICE HANDLERS
 *****************************************************************************/
+
+void k001005_device::enlarge_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect) const
+{
+	int const os = m_output_scale;
+	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		uint32_t const *const src = &m_layer.pix(y / os, 0);
+		uint32_t *const dst = &bitmap.pix(y);
+		for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+		{
+			uint32_t const p = src[x / os];
+			if (p & 0xff000000)
+				dst[x] = p;
+		}
+	}
+}
 
 void k001005_device::swap_buffers( )
 {

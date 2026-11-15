@@ -888,6 +888,52 @@ end
 			"Z7_ST",
 		}
 
+if _OPTIONS["osd"] == "retro" then
+	files {
+			MAME_DIR .. "3rdparty/lzma/C/7zAlloc.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zArcIn.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zBuf.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zBuf2.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zCrc.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zCrcOpt.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zDec.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zFile.c",
+			MAME_DIR .. "3rdparty/lzma/C/7zStream.c",
+			MAME_DIR .. "3rdparty/lzma/C/Aes.c",
+			MAME_DIR .. "3rdparty/lzma/C/AesOpt.c",
+			MAME_DIR .. "3rdparty/lzma/C/Alloc.c",
+			MAME_DIR .. "3rdparty/lzma/C/Bcj2.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/Bcj2Enc.c",
+			MAME_DIR .. "3rdparty/lzma/C/Bra.c",
+			MAME_DIR .. "3rdparty/lzma/C/Bra86.c",
+			MAME_DIR .. "3rdparty/lzma/C/BraIA64.c",
+			MAME_DIR .. "3rdparty/lzma/C/CpuArch.c",
+			MAME_DIR .. "3rdparty/lzma/C/Delta.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/DllSecur.c",
+			MAME_DIR .. "3rdparty/lzma/C/LzFind.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/LzFindMt.c",
+			MAME_DIR .. "3rdparty/lzma/C/Lzma2Dec.c",
+			MAME_DIR .. "3rdparty/lzma/C/Lzma2Enc.c",
+			MAME_DIR .. "3rdparty/lzma/C/Lzma86Dec.c",
+			MAME_DIR .. "3rdparty/lzma/C/Lzma86Enc.c",
+			MAME_DIR .. "3rdparty/lzma/C/LzmaDec.c",
+			MAME_DIR .. "3rdparty/lzma/C/LzmaEnc.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/LzmaLib.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/MtCoder.c",
+			MAME_DIR .. "3rdparty/lzma/C/Ppmd7.c",
+			MAME_DIR .. "3rdparty/lzma/C/Ppmd7Dec.c",
+			MAME_DIR .. "3rdparty/lzma/C/Ppmd7Enc.c",
+			MAME_DIR .. "3rdparty/lzma/C/Sha256.c",
+			MAME_DIR .. "3rdparty/lzma/C/Sort.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/Threads.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/Xz.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/XzCrc64.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/XzCrc64Opt.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/XzDec.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/XzEnc.c",
+			-- MAME_DIR .. "3rdparty/lzma/C/XzIn.c",
+		}
+else
 	files {
 			MAME_DIR .. "3rdparty/lzma/C/7zAlloc.c",
 			MAME_DIR .. "3rdparty/lzma/C/7zArcIn.c",
@@ -937,7 +983,7 @@ end
 			-- MAME_DIR .. "3rdparty/lzma/C/XzEnc.c",
 			-- MAME_DIR .. "3rdparty/lzma/C/XzIn.c",
 		}
-
+end
 
 --------------------------------------------------
 -- LUA library objects
@@ -1210,6 +1256,7 @@ end
 -- BX library objects
 --------------------------------------------------
 
+if _OPTIONS["NO_USE_BGFX"]~="1" then
 project "bx"
 	uuid "238318fe-49f5-4eb4-88be-0618900f5eac"
 	kind "StaticLib"
@@ -1289,11 +1336,13 @@ project "bx"
 		MAME_DIR .. "3rdparty/bx/src/url.cpp",
 	}
 
+end
 
 --------------------------------------------------
 -- BIMG library objects
 --------------------------------------------------
 
+if _OPTIONS["NO_USE_BGFX"]~="1" then
 project "bimg"
 	uuid "5603611b-8bf8-4ffd-85bc-76858cd7df39"
 	kind "StaticLib"
@@ -1420,11 +1469,13 @@ project "bimg"
 		MAME_DIR .. "3rdparty/bimg/3rdparty/tinyexr/deps/miniz/miniz.c",
 	}
 
+end
 
 --------------------------------------------------
 -- BGFX library objects
 --------------------------------------------------
 
+if _OPTIONS["NO_USE_BGFX"]~="1" then
 project "bgfx"
 	uuid "d3e7e119-35cf-4f4f-aba0-d3bdcd1b879a"
 	kind "StaticLib"
@@ -1608,6 +1659,7 @@ end
 		}
 	end
 
+end
 
 --------------------------------------------------
 -- PortAudio library objects
@@ -2007,6 +2059,15 @@ project "asmjit"
 			MAME_DIR .. "3rdparty/asmjit",
 		}
 
+	local version = str_to_version(_OPTIONS["gcc_version"])
+	if _OPTIONS["targetos"]=="macosx" and _OPTIONS["gcc"]~=nil then
+		if string.find(_OPTIONS["gcc"], "clang") and (version < 80000) then
+			defines {
+				"TARGET_OS_OSX=1",
+			}
+		end
+	end
+
 	files {
 		MAME_DIR .. "3rdparty/asmjit/asmjit/a64.h",
 		MAME_DIR .. "3rdparty/asmjit/asmjit/arm.h",
@@ -2178,6 +2239,66 @@ project "asmjit"
 		MAME_DIR .. "3rdparty/asmjit/asmjit/x86/x86rapass_p.h",
 	}
 end
+
+
+--------------------------------------------------
+-- glslang: GLSL to SPIR-V for the libretro host-GPU Vulkan engine
+-- (compiled at run time, so the
+-- compiler is linked into the core). Built from bgfx's vendored copy.
+-- SPIRV-Tools optimisation and the HLSL front end are left out.
+--------------------------------------------------
+
+project "glslang"
+	uuid "9cb2b02b-cae2-41a1-a721-b4a97cde0455"
+	kind (LIBTYPE)
+
+	addprojectflags()
+
+	configuration { "vs*" }
+if _OPTIONS["vs"]==nil then
+		buildoptions {
+			"/wd4100", -- warning C4100: unreferenced formal parameter
+			"/wd4127", -- warning C4127: conditional expression is constant
+			"/wd4244", -- warning C4244: conversion, possible loss of data
+			"/wd4189", -- warning C4189: local variable is initialized but not referenced
+		}
+end
+
+	configuration { }
+
+	defines {
+		"ENABLE_OPT=0",
+		"ENABLE_HLSL=0",
+	}
+
+	includedirs {
+		MAME_DIR .. "3rdparty/bgfx/3rdparty",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/glslang",
+	}
+
+	files {
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/glslang/**.cpp",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/glslang/**.h",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/SPIRV/**.cpp",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/SPIRV/**.h",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/OGLCompilersDLL/**.cpp",
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/OGLCompilersDLL/**.h",
+		-- GetDefaultResources() (the built-in limits glslang needs to parse) is defined in StandAlone
+		MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/StandAlone/ResourceLimits.cpp",
+	}
+
+	configuration { "windows" }
+		removefiles {
+			MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/glslang/OSDependent/Unix/**.cpp",
+		}
+
+	configuration { "not windows" }
+		removefiles {
+			MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang/glslang/OSDependent/Windows/**.cpp",
+		}
+
+	configuration { }
 
 --------------------------------------------------
 -- OpenH264 portable decoder (Hantro G1)

@@ -1,0 +1,515 @@
+// license:BSD-3-Clause
+// copyright-holders:TrickoUK
+/***************************************************************************
+
+    gpuengine.h
+
+    OSD interface to a frame-based GPU engine. A device builds one
+    gpu_frame per emulated frame (textures to update, vertices, a table
+    of per-primitive state and an ordered command list), submits it in a
+    single synchronous call and gets the finished image back as ordinary
+    32-bit pixels. The device supplies its pixel pipeline as a
+    gpu_shader_module (GLSL fragment source); the engine owns contexts,
+    textures, programs, depth and read-back.
+
+    The interface holds no API types, so another backend can implement
+    it. An OSD without an engine returns nullptr from
+    osd_interface::get_gpu_engine(), and a device must then keep using its
+    software renderer.
+
+    Frame lifecycle rules (every adapter follows these):
+    - Frame skip: the device does not submit a frame; the target is
+      untouched and nothing is queued.
+    - State load and reset: the device increments target.generation. A
+      persistent target is cleared when the generation changes.
+    - Resolution change: a different target size reallocates (and clears)
+      the target. The device declares the largest size it will ever use to
+      the frontend before the machine starts.
+    - Failure: submit_frame() returns false when the GPU path cannot
+      produce the frame (no context, a shader that does not compile, a
+      bad frame description). The device then renders the frame in
+      software and stops submitting once failed() is true. An engine
+      latches failed() by itself after a run of consecutive failed
+      frames, so a device can rely on it for a failure that repeats.
+    - Each device gets an engine of its own from get_gpu_engine(), so the
+      render target is never shared between devices.
+    - The engine makes its GPU context current only inside submit_frame()
+      and collect_frame() and releases it before returning, so it never stays
+      current across separately scheduled emulator calls. A frame with
+      read-backs (at the end, or READBACK commands) returns with their pixels
+      written; a frame without any, or with defer_readback, returns once its
+      commands are issued and the GPU executes them while emulation runs.
+      Later work on the same engine is ordered after it. The pixels of a
+      deferred read-back are written by collect_frame(), in the same emulated
+      frame as the submit; the buffers they go to must stay alive until then.
+
+    Vertex layout (gpu_frame::vertices), per vertex, tightly packed:
+        float x, y   target pixels, (0,0) = top-left of the target
+        float z      depth in [0,1], used when the target depth mode is REAL
+        float w      perspective divisor (1 = affine), larger = further away
+        uint32_t prim  index into the per-primitive state table
+        float v[varyings_per_vertex]
+    The varyings are interpolated according to each module's
+    varying_mode (perspective-correct, screen-linear or flat).
+
+***************************************************************************/
+#ifndef MAME_OSD_INTERFACE_GPUENGINE_H
+#define MAME_OSD_INTERFACE_GPUENGINE_H
+
+#pragma once
+
+#include "gpurender.h"
+
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+
+
+namespace osd {
+
+constexpr int GPU_MAX_VARYINGS = 16;
+constexpr int GPU_MAX_BINDINGS = 8;
+
+// the largest supersampling factor of any host-GPU target; the colour-target stack does not fit at a larger factor on tall modes
+constexpr int GPU_MAX_SUPERSAMPLE = 3;
+
+// the supersampling factor a target uses: the requested factor, reduced until the largest native extent times it fits the texture size
+inline int gpu_pick_scale(int requested, int largest_native_extent, int max_texture_size)
+{
+	int scale = std::clamp(requested, 1, GPU_MAX_SUPERSAMPLE);
+	while (scale > 1 && largest_native_extent * scale > max_texture_size)
+		scale--;
+	return scale;
+}
+
+// opaque handle to an engine-owned object (texture or shader module);
+// zero is never valid
+using gpu_handle = uint32_t;
+constexpr gpu_handle GPU_NULL_HANDLE = 0;
+
+enum class gpu_texture_format : uint8_t
+{
+	R8UI,       // unsigned integer, sampled with texelFetch
+	R16UI,
+	R32UI,
+	RG32UI,
+	RGBA32I,    // signed integer, four words per texel
+	RGBA8       // normalised colour, may be filtered
+};
+
+struct gpu_texture_desc
+{
+	gpu_texture_format format = gpu_texture_format::R16UI;
+	int width = 0;
+	int height = 0;
+	bool filter_linear = false;     // RGBA8 only; integer formats are never filtered
+};
+
+// a rectangle of texels to replace; data points at the first texel of the
+// rectangle, pitch_bytes is the distance between its rows (0 = tightly packed)
+struct gpu_texture_update
+{
+	gpu_handle texture = GPU_NULL_HANDLE;
+	int x = 0, y = 0, w = 0, h = 0;
+	const void *data = nullptr;
+	int pitch_bytes = 0;
+};
+
+enum class gpu_depth_mode : uint8_t
+{
+	NONE,       // draw order only, no depth attachment
+	ORDER,      // the primitive index is the depth: with LESS the first primitive drawn at a pixel wins
+	REAL        // vertex z is the depth, compared with each draw's depth_func
+};
+
+enum class gpu_depth_func : uint8_t
+{
+	NEVER, LESS, LEQUAL, EQUAL, GEQUAL, GREATER, NOTEQUAL, ALWAYS
+};
+
+enum class gpu_varying_mode : uint8_t
+{
+	PERSPECTIVE,
+	NOPERSPECTIVE,
+	FLAT
+};
+
+enum class gpu_blend_op : uint8_t { ADD, SUBTRACT, REVERSE_SUBTRACT };
+
+enum class gpu_blend_factor : uint8_t
+{
+	ZERO, ONE, SRC_ALPHA, ONE_MINUS_SRC_ALPHA, CONSTANT_ALPHA, ONE_MINUS_CONSTANT_ALPHA,
+	SRC_COLOR, ONE_MINUS_SRC_COLOR, DST_COLOR, ONE_MINUS_DST_COLOR, SRC_ALPHA_SATURATE,
+	SRC1_ALPHA, ONE_MINUS_SRC1_ALPHA    // the module's blend_factor output; for a module with blend_factor_output
+};
+
+struct gpu_blend_state
+{
+	bool enable = false;
+	gpu_blend_op op = gpu_blend_op::ADD;
+	gpu_blend_factor src = gpu_blend_factor::ONE;
+	gpu_blend_factor dst = gpu_blend_factor::ZERO;
+	bool separate_alpha = false;        // the alpha channel uses src_alpha/dst_alpha instead of src/dst
+	gpu_blend_factor src_alpha = gpu_blend_factor::ONE;
+	gpu_blend_factor dst_alpha = gpu_blend_factor::ZERO;
+	float constant_alpha = 1.0f;
+
+	bool operator==(const gpu_blend_state &that) const
+	{
+		return enable == that.enable
+			&& op == that.op
+			&& src == that.src
+			&& dst == that.dst
+			&& separate_alpha == that.separate_alpha
+			&& src_alpha == that.src_alpha
+			&& dst_alpha == that.dst_alpha
+			&& constant_alpha == that.constant_alpha;
+	}
+
+	// the colour is weighted by the shader's blend_factor output; the alpha channel takes the fragment's alpha
+	static gpu_blend_state weighted()
+	{
+		gpu_blend_state blend;
+		blend.enable = true;
+		blend.src = gpu_blend_factor::SRC1_ALPHA;
+		blend.dst = gpu_blend_factor::ONE_MINUS_SRC1_ALPHA;
+		blend.separate_alpha = true;
+		blend.src_alpha = gpu_blend_factor::ONE;
+		blend.dst_alpha = gpu_blend_factor::ZERO;
+		return blend;
+	}
+
+	// the colour blends by the given factors; the alpha channel takes the fragment's alpha, so the target's alpha is replaced
+	static gpu_blend_state with_opaque_alpha(gpu_blend_factor src, gpu_blend_factor dst)
+	{
+		gpu_blend_state blend;
+		blend.enable = true;
+		blend.src = src;
+		blend.dst = dst;
+		blend.separate_alpha = true;
+		blend.src_alpha = gpu_blend_factor::ONE;
+		blend.dst_alpha = gpu_blend_factor::ZERO;
+		return blend;
+	}
+};
+
+// The pixel pipeline of one system. fragment_source is GLSL that defines
+//     bool shade(out vec4 color)
+// (return false to discard the fragment). The engine prepends a prelude:
+//   - `float v0 ... v<varying_count-1>`: the interpolated varyings
+//   - `int state(int k)`: word k of the current primitive's state record
+//   - `vec2 frag_pos()`: the fragment position in target pixels, top-left origin
+//   - `ivec2 target_size()`: the target size in pixels
+//   - with writes_depth, `float frag_depth`, written to the fragment depth
+//   - with blend_factor_output, `float blend_factor` (initially 1), written to a second
+//     fragment output that the SRC1_ALPHA blend factors read, so a pixel can carry the
+//     colour and a blend weight apart from the alpha channel
+//   - `VARIANT`: an integer macro, the draw's variant value
+//   - for each binding i, a sampler named binding_name[i] (usampler2D for the
+//     unsigned formats, isampler2D for RGBA32I, sampler2D for RGBA8) plus a
+//     `ivec2 <name>_size()` helper
+// The source stays within GLSL 3.30 so another backend can translate it.
+struct gpu_shader_module
+{
+	const char *name = "";
+	const char *fragment_source = "";
+	uint32_t centroid_mask = 0;         // bit i: varying i is interpolated at a point inside the primitive for a partly covered multisample pixel, instead of at the pixel centre
+	int varying_count = 0;
+	gpu_varying_mode varying_mode[GPU_MAX_VARYINGS] = {};
+	int state_stride = 0;               // words per record the source reads
+	bool writes_depth = false;          // the source assigns `float frag_depth` (0..1) for the REAL depth mode
+	bool blend_factor_output = false;   // the source may assign `float blend_factor` (needs dual-source blending, GL 3.3)
+	int binding_count = 0;
+	const char *binding_name[GPU_MAX_BINDINGS] = {};
+	gpu_texture_format binding_format[GPU_MAX_BINDINGS] = {};
+
+	// all varyings share one interpolation mode; the centroid mask covers every varying when centroid is set
+	void set_varyings(int count, gpu_varying_mode mode, bool centroid)
+	{
+		assert(count >= 0 && count <= GPU_MAX_VARYINGS);
+		count = std::clamp(count, 0, GPU_MAX_VARYINGS);
+		varying_count = count;
+		for (int i = 0; i < count; i++)
+			varying_mode[i] = mode;
+		centroid_mask = centroid ? ((1U << count) - 1U) : 0U;
+	}
+};
+
+struct gpu_target_desc
+{
+	int width = 0;
+	int height = 0;
+	bool persistent = false;            // keep colour between frames; otherwise cleared to clear_color each frame
+	gpu_depth_mode depth = gpu_depth_mode::NONE;
+	int msaa_samples = 0;               // 0 = single sample; reduced to what the GPU supports and to the engine's memory budget
+	bool msaa_per_sample = false;       // keep the samples readable one by one, which a read-back with coverage needs
+	uint32_t generation = 0;            // a changed value clears a persistent target
+	float clear_color[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+};
+
+enum class gpu_command_type : uint8_t
+{
+	DRAW,           // draw vertices [first_vertex, first_vertex + vertex_count) as triangles
+	SET_CLIP,       // scissor rectangle (x, y, w, h), top-left origin; persists until changed
+	COPY_RECT,      // copy (x, y, w, h) to (dx, dy) inside the target, ignoring the clip
+	UPDATE_TEXTURE, // replace a texture rectangle at this point of the frame
+	CLEAR,          // clear the whole target, ignoring the clip
+	READBACK        // read a target rectangle back at this point of the frame (waits for the commands before it)
+};
+
+// Variant bits 24-27 carry log2 of the anisotropic tap limit (0 = off); a module sees the limit as the
+// ANISO_MAX macro and the remaining variant bits as VARIANT. Returns the bits for a tap limit of 0, 2, 4, 8 or 16.
+constexpr uint32_t gpu_aniso_variant(int taps)
+{
+	return (taps >= 16) ? (4U << 24) : (taps >= 8) ? (3U << 24) : (taps >= 4) ? (2U << 24) : (taps >= 2) ? (1U << 24) : 0U;
+}
+
+struct gpu_command
+{
+	gpu_command_type type = gpu_command_type::DRAW;
+
+	// DRAW
+	gpu_handle module = GPU_NULL_HANDLE;
+	uint32_t variant = 0;
+	uint32_t first_vertex = 0;
+	uint32_t vertex_count = 0;
+	gpu_blend_state blend;
+	gpu_depth_func depth_func = gpu_depth_func::ALWAYS;
+	bool depth_write = false;
+	bool color_write = true;
+	bool multisample = true;            // false: rasterise at the pixel centre and write every sample of the pixels covered (no effect on a single-sample target)
+	gpu_handle bindings[GPU_MAX_BINDINGS] = {};
+
+	// SET_CLIP, COPY_RECT
+	int x = 0, y = 0, w = 0, h = 0;
+	int dx = 0, dy = 0;
+
+	// UPDATE_TEXTURE
+	gpu_texture_update update;
+
+	// CLEAR
+	float clear_color[4] = {};
+	bool clear_color_enable = true;
+	bool clear_depth_enable = true;
+
+	// READBACK
+	gpu_readback_rect readback;
+
+	static gpu_command make_draw(gpu_handle module, uint32_t first_vertex, uint32_t vertex_count)
+	{
+		gpu_command c;
+		c.type = gpu_command_type::DRAW;
+		c.module = module;
+		c.first_vertex = first_vertex;
+		c.vertex_count = vertex_count;
+		return c;
+	}
+
+	static gpu_command make_clip(int x, int y, int w, int h)
+	{
+		gpu_command c;
+		c.type = gpu_command_type::SET_CLIP;
+		c.x = x; c.y = y; c.w = w; c.h = h;
+		return c;
+	}
+
+	static gpu_command make_copy(int sx, int sy, int dx, int dy, int w, int h)
+	{
+		gpu_command c;
+		c.type = gpu_command_type::COPY_RECT;
+		c.x = sx; c.y = sy; c.dx = dx; c.dy = dy; c.w = w; c.h = h;
+		return c;
+	}
+
+	static gpu_command make_update(const gpu_texture_update &u)
+	{
+		gpu_command c;
+		c.type = gpu_command_type::UPDATE_TEXTURE;
+		c.update = u;
+		return c;
+	}
+
+	static gpu_command make_readback(const gpu_readback_rect &r)
+	{
+		gpu_command c;
+		c.type = gpu_command_type::READBACK;
+		c.readback = r;
+		return c;
+	}
+
+	static gpu_command make_clear(float r, float g, float b, float a)
+	{
+		gpu_command c;
+		c.type = gpu_command_type::CLEAR;
+		c.clear_color[0] = r; c.clear_color[1] = g; c.clear_color[2] = b; c.clear_color[3] = a;
+		return c;
+	}
+};
+
+// One frame of work. Every pointer must stay valid until submit_frame() returns.
+struct gpu_frame
+{
+	gpu_target_desc target;
+
+	// texture rectangles applied before the first command
+	const gpu_texture_update *updates = nullptr;
+	int update_count = 0;
+
+	const void *vertices = nullptr;     // layout in the file header
+	uint32_t vertex_count = 0;
+	int varyings_per_vertex = 0;        // at least every module's varying_count
+
+	// per-primitive state: prim_count records of state_stride words each
+	const uint32_t *prim_state = nullptr;
+	uint32_t prim_count = 0;            // primitive ids in the vertices are below this
+	int state_stride = 0;
+
+	const gpu_command *commands = nullptr;
+	int command_count = 0;
+
+	// With defer_readback the read-backs of readbacks[] are started but not waited for: submit_frame()
+	// returns once the commands are issued, and collect_frame() later waits and writes the pixels.
+	// READBACK commands inside the command list are always completed before submit_frame() returns.
+	bool defer_readback = false;
+
+	// regions read back after the last command (target pixels, row 0 = top).
+	// A frame without any (and without READBACK commands) is not waited for:
+	// the commands are flushed to the GPU and the call returns, so the GPU
+	// works while emulation continues.
+	const gpu_readback_rect *readbacks = nullptr;
+	int readback_count = 0;
+};
+
+struct gpu_engine_caps
+{
+	int max_texture_size = 0;
+	int max_samples = 0;
+	// The engine returns from submit_frame() before the GPU finishes, and its frames are cheap enough to send
+	// in chunks while emulation runs (see flush_frame()). Devices that split a frame only do so when this is set.
+	bool chunked_frames = false;
+	// SRC1 blend factors, which a module with blend_factor_output needs (GL 3.3, or the Vulkan dualSrcBlend feature)
+	bool dual_source_blend = false;
+	const char *renderer = "";
+};
+
+// timing of the last submitted frame, in milliseconds
+struct gpu_engine_stats
+{
+	double upload_ms = 0.0;
+	double draw_ms = 0.0;           // CPU time spent issuing the commands (and waiting for them, while submission is synchronous)
+	double readback_ms = 0.0;
+	double gpu_ms = 0.0;            // GPU execution time of the command loop; 0 unless timers are enabled (MAME_GPU_PROF) and a result has arrived
+	uint64_t uploaded_bytes = 0;
+	uint32_t draw_calls = 0;
+	uint32_t program_compiles = 0;      // programs built during this frame
+	double collect_ms = 0.0;            // collect_frame(): time spent waiting for the GPU and copying
+};
+
+class gpu_engine
+{
+public:
+	virtual ~gpu_engine() = default;
+
+	virtual const gpu_engine_caps &caps() const = 0;
+
+	// false after an unrecoverable failure; the device keeps its software path
+	virtual bool failed() const = 0;
+
+	// create a texture (contents undefined until updated); returns GPU_NULL_HANDLE
+	// when the size, format or the memory budget cannot be satisfied
+	virtual gpu_handle create_texture(const gpu_texture_desc &desc) = 0;
+	virtual void destroy_texture(gpu_handle texture) = 0;
+	virtual uint64_t texture_memory() const = 0;
+	virtual void set_texture_budget(uint64_t bytes) = 0;
+
+	// register a pixel pipeline; programs are built on first use. Returns
+	// GPU_NULL_HANDLE when the description is invalid.
+	virtual gpu_handle create_shader_module(const gpu_shader_module &module) = 0;
+	virtual void destroy_shader_module(gpu_handle module) = 0;
+
+	// run one frame; see the file header for the lifecycle rules
+	virtual bool submit_frame(const gpu_frame &frame) = 0;
+
+	// Sends the commands of a frame that continues after this call: the frame's own read-backs are not
+	// performed, nothing is waited for, and the next submit of the device is ordered after these commands. The
+	// default submits the frame without read-backs, and returns without waiting.
+	virtual bool flush_frame(const gpu_frame &frame)
+	{
+		gpu_frame chunk = frame;
+		chunk.readbacks = nullptr;
+		chunk.readback_count = 0;
+		return submit_frame(chunk);
+	}
+
+	// Completes the deferred read-backs of the last submit_frame() and writes their pixels, waiting for the GPU
+	// if it is not done. Call it in the same emulated frame as the submit. A frame submitted after a submit
+	// whose read-backs were never collected discards them. Returns false if the pixels could not be delivered
+	// (the device then renders the frame in software). Does nothing and returns true if nothing is pending.
+	virtual bool collect_frame() { return true; }
+
+	virtual const gpu_engine_stats &last_frame_stats() const = 0;
+};
+
+
+// Tracks which part of a CPU-side texture shadow changed since the last
+// upload, as one bounding rectangle. A device marks writes from its memory
+// handlers and turns the result into a gpu_texture_update once per frame.
+// Setting MAME_GPU_FORCE_FULL_UPLOAD in the environment makes every take()
+// return the whole texture, to rule out dirty tracking when textures look
+// stale.
+class gpu_dirty_region
+{
+public:
+	gpu_dirty_region(int width, int height) : m_width(width), m_height(height) { mark_all(); }
+
+	void mark(int x, int y, int w, int h)
+	{
+		if (w <= 0 || h <= 0)
+			return;
+		const int x1 = std::max(x, 0);
+		const int y1 = std::max(y, 0);
+		const int x2 = std::min(x + w, m_width);
+		const int y2 = std::min(y + h, m_height);
+		if (x1 >= x2 || y1 >= y2)
+			return;
+		if (!m_dirty)
+		{
+			m_x1 = x1; m_y1 = y1; m_x2 = x2; m_y2 = y2;
+			m_dirty = true;
+		}
+		else
+		{
+			m_x1 = std::min(m_x1, x1); m_y1 = std::min(m_y1, y1);
+			m_x2 = std::max(m_x2, x2); m_y2 = std::max(m_y2, y2);
+		}
+	}
+
+	void mark_all() { m_dirty = false; mark(0, 0, m_width, m_height); }
+
+	bool dirty() const { return m_dirty; }
+
+	// returns false when nothing changed; otherwise the rectangle to upload,
+	// and the region becomes clean
+	bool take(int &x, int &y, int &w, int &h)
+	{
+		static const bool force_full = std::getenv("MAME_GPU_FORCE_FULL_UPLOAD") != nullptr;
+		if (force_full)
+			m_dirty = true, m_x1 = 0, m_y1 = 0, m_x2 = m_width, m_y2 = m_height;
+		if (!m_dirty)
+			return false;
+		x = m_x1; y = m_y1; w = m_x2 - m_x1; h = m_y2 - m_y1;
+		m_dirty = false;
+		return true;
+	}
+
+private:
+	int m_width, m_height;
+	bool m_dirty = false;
+	int m_x1 = 0, m_y1 = 0, m_x2 = 0, m_y2 = 0;
+};
+
+} // namespace osd
+
+#endif // MAME_OSD_INTERFACE_GPUENGINE_H

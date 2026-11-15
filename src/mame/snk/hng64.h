@@ -14,6 +14,9 @@
 #include "sound/l7a1045_l6028_dsp_a.h"
 #include "video/poly.h"
 
+#include "interface/gpuengine.h"
+#include "hng64_shader.h"
+
 #include "emupal.h"
 #include "screen.h"
 #include "tilemap.h"
@@ -98,6 +101,14 @@ struct hng64_poly_data
 
 class hng64_state;
 
+// vertex layout of the host-GPU path (see osd/interface/gpuengine.h)
+struct hng64_gpu_vertex
+{
+	float x, y, z, w;
+	u32 prim;
+	float v[HNG64_SHADER_VARYINGS];
+};
+
 class hng64_poly_renderer : public poly_manager<float, hng64_poly_data, 7>
 {
 public:
@@ -107,12 +118,45 @@ public:
 	void render_texture_scanline(s32 scanline, const extent_t &extent, const hng64_poly_data &renderData, int threadid);
 	void render_flat_scanline(s32 scanline, const extent_t &extent, const hng64_poly_data &renderData, int threadid);
 
+	// Host-GPU rendering: drawShaded() queues polygons while the engine is usable, gpu_submit() starts drawing
+	// them and gpu_collect() delivers the 16-bit colour words into colorBuffer3d(); gpu_clear() empties the GPU buffers
+	void gpu_submit();
+	void gpu_collect();
+	void gpu_clear();
+	void clear_depth();
+
 	hng64_state &state() { return m_state; }
 	float *depthBuffer3d() { return m_depthBuffer3d.get(); }
 	u16 *colorBuffer3d() { return m_colorBuffer3d.get(); }
 
+	// The 3D buffers are 512x512 on the hardware.  With supersampling they are m_ss times bigger in
+	// each direction, and the polygon coordinates are scaled to match.
+	int supersample() const { return m_frame_ss; }
+	int frameSize() const { return NATIVE_SIZE * m_frame_ss; }
+	void begin_frame();
+	int bufferSize() const { return NATIVE_SIZE * m_ss; }
+
+	static constexpr int NATIVE_SIZE = 512;
+
 private:
+	bool gpu_init();
+	void gpu_add_polygon(polygon *p);
+
 	hng64_state &m_state;
+	int m_ss;
+	// scale of the frame being drawn, see begin_frame()
+	int m_frame_ss;
+
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	bool m_gpu_checked = false;
+	bool m_gpu_full_upload = true;
+	u32 m_gpu_generation = 1;
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tex_rom = osd::GPU_NULL_HANDLE;
+	std::vector<u32> m_gpu_state;
+	std::vector<hng64_gpu_vertex> m_gpu_vertices;
+	bool m_gpu_pending = false;             // a submitted frame has not been collected
+	bool m_depth_clear_pending = false;     // the software depth buffer is stale (the GPU drew the frames since the last clear)
 
 	// (Temporarily class members - someday they will live in the memory map)
 	std::unique_ptr<float[]> m_depthBuffer3d;

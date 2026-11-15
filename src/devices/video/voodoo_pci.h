@@ -32,6 +32,7 @@ public:
 	auto vblank_callback() { return m_generic_voodoo.lookup()->vblank_callback(); }
 	auto stall_callback() { return m_generic_voodoo.lookup()->stall_callback(); }
 	u32 screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	int output_scale() const { return m_generic_voodoo->output_scale(); }
 
 	u32 vga_r(offs_t offset, u32 mem_mask = ~0);
 	void vga_w(offs_t offset, u32 data, u32 mem_mask = ~0);

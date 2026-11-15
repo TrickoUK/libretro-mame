@@ -63,6 +63,7 @@ static constexpr bool LOG_CMDFIFO_VERBOSE = false;
 // include register and render classes
 #include "voodoo_regs.h"
 #include "voodoo_render.h"
+#include "voodoo_gpu.h"
 
 
 namespace voodoo
@@ -162,6 +163,7 @@ public:
 	// simple getters
 	voodoo_regs &regs() { return m_reg; }
 	bool dirty() const { return m_regdirty; }
+	u8 *ram() const { return m_ram; }
 
 	// simple setters
 	void mark_dirty() { m_regdirty = true; }
@@ -417,6 +419,10 @@ public:
 	// video update
 	virtual int update(bitmap_rgb32 &bitmap, const rectangle &cliprect) = 0;
 
+	// the screen is presented at this multiple of its native size (1 = native); the layers a driver draws
+	// itself must be enlarged to match
+	virtual int output_scale() const { return 1; }
+
 protected:
 	// internal construction
 	generic_voodoo_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, voodoo::voodoo_model model);
@@ -500,6 +506,7 @@ public:
 
 	// video update
 	virtual int update(bitmap_rgb32 &bitmap, const rectangle &cliprect) override;
+	virtual int output_scale() const override { return m_output_scale; }
 
 protected:
 	// device-level overrides
@@ -649,6 +656,68 @@ protected:
 	std::unique_ptr<u8[]> m_memory;          // allocated framebuffer/texture memory
 	std::unique_ptr<voodoo::shared_tables> m_shared; // shared tables
 	std::unique_ptr<voodoo::voodoo_renderer> m_renderer; // rendering helper
+	// host-GPU path (nullptr = software only)
+	static constexpr int GPU_SLOTS = 8;
+	bool gpu_shared_memory() const { return m_model == voodoo::voodoo_model::VOODOO_BANSHEE || m_model == voodoo::voodoo_model::VOODOO_3; }
+	int gpu_buffer_index(u16 const *buffer, bool create = false);
+	u32 gpu_slot_offset(int slot) const;
+	u16 *gpu_slot_buffer(int slot) const { return (u16 *)(m_fbram + gpu_slot_offset(slot)); }
+	int gpu_front_slot();
+	// returns true when the range is in a colour buffer; without upload the write is latched, with upload the
+	// caller stores the bytes and then calls gpu_ram_upload()
+	bool gpu_ram_write(u32 offs, u32 bytes, bool upload = false);
+	void gpu_ram_upload(u32 offs, u32 bytes);
+	void gpu_ram_read(u32 offs, u32 bytes);
+	void gpu_sync_down(int buffer, u32 first_row = 0, u32 last_row = 1023);
+	void gpu_mark_rows(int buffer, s32 first_row, s32 last_row);
+	void gpu_sync_up();
+	void gpu_latch(char const *reason);
+	void gpu_configure();
+	bool gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprect, rgb_t const *pens);
+	std::unique_ptr<voodoo::gpu_renderer> m_gpu;
+	std::vector<u32> m_gpu_image;            // front buffer as read back, rgb32
+	bool m_gpu_shadow_dirty[GPU_SLOTS] = { };        // the GPU drew into the buffer since m_fbram was last updated from it
+	bool m_gpu_dirty_row[GPU_SLOTS][1024] = { };     // per row of each buffer, in 16-row groups checked together
+	u32 m_gpu_slot_offs[GPU_SLOTS] = { ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U };  // shared-memory models: RAM offset of the buffer in each slot
+	u32 m_gpu_seen_serial = ~0U;             // renderer submit serial of the last picture read from the GPU
+	int m_gpu_seen_front = -1;               // front buffer index of that picture
+	u32 m_gpu_image_serial = ~0U;            // serial and front buffer m_gpu_image holds
+	int m_gpu_image_front = -1;
+
+	// screen bitmaps holding the current GPU picture, read straight into them (see gpu_present())
+	struct gpu_direct_copy
+	{
+		bitmap_rgb32 const *bitmap = nullptr;
+		u32 const *pixels = nullptr;
+		u32 serial = 0;
+		int front = -1;
+		u32 pen_generation = 0;
+		rgb_t const *pens = nullptr;
+		int width = 0, height = 0;
+		u32 epoch = 0;
+		bool same_picture(gpu_direct_copy const &o) const { return serial == o.serial && front == o.front && pen_generation == o.pen_generation && pens == o.pens && width == o.width && height == o.height && epoch == o.epoch; }
+	};
+	gpu_direct_copy m_gpu_direct[2];
+	u32 m_gpu_epoch = 0;                     // changes when the GPU contents are replaced (state load)
+	u32 m_pen_generation = 0;                // changes whenever m_pen is recomputed
+	std::vector<u32> m_gpu_out;              // the finished picture (scaled to the output, through the pens), by bitmap row
+	std::vector<u8> m_gpu_out_valid;         // per bitmap row: m_gpu_out holds the finished row
+	struct gpu_out_key
+	{
+		u32 serial = 0, pen_generation = 0, xoffs = 0, yoffs = 0;
+		s32 front = 0, os = 0, scale = 0;
+		u32 rows = 0, min_x = 0, max_x = 0, width = 0, height = 0;
+		uintptr_t pens = 0;
+		bool operator==(gpu_out_key const &o) const { return serial == o.serial && pen_generation == o.pen_generation && xoffs == o.xoffs && yoffs == o.yoffs && front == o.front && os == o.os && scale == o.scale && rows == o.rows && min_x == o.min_x && max_x == o.max_x && width == o.width && height == o.height && pens == o.pens; }
+	};
+	gpu_out_key m_gpu_out_key;               // what m_gpu_out was built from
+	bool m_gpu_compare = false;              // log the difference to the software picture
+	int m_output_scale = 1;                  // the screen is presented at this multiple of the native size
+	bool m_gpu_parallel = false;             // the software renderer still draws every triangle and fill
+	u32 m_gpu_swap_count = 0;
+	static constexpr u32 GPU_PARALLEL_SWAPS = 120;
+	u32 m_gpu_compare_count = 0;
+
 
 	// video buffer configuration
 	u32 m_rgboffs[3];                        // word offset to 3 RGB buffers

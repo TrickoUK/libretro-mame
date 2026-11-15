@@ -31,6 +31,8 @@
 #include "emu.h"
 #include "voodoo_banshee.h"
 
+#include "osdepend.h"
+
 #include "endianness.h"
 
 using namespace voodoo;
@@ -334,6 +336,7 @@ u32 voodoo_banshee_device::read_lfb(offs_t offset, u32 mem_mask)
 	if (addr <= m_fbmask)
 	{
 		m_renderer->wait("read_lfb");
+		gpu_ram_read(addr, 4);
 		u32 result = *(u32 *)&m_fbram[addr];
 		if (LOG_LFB)
 			logerror("%s:read_lfb(%X) = %08X\n", machine().describe_context(), addr, result);
@@ -369,6 +372,7 @@ void voodoo_banshee_device::write_lfb(offs_t offset, u32 data, u32 mem_mask)
 		m_renderer->wait("write_lfb");
 		if (LOG_LFB)
 			logerror("%s:write_lfb(%X) = %08X & %08X\n", machine().describe_context(), addr, data, mem_mask);
+		gpu_ram_write(addr, 4);
 		COMBINE_DATA((u32 *)&m_fbram[addr]);
 	}
 	else
@@ -426,6 +430,7 @@ int voodoo_banshee_device::update(bitmap_rgb32 &bitmap, const rectangle &cliprec
 
 		// no longer dirty
 		m_clut_dirty = false;
+		m_pen_generation++;
 		m_video_changed = true;
 	}
 	return update_common(bitmap, cliprect, &m_pen[0]);
@@ -441,9 +446,10 @@ void voodoo_banshee_device::device_start()
 	// expand CLUT to 512 entries
 	m_clut.resize(512);
 
-	// pre-set the chipmask and clear the TMU memory to indicate we're shared
+	// pre-set the chipmask and clear the TMU memory to indicate we're shared;
+	// Banshee has one TMU, Voodoo 3 has two
 	if (m_chipmask == 0x01)
-		m_chipmask = 0x03;
+		m_chipmask = (m_model == voodoo::voodoo_model::VOODOO_3) ? 0x07 : 0x03;
 	m_tmumem0_in_mb = m_tmumem1_in_mb = 0;
 
 	// start like a Voodoo-2
@@ -1084,6 +1090,8 @@ void voodoo_banshee_device::internal_texture_w(offs_t offset, u32 data)
 
 	// wait for any outstanding work to finish
 	m_renderer->wait("internal_texture_w");
+	if (m_gpu)
+		m_gpu->texture_write(0, dest - m_fbram, 4);
 
 	// write the four bytes in little-endian order
 	u32 bytes_per_texel = (texmode.format() < 8) ? 1 : 2;
@@ -1149,12 +1157,20 @@ void voodoo_banshee_device::internal_lfb_direct_w(offs_t offset, u32 data, u32 m
 
 	// wait for any outstanding work to finish
 	m_renderer->wait("internal_lfb_direct_w");
+	u32 const addr = u32(reinterpret_cast<u8 *>(dest) - m_fbram);
+	bool gpu_target = false;
+	if (m_gpu && dest < end)
+		gpu_target = gpu_ram_write(addr, 4, true);
 
 	// write to the RGB buffer
 	if (ACCESSING_BITS_0_15 && dest < end)
 		dest[0] = BIT(data, 0, 16);
 	if (ACCESSING_BITS_16_31 && dest + 1 < end)
 		dest[1] = BIT(data, 16, 16);
+
+	// the GPU target takes the pixels just stored
+	if (gpu_target)
+		gpu_ram_upload(addr, 4);
 
 	// notify that frame buffer has changed
 	m_video_changed = true;
@@ -1391,6 +1407,7 @@ u32 voodoo_banshee_device::reg_colbufstride_w(u32 chipmask, u32 regnum, u32 data
 		{
 			m_renderer->set_rowpixels(newpix);
 			m_video_changed = true;
+			gpu_configure();
 		}
 	}
 	return 0;
@@ -1515,13 +1532,18 @@ void voodoo_banshee_device::recompute_video()
 	if (LOG_REGISTERS)
 		logerror("configure screen: htotal: %d vtotal: %d vstart: %d vstop: %d width: %d height: %d misc_vga: %02x alpha_dis %d refresh: %f\n", htotal, vtotal, vstart, vstop, width, height, misc_vga_output, alpha_dis, 1.0 / frame_period);
 
+	// the host-GPU path can present the screen at the render scale (the mame_3d_output_scale option)
+	m_output_scale = (m_gpu && machine().osd().supersample_output()) ? std::clamp(machine().osd().supersample(), 1, osd::GPU_MAX_SUPERSAMPLE) : 1;
+	int const os = m_output_scale;
+
 	// configure the screen
-	rectangle visarea(0, width - 1, 0, height - 1);
-	screen().configure(htotal, vtotal, visarea, attotime::from_double(frame_period));
+	rectangle visarea(0, width * os - 1, 0, height * os - 1);
+	screen().configure(htotal * os, vtotal * os, visarea, attotime::from_double(frame_period));
 
 	// set the vsync start and stop
-	m_vsyncstart = vstart;
-	m_vsyncstop = vstop;
+	// the vsync positions are screen lines, which are os times the native lines
+	m_vsyncstart = vstart * os;
+	m_vsyncstop = vstop * os;
 	adjust_vblank_start_timer();
 }
 
@@ -1584,6 +1606,7 @@ void voodoo_banshee_device::execute_blit(u32 data)
 				logerror("   blit_2d:host_to_screen: %08x -> %08x, %d, %d\n", data, addr, m_blt_dst_x, m_blt_dst_y);
 
 			m_renderer->wait("execute_blit(3)");
+			gpu_ram_write(addr, 4);
 
 			switch (m_blt_dst_bpp)
 			{
@@ -1706,6 +1729,8 @@ void voodoo_banshee_device::screen_to_screen_blit(u32 srcx, u32 srcy)
 		s64 const dstrow = s64(dstbase) + s64(y0 + row) * dststride + s64(x0) * bpp;
 		if (srcrow < 0 || dstrow < 0 || srcrow + span > fbsize || dstrow + span > fbsize)
 			continue;
+		gpu_ram_read(u32(srcrow), span);
+		gpu_ram_write(u32(dstrow), span);
 		u8 const *const s = &m_fbram[srcrow];
 		u8 *const d = &m_fbram[dstrow];
 		if (rop == 0xcc)

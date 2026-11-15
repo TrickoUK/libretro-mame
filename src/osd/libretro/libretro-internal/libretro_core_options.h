@@ -1,0 +1,1468 @@
+#ifndef LIBRETRO_CORE_OPTIONS_H__
+#define LIBRETRO_CORE_OPTIONS_H__
+
+#include <stdlib.h>
+#include <string.h>
+
+#include <libretro.h>
+#include <retro_inline.h>
+
+#include <libretro_shared.h>
+
+#ifndef HAVE_NO_LANGEXTRA
+#include "libretro_core_options_intl.h"
+#endif
+
+/*
+ ********************************
+ * VERSION: 2.0
+ ********************************
+ *
+ * - 2.0: Add support for core options v2 interface 
+ * - 1.3: Move translations to libretro_core_options_intl.h
+ *        - libretro_core_options_intl.h includes BOM and utf-8
+ *          fix for MSVC 2010-2013
+ *        - Added HAVE_NO_LANGEXTRA flag to disable translations
+ *          on platforms/compilers without BOM support
+ * - 1.2: Use core options v1 interface when
+ *        RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION is >= 1
+ *        (previously required RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION == 1)
+ * - 1.1: Support generation of core options v0 retro_core_option_value
+ *        arrays containing options with a single value
+ * - 1.0: First commit
+*/
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
+ ********************************
+ * Core Definitions
+ ********************************
+*/
+
+
+/*
+ ********************************
+ * Core Option Definitions
+ ********************************
+*/
+
+/* RETRO_LANGUAGE_ENGLISH */
+
+/* Default language:
+ * - All other languages must include the same keys and values
+ * - Will be used as a fallback in the event that frontend language
+ *   is not available
+ * - Will be used as a fallback for any missing entries in
+ *   frontend language definition */
+
+struct retro_core_option_v2_category option_cats_us[] = {
+   {
+      "system",
+      "System",
+      "Configure general MAME related options."
+   },
+   {
+      "video",
+      "Video",
+      "Configure video options."
+   },
+   {
+      "input",
+      "Input",
+      "Configure input options."
+   },
+   {
+      "hacks",
+      "Emulation Hacks",
+      "Configure emulation hack options."
+   },
+   {
+      "debug",
+      "Debug",
+      "Configure MAME's Lua console and debug plugins."
+   },
+   { NULL, NULL, NULL },
+};
+
+struct retro_core_option_v2_definition option_defs_us[] = {
+   {
+      CORE_NAME "_thread_mode",
+      "Thread Mode",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "enabled"
+   },
+   {
+      CORE_NAME "_cheats_enable",
+      "Cheats",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_throttle",
+      "Throttle",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_boot_to_bios",
+      "Boot to BIOS",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_boot_to_osd",
+      "Boot to OSD",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_read_config",
+      "Read Configuration",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_write_config",
+      "Write Configuration",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_mame_paths_enable",
+      "MAME INI Paths",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_saves",
+      "Save State Naming",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "game",   "Game" },
+         { "system", "System" },
+         { NULL,  NULL },
+      },
+      "game"
+   },
+   {
+      CORE_NAME "_auto_save",
+      "Auto Save/Load States",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_softlists_enable",
+      "Softlists",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "enabled"
+   },
+   {
+      CORE_NAME "_softlists_auto_media",
+      "Softlist Automatic Media Type",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "enabled"
+   },
+   {
+      CORE_NAME "_media_type",
+      "Media Type",
+      NULL,
+      "",
+      NULL,
+      "system",
+      {
+         { "cart", NULL },
+         { "cass", NULL },
+         { "cdrm", NULL },
+         { "flop", NULL },
+         { "hard", NULL },
+         { "prin", NULL },
+         { "rom",  NULL },
+         { "serl", NULL },
+         { NULL, NULL },
+      },
+      "rom"
+   },
+   {
+      CORE_NAME "_joystick_deadzone",
+      "Joystick Deadzone",
+      NULL,
+      "",
+      NULL,
+      "input",
+      {
+         { "0.00", NULL },
+         { "0.05", NULL },
+         { "0.10", NULL },
+         { "0.15", NULL },
+         { "0.20", NULL },
+         { "0.25", NULL },
+         { "0.30", NULL },
+         { "0.35", NULL },
+         { "0.40", NULL },
+         { "0.45", NULL },
+         { "0.50", NULL },
+         { "0.55", NULL },
+         { "0.60", NULL },
+         { "0.65", NULL },
+         { "0.70", NULL },
+         { "0.75", NULL },
+         { "0.80", NULL },
+         { "0.85", NULL },
+         { "0.90", NULL },
+         { "0.95", NULL },
+         { "1.00", NULL },
+         { NULL, NULL },
+      },
+      "0.15"
+   },
+   {
+      CORE_NAME "_joystick_saturation",
+      "Joystick Saturation",
+      NULL,
+      "",
+      NULL,
+      "input",
+      {
+         { "0.05", NULL },
+         { "0.10", NULL },
+         { "0.15", NULL },
+         { "0.20", NULL },
+         { "0.25", NULL },
+         { "0.30", NULL },
+         { "0.35", NULL },
+         { "0.40", NULL },
+         { "0.45", NULL },
+         { "0.50", NULL },
+         { "0.55", NULL },
+         { "0.60", NULL },
+         { "0.65", NULL },
+         { "0.70", NULL },
+         { "0.75", NULL },
+         { "0.80", NULL },
+         { "0.85", NULL },
+         { "0.90", NULL },
+         { "0.95", NULL },
+         { "1.00", NULL },
+         { NULL, NULL },
+      },
+      "0.85"
+   },
+   {
+      CORE_NAME "_joystick_threshold",
+      "Joystick Threshold",
+      NULL,
+      "",
+      NULL,
+      "input",
+      {
+         { "0.05", NULL },
+         { "0.10", NULL },
+         { "0.15", NULL },
+         { "0.20", NULL },
+         { "0.25", NULL },
+         { "0.30", NULL },
+         { "0.35", NULL },
+         { "0.40", NULL },
+         { "0.45", NULL },
+         { "0.50", NULL },
+         { "0.55", NULL },
+         { "0.60", NULL },
+         { "0.65", NULL },
+         { "0.70", NULL },
+         { "0.75", NULL },
+         { "0.80", NULL },
+         { "0.85", NULL },
+         { "0.90", NULL },
+         { "0.95", NULL },
+         { "1.00", NULL },
+         { NULL, NULL },
+      },
+      "0.30"
+   },
+   {
+      CORE_NAME "_mame_4way_enable",
+      "Joystick 4-way Simulation",
+      NULL,
+      "",
+      NULL,
+      "input",
+      {
+         { "disabled", NULL },
+         { "4way",     NULL },
+         { "strict",   NULL },
+         { "qbert",    NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_buttons_profiles",
+      "Profile Buttons Per Game",
+      NULL,
+      "",
+      NULL,
+      "input",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_mouse_enable",
+      "Mouse",
+      NULL,
+      "",
+      NULL,
+      "input",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "enabled"
+   },
+   {
+      CORE_NAME "_lightgun_mode",
+      "Lightgun Mode",
+      NULL,
+      "",
+      NULL,
+      "input",
+      {
+         { "none",        "None" },
+         { "lightgun",    "Lightgun" },
+         { "touchscreen", "Touchscreen" },
+         { NULL, NULL },
+      },
+      "none"
+   },
+   {
+      CORE_NAME "_lightgun_offscreen_mode",
+      "Lightgun Offscreen Position",
+      NULL,
+      "",
+      NULL,
+      "input",
+      {
+         { "free",                 "Free" },
+         { "fixed (top left)",     "Fixed (Top Left)" },
+         { "fixed (bottom right)", "Fixed (Bottom Right)" },
+         { NULL, NULL },
+      },
+      "free"
+   },
+   {
+      CORE_NAME "_steering_response",
+      "Steering Response (Wheel Games)",
+      NULL,
+      "Overrides the 'Steering Response' Machine Configuration setting in wheel games with gamepad steering assists (GTI Club 2, Thrill Drive 2, Pole Position, Final Lap series, Road Blasters, Speed Racer, F-1 Super Battle, Cruis'n USA, Cruis'n World, Off Road Challenge, Cruis'n Exotica and others). Curves shrink small stick movements around centre while still reaching full lock. 'Game setting' keeps whatever is set in MAME's menu. Other games are unaffected.",
+      NULL,
+      "input",
+      {
+         { "game",    "Game setting" },
+         { "linear",  "Linear (arcade)" },
+         { "mild",    "Mild curve" },
+         { "squared", "Squared curve" },
+         { "cubic",   "Cubic curve" },
+         { NULL, NULL },
+      },
+      "game"
+   },
+   {
+      CORE_NAME "_steering_smoothing",
+      "Steering Smoothing (Wheel Games)",
+      NULL,
+      "Overrides the 'Steering Smoothing' Machine Configuration setting in wheel games with gamepad steering assists (including Cruis'n USA, Cruis'n World, Off Road Challenge and Cruis'n Exotica). Limits how fast the wheel can turn, given as the time from full left to full right. 'Game setting' keeps whatever is set in MAME's menu. Pole Position has no smoothing setting. Other games are unaffected.",
+      NULL,
+      "input",
+      {
+         { "game",    "Game setting" },
+         { "off",     "Off (arcade)" },
+         { "light",   "Light (0.25 s lock to lock)" },
+         { "medium",  "Medium (0.5 s)" },
+         { "medium+", "Medium+ (0.625 s)" },
+         { "firm",    "Firm (0.75 s)" },
+         { "firm+",   "Firm+ (0.875 s)" },
+         { "heavy",   "Heavy (1 s)" },
+         { NULL, NULL },
+      },
+      "game"
+   },
+   {
+      CORE_NAME "_steering_input",
+      "Steering Input (Pole Position)",
+      NULL,
+      "Overrides the 'Steering Input' Machine Configuration setting in Pole Position / Pole Position II. The arcade wheel spins freely; 'Gamepad stick' lets the stick set how fast it turns instead. 'Game setting' keeps whatever is set in MAME's menu.",
+      NULL,
+      "input",
+      {
+         { "game",  "Game setting" },
+         { "wheel", "Wheel / spinner (arcade)" },
+         { "stick", "Gamepad stick" },
+         { NULL, NULL },
+      },
+      "game"
+   },
+   {
+      CORE_NAME "_stick_steering_speed",
+      "Stick Steering Speed (Pole Position)",
+      NULL,
+      "Overrides the 'Stick Steering Speed' Machine Configuration setting in Pole Position / Pole Position II: how fast the wheel turns at full stick when Steering Input is 'Gamepad stick'. 'Game setting' keeps whatever is set in MAME's menu.",
+      NULL,
+      "input",
+      {
+         { "game",      "Game setting" },
+         { "slow",      "Slow" },
+         { "medium",    "Medium" },
+         { "fast",      "Fast" },
+         { "very fast", "Very fast" },
+         { NULL, NULL },
+      },
+      "game"
+   },
+   {
+      CORE_NAME "_rotation_mode",
+      "Screen Rotation Mode",
+      NULL,
+      "",
+      NULL,
+      "video",
+      {
+         { "libretro", "Libretro" },
+         { "internal", "Internal" },
+         { "tate-rol", "TATE-ROL" },
+         { "tate-ror", "TATE-ROR" },
+         { "none",     "None" },
+         { NULL, NULL },
+      },
+      "libretro"
+   },
+   {
+      CORE_NAME "_alternate_renderer",
+      "Alternate Renderer",
+      NULL,
+      "",
+      NULL,
+      "video",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { "cropped",  "Cropped" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_altres",
+      "Alternate Renderer Resolution",
+      NULL,
+      "",
+      NULL,
+      "video",
+      {
+         { "640x360",   NULL },
+         { "640x480",   NULL },
+         { "800x450",   NULL },
+         { "800x600",   NULL },
+         { "960x540",   NULL },
+         { "960x720",   NULL },
+         { "1024x576",  NULL },
+         { "1024x768",  NULL },
+         { "1280x720",  NULL },
+         { "1280x960",  NULL },
+         { "1600x900",  NULL },
+         { "1600x1200", NULL },
+         { "1440x1080", NULL },
+         { "1920x1080", NULL },
+         { "1920x1440", NULL },
+         { "2560x1440", NULL },
+         { "2880x2160", NULL },
+         { "3840x2160", NULL },
+         { NULL, NULL },
+      },
+      "640x480"
+   },
+   {
+      CORE_NAME "_psx_gpu_hle",
+      "PS1 GPU Hardware Rendering (Experimental)",
+      NULL,
+      "Renders PS1-based drivers (Sony ZN, Konami GQ/GV/573/Twinkle, Namco System 10/11/12, Taito GNET, plain PS1) via the host GPU at an internal-resolution multiplier instead of MAME's software rasterizer. Requires restarting content to take effect. Only tested against a subset of games so far - if a game looks wrong, set this back to Disabled.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "1x",       "1x" },
+         { "2x",       "2x" },
+         { "4x",       "4x" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_psx_gpu_pgxp",
+      "PS1 GPU PGXP Geometry Correction (Experimental)",
+      NULL,
+      "Only affects GTE-sourced polygons when PS1 GPU Hardware Rendering above is also enabled. Redoes the PS1 geometry transform in floating point instead of the console's low-precision fixed-point math, reducing vertex 'wobble' on distant/small geometry. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "enabled",  "Enabled" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_psx_gpu_pgxp_tol",
+      "PS1 GPU PGXP 2D Geometry Tolerance (Experimental)",
+      NULL,
+      "Only affects PS1 GPU PGXP Geometry Correction above. Governs polygons where some vertices have no PGXP depth information (typically 2D-ish or CPU-transformed geometry such as backgrounds/scenery). Legacy: the whole polygon reverts to the console's native integer coordinates, which can leave visible seams against neighbouring polygons that stayed corrected. Disabled: keep every corrected vertex position (matches Beetle PSX HW's default). 0px-8px: keep a corrected position only if it lies within that many native pixels of the native one, otherwise revert that vertex (Beetle PSX HW's 'PGXP 2D Geometry Tolerance'). 1px is the default - it removed visible seams between background polygons while showing no regressions. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "legacy",   "Legacy" },
+         { "disabled", "Disabled" },
+         { "0px", NULL },
+         { "1px", NULL },
+         { "2px", NULL },
+         { "3px", NULL },
+         { "4px", NULL },
+         { "5px", NULL },
+         { "6px", NULL },
+         { "7px", NULL },
+         { "8px", NULL },
+         { NULL, NULL },
+      },
+      "1px"
+   },
+   {
+      CORE_NAME "_psx_gpu_pgxp_vcache",
+      "PS1 GPU PGXP Vertex Cache (Experimental)",
+      NULL,
+      "Only affects PS1 GPU PGXP Geometry Correction above. When a polygon vertex has no PGXP data of its own, look for another vertex the console's geometry unit transformed this frame that landed on the same screen pixel and reuse its precise position (Beetle PSX HW's 'PGXP Vertex Cache'). Can reduce visible seams between separate meshes, such as fighting-game character limbs; a wrong match can also cause small glitches (Beetle PSX HW leaves it off by default; it's on here after testing on several games - turn it off if a game shows odd vertices). Works together with the PGXP 2D Geometry Tolerance above (not with Legacy). Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "enabled",  "Enabled" },
+         { NULL, NULL },
+      },
+      "enabled"
+   },
+   {
+      CORE_NAME "_psx_gpu_msaa",
+      "PS1 GPU 4x MSAA (Experimental)",
+      NULL,
+      "Only affects PS1 GPU Hardware Rendering above when it's also enabled. Smooths jagged polygon edges using 4x multisample anti-aliasing on the GPU render target. Disable this for a specific game if it causes visual problems. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "enabled",  "Enabled" },
+         { NULL, NULL },
+      },
+      "enabled"
+   },
+   {
+      CORE_NAME "_psx_gpu_texfilter",
+      "PS1 GPU Texture Filtering (Experimental)",
+      NULL,
+      "Only affects PS1 GPU Hardware Rendering above when it's also enabled. Smooths 3D polygon and sprite textures. By default 2D content (sprites, and polygons detected as 2D - HUD, text, UI, backgrounds) is excluded and stays pixel-sharp - see the two Exclude options below to change that. Bilinear samples the four nearest texels; Trilinear additionally blends in a coarser sample on distant/minified polygons to reduce shimmering; 3-Point (as seen on Beetle PSX HW) is an N64-style alternative to Bilinear that blends only 3 of the 4 nearest texels, giving a slightly different, more angular look. Texture-edge bleeding into whatever's packed next to a texture in VRAM is guarded against for all three, but if you still see color smearing at texture edges on a specific game, try Disabled. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled",  "Disabled" },
+         { "bilinear",  "Bilinear" },
+         { "trilinear", "Trilinear" },
+         { "3point",    "3-Point" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_psx_gpu_filter_exclude_sprite",
+      "PS1 GPU Exclude Sprites from Filtering (Experimental)",
+      NULL,
+      "Only affects PS1 GPU Hardware Rendering above when PS1 GPU Texture Filtering is also enabled. Sprites (used heavily for HUD/text/UI, but also in-game 2D art in some games) are already excluded from filtering by default so they stay pixel-sharp - this only needs changing if a specific game wants its sprites smoothed too. 'Opaque Only' filters this game's semi-transparent sprites (glow/particle effects etc.) while keeping opaque ones sharp; 'Opaque and Semi-Transparent' excludes both (the default); 'Disabled' filters sprites the same as everything else. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "opaque",   "Opaque Only" },
+         { "all",      "Opaque and Semi-Transparent" },
+         { NULL, NULL },
+      },
+      "all"
+   },
+   {
+      CORE_NAME "_psx_gpu_filter_exclude_2d_polygon",
+      "PS1 GPU Exclude 2D Polygons from Filtering (Experimental)",
+      NULL,
+      "Only affects PS1 GPU Hardware Rendering above when PS1 GPU Texture Filtering is also enabled. Many PS1 games draw 2D content (HUD/text/UI) using the same general polygon commands as real 3D geometry instead of a dedicated sprite command, which the Exclude Sprites option above can't catch - this detects those with a heuristic (an unrotated, screen-aligned quad with an exact 1:1 texel-to-pixel mapping) and excludes them the same way. The heuristic can occasionally misclassify real 3D geometry (an unrotated, unscaled wall or floor tile, for example) - try Disabled for a specific game if 3D surfaces look unexpectedly unfiltered. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "opaque",   "Opaque Only" },
+         { "all",      "Opaque and Semi-Transparent" },
+         { NULL, NULL },
+      },
+      "all"
+   },
+   {
+      CORE_NAME "_3d_supersample",
+      "3D Supersampling",
+      NULL,
+      "3D games with enhanced rendering: 3dfx Voodoo games (Konami Viper, Midway Seattle/Vegas and others), Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games) SNK Hyper Neo Geo 64 and Midway V-Unit (Cruis'n USA, Cruis'n World, Off Road Challenge), Midway Zeus 1 (Invasion: The Abductors), Midway Zeus 2 (Cruis'n Exotica), Namco System 22/Super System 22 and System 23/Super System 23 (with 3D GPU Rendering), and Konami M2 (Polystars, Evil Night, Total Vice). Except on Konami M2, it only works with 3D GPU Rendering enabled: the software renderers draw at native size and ignore it. On Voodoo games it reduces shimmering on detailed textures seen at a distance, such as foliage and terrain, by averaging several texture samples across each pixel wherever a texture is shrunk; only texture colour is smoothed. On GTI Club hardware and Hyper Neo Geo 64 the whole 3D layer is rendered at 2x or 3x the native size and averaged down, which also smooths polygon edges; the HUD, text and 2D layers are unchanged. On Midway V-Unit games the whole picture is drawn at 2x or 3x and averaged down, which smooths polygon edges. On Midway Zeus 1 and Zeus 2 games the whole picture is drawn at 2x or 3x and averaged down, which smooths polygon edges. On Konami M2 games (Polystars, Evil Night, Total Vice) the Triangle Engine draws the whole picture at 2x and averages it down, which smooths polygon edges; it works with the software renderer and is limited to 2x even when 3x is set. 3x is the highest scale supported on every system. Each step costs more CPU: 2x is a good start, 3x can slow heavy scenes on slower machines. Save states made with it on, on GTI Club hardware, can only be loaded with it on. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "2x",       "2x" },
+         { "3x",       "3x" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_3d_output_scale",
+      "3D Output Scale",
+      NULL,
+      "Sega Model 2, Konami GTI Club hardware and 3dfx Voodoo boards drawn on the host GPU (Midway Seattle/Vegas, Konami Viper). SNK Hyper Neo Geo 64 and Namco System 22/23 always output native and ignore this option. Normally 3D Supersampling renders the 3D layer larger and averages it back down to the native screen size. With this set to 'Match supersampling' the screen is presented at the supersampling size instead (for example 2x of 496x384), so the 3D layer keeps all its extra detail; the 2D layers (tilemaps, sprites, text) are enlarged with sharp pixels. Only with 3D GPU Rendering enabled, and needs 3D Supersampling set to 2x or higher; it has no effect otherwise. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "native", "Native" },
+         { "match",  "Match supersampling" },
+         { NULL, NULL },
+      },
+      "native"
+   },
+   {
+      CORE_NAME "_3d_gpu",
+      "3D GPU Rendering",
+      NULL,
+      "Sega Model 2, Konami GTI Club hardware (GTI Club, Thunder Hurricane, Solar Assault, Midnight Run), SNK Hyper Neo Geo 64, Namco System 22/Super System 22 (Ridge Racer, Time Crisis, Prop Cycle and others), Namco System 23/Super System 23 (Time Crisis 2, Crisis Zone, 500 GP and others) and 3dfx Voodoo 1/2/3 boards (Midway Seattle and Vegas games: San Francisco Rush, California Speed, Gauntlet Legends and others; Konami Viper games). Renders the 3D layer on the host GPU instead of the CPU. The picture matches the software renderer closely; 3D Supersampling sets the resolution (3D Output Scale presents it at that size). On Voodoo boards the software renderer runs alongside for the first seconds of start-up, and the GPU path falls back to it for features it does not cover. If no GPU context can be created the software renderer is used. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "enabled",  "Enabled" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_3d_msaa",
+      "3D Multisample Anti-Aliasing",
+      NULL,
+      "Only with 3D GPU Rendering enabled (it has no effect on the software renderer): 3dfx Voodoo boards (Midway Seattle/Vegas, Konami Viper), Konami GTI Club hardware, Sega Model 2, Midway V-Unit (Cruis'n USA, Cruis'n World, Off Road Challenge), Midway Zeus 1 (Invasion: The Abductors), Midway Zeus 2 (Cruis'n Exotica), Namco System 22/Super System 22 and Namco System 23/Super System 23. SNK Hyper Neo Geo 64 is not covered. Smooths the stair-stepped outlines of 3D objects on the GPU by testing several coverage samples per pixel; it costs less GPU time than raising 3D Supersampling, but the multisampled buffers need extra video memory (4x MSAA about as much as 2x supersampling). It combines with 3D Supersampling and 3D Output Scale. HUD, text and other 2D content stay sharp. Textures and cut-out edges (fences, foliage) are not smoothed. Uses more video memory (4x costs about 4 times the colour and depth buffers, and the count is reduced automatically if the buffers would pass 1 GB). Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "2x",       "2x" },
+         { "4x",       "4x" },
+         { "8x",       "8x" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_3d_texfilter",
+      "3D Texture Filtering",
+      NULL,
+      "Only with 3D GPU Rendering enabled: Midway V-Unit games (Cruis'n USA, Cruis'n World, Off Road Challenge) filter their textures, Konami GTI Club hardware (GTI Club, Operation Thunder Hurricane, Solar Assault, ZR107 games) and Namco System 22/Super System 22 and System 23/Super System 23 polygons (not sprites). Smooths blocky magnified textures with bilinear filtering. Operation Thunder Hurricane and Solar Assault already filter on the real hardware; this turns it on for the other games. The software renderers keep their own filtering, and other 3D hardware is unaffected. Requires restarting content to take effect.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "bilinear", "Bilinear" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_3d_aniso",
+      "3D Anisotropic Filtering",
+      NULL,
+      "Only with 3D GPU Rendering enabled: 3dfx Voodoo boards (Midway Seattle/Vegas, Konami Viper), Konami GTI Club hardware, Sega Model 2, Midway Zeus 2 (Cruis'n Exotica), Namco System 22/Super System 22 and Namco System 23/Super System 23. Keeps textures on steep, angled surfaces (roads, streets, floors, building fronts) steady and sharp in the distance instead of shimmering. Where a pixel covers a long, thin strip of the texture, it averages several texture samples along that strip; the number is the most samples taken per pixel. Costs GPU time only on such pixels, works at any 3D Supersampling and Output Scale setting, and combines with 3D Multisample Anti-Aliasing. Sony PlayStation-based boards and SNK Hyper Neo Geo 64 are not covered.",
+      NULL,
+      "video",
+      {
+         { "disabled", "Disabled" },
+         { "2x",       "2x" },
+         { "4x",       "4x" },
+         { "8x",       "8x" },
+         { "16x",      "16x" },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_cpu_overclock",
+      "Main CPU Overclock %",
+      NULL,
+      "",
+      NULL,
+      "hacks",
+      {
+         { "default", "Default (100%)" },
+         { "10",  NULL },
+         { "11",  NULL },
+         { "12",  NULL },
+         { "13",  NULL },
+         { "14",  NULL },
+         { "15",  NULL },
+         { "16",  NULL },
+         { "17",  NULL },
+         { "18",  NULL },
+         { "19",  NULL },
+         { "20",  NULL },
+         { "21",  NULL },
+         { "22",  NULL },
+         { "23",  NULL },
+         { "24",  NULL },
+         { "25",  NULL },
+         { "26",  NULL },
+         { "27",  NULL },
+         { "28",  NULL },
+         { "29",  NULL },
+         { "30",  NULL },
+         { "31",  NULL },
+         { "32",  NULL },
+         { "33",  NULL },
+         { "34",  NULL },
+         { "35",  NULL },
+         { "36",  NULL },
+         { "37",  NULL },
+         { "38",  NULL },
+         { "39",  NULL },
+         { "40",  NULL },
+         { "41",  NULL },
+         { "42",  NULL },
+         { "43",  NULL },
+         { "44",  NULL },
+         { "45",  NULL },
+         { "46",  NULL },
+         { "47",  NULL },
+         { "48",  NULL },
+         { "49",  NULL },
+         { "50",  NULL },
+         { "51",  NULL },
+         { "52",  NULL },
+         { "53",  NULL },
+         { "54",  NULL },
+         { "55",  NULL },
+         { "60",  NULL },
+         { "65",  NULL },
+         { "70",  NULL },
+         { "75",  NULL },
+         { "80",  NULL },
+         { "85",  NULL },
+         { "90",  NULL },
+         { "95",  NULL },
+         { "100", NULL },
+         { "105", NULL },
+         { "110", NULL },
+         { "115", NULL },
+         { "120", NULL },
+         { "125", NULL },
+         { "130", NULL },
+         { "135", NULL },
+         { "140", NULL },
+         { "145", NULL },
+         { "150", NULL },
+         { "155", NULL },
+         { "160", NULL },
+         { "165", NULL },
+         { "170", NULL },
+         { "175", NULL },
+         { "180", NULL },
+         { "185", NULL },
+         { "190", NULL },
+         { "195", NULL },
+         { "200", NULL },
+         { "205", NULL },
+         { "210", NULL },
+         { "215", NULL },
+         { "220", NULL },
+         { "225", NULL },
+         { "230", NULL },
+         { "235", NULL },
+         { "240", NULL },
+         { "245", NULL },
+         { "250", NULL },
+         { "255", NULL },
+         { "260", NULL },
+         { "265", NULL },
+         { "270", NULL },
+         { "275", NULL },
+         { "280", NULL },
+         { "285", NULL },
+         { "290", NULL },
+         { "295", NULL },
+         { "300", NULL },
+         { "305", NULL },
+         { "310", NULL },
+         { "315", NULL },
+         { "320", NULL },
+         { "325", NULL },
+         { "330", NULL },
+         { "335", NULL },
+         { "340", NULL },
+         { "345", NULL },
+         { "350", NULL },
+         { "355", NULL },
+         { "360", NULL },
+         { "365", NULL },
+         { "370", NULL },
+         { "375", NULL },
+         { "380", NULL },
+         { "385", NULL },
+         { "390", NULL },
+         { "395", NULL },
+         { "400", NULL },
+         { NULL, NULL },
+      },
+      "default"
+   },
+   {
+      CORE_NAME "_cpu_sound_overclock",
+      "Sound CPU Overclock %",
+      NULL,
+      "",
+      NULL,
+      "hacks",
+      {
+         { "default", "Default (100%)" },
+         { "10",  NULL },
+         { "11",  NULL },
+         { "12",  NULL },
+         { "13",  NULL },
+         { "14",  NULL },
+         { "15",  NULL },
+         { "16",  NULL },
+         { "17",  NULL },
+         { "18",  NULL },
+         { "19",  NULL },
+         { "20",  NULL },
+         { "21",  NULL },
+         { "22",  NULL },
+         { "23",  NULL },
+         { "24",  NULL },
+         { "25",  NULL },
+         { "26",  NULL },
+         { "27",  NULL },
+         { "28",  NULL },
+         { "29",  NULL },
+         { "30",  NULL },
+         { "31",  NULL },
+         { "32",  NULL },
+         { "33",  NULL },
+         { "34",  NULL },
+         { "35",  NULL },
+         { "36",  NULL },
+         { "37",  NULL },
+         { "38",  NULL },
+         { "39",  NULL },
+         { "40",  NULL },
+         { "41",  NULL },
+         { "42",  NULL },
+         { "43",  NULL },
+         { "44",  NULL },
+         { "45",  NULL },
+         { "46",  NULL },
+         { "47",  NULL },
+         { "48",  NULL },
+         { "49",  NULL },
+         { "50",  NULL },
+         { "51",  NULL },
+         { "52",  NULL },
+         { "53",  NULL },
+         { "54",  NULL },
+         { "55",  NULL },
+         { "60",  NULL },
+         { "65",  NULL },
+         { "70",  NULL },
+         { "75",  NULL },
+         { "80",  NULL },
+         { "85",  NULL },
+         { "90",  NULL },
+         { "95",  NULL },
+         { "100", NULL },
+         { "105", NULL },
+         { "110", NULL },
+         { "115", NULL },
+         { "120", NULL },
+         { "125", NULL },
+         { "130", NULL },
+         { "135", NULL },
+         { "140", NULL },
+         { "145", NULL },
+         { "150", NULL },
+         { "155", NULL },
+         { "160", NULL },
+         { "165", NULL },
+         { "170", NULL },
+         { "175", NULL },
+         { "180", NULL },
+         { "185", NULL },
+         { "190", NULL },
+         { "195", NULL },
+         { "200", NULL },
+         { "205", NULL },
+         { "210", NULL },
+         { "215", NULL },
+         { "220", NULL },
+         { "225", NULL },
+         { "230", NULL },
+         { "235", NULL },
+         { "240", NULL },
+         { "245", NULL },
+         { "250", NULL },
+         { "255", NULL },
+         { "260", NULL },
+         { "265", NULL },
+         { "270", NULL },
+         { "275", NULL },
+         { "280", NULL },
+         { "285", NULL },
+         { "290", NULL },
+         { "295", NULL },
+         { "300", NULL },
+         { "305", NULL },
+         { "310", NULL },
+         { "315", NULL },
+         { "320", NULL },
+         { "325", NULL },
+         { "330", NULL },
+         { "335", NULL },
+         { "340", NULL },
+         { "345", NULL },
+         { "350", NULL },
+         { "355", NULL },
+         { "360", NULL },
+         { "365", NULL },
+         { "370", NULL },
+         { "375", NULL },
+         { "380", NULL },
+         { "385", NULL },
+         { "390", NULL },
+         { "395", NULL },
+         { "400", NULL },
+         { NULL, NULL },
+      },
+      "default"
+   },
+   {
+      CORE_NAME "_autoloadfastforward",
+      "Automatic Load Fast-Forward",
+      NULL,
+      "Experimental feature to automatically fast-forward during CD access.\nWorks with:\n- Generic SCSI\n- Sega CD and Neo Geo CD",
+      NULL,
+      "hacks",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_coin_limit",
+      "Coin Limit",
+      NULL,
+      "",
+      NULL,
+      "hacks",
+      {
+         { "0", "disabled" },
+         { "1", NULL },
+         { "2", NULL },
+         { "3", NULL },
+         { "4", NULL },
+         { "5", NULL },
+         { "6", NULL },
+         { "7", NULL },
+         { "8", NULL },
+         { "9", NULL },
+         { "10", NULL },
+         { "11", NULL },
+         { "12", NULL },
+         { "13", NULL },
+         { "14", NULL },
+         { "15", NULL },
+         { "16", NULL },
+         { "17", NULL },
+         { "18", NULL },
+         { "19", NULL },
+         { "20", NULL },
+         { NULL, NULL },
+      },
+      "0"
+   },
+   {
+      CORE_NAME "_lua_console",
+      "Enable Lua Debug Console",
+      NULL,
+      "Starts MAME's interactive Lua console on stdin/stdout (-console). Only usable when RetroArch is launched attached to a terminal.",
+      NULL,
+      "debug",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled"
+   },
+   {
+      CORE_NAME "_debug_plugin",
+      "Autostart Debug Plugin",
+      NULL,
+      "Autostarts a single MAME Lua plugin (-plugin) for runtime state inspection without needing the interactive console.",
+      NULL,
+      "debug",
+      {
+         { "none",      NULL },
+         { "gdbstub",   "gdbstub (GDB remote CPU debugging, x86 family only)" },
+         { "cheatfind", NULL },
+         { "hiscore",   NULL },
+         { "timer",     NULL },
+         { NULL, NULL },
+      },
+      "none"
+   },
+   { NULL, NULL, NULL, NULL, NULL, NULL, {{0}}, NULL },
+};
+
+struct retro_core_options_v2 options_us = {
+   option_cats_us,
+   option_defs_us
+};
+
+/*
+ ********************************
+ * Language Mapping
+ ********************************
+*/
+
+#ifndef HAVE_NO_LANGEXTRA
+struct retro_core_options_v2 *options_intl[RETRO_LANGUAGE_LAST] = {
+   &options_us,      /* RETRO_LANGUAGE_ENGLISH */
+   NULL,             /* RETRO_LANGUAGE_JAPANESE */
+   NULL,             /* RETRO_LANGUAGE_FRENCH */
+   NULL,             /* RETRO_LANGUAGE_SPANISH */
+   NULL,             /* RETRO_LANGUAGE_GERMAN */
+   NULL,             /* RETRO_LANGUAGE_ITALIAN */
+   NULL,             /* RETRO_LANGUAGE_DUTCH */
+   NULL,             /* RETRO_LANGUAGE_PORTUGUESE_BRAZIL */
+   NULL,             /* RETRO_LANGUAGE_PORTUGUESE_PORTUGAL */
+   NULL,             /* RETRO_LANGUAGE_RUSSIAN */
+   NULL,             /* RETRO_LANGUAGE_KOREAN */
+   NULL,             /* RETRO_LANGUAGE_CHINESE_TRADITIONAL */
+   NULL,             /* RETRO_LANGUAGE_CHINESE_SIMPLIFIED */
+   NULL,             /* RETRO_LANGUAGE_ESPERANTO */
+   NULL,             /* RETRO_LANGUAGE_POLISH */
+   NULL,             /* RETRO_LANGUAGE_VIETNAMESE */
+   NULL,             /* RETRO_LANGUAGE_ARABIC */
+   NULL,             /* RETRO_LANGUAGE_GREEK */
+   NULL,             /* RETRO_LANGUAGE_TURKISH */
+   NULL,             /* RETRO_LANGUAGE_SLOVAK */
+   NULL,             /* RETRO_LANGUAGE_PERSIAN */
+   NULL,             /* RETRO_LANGUAGE_HEBREW */
+   NULL,             /* RETRO_LANGUAGE_ASTURIAN */
+   NULL,             /* RETRO_LANGUAGE_FINNISH */
+   NULL,             /* RETRO_LANGUAGE_INDONESIAN */
+   NULL,             /* RETRO_LANGUAGE_SWEDISH */
+   NULL,             /* RETRO_LANGUAGE_UKRAINIAN */
+   NULL,             /* RETRO_LANGUAGE_CZECH */
+   NULL,             /* RETRO_LANGUAGE_CATALAN_VALENCIA */
+   NULL,             /* RETRO_LANGUAGE_CATALAN */
+   NULL,             /* RETRO_LANGUAGE_BRITISH_ENGLISH */
+   NULL,             /* RETRO_LANGUAGE_HUNGARIAN */
+};
+#endif
+
+/*
+ ********************************
+ * Functions
+ ********************************
+*/
+
+/* Handles configuration/setting of core options.
+ * Should be called as early as possible - ideally inside
+ * retro_set_environment(), and no later than retro_load_game()
+ * > We place the function body in the header to avoid the
+ *   necessity of adding more .c files (i.e. want this to
+ *   be as painless as possible for core devs)
+ */
+
+INLINE void libretro_set_core_options(retro_environment_t environ_cb,
+      bool *categories_supported)
+{
+   unsigned version  = 0;
+#ifndef HAVE_NO_LANGEXTRA
+   unsigned language = 0;
+#endif
+
+   if (!environ_cb || !categories_supported)
+      return;
+
+   *categories_supported = false;
+
+   if (!environ_cb(RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION, &version))
+      version = 0;
+
+   if (version >= 2)
+   {
+#ifndef HAVE_NO_LANGEXTRA
+      struct retro_core_options_v2_intl core_options_intl;
+
+      core_options_intl.us    = &options_us;
+      core_options_intl.local = NULL;
+
+      if (environ_cb(RETRO_ENVIRONMENT_GET_LANGUAGE, &language) &&
+          (language < RETRO_LANGUAGE_LAST) && (language != RETRO_LANGUAGE_ENGLISH))
+         core_options_intl.local = options_intl[language];
+
+      *categories_supported = environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL,
+            &core_options_intl);
+#else
+      *categories_supported = environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2,
+            &options_us);
+#endif
+   }
+   else
+   {
+      size_t i, j;
+      size_t option_index              = 0;
+      size_t num_options               = 0;
+      struct retro_core_option_definition
+            *option_v1_defs_us         = NULL;
+#ifndef HAVE_NO_LANGEXTRA
+      size_t num_options_intl          = 0;
+      struct retro_core_option_v2_definition
+            *option_defs_intl          = NULL;
+      struct retro_core_option_definition
+            *option_v1_defs_intl       = NULL;
+      struct retro_core_options_intl
+            core_options_v1_intl;
+#endif
+      struct retro_variable *variables = NULL;
+      char **values_buf                = NULL;
+
+      /* Determine total number of options */
+      while (true)
+      {
+         if (option_defs_us[num_options].key)
+            num_options++;
+         else
+            break;
+      }
+
+      if (version >= 1)
+      {
+         /* Allocate US array */
+         option_v1_defs_us = (struct retro_core_option_definition *)
+               calloc(num_options + 1, sizeof(struct retro_core_option_definition));
+
+         /* Copy parameters from option_defs_us array */
+         for (i = 0; i < num_options; i++)
+         {
+            struct retro_core_option_v2_definition *option_def_us = &option_defs_us[i];
+            struct retro_core_option_value *option_values         = option_def_us->values;
+            struct retro_core_option_definition *option_v1_def_us = &option_v1_defs_us[i];
+            struct retro_core_option_value *option_v1_values      = option_v1_def_us->values;
+
+            option_v1_def_us->key           = option_def_us->key;
+            option_v1_def_us->desc          = option_def_us->desc;
+            option_v1_def_us->info          = option_def_us->info;
+            option_v1_def_us->default_value = option_def_us->default_value;
+
+            /* Values must be copied individually... */
+            while (option_values->value)
+            {
+               option_v1_values->value = option_values->value;
+               option_v1_values->label = option_values->label;
+
+               option_values++;
+               option_v1_values++;
+            }
+         }
+
+#ifndef HAVE_NO_LANGEXTRA
+         if (environ_cb(RETRO_ENVIRONMENT_GET_LANGUAGE, &language) &&
+             (language < RETRO_LANGUAGE_LAST) && (language != RETRO_LANGUAGE_ENGLISH) &&
+             options_intl[language])
+            option_defs_intl = options_intl[language]->definitions;
+
+         if (option_defs_intl)
+         {
+            /* Determine number of intl options */
+            while (true)
+            {
+               if (option_defs_intl[num_options_intl].key)
+                  num_options_intl++;
+               else
+                  break;
+            }
+
+            /* Allocate intl array */
+            option_v1_defs_intl = (struct retro_core_option_definition *)
+                  calloc(num_options_intl + 1, sizeof(struct retro_core_option_definition));
+
+            /* Copy parameters from option_defs_intl array */
+            for (i = 0; i < num_options_intl; i++)
+            {
+               struct retro_core_option_v2_definition *option_def_intl = &option_defs_intl[i];
+               struct retro_core_option_value *option_values           = option_def_intl->values;
+               struct retro_core_option_definition *option_v1_def_intl = &option_v1_defs_intl[i];
+               struct retro_core_option_value *option_v1_values        = option_v1_def_intl->values;
+
+               option_v1_def_intl->key           = option_def_intl->key;
+               option_v1_def_intl->desc          = option_def_intl->desc;
+               option_v1_def_intl->info          = option_def_intl->info;
+               option_v1_def_intl->default_value = option_def_intl->default_value;
+
+               /* Values must be copied individually... */
+               while (option_values->value)
+               {
+                  option_v1_values->value = option_values->value;
+                  option_v1_values->label = option_values->label;
+
+                  option_values++;
+                  option_v1_values++;
+               }
+            }
+         }
+
+         core_options_v1_intl.us    = option_v1_defs_us;
+         core_options_v1_intl.local = option_v1_defs_intl;
+
+         environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL, &core_options_v1_intl);
+#else
+         environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS, option_v1_defs_us);
+#endif
+      }
+      else
+      {
+         /* Allocate arrays */
+         variables  = (struct retro_variable *)calloc(num_options + 1,
+               sizeof(struct retro_variable));
+         values_buf = (char **)calloc(num_options, sizeof(char *));
+
+         if (!variables || !values_buf)
+            goto error;
+
+         /* Copy parameters from option_defs_us array */
+         for (i = 0; i < num_options; i++)
+         {
+            const char *key                        = option_defs_us[i].key;
+            const char *desc                       = option_defs_us[i].desc;
+            const char *default_value              = option_defs_us[i].default_value;
+            struct retro_core_option_value *values = option_defs_us[i].values;
+            size_t buf_len                         = 3;
+            size_t default_index                   = 0;
+
+            values_buf[i] = NULL;
+
+            if (desc)
+            {
+               size_t num_values = 0;
+
+               /* Determine number of values */
+               while (true)
+               {
+                  if (values[num_values].value)
+                  {
+                     /* Check if this is the default value */
+                     if (default_value)
+                        if (strcmp(values[num_values].value, default_value) == 0)
+                           default_index = num_values;
+
+                     buf_len += strlen(values[num_values].value);
+                     num_values++;
+                  }
+                  else
+                     break;
+               }
+
+               /* Build values string */
+               if (num_values > 0)
+               {
+                  buf_len += num_values - 1;
+                  buf_len += strlen(desc);
+
+                  values_buf[i] = (char *)calloc(buf_len, sizeof(char));
+                  if (!values_buf[i])
+                     goto error;
+
+                  strcpy(values_buf[i], desc);
+                  strcat(values_buf[i], "; ");
+
+                  /* Default value goes first */
+                  strcat(values_buf[i], values[default_index].value);
+
+                  /* Add remaining values */
+                  for (j = 0; j < num_values; j++)
+                  {
+                     if (j != default_index)
+                     {
+                        strcat(values_buf[i], "|");
+                        strcat(values_buf[i], values[j].value);
+                     }
+                  }
+               }
+            }
+
+            variables[option_index].key   = key;
+            variables[option_index].value = values_buf[i];
+            option_index++;
+         }
+
+         /* Set variables */
+         environ_cb(RETRO_ENVIRONMENT_SET_VARIABLES, variables);
+      }
+
+error:
+      /* Clean up */
+
+      if (option_v1_defs_us)
+      {
+         free(option_v1_defs_us);
+         option_v1_defs_us = NULL;
+      }
+
+#ifndef HAVE_NO_LANGEXTRA
+      if (option_v1_defs_intl)
+      {
+         free(option_v1_defs_intl);
+         option_v1_defs_intl = NULL;
+      }
+#endif
+
+      if (values_buf)
+      {
+         for (i = 0; i < num_options; i++)
+         {
+            if (values_buf[i])
+            {
+               free(values_buf[i]);
+               values_buf[i] = NULL;
+            }
+         }
+
+         free(values_buf);
+         values_buf = NULL;
+      }
+
+      if (variables)
+      {
+         free(variables);
+         variables = NULL;
+      }
+   }
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

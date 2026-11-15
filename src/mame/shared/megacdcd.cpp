@@ -6,6 +6,9 @@
   currently this is a bit of a mix of system specific bits, incomplete implementations etc. as well as a rather kludgy combination
   of the CDC and drive emulation. */
 
+#ifdef __LIBRETRO__
+extern int CDD_status;
+#endif
 
 #include "emu.h"
 #include "megacdcd.h"
@@ -286,6 +289,9 @@ void lc89510_temp_device::CDD_Export(bool neocd_hack)
 
 	CDD_CONTROL &= ~4; // Clear HOCK bit
 
+#ifdef __LIBRETRO__
+	CDD_status  = CDD_STATUS | (CDD_CONTROL & 0x0100) << 4;
+#endif
 }
 
 

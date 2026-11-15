@@ -52,6 +52,13 @@ ifeq ($(config),release)
   override TARGET              = $(TARGETDIR)/genie
   DEFINES            += -DNDEBUG -DLUA_COMPAT_MODULE -DLUA_USE_MACOSX
   INCLUDES           += -I"../../src/host/lua-5.3.0/src"
+  INCLUDES           +=
+
+  ifeq ($(LIBRETRO_OS),$(filter $(LIBRETRO_OS),tvos-arm64 ios-arm64 osx-arm64))
+    $(info Detected iOS, using the host (macOS) clang compiler to build genie. If you're compiling for iOS, we assume you're using macOS to do that.)
+	CC = cc
+  endif
+
   ALL_CPPFLAGS       += $(CPPFLAGS) -MMD -MP -MP $(DEFINES) $(INCLUDES)
   ALL_ASMFLAGS       += $(ASMFLAGS) $(CFLAGS) $(ALL_CPPFLAGS) $(ARCH) -Wall -Wextra -Os $(MPARAM) -mmacosx-version-min=11.0
   ALL_CFLAGS         += $(CFLAGS) $(ALL_CPPFLAGS) $(ARCH) -Wall -Wextra -Os $(MPARAM) -mmacosx-version-min=11.0
@@ -64,6 +71,9 @@ ifeq ($(config),release)
   LDDEPS             +=
   LDRESP              =
   LIBS               += $(LDDEPS) -framework CoreServices
+  ifeq ($(LIBRETRO_OS),$(filter $(LIBRETRO_OS),tvos-arm64 ios-arm64))
+     LIBS += -framework CoreFoundation
+  endif
   EXTERNAL_LIBS      +=
   LINKOBJS            = $(OBJECTS)
   LINKCMD             = $(CC) -o $(TARGET) $(LINKOBJS) $(RESOURCES) $(ARCH) $(ALL_LDFLAGS) $(LIBS)

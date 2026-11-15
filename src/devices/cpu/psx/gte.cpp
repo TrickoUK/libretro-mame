@@ -207,10 +207,50 @@ void gte::setcp2dr( uint32_t pc, int reg, uint32_t value )
 	switch( reg )
 	{
 	case 15:
-		SXY0 = SXY1;
-		SXY1 = SXY2;
+	{
+		// PGXP (CLAUDE.md Phase 4c/investigation): MTC2/CTC2 writing SXYP
+		// pushes a value into the FIFO without going through RTPS/RTPT's
+		// own shadow write - but the overwhelmingly common real use of
+		// this isn't an arbitrary unrelated coordinate, it's PS1 code
+		// re-sharing an already-computed vertex across a triangle
+		// fan/strip: read one of SXY0/SXY1/SXY2 back via MFC2, then push
+		// that *same* value into SXYP to advance the FIFO without
+		// recomputing it (found live: this is the dominant pattern on
+		// subdivided ground/floor geometry, which leans on fan/strip
+		// vertex sharing far more than character models do - blanket
+		// invalidation here was killing the shadow for nearly every
+		// ground-plane vertex, even though nothing about the underlying
+		// float position was actually unknown). So: only invalidate when
+		// `value` doesn't match any of the three real SXY registers as
+		// they stood *before* this shift - a genuine match reuses that
+		// slot's already-computed shadow instead of losing it.
+		uint32_t old_sxy0 = SXY0;
+		uint32_t old_sxy1 = SXY1;
+		uint32_t old_sxy2 = SXY2;
+		pgxp_shadow old_shadow0 = m_pgxp_shadow[ 0 ];
+		pgxp_shadow old_shadow1 = m_pgxp_shadow[ 1 ];
+		pgxp_shadow old_shadow2 = m_pgxp_shadow[ 2 ];
+
+		SXY0 = old_sxy1;
+		SXY1 = old_sxy2;
 		SXY2 = value;
+
+		// the PGXP shadows are only tracked while PGXP is enabled
+		if (!m_pgxp_enabled)
+			break;
+
+		m_pgxp_shadow[ 0 ] = old_shadow1;
+		m_pgxp_shadow[ 1 ] = old_shadow2;
+		if( value == old_sxy2 )
+			m_pgxp_shadow[ 2 ] = old_shadow2;
+		else if( value == old_sxy1 )
+			m_pgxp_shadow[ 2 ] = old_shadow1;
+		else if( value == old_sxy0 )
+			m_pgxp_shadow[ 2 ] = old_shadow0;
+		else
+			m_pgxp_shadow[ 2 ] = pgxp_shadow();
 		break;
+	}
 
 	case 28:
 		IR1 = ( value & 0x1f ) << 7;
@@ -389,6 +429,157 @@ uint32_t gte::Lm_E( uint32_t result )
 	return result;
 }
 
+// PGXP-style geometry/texture correction (CLAUDE.md Phase 4c). Redoes
+// RTPS/RTPT's OFX/OFY + IR1_or_2 * (H/SZ3) perspective-projection step in
+// double precision instead of the hardware's F()>>16 fixed-point rounding
+// and limited-precision reciprocal-table approximation (gte_divide()), and
+// rotates the result into m_pgxp_shadow[] exactly where docop2() rotates
+// the real SXY0/SXY1/SXY2 FIFO - see pgxp_shadow_for_reg() for how a
+// caller reads it back. Earlier revisions of this (Phase 4b) cached the
+// result in a value-keyed hash table instead, keyed by the fixed-point
+// SXY word - after several rounds of real bugs in that approach (bad
+// hash, unbounded staleness) still left live-tested seams/shimmer, a
+// comparison against libretro/beetle-psx-libretro's real PGXP
+// implementation confirmed a value-keyed cache is exactly its own
+// documented-broken fallback mode, not its recommended mechanism (see
+// CLAUDE.md Phase 4c) - replaced with this FIFO-mirror plus end-to-end
+// GPR/RAM-address shadow propagation (psxcpu_device/psxgpu_device).
+//
+// Takes ir1/ir2 (the *clamped* IR1/IR2, not the raw pre-clamp MAC1/MAC2)
+// deliberately - using MAC1/MAC2 for "more precision" was tried first and
+// was a real bug: A1()/A2() never actually clamp their return value (only
+// flag overflow), so for a near-degenerate/behind-camera vertex MAC1/MAC2
+// could reach values IR1/IR2's hardware clamp would normally bound -
+// multiplied into the perspective formula, that produced screen positions
+// literally millions of pixels off. IR1/IR2 match MAC1/MAC2 exactly for
+// any vertex within the clamp's range anyway (the vast majority), so this
+// costs nothing for the normal case while restoring the same safety
+// bound hardware relies on.
+//
+// Two more hardware clamps this recomputation must reproduce or it
+// produces systematically wrong (not just imprecise) results:
+//   - h_over_sz3 (gte_divide()+Lm_E()) is capped to 0x1ffff/65536
+//     (≈1.9999847) - not a rare case, this triggers for any vertex closer
+//     than half the "H" reference distance, i.e. ordinary foreground
+//     geometry. A plain double H/SZ3 division runs unboundedly higher
+//     than that whenever it applies.
+//   - The final x/y is capped to [-1024,1023] (Lm_G1/Lm_G2) - hardware's
+//     own safety net for a near-zero SZ3 blowing up the divide regardless
+//     of how IR1/IR2 are bounded.
+//
+// sz3 (the vertex's raw eye-space depth) is stored as-is for
+// perspective-correct texture/color interpolation - see
+// psxgpu_device::gpu_vertex_xyw() and the PS1 engine vertex layout (gpuengine.h).
+// This never changes any existing register/FLAG value.
+void gte::pgxp_write_shadow( int64_t ir1, int64_t ir2, int32_t sz3 )
+{
+	m_pgxp_shadow[ 0 ] = m_pgxp_shadow[ 1 ];
+	m_pgxp_shadow[ 1 ] = m_pgxp_shadow[ 2 ];
+	m_pgxp_shadow[ 2 ] = pgxp_shadow();
+
+	if( sz3 <= 0 )
+	{
+		// Degenerate/behind-camera vertex - gte_divide() itself saturates
+		// to its max clamp here (see Lm_E()); no meaningful precise value
+		// to shadow, leave slot 2 invalid (falls back to the plain
+		// integer coordinate, same as any other invalid shadow entry).
+		return;
+	}
+
+	const double PGXP_H_OVER_SZ3_MAX = 131071.0 / 65536.0;
+	double h_over_sz3 = (double) H / (double) sz3;
+	if( h_over_sz3 > PGXP_H_OVER_SZ3_MAX )
+	{
+		h_over_sz3 = PGXP_H_OVER_SZ3_MAX;
+	}
+	double x = ( (double) OFX / 65536.0 ) + ( (double) ir1 * h_over_sz3 );
+	double y = ( (double) OFY / 65536.0 ) + ( (double) ir2 * h_over_sz3 );
+
+	if( x > 1023.0 ) x = 1023.0;
+	else if( x < -1024.0 ) x = -1024.0;
+	if( y > 1023.0 ) y = 1023.0;
+	else if( y < -1024.0 ) y = -1024.0;
+
+	m_pgxp_shadow[ 2 ].x = (float) x;
+	m_pgxp_shadow[ 2 ].y = (float) y;
+	m_pgxp_shadow[ 2 ].w = (float) sz3;
+	m_pgxp_shadow[ 2 ].valid = true;
+	// PGXP (CLAUDE.md Phase 4c investigation): tag with SXY2's own real
+	// value - SX2/SY2 are already written by the caller above this call
+	// (RTPS/RTPT set them immediately before calling pgxp_write_shadow())
+	// - so this is the real hardware register content, not a
+	// recomputation. Lets a later MFC2 validate this shadow against
+	// whatever SXY2 actually holds *at that read*, rather than trusting
+	// it purely because the FIFO rotation is expected to stay in sync;
+	// see the MFC2 site's comment in psx.cpp for why that expectation
+	// alone wasn't a safe enough guarantee in practice.
+	m_pgxp_shadow[ 2 ].tag_value = SXY2;
+
+	if( m_pgxp_vcache_enabled )
+	{
+		pgxp_vcache_write( (int16_t)( SXY2 & 0xffff ), (int16_t)( SXY2 >> 16 ), m_pgxp_shadow[ 2 ].x, m_pgxp_shadow[ 2 ].y, m_pgxp_shadow[ 2 ].w );
+	}
+}
+
+// Port of Beetle's PGXP_CacheVertex(): the first write after a read opens a
+// new session (clearing the previous one - equivalent to Beetle's generation
+// counter retiring old entries); a second, different vertex claiming the same
+// integer position within a session marks it ambiguous.
+void gte::pgxp_vcache_write( int sx, int sy, float x, float y, float w )
+{
+	if( sx < -2048 || sx > 2047 || sy < -2048 || sy > 2047 )
+		return;
+
+	if( !m_pgxp_vcache_writing )
+	{
+		m_pgxp_vcache.clear();
+		m_pgxp_vcache_writing = true;
+	}
+
+	auto it = m_pgxp_vcache.find( pgxp_vcache_key( sx, sy ) );
+	if( it == m_pgxp_vcache.end() )
+	{
+		m_pgxp_vcache[ pgxp_vcache_key( sx, sy ) ] = { x, y, w, false };
+	}
+	else if( it->second.x != x || it->second.y != y || it->second.w != w )
+	{
+		it->second.ambiguous = true;
+	}
+}
+
+// Port of Beetle's PGXP_GetCachedVertex(): declines (false) for a position
+// never written this session or claimed twice; the caller then falls back to
+// the plain native coordinate.
+bool gte::pgxp_vertex_cache_query( int sx, int sy, float &x, float &y, float &w )
+{
+	if( !m_pgxp_vcache_enabled )
+		return false;
+
+	m_pgxp_vcache_writing = false;
+
+	if( sx < -2048 || sx > 2047 || sy < -2048 || sy > 2047 )
+		return false;
+
+	auto it = m_pgxp_vcache.find( pgxp_vcache_key( sx, sy ) );
+	if( it == m_pgxp_vcache.end() || it->second.ambiguous )
+		return false;
+
+	x = it->second.x; y = it->second.y; w = it->second.w;
+	return true;
+}
+
+gte::pgxp_shadow gte::pgxp_shadow_for_reg( int reg ) const
+{
+	switch( reg )
+	{
+	case 12: return m_pgxp_shadow[ 0 ];
+	case 13: return m_pgxp_shadow[ 1 ];
+	case 14:
+	case 15: return m_pgxp_shadow[ 2 ]; // SXYP aliases SXY2 - see getcp2dr().
+	default: return pgxp_shadow();
+	}
+}
+
 int64_t gte::F( int64_t a )
 {
 	m_mac0 = a;
@@ -501,6 +692,10 @@ int gte::docop2( uint32_t pc, int gteop )
 		SY2 = Lm_G2( F( (int64_t) OFY + ( (int64_t) IR2 * h_over_sz3 ) ) >> 16 );
 		MAC0 = F( (int64_t) DQB + ( (int64_t) DQA * h_over_sz3 ) );
 		IR0 = Lm_H( m_mac0, 1 );
+		if( m_pgxp_enabled )
+		{
+			pgxp_write_shadow( IR1, IR2, SZ3 );
+		}
 		return 1;
 
 	case 0x06:
@@ -852,6 +1047,10 @@ int gte::docop2( uint32_t pc, int gteop )
 			SXY1 = SXY2;
 			SX2 = Lm_G1( F( (int64_t) OFX + ( (int64_t) IR1 * h_over_sz3 ) ) >> 16 );
 			SY2 = Lm_G2( F( (int64_t) OFY + ( (int64_t) IR2 * h_over_sz3 ) ) >> 16 );
+			if( m_pgxp_enabled )
+			{
+				pgxp_write_shadow( IR1, IR2, SZ3 );
+			}
 		}
 
 		MAC0 = F( (int64_t) DQB + ( (int64_t) DQA * h_over_sz3 ) );

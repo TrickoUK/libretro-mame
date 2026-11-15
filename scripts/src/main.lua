@@ -25,6 +25,11 @@ end
 	kind "ConsoleApp"
 
 	configuration { "android*" }
+if _OPTIONS["osd"] == "retro" then
+		linkoptions {
+			"-shared",
+		}
+else
 		targetprefix "lib"
 		targetname "main"
 		targetextension ".so"
@@ -32,19 +37,29 @@ end
 			"-shared",
 			"-Wl,-soname,libmain.so"
 		}
+end
 		links {
 			"EGL",
 			"GLESv1_CM",
 			"GLESv2",
-			"SDL3",
+-- RETRO HACK no sdl for libretro android
+--			"SDL3",
 		}
+if _OPTIONS["osd"] == "retro" then
+
+else
+               links {
+                        "SDL3",
+                }
+end
+-- RETRO HACK END no sdl for libretro android
 
 	configuration {  }
 
 	addprojectflags()
 	flags {
 		"NoManifest",
-		"Symbols", -- always include minimum symbols for executables
+		--"Symbols", -- always include minimum symbols for executables, or maybe not, since it wastes space and needs stripping after
 	}
 
 	if _OPTIONS["SYMBOLS"]~=nil and _OPTIONS["SYMBOLS"]~=0 and (_OPTIONS["PDB_SYMBOLS"]==nil or _OPTIONS["PDB_SYMBOLS"]==0) then
@@ -84,14 +99,138 @@ end
 		targetextension ".exe"
 
 	configuration { "asmjs" }
-		targetextension ".html"
+		targetextension ".bc"
+-- RETRO HACK no sdl for libretro android
+if _OPTIONS["osd"] == "retro" then
 
+
+else
+		if os.getenv("EMSCRIPTEN") then
+			local emccopts = ""
+				.. " -O" .. _OPTIONS["OPTIMIZE"]
+				.. " -s USE_SDL=2"
+				.. " -s USE_SDL_TTF=2"
+				.. " --memory-init-file 0"
+				.. " -s DISABLE_EXCEPTION_CATCHING=2"
+				.. " -s EXCEPTION_CATCHING_WHITELIST=\"['__ZN15running_machine17start_all_devicesEv','__ZN12cli_frontend7executeEiPPc','__ZN8chd_file11open_commonEb','__ZN8chd_file13read_metadataEjjRNSt3__212basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE','__ZN8chd_file13read_metadataEjjRNSt3__26vectorIhNS0_9allocatorIhEEEE','__ZNK19netlist_mame_device19base_validity_checkER16validity_checker']\""
+				.. " -s EXPORTED_FUNCTIONS=\"['_main', '_malloc', '__ZN15running_machine30emscripten_get_running_machineEv', '__ZN15running_machine17emscripten_get_uiEv', '__ZN15running_machine20emscripten_get_soundEv', '__ZN15mame_ui_manager12set_show_fpsEb', '__ZNK15mame_ui_manager8show_fpsEv', '__ZN13sound_manager4muteEbh', '_SDL_PauseAudio', '_SDL_SendKeyboardKey', '__ZN15running_machine15emscripten_saveEPKc', '__ZN15running_machine15emscripten_loadEPKc', '__ZN15running_machine21emscripten_hard_resetEv', '__ZN15running_machine21emscripten_soft_resetEv', '__ZN15running_machine15emscripten_exitEv']\""
+				.. " -s EXTRA_EXPORTED_RUNTIME_METHODS=\"['cwrap']\""
+				.. " -s ERROR_ON_UNDEFINED_SYMBOLS=0"
+				.. " -s USE_WEBGL2=1"
+				.. " -s LEGACY_GL_EMULATION=1"
+				.. " -s GL_UNSAFE_OPTS=0"
+				.. " --pre-js " .. _MAKE.esc(MAME_DIR) .. "src/osd/modules/sound/js_sound.js"
+				.. " --post-js " .. _MAKE.esc(MAME_DIR) .. "scripts/resources/emscripten/emscripten_post.js"
+				.. " --embed-file " .. _MAKE.esc(MAME_DIR) .. "bgfx/chains@bgfx/chains"
+				.. " --embed-file " .. _MAKE.esc(MAME_DIR) .. "bgfx/effects@bgfx/effects"
+				.. " --embed-file " .. _MAKE.esc(MAME_DIR) .. "bgfx/shaders/essl@bgfx/shaders/essl"
+				.. " --embed-file " .. _MAKE.esc(MAME_DIR) .. "artwork/bgfx@artwork/bgfx"
+				.. " --embed-file " .. _MAKE.esc(MAME_DIR) .. "artwork/slot-mask.png@artwork/slot-mask.png"
+
+			if _OPTIONS["SYMBOLS"]~=nil and _OPTIONS["SYMBOLS"]~="0" then
+				emccopts = emccopts
+					.. " -g" .. _OPTIONS["SYMLEVEL"]
+					.. " -s DEMANGLE_SUPPORT=1"
+			end
+
+			if _OPTIONS["WEBASSEMBLY"] then
+				emccopts = emccopts
+					.. " -s WASM=" .. _OPTIONS["WEBASSEMBLY"]
+			else
+				emccopts = emccopts
+					.. " -s WASM=1"
+			end
+
+			if _OPTIONS["WEBASSEMBLY"]~=nil and _OPTIONS["WEBASSEMBLY"]=="0" then
+				-- define a fixed memory size because allowing memory growth disables asm.js optimizations
+				emccopts = emccopts
+					.. " -s ALLOW_MEMORY_GROWTH=0"
+					.. " -s TOTAL_MEMORY=268435456"
+			else
+				emccopts = emccopts
+					.. " -s ALLOW_MEMORY_GROWTH=1"
+			end
+
+			if _OPTIONS["ARCHOPTS"] then
+				emccopts = emccopts .. " " .. _OPTIONS["ARCHOPTS"]
+			end
+
+			postbuildcommands {
+				--os.getenv("EMSCRIPTEN") .. "/emcc " .. emccopts .. " $(TARGET) -o " .. _MAKE.esc(MAME_DIR) .. _OPTIONS["target"] .. _OPTIONS["subtarget"] .. ".js",
+				os.getenv("EMSCRIPTEN") .. "/emcc " .. emccopts .. " $(TARGET) -o " .. _MAKE.esc(MAME_DIR) .. _OPTIONS["target"] .. _OPTIONS["subtarget"] .. ".html",
+			}
+		end
+
+		targetextension ".html"
+end
+	-- BEGIN libretro overrides to MAME's GENie build
+	configuration { "libretro*" }
+		kind "SharedLib"	
+		targetsuffix "_libretro"
+		if _OPTIONS["targetos"]=="android" then
+			targetsuffix "_libretro_android"
+			defines {
+ 				"SDLMAME_ARM=1",
+			}
+		elseif _OPTIONS["targetos"]=="asmjs" then
+			targetsuffix "_libretro_emscripten"
+			linkoptions {
+				 "-s DISABLE_EXCEPTION_CATCHING=2",
+				 "-s EXCEPTION_CATCHING_WHITELIST='[\"__ZN15running_machine17start_all_devicesEv\",\"__ZN12cli_frontend7executeEiPPc\"]'",			}
+		elseif _OPTIONS["targetos"]=="ios-arm" or _OPTIONS["LIBRETRO_IOS"]=="1" then
+			targetsuffix "_libretro_ios"
+			targetextension ".dylib"
+		elseif _OPTIONS["LIBRETRO_TVOS"]=="1" then
+			targetsuffix "_libretro_tvos"
+			targetextension ".dylib"
+		elseif _OPTIONS["targetos"]=="windows" then
+			targetextension ".dll"
+			flags {
+				"NoImportLib",
+			}
+		elseif _OPTIONS["targetos"]=="osx" then
+			targetextension ".dylib"
+		else
+			targetsuffix "_libretro"
+		end
+
+		targetprefix ""
+
+		includedirs {
+			MAME_DIR .. "src/osd/libretro/libretro-internal",
+		}
+
+		files {
+			MAME_DIR .. "src/osd/libretro/libretro-internal/libretro.cpp"
+		}
+
+		-- Ensure the public API is made public with GNU ld
+		if _OPTIONS["targetos"]=="linux" then
+			linkoptions {
+				"-Wl,--version-script=" .. MAME_DIR .. "src/osd/libretro/libretro-internal/link.T",
+			}
+		end
+
+	-- END libretro overrides to MAME's GENie build
 	configuration { }
 
 	if _OPTIONS["targetos"]=="android" then
+
+-- RETRO HACK no sdl for libretro android
+if _OPTIONS["osd"] == "retro" then
+
+		if _OPTIONS["SEPARATE_BIN"]~="1" then
+			targetdir(MAME_DIR)
+		end
+else
+		includedirs {
+			MAME_DIR .. "3rdparty/SDL3/include",
+		}
+
 		files {
 			MAME_DIR .. "src/osd/sdl3/android_main.cpp",
 		}
+
 		targetsuffix ""
 		if _OPTIONS["SEPARATE_BIN"]~="1" then
 			if _OPTIONS["PLATFORM"]=="arm" then
@@ -115,6 +254,8 @@ end
 				os.copyfile(androidToolchainRoot() .. "/sysroot/usr/lib/x86_64-linux-android/libc++_shared.so", MAME_DIR .. "android-project/app/src/main/libs/x86_64/libc++_shared.so")
 			end
 		end
+end
+-- RETRO HACK END no sdl for libretro android
 	else
 		if _OPTIONS["SEPARATE_BIN"]~="1" then
 			targetdir(MAME_DIR)
@@ -136,9 +277,16 @@ end
 	links {
 		"osd_" .. _OPTIONS["osd"],
 	}
+-- RETRO HACK no qt
+if _OPTIONS["osd"]=="retro" then
+
+else
 	links {
 		"qtdbg_" .. _OPTIONS["osd"],
 	}
+end
+-- RETRO HACK END
+
 --if (STANDALONE~=true) then
 	links {
 		"formats",
@@ -206,10 +354,14 @@ end
 			ext_lib("portmidi"),
 		}
 	end
+	if _OPTIONS["NO_USE_BGFX"]~="1" then
+		links {
+			"bgfx",
+			"bimg",
+			"bx",
+		}
+	end
 	links {
-		"bgfx",
-		"bimg",
-		"bx",
 		"ocore_" .. _OPTIONS["osd"],
 	}
 
@@ -236,13 +388,69 @@ end
 		GEN_DIR  .. "resource",
 	}
 
+	-- RETRO HACK
+	if _OPTIONS["osd"]=="retro" then
+ 
+       forcedincludes {
+			MAME_DIR .. "src/osd/libretro/retroprefix.h"
+		}
 
+		includedirs {
+			MAME_DIR .. "src/emu",
+			MAME_DIR .. "src/osd",
+			MAME_DIR .. "src/lib",
+			MAME_DIR .. "src/lib/util",
+			MAME_DIR .. "src/osd/libretro",
+			MAME_DIR .. "src/osd/interface",
+			MAME_DIR .. "src/osd/modules/render",
+			MAME_DIR .. "3rdparty",
+			MAME_DIR .. "3rdparty/bgfx/include",
+			MAME_DIR .. "3rdparty/bx/include",
+			MAME_DIR .. "src/osd/libretro/libretro-internal",
+		}
+
+  	if _OPTIONS["targetos"]=="windows" then
+  		includedirs {
+  			MAME_DIR .. "3rdparty/winpcap/Include",
+		}
+	end
+
+		files {
+			MAME_DIR .. "src/osd/libretro/retromain.cpp",
+			MAME_DIR .. "src/osd/libretro/libretro-internal/libretro.cpp",
+		}
+
+		-- retromain.cpp/libretro.cpp are compiled again here (a second,
+		-- separate copy from the one in retro.lua's osd_retro project -
+		-- this is the copy that actually ends up in the final link), so
+		-- the optional GPU render-target service needs the same
+		-- HAVE_RETRO_GPU_TARGET define/files here too. See CLAUDE.md "Chosen first
+		-- target" for the feature; retro.lua has the primary comment.
+		if _OPTIONS["HAVE_RETRO_GPU_TARGET"] then
+			defines {
+				"HAVE_RETRO_GPU_TARGET",
+			}
+			files {
+				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_device.cpp",
+				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_shader.cpp",
+				MAME_DIR .. "src/osd/libretro/libretro-internal/retro_vk_engine.cpp",
+			}
+			includedirs {
+				MAME_DIR .. "3rdparty/bgfx/3rdparty",
+				MAME_DIR .. "3rdparty/bgfx/3rdparty/glslang",
+			}
+			links {
+				"glslang",
+			}
+		end
+	end
+-- RETRO HACK
 if (STANDALONE==true) then
 	standalone();
 end
 
 if (STANDALONE~=true) then
-	if _OPTIONS["targetos"]=="macosx" and (not override_resources) then
+	if _OPTIONS["targetos"]=="macosx" and (not override_resources) and not (_OPTIONS["LIBRETRO_IOS"]=="1" or _OPTIONS["LIBRETRO_TVOS"]=="1") then
 		local plistname = _target .. "_" .. _subtarget .. "-Info.plist"
 		linkoptions {
 			"-sectcreate __TEXT __info_plist " .. _MAKE.esc(GEN_DIR) .. "resource/" .. plistname

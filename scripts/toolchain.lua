@@ -472,6 +472,9 @@ function toolchain(_buildDir, _subDir)
 		linkoptions {
 			"--gcc-toolchain=" .. androidToolchainRoot(),
 			"--sysroot=" .. androidToolchainRoot() .. "/sysroot",
+-- RETRO HACK for libretro android
+			"-static-libstdc++",
+-- RETRO HACK END for libretro android
 			"-Wl,--no-undefined",
 			"-Wl,-z,noexecstack",
 			"-Wl,-z,relro",
@@ -568,6 +571,99 @@ function toolchain(_buildDir, _subDir)
 
 	configuration { "osx*", "arm64", "Debug" }
 		targetdir (_buildDir .. "osx_clang" .. "/bin/x64/Debug")
+
+	configuration { "ios-arm" }
+		targetdir (_buildDir .. "ios-arm" .. "/bin")
+		objdir (_buildDir .. "ios-arm" .. "/obj")
+
+	configuration { "ios-simulator" }
+		targetdir (_buildDir .. "ios-simulator" .. "/bin")
+		objdir (_buildDir .. "ios-simulator" .. "/obj")
+
+	configuration { "rpi" }
+		targetdir (_buildDir .. "rpi" .. "/bin")
+		objdir (_buildDir .. "rpi" .. "/obj")
+-- BEGIN libretro overrides to MAME's GENie build
+
+	configuration { "libretro*" }
+		objdir (_buildDir .. "libretro" .. "/obj")
+
+	-- $ARCH means something to Apple/Clang, so we can't use it here.
+		-- Instead, use ARCH="" LIBRETRO_CPU="$ARCH" on the make cmdline.
+		--
+		-- NB: $ARCH has caused libretro problems before, LIBRETRO_CPU will
+		--     replace it everywhere at some point.
+		newoption {
+			trigger = "LIBRETRO_CPU",
+			description = "libretro CPU/architecture variable",
+		}
+		if _OPTIONS["LIBRETRO_CPU"]~=nil then
+			LIBRETRO_CPU=_OPTIONS["LIBRETRO_CPU"]
+		end
+
+		-- $platform we could keep using, but $LIBRETRO_OS seems safer.
+		newoption {
+			trigger = "LIBRETRO_OS",
+			description = "libretro OS/platform variable",
+		}
+		if _OPTIONS["LIBRETRO_OS"]~=nil then
+			LIBRETRO_OS=_OPTIONS["LIBRETRO_OS"]
+		end
+
+		-- Set TARGETOS based on LIBRETRO_OS if we know
+		if LIBRETRO_OS~=nil then
+			local targetos = "linux"
+			if LIBRETRO_OS=="macosx"  then
+				targetos = "macosx"
+			elseif LIBRETRO_OS=="android" then
+				targetos = "android"
+			elseif LIBRETRO_OS=="ios" then
+				targetos = "ios"
+			elseif LIBRETRO_OS=="win" then
+				targetos = "windows"
+			end
+			_OPTIONS["targetos"] = targetos
+		end
+
+		-- FIXME: set BIGENDIAN and dynarec based on retro_platform/retro_arch
+		if LIBRETRO_CPU~=nil then
+			if LIBRETRO_CPU=="x86_64" or LIBRETRO_CPU=="ppc64" then
+				defines { "PTR64=1" }
+			end
+		end
+
+		-- MS and Apple don't need -fPIC, but pretty much everything else does.
+		if _OPTIONS["targetos"] ~= "windows" and _OPTIONS["targetos"] ~= "macosx" then
+			buildoptions { "-fPIC" }
+			linkoptions { "-fPIC" }
+		end
+
+		buildoptions {
+			"-fsigned-char",
+		}
+
+		flags {
+			"NoPCH",
+		}
+
+		-- libretro only supports the retro OSD
+		_OPTIONS["osd"] = "retro"
+
+		-- Don't use BGFX
+		_OPTIONS["NO_USE_BGFX"] = "1"
+
+		-- libretro does not (yet) support MIDI.
+		_OPTIONS["NO_USE_MIDI"] = "1"
+
+	configuration { "libretrodbg" }
+		targetdir (_buildDir .. "libretro"  .. "/debug")
+		flags {
+			"Symbols",
+		}
+	configuration { "libretro" }
+		targetdir (_buildDir .. "libretro" .. "/bin")
+
+-- END   libretro overrides to MAME's GENie build
 
 	configuration {} -- reset configuration
 

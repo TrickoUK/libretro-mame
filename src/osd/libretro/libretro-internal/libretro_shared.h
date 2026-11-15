@@ -1,0 +1,217 @@
+#ifndef _LIBRETRO_SHARED_H
+#define _LIBRETRO_SHARED_H
+
+#include "libretro.h"
+
+#ifndef USE_XINPUT
+#define USE_XINPUT 0
+#endif
+
+#define HAVE_RGB32
+//FIXME: re-add way to handle 16/32 bit
+#if (!defined(HAVE_OPENGL) && !defined(HAVE_RGB32)) || (!defined(HAVE_OPENGLES) && !defined(HAVE_RGB32))
+
+#ifndef M16B
+#define M16B
+#endif
+
+#endif
+
+#ifndef M16B
+#define PIXEL_TYPE UINT32
+#else
+#define PIXEL_TYPE UINT16
+#endif
+
+#define CORE_NAME "mame"
+#define RETRO_PATH_MAX 512
+
+enum
+{
+   RETROPAD_B,
+   RETROPAD_Y,
+   RETROPAD_SELECT,
+   RETROPAD_START,
+   RETROPAD_PAD_UP,
+   RETROPAD_PAD_DOWN,
+   RETROPAD_PAD_LEFT,
+   RETROPAD_PAD_RIGHT,
+   RETROPAD_A,
+   RETROPAD_X,
+   RETROPAD_L,
+   RETROPAD_R,
+   RETROPAD_L2,
+   RETROPAD_R2,
+   RETROPAD_L3,
+   RETROPAD_R3,
+   RETROPAD_TOTAL
+};
+
+enum
+{
+   RETRO_SETTING_LIGHTGUN_MODE_DISABLED,
+   RETRO_SETTING_LIGHTGUN_MODE_POINTER,
+   RETRO_SETTING_LIGHTGUN_MODE_LIGHTGUN
+};
+
+enum
+{
+   RETRO_SETTING_LIGHTGUN_OFFSCREEN_MODE_FREE,
+   RETRO_SETTING_LIGHTGUN_OFFSCREEN_MODE_TOP_LEFT,
+   RETRO_SETTING_LIGHTGUN_OFFSCREEN_MODE_BOTTOM_RIGHT,
+};
+
+enum
+{
+   ROTATION_MODE_NONE,
+   ROTATION_MODE_LIBRETRO,
+   ROTATION_MODE_INTERNAL,
+   ROTATION_MODE_TATE_ROL,
+   ROTATION_MODE_TATE_ROR
+};
+
+enum
+{
+   VIDEO_CHANGED_NONE,
+   VIDEO_CHANGED_AV_INFO,
+   VIDEO_CHANGED_GEOMETRY
+};
+
+extern bool retro_load_ok;
+extern int video_changed;
+extern int retro_pause;
+extern int mame_reset;
+extern char g_rom_dir[RETRO_PATH_MAX];
+extern char mediaType[10];
+extern const char *retro_save_directory;
+extern const char *retro_system_directory;
+extern const char *retro_content_directory;
+
+extern int lightgun_mode;
+extern int lightgun_offscreen_mode;
+extern bool mouse_enable;
+extern bool cheats_enable;
+extern bool boot_to_osd_enable;
+extern bool boot_to_bios_enable;
+extern bool softlist_enable;
+extern bool softlist_auto;
+extern bool autoloadfastforward;
+extern bool write_config_enable;
+extern bool read_config_enable;
+extern bool throttle_enable;
+extern bool auto_save_enable;
+extern bool game_specific_saves_enable;
+extern bool buttons_profiles;
+extern bool mame_paths_enable;
+extern bool mame_4way_enable;
+extern char mame_4way_map[256];
+extern char joystick_deadzone[8];
+extern char joystick_saturation[8];
+extern char joystick_threshold[8];
+extern char alternate_renderer;
+extern bool lua_console_enable;
+extern char debug_plugin[32];
+// mame_psx_gpu_hle core option: 0 = disabled (software rendering, the
+// default), else the internal resolution multiplier (2 or 4) psxgpu_device
+// should render at via the GPU render-target service - see osdretro.h's
+// gpu_render_available()/gpu_render_scale() overrides and CLAUDE.md
+// "Chosen first target" for the feature this controls.
+extern int psx_gpu_hle_scale;
+// mame_psx_gpu_pgxp core option: PGXP-style geometry correction for the PS1
+// GPU HLE path above (see osdretro.h's gpu_render_pgxp_enabled() and
+// CLAUDE.md Phase 4) - only meaningful when psx_gpu_hle_scale > 0.
+extern bool psx_gpu_pgxp_enable;
+// mame_psx_gpu_pgxp_tol core option: -2 = legacy, -1 = disabled (keep all
+// PGXP positions), 0..8 = tolerance in native pixels - see osdepend.h's
+// gpu_render_pgxp_tolerance().
+extern int psx_gpu_pgxp_tolerance;
+// mame_psx_gpu_pgxp_vcache core option: PGXP vertex cache (see osdepend.h).
+extern bool psx_gpu_pgxp_vcache;
+// mame_psx_gpu_msaa core option: 4x MSAA on the GPU render target above
+// (see osdretro.h's gpu_render_msaa_samples()) - only meaningful when
+// psx_gpu_hle_scale > 0. A user-facing escape hatch in case a specific
+// game looks worse with it on, not expected to be needed in the common
+// case.
+extern bool psx_gpu_msaa_enable;
+// mame_psx_gpu_texfilter core option: texture filtering mode for the GPU
+// render target above (see osdretro.h's gpu_render_texfilter()) - only
+// meaningful when psx_gpu_hle_scale > 0. 0 = disabled/nearest (PS1-accurate,
+// the default), 1 = bilinear, 2 = trilinear, 3 = 3-point/N64-style.
+extern int psx_gpu_texfilter_mode;
+// mame_psx_gpu_filter_exclude_sprite/_2d_polygon core options: mirror
+// Beetle PSX HW's options of the same name/shape - exclude sprite/
+// rectangle primitives, or polygon primitives heuristically detected as
+// 2D content, from the texture filtering mode above. 0 = disabled (no
+// exclusion), 1 = exclude opaque draws only, 2 = exclude opaque and
+// semi-transparent draws. Only meaningful when psx_gpu_texfilter_mode > 0.
+extern int psx_gpu_filter_exclude_sprite_mode;
+extern int psx_gpu_filter_exclude_2d_polygon_mode;
+// mame_3d_supersample core option: supersampling factor for the 3D renderers
+// that support it on the host-GPU path (Voodoo, Konami K001005, Model 2,
+// HNG64), 1 = off (see osdepend.h).
+extern int supersample_factor;
+// mame_3d_output_scale core option: present the supersampled 3D layer at
+// supersample_factor times the native screen size instead of averaging it
+// down (see osdepend.h).
+extern bool supersample_output_enable;
+// mame_3d_msaa core option: multisample anti-aliasing of the 3D layer on the host-GPU
+// path, 0 = off, else the sample count (2, 4 or 8) (see osdepend.h).
+extern int msaa_samples_option;
+
+// mame_3d_aniso core option: most texture taps per pixel for anisotropic
+// filtering on the host-GPU path (0 = off).
+extern int aniso_taps_option;
+// mame_3d_texfilter core option: bilinear filter textures on the host-GPU path
+// (see osdepend.h).
+extern bool texfilter_enable;
+// mame_3d_gpu core option: let systems with a GPU engine adapter render their 3D
+// layer on the host GPU (osd::gpu_engine). Off until an adapter registers the option.
+extern bool gpu3d_enable;
+// mame_steering_response/_smoothing/_input, mame_stick_steering_speed core
+// options: override the fork's gamepad steering Machine Configuration
+// settings (see apply_steering_options() in libretro.cpp). Set when a machine
+// starts or the options change; applied once the machine's cfg has loaded.
+extern bool steering_options_pending;
+
+extern int fb_width;
+extern int fb_height;
+extern float retro_aspect;
+extern float view_aspect;
+extern float retro_fps;
+extern int rotation_mode;
+extern int thread_mode;
+extern int screen_configured;
+extern unsigned coin_inserted;
+extern unsigned coin_limit;
+
+extern const char *slash_str;
+
+/* libretro callbacks */
+extern retro_log_printf_t log_cb;
+extern retro_environment_t environ_cb;
+extern retro_input_state_t input_state_cb;
+extern retro_input_poll_t input_poll_cb;
+
+extern void retro_keyboard_event(bool, unsigned, uint32_t, uint16_t);
+
+extern bool fexists(std::string path);
+extern int mmain2(int argc, const char *argv[]);
+extern void extract_basename(char *buf, const char *path, size_t size);
+extern void extract_directory(char *buf, const char *path, size_t size);
+
+void retro_frame_draw_enable(bool enable);
+
+void *retro_get_fb_ptr(void);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int mmain2(int argc, const char *argv);
+int mmain(int argc, char *argv[]);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

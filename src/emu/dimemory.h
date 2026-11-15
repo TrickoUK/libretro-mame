@@ -65,7 +65,9 @@ public:
 	bool has_logical_space(int index = 0) const { return index >= 0 && index < int(m_logical_address_config.size()) && m_logical_address_config[index]; }
 	bool has_configured_map(int index = 0) const { return index >= 0 && index < int(m_address_map.size()) && !m_address_map[index].isnull(); }
 	address_space &space(int index = 0) const { assert(index >= 0 && index < int(m_addrspace.size()) && m_addrspace[index]); return *m_addrspace[index]; }
-
+#if defined(__LIBRETRO__)
+	int num_spaces() const { return int(m_addrspace.size()) ; }
+#endif
 	// address translation
 	bool translate(int spacenum, int intention, offs_t &address, address_space *&target_space) { return memory_translate(spacenum, intention, address, target_space); }
 

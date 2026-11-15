@@ -234,11 +234,6 @@ void ppc_device::execute_run()
 {
 	int execute_result;
 
-	// Other CPUs or DMA may have written the reserved granule while we
-	// yielded to the scheduler.  Without bus snooping, conservatively lose
-	// the reservation across a timeslice (including same-value writes).
-	m_core->reserve = 0;
-
 	// reset the cache if dirty
 	if (m_cache_dirty)
 		code_flush_cache();
@@ -324,6 +319,9 @@ void ppc_device::code_flush_cache()
 	// no compiled code remains, so forget which pages held it
 	std::fill(m_codepage_bits.begin(), m_codepage_bits.end(), 0);
 	m_core->m_codepage_any = false;
+	m_code_snapshots.clear();
+	std::fill(m_physpage_bits.begin(), m_physpage_bits.end(), 0);
+	m_physpage_logical.clear();
 
 	// the generated code is gone, so the reuse entries pointing to it can be flushed
 	m_reuse_cache.clear();
@@ -335,6 +333,107 @@ void ppc_device::code_flush_cache()
 		m_drcuml.cache_dealloc(chk, sizeof(*chk));
 	}
 	m_entry_checks.clear();
+}
+
+
+/*-------------------------------------------------
+    signal_external_write - another bus master
+    wrote this physical range
+-------------------------------------------------*/
+
+void ppc_device::signal_external_write(offs_t physical_address, u32 length)
+{
+	if (!length)
+	{
+		return;
+	}
+
+	// a write anywhere in the reservation granule cancels the reservation
+	const offs_t last = physical_address + std::min<offs_t>(length - 1, ~physical_address);
+	if (m_core->reserve && ((physical_address & m_reservation_mask) <= m_core->reserve_address) && ((last & m_reservation_mask) >= m_core->reserve_address))
+	{
+		m_core->reserve = 0;
+	}
+
+	// Physical pages are only tracked from the first report on, so drop everything
+	// compiled before then.
+	if (!m_track_physical_code)
+	{
+		m_track_physical_code = true;
+		m_cache_dirty = true;
+		return;
+	}
+
+	// recompile every block that was compiled from a written page
+	for (uint32_t page = physical_address >> 12; page <= (last >> 12); page++)
+	{
+		if (BIT(m_physpage_bits[page >> 3], page & 7))
+		{
+			m_physpage_bits[page >> 3] &= ~(1 << (page & 7));
+			const auto found = m_physpage_logical.find(page);
+			if (found != m_physpage_logical.end())
+			{
+				for (const uint32_t logical : found->second)
+				{
+					m_drcuml.hash_invalidate_range(logical << 12, (logical << 12) | 0xfff);
+				}
+				m_physpage_logical.erase(found);
+			}
+		}
+	}
+}
+
+
+/*-------------------------------------------------
+    note_physical_code - record the physical pages
+    a block was compiled from against every logical
+    page it can be entered at
+-------------------------------------------------*/
+
+void ppc_device::note_physical_code(const opcode_desc *desclist)
+{
+	if (!m_track_physical_code)
+	{
+		return;
+	}
+
+	// the compile window can only span two pages
+	static_assert((COMPILE_BACKWARDS_BYTES + COMPILE_FORWARDS_BYTES) <= 4096);
+	uint32_t logical[2];
+	uint32_t physical[2];
+	uint32_t logcount = 0;
+	uint32_t physcount = 0;
+	for (const opcode_desc *desc = desclist; desc != nullptr; desc = desc->next())
+	{
+		if (desc->compiler_page_fault())
+		{
+			continue;
+		}
+
+		const uint32_t logpage = desc->pc >> 12;
+		const uint32_t physpage = desc->physpc >> 12;
+		if ((std::find(logical, logical + logcount, logpage) == (logical + logcount)) && (logcount < std::size(logical)))
+		{
+			logical[logcount++] = logpage;
+		}
+		if ((std::find(physical, physical + physcount, physpage) == (physical + physcount)) && (physcount < std::size(physical)))
+		{
+			physical[physcount++] = physpage;
+		}
+	}
+
+	for (uint32_t p = 0; p < physcount; p++)
+	{
+		m_physpage_bits[physical[p] >> 3] |= 1 << (physical[p] & 7);
+		std::vector<uint32_t> &pages = m_physpage_logical[physical[p]];
+		for (uint32_t l = 0; l < logcount; l++)
+		{
+			if (std::find(pages.begin(), pages.end(), logical[l]) == pages.end())
+			{
+				pages.push_back(logical[l]);
+			}
+		}
+	}
 }
 
 
@@ -428,6 +527,19 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 			{
 				note_code_page(pg);
 			}
+			note_physical_code(desclist);
+
+			// and re-snapshot them, as a fresh compile would, so a later icache
+			// flash invalidate still notices if this code is replaced
+			if (m_cap & PPCCAP_603_MMU)
+			{
+				for (const opcode_desc *curdesc = desclist; ; curdesc = curdesc->next())
+				{
+					snapshot_code_page(curdesc->pc >> 12, curdesc->physpc & ~0xfff);
+					if (curdesc == seqend)
+						break;
+				}
+			}
 			m_codewrite_skip_page = ~uint32_t(0);
 			m_last_reuse = reusekey;
 			return;
@@ -468,6 +580,18 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 				// code, so a later TLB invalidation of one of them can trigger a flush
 				for (uint32_t pg = seqhead->pc >> 12; pg <= (seqlast->pc >> 12); pg++)
 					note_code_page(pg);
+
+				// and what those pages held, so an icache flash invalidate can tell
+				// whether the code was replaced behind the DRC's back
+				if (m_cap & PPCCAP_603_MMU)
+				{
+					for (const opcode_desc *curdesc = seqhead; ; curdesc = curdesc->next())
+					{
+						snapshot_code_page(curdesc->pc >> 12, curdesc->physpc & ~0xfff);
+						if (curdesc == seqlast)
+							break;
+					}
+				}
 
 				// if we don't have a hash for this mode/pc, or if we are overriding all, add one
 				if (override || !m_drcuml.hash_exists(mode, seqhead->pc))
@@ -548,6 +672,8 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 	// remember what was generated so an identical recompile can reuse it
 	if (desclist != nullptr)
 	{
+		note_physical_code(desclist);
+
 		auto const code = m_drcuml.hash_get_codeptr(mode, pc);
 		if (code)
 		{
@@ -987,7 +1113,10 @@ void ppc_device::static_generate_tlb_mismatch()
 	UML_SHL(block, I3, 1, I3);                                              // shl     i3,1,i3
 	UML_TEST(block, I1, I3);                                                // test    i1,i3   ; (USER_)FETCH_ALLOWED
 	UML_JMPc(block, COND_Z, isi = label++);                                 // jmp     isi,z
-	UML_CMP(block, I2, 0);                                                  // cmp     i2,0
+	// If the stale entry didn't allow fetches in this mode (flushed, or only filled
+	// by data accesses so far), the block itself may still be valid: re-enter it and
+	// let its TLB check decide.  Only recompile if a fetchable mapping was replaced.
+	UML_TEST(block, I2, I3);                                                // test    i2,i3   ; (USER_)FETCH_ALLOWED
 	UML_JMPc(block, COND_NZ, exit = label++);                               // jmp     exit,nz
 	UML_HASHJMP(block, mem(&m_core->mode), I0, *m_nocode);                  // hashjmp <mode>,i0,nocode
 	UML_LABEL(block, exit);                                                 // exit:
@@ -4505,6 +4634,13 @@ bool ppc_device::generate_instruction_1f(drcuml_block &block, compiler_state *co
 					// the little endian mode bit is in HID0 on PPC601;
 					// thus, update mode for that scenario in case HID0_LM changed
 					generate_update_mode(block);                                // <update mode>
+				}
+				else if (spr == SPR603_HID0 && (m_cap & PPCCAP_603_MMU))
+				{
+					// ppccom_execute_mtspr() sets param1 if an icache flash
+					// invalidate discarded compiled code, which may include this
+					// block.  Exit so execution continues with a fresh lookup.
+					generate_recompile_if(block, compiler, desc, uml::mem(&m_core->param1), EXECUTE_MISSING_CODE);
 				}
 				compiler->checkints = true;
 				generate_update_cycles(block, compiler, desc->pc + 4, true);    // <update cycles>

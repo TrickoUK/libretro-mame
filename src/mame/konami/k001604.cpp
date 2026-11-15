@@ -300,9 +300,11 @@ TILE_GET_INFO_MEMBER(k001604_device::tile_info_bg16)
 
 
 
-void k001604_device::draw_tilemap(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, bool front, tilemap_t* tilemap)
+void k001604_device::draw_tilemap(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, bool front, tilemap_t* tilemap, int output_scale)
 {
-	const rectangle& visarea = screen.visible_area();
+	// the layer is drawn at native size; the screen may be presented larger
+	const rectangle visarea(screen.visible_area().min_x / output_scale, screen.visible_area().max_x / output_scale,
+			screen.visible_area().min_y / output_scale, screen.visible_area().max_y / output_scale);
 	static const int SUBTILEMAP_DIMENSION[4] = { 128, 128, 64, 32 };        // entry 1 seems unused
 
 	int32_t startx, starty, incxx, incyx, incxy, incyy;
@@ -400,22 +402,51 @@ void k001604_device::draw_tilemap(screen_device &screen, bitmap_rgb32 &bitmap, c
 
 
 
-void k001604_device::draw_back_layer(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect )
+void k001604_device::draw_back_layer(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale)
 {
 	bitmap.fill(0, cliprect);
 
 	if ((m_reg[0x60 / 4] & 0x40000000) == 0)
 		return;
 
-	draw_tilemap(screen, bitmap, cliprect, false, (m_reg[0x18] & 0x400000) ? m_bg_tilemap8 : m_bg_tilemap16);
+	draw_tilemap(screen, bitmap, cliprect, false, (m_reg[0x18] & 0x400000) ? m_bg_tilemap8 : m_bg_tilemap16, output_scale);
 }
 
-void k001604_device::draw_front_layer( screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect )
+void k001604_device::draw_front_layer(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale)
 {
 	if ((m_reg[0x60 / 4] & 0x80000000) == 0)
 		return;
 
-	draw_tilemap(screen, bitmap, cliprect, true, m_fg_tilemap);
+	draw_tilemap(screen, bitmap, cliprect, true, m_fg_tilemap, output_scale);
+}
+
+void k001604_device::draw_front_layer_enlarged(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale)
+{
+	if (output_scale <= 1)
+	{
+		draw_front_layer(screen, bitmap, cliprect);
+		return;
+	}
+
+	rectangle const native_clip(
+			cliprect.min_x / output_scale, cliprect.max_x / output_scale,
+			cliprect.min_y / output_scale, cliprect.max_y / output_scale);
+	if (m_layer.width() <= native_clip.max_x || m_layer.height() <= native_clip.max_y)
+		m_layer.resize(bitmap.width() / output_scale + 1, bitmap.height() / output_scale + 1);
+	m_layer.fill(0, native_clip);
+	draw_front_layer(screen, m_layer, native_clip, output_scale);
+
+	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		uint32_t const *const src = &m_layer.pix(y / output_scale, 0);
+		uint32_t *const dst = &bitmap.pix(y);
+		for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+		{
+			uint32_t const p = src[x / output_scale];
+			if (p & 0xff000000)
+				dst[x] = p;
+		}
+	}
 }
 
 uint32_t k001604_device::tile_r(offs_t offset)

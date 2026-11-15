@@ -45,7 +45,7 @@
 #include <ctime>
 #include <locale>
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) && !defined(__LIBRETRO__)
 #include <emscripten.h>
 #endif
 
@@ -434,6 +434,11 @@ int running_machine::run(bool quiet)
 		while ((!m_hard_reset_pending && !m_exit_pending) || m_saveload_schedule != saveload_schedule::NONE)
 		{
 			auto profile = g_profiler.start(PROFILER_EXTRA);
+
+#if defined(__LIBRETRO__)
+			// non-libco break out to LIBRETRO LOOP
+			return 0;
+#endif
 
 			// execute CPUs if not paused
 			if (!m_paused)
@@ -1394,7 +1399,7 @@ void system_time::full_time::set(struct tm &t)
 //  JAVASCRIPT PORT-SPECIFIC
 //**************************************************************************
 
-#if defined(__EMSCRIPTEN__)
+#if defined(EMSCRIPTEN) && !defined(__LIBRETRO__)
 
 running_machine * running_machine::emscripten_running_machine;
 
@@ -1477,4 +1482,64 @@ void running_machine::emscripten_load(const char *name) {
 	emscripten_running_machine->schedule_load(name);
 }
 
-#endif /* defined(__EMSCRIPTEN__) */
+#endif /* defined(EMSCRIPTEN) */
+
+//**************************************************************************
+//  LIBRETRO PORT-SPECIFIC
+//**************************************************************************
+
+#if defined(__LIBRETRO__)
+extern int POSTNOTIFY;
+extern int RLOOP;
+extern int ENDEXEC;
+
+void running_machine::retro_machine_exit()
+{
+	// and out via the exit phase
+	m_current_phase = machine_phase::EXIT;
+
+	// save the NVRAM and configuration
+	sound().ui_mute(true);
+	nvram_save();
+	m_configuration->save_settings();
+
+	call_notifiers(MACHINE_NOTIFY_EXIT);
+	util::archive_file::cache_clear();
+
+	m_logfile.reset();
+}
+
+void running_machine::retro_loop()
+{
+	// get most recent input now 
+	m_manager.osd().input_update(true);
+	// perform tasks for this frame
+	// except start using this "next frame input response" pre-frame notify
+	// after allowing a few startup frames for hiscore plugin to init properly
+	if (POSTNOTIFY)
+		POSTNOTIFY--;
+	else
+		call_notifiers(MACHINE_NOTIFY_FRAME);
+
+	while (RLOOP == 1)
+	{
+		// execute CPUs if not paused
+		if (!m_paused)
+			m_scheduler.timeslice();
+		// otherwise, just pump video updates through
+		else
+			m_video->frame_update();
+
+		// handle save/load
+		if (m_saveload_schedule != saveload_schedule::NONE)
+			handle_saveload();
+	}
+
+	if ((m_hard_reset_pending || m_exit_pending) && m_saveload_schedule == saveload_schedule::NONE)
+	{
+		retro_machine_exit();
+
+		ENDEXEC = 1;
+	}
+}
+#endif

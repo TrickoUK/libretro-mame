@@ -9,8 +9,14 @@
 hng64_poly_renderer::hng64_poly_renderer(hng64_state& state)
 	: poly_manager<float, hng64_poly_data, 7>(state.machine())
 	, m_state(state)
+	, m_ss(std::clamp(state.machine().osd().supersample(), 1, osd::GPU_MAX_SUPERSAMPLE))
 {
-	const s32 bufferSize = 512 * 512;
+	// The supersampling is a host-GPU setting: it is only kept when the engine exists at start
+	if (!gpu_init())
+		m_ss = 1;
+	m_frame_ss = m_ss;
+
+	const s32 bufferSize = this->bufferSize() * this->bufferSize();
 	m_depthBuffer3d = std::make_unique<float[]>(bufferSize);
 	m_colorBuffer3d = std::make_unique<u16[]>(bufferSize);
 
@@ -394,6 +400,8 @@ void hng64_state::recoverStandardVerts(polygon& currentPoly, int m, const u16* c
 // Polygon rasterization.
 void hng64_state::recoverPolygonBlock(const u16* packet, int& numPolys)
 {
+	const int ss = m_poly_renderer->supersample();
+
 	//printPacket(packet, 1);
 
 	/*//////////////
@@ -935,6 +943,10 @@ void hng64_state::recoverPolygonBlock(const u16* packet, int& numPolys)
 						// Flip Y
 						windowCoords[1] = 512.0f - windowCoords[1];
 
+						// Supersampling renders into bigger buffers
+						windowCoords[0] *= ss;
+						windowCoords[1] *= ss;
+
 						// Store the points in a list for later use...
 						currentPoly.vert[m].clipCoords[0] = windowCoords[0];
 						currentPoly.vert[m].clipCoords[1] = windowCoords[1];
@@ -1053,11 +1065,12 @@ void hng64_state::clear3d()
 {
 	// Reset the buffers...
 	//const rectangle& visarea = m_screen->visible_area();
-	for (int i = 0; i < 512*512; i++)
-	{
-		m_poly_renderer->depthBuffer3d()[i] = 100.0f;
-		m_poly_renderer->colorBuffer3d()[i] = 0;
-	}
+	m_poly_renderer->begin_frame();
+	const int size = m_poly_renderer->bufferSize();
+	std::fill_n(m_poly_renderer->colorBuffer3d(), size * size, 0);
+	m_poly_renderer->clear_depth();
+
+	m_poly_renderer->gpu_clear();
 
 	m_paletteState3d = 0;
 
@@ -1311,7 +1324,11 @@ void hng64_state::normalize(float* x)
 
 void hng64_poly_renderer::render_texture_scanline(s32 scanline, const extent_t& extent, const hng64_poly_data& renderData, int threadid)
 {
-	if ((scanline > 511) | (scanline < 0))
+	const int size = bufferSize();
+	// The hardware wraps x at the buffer width, which the rasterizer can hit once at x = 512
+	const int xmask = (m_frame_ss == 1) ? (NATIVE_SIZE - 1) : -1;
+
+	if ((scanline >= frameSize()) | (scanline < 0))
 		return;
 
 	// Pull the parameters out of the extent structure
@@ -1328,15 +1345,15 @@ void hng64_poly_renderer::render_texture_scanline(s32 scanline, const extent_t& 
 	const float dt = extent.param[6].dpdx;
 
 	// Pointers to the pixel buffers
-	u16* colorBuffer = &m_colorBuffer3d[(scanline * 512)];
-	float* depthBuffer = &m_depthBuffer3d[(scanline * 512)];
+	u16* colorBuffer = &m_colorBuffer3d[(scanline * size)];
+	float* depthBuffer = &m_depthBuffer3d[(scanline * size)];
 
 	const u8 *textureOffset = &m_state.m_texturerom[renderData.texIndex * 1024 * 1024];
 
 	// Step over each pixel in the horizontal span
 	for (int x = extent.startx; x < extent.stopx; x++)
 	{
-		if (z < depthBuffer[x & 511])
+		if (z < depthBuffer[x & xmask])
 		{
 			// Multiply back through by w for everything that was interpolated perspective-correctly
 			const float sCorrect = s / w;
@@ -1397,8 +1414,8 @@ void hng64_poly_renderer::render_texture_scanline(s32 scanline, const extent_t& 
 					if (renderData.blend)
 						color |= 0x800;
 
-					colorBuffer[x & 511] = color;
-					depthBuffer[x & 511] = z;
+					colorBuffer[x & xmask] = color;
+					depthBuffer[x & xmask] = z;
 				}
 			}
 		}
@@ -1413,7 +1430,10 @@ void hng64_poly_renderer::render_texture_scanline(s32 scanline, const extent_t& 
 
 void hng64_poly_renderer::render_flat_scanline(s32 scanline, const extent_t& extent, const hng64_poly_data& renderData, int threadid)
 {
-	if ((scanline > 511) | (scanline < 0))
+	const int size = bufferSize();
+	const int xmask = (m_frame_ss == 1) ? (NATIVE_SIZE - 1) : -1;
+
+	if ((scanline >= frameSize()) | (scanline < 0))
 		return;
 
 	// Pull the parameters out of the extent structure
@@ -1421,24 +1441,222 @@ void hng64_poly_renderer::render_flat_scanline(s32 scanline, const extent_t& ext
 	const float dz = extent.param[0].dpdx;
 
 	// Pointers to the pixel buffers
-	float* depthBuffer = &m_depthBuffer3d[(scanline * 512)];
-	u16* colorBuffer = &m_colorBuffer3d[(scanline * 512)];
+	float* depthBuffer = &m_depthBuffer3d[(scanline * size)];
+	u16* colorBuffer = &m_colorBuffer3d[(scanline * size)];
 
 	// Step over each pixel in the horizontal span
 	for (int x = extent.startx; x < extent.stopx; x++)
 	{
-		if (z < depthBuffer[x & 511])
+		if (z < depthBuffer[x & xmask])
 		{
-			colorBuffer[x & 511] = renderData.palOffset + renderData.colorIndex;
-			depthBuffer[x & 511] = z;
+			colorBuffer[x & xmask] = renderData.palOffset + renderData.colorIndex;
+			depthBuffer[x & xmask] = z;
 		}
 
 		z += dz;
 	}
 }
 
+bool hng64_poly_renderer::gpu_init()
+{
+	if (!m_gpu_checked)
+	{
+		m_gpu_checked = true;
+		m_gpu_engine = m_state.machine().osd().get_gpu_engine("hng64");
+		const int pages = std::min<int>(m_state.m_texturerom.length() / (1024 * 1024), 16);
+		if (m_gpu_engine && (pages == 0 || pages * 1024 > m_gpu_engine->caps().max_texture_size))
+			m_gpu_engine = nullptr;
+		if (m_gpu_engine)
+		{
+			osd::gpu_shader_module module;
+			module.name = "hng64";
+			module.fragment_source = HNG64_FRAGMENT_SOURCE;
+			module.set_varyings(HNG64_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, false);
+			module.state_stride = HNG64_SHADER_STATE_WORDS;
+			module.binding_count = 1;
+			module.binding_name[0] = "tex_rom";
+			module.binding_format[0] = osd::gpu_texture_format::R8UI;
+			m_gpu_module = m_gpu_engine->create_shader_module(module);
+
+			osd::gpu_texture_desc desc;
+			desc.format = osd::gpu_texture_format::R8UI;
+			desc.width = 1024;
+			desc.height = pages * 1024;
+			m_gpu_tex_rom = m_gpu_engine->create_texture(desc);
+
+			if (!m_gpu_module || !m_gpu_tex_rom)
+				m_gpu_engine = nullptr;
+		}
+	}
+	return m_gpu_engine != nullptr && !m_gpu_engine->failed();
+}
+
+// Queues the triangles of one polygon with the state its scanline routine would have read.
+void hng64_poly_renderer::gpu_add_polygon(polygon *p)
+{
+	const u32 prim = m_gpu_state.size() / HNG64_SHADER_STATE_WORDS;
+	m_gpu_state.insert(m_gpu_state.end(), {
+			u32(p->flatShade ? 1 : 0) | u32(p->tex4bpp ? 2 : 0) | u32(p->blend ? 4 : 0),
+			u32(p->texIndex),
+			u32(p->palOffset),
+			u32(p->texPageSmall),
+			u32(p->colorIndex),
+			u32(p->texscrollx),
+			u32(p->texscrolly),
+			u32(p->tex_mask_x),
+			u32(p->tex_mask_y),
+			0, 0, 0 });
+
+	auto emit = [this, p, prim] (const polyVert &pv)
+	{
+		hng64_gpu_vertex &dst = m_gpu_vertices.emplace_back();
+		dst.x = pv.clipCoords[0];
+		dst.y = pv.clipCoords[1];
+		dst.z = std::clamp(pv.clipCoords[2], 0.0f, 1.0f) * 0.9999f;
+		dst.w = 1.0f;
+		dst.prim = prim;
+		if (p->flatShade)
+		{
+			dst.v[0] = dst.v[1] = dst.v[2] = dst.v[3] = 0.0f;
+		}
+		else
+		{
+			// attributes divided by w, so that they interpolate linearly across the screen
+			const float invw = 1.0f / pv.clipCoords[3];
+			dst.v[0] = invw;
+			dst.v[1] = pv.light * invw;
+			dst.v[2] = pv.texCoords[0] * invw;
+			dst.v[3] = pv.texCoords[1] * invw;
+		}
+	};
+
+	for (int j = 1; j < p->n - 1; j++)
+	{
+		emit(p->vert[0]);
+		emit(p->vert[j]);
+		emit(p->vert[j + 1]);
+	}
+}
+
+// Starts drawing the queued polygons; gpu_collect() delivers the colour words into the software colour buffer.
+void hng64_poly_renderer::gpu_submit()
+{
+	if (m_gpu_vertices.empty())
+		return;
+
+	const int size = bufferSize();
+	osd::gpu_texture_update update;
+	int update_count = 0;
+	if (m_gpu_full_upload)
+	{
+		update.texture = m_gpu_tex_rom;
+		update.w = 1024;
+		update.h = std::min<int>(m_state.m_texturerom.length() / (1024 * 1024), 16) * 1024;
+		update.data = &m_state.m_texturerom[0];
+		update.pitch_bytes = 1024;
+		update_count = 1;
+	}
+	m_gpu_full_upload = false;
+
+	osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, 0, m_gpu_vertices.size());
+	draw.bindings[0] = m_gpu_tex_rom;
+	draw.depth_func = osd::gpu_depth_func::LESS;
+	draw.depth_write = true;
+
+	// red holds the low byte of the colour word and green the high byte
+	osd::gpu_readback_rect readback;
+	readback.x = 0;
+	readback.y = 0;
+	readback.w = size;
+	readback.h = size;
+	readback.format = osd::gpu_readback_format::RG8;
+	readback.out16 = m_colorBuffer3d.get();
+	readback.stride = size;
+
+	osd::gpu_frame frame;
+	frame.target.width = size;
+	frame.target.height = size;
+	frame.target.persistent = true;
+	frame.target.depth = osd::gpu_depth_mode::REAL;
+	frame.target.generation = m_gpu_generation;
+	frame.updates = &update;
+	frame.update_count = update_count;
+	frame.vertices = m_gpu_vertices.data();
+	frame.vertex_count = m_gpu_vertices.size();
+	frame.varyings_per_vertex = HNG64_SHADER_VARYINGS;
+	frame.prim_state = m_gpu_state.data();
+	frame.prim_count = m_gpu_state.size() / HNG64_SHADER_STATE_WORDS;
+	frame.state_stride = HNG64_SHADER_STATE_WORDS;
+	frame.commands = &draw;
+	frame.command_count = 1;
+	frame.readbacks = &readback;
+	frame.readback_count = 1;
+	frame.defer_readback = true;
+	if (m_gpu_engine->submit_frame(frame))
+		m_gpu_pending = true;
+	else
+	{
+		// the texture ROM may not have reached the GPU, and the target no longer matches the colour buffer
+		m_gpu_full_upload = true;
+		m_gpu_generation++;
+	}
+
+	m_gpu_state.clear();
+	m_gpu_vertices.clear();
+}
+
+// Waits for the frame started by gpu_submit() and fills the colour buffer.
+void hng64_poly_renderer::gpu_collect()
+{
+	if (!m_gpu_pending)
+		return;
+	m_gpu_pending = false;
+	if (!m_gpu_engine->collect_frame())
+	{
+		m_gpu_full_upload = true;
+		m_gpu_generation++;
+	}
+}
+
+// The buffers were cleared: forget queued polygons and have the GPU buffers cleared with the next frame.
+void hng64_poly_renderer::gpu_clear()
+{
+	m_gpu_pending = false;
+	m_gpu_state.clear();
+	m_gpu_vertices.clear();
+	m_gpu_generation++;
+}
+
+// Each frame is drawn at the supersampling factor while the host-GPU engine works. A frame that starts without
+// the engine is drawn by the software rasterizer at native size, and its palette resolve reads it at native size.
+void hng64_poly_renderer::begin_frame()
+{
+	m_frame_ss = gpu_init() ? m_ss : 1;
+}
+
+// The depth buffer is only used by the software rasteriser, so it is cleared when a polygon first needs it.
+void hng64_poly_renderer::clear_depth()
+{
+	if (gpu_init())
+		m_depth_clear_pending = true;
+	else
+		std::fill_n(m_depthBuffer3d.get(), bufferSize() * bufferSize(), 100.0f);
+}
+
 void hng64_poly_renderer::drawShaded(polygon *p)
 {
+	if (gpu_init())
+	{
+		gpu_add_polygon(p);
+		return;
+	}
+
+	if (m_depth_clear_pending)
+	{
+		m_depth_clear_pending = false;
+		std::fill_n(m_depthBuffer3d.get(), bufferSize() * bufferSize(), 100.0f);
+	}
+
 	// Polygon information for the rasterizer
 	hng64_poly_data rOptions;
 	rOptions.tex4bpp = p->tex4bpp;
@@ -1456,8 +1674,12 @@ void hng64_poly_renderer::drawShaded(polygon *p)
 	hng64_poly_data& renderData = object_data().next();
 	renderData = rOptions;
 
+	// Without supersampling the hardware's rectangle runs one past the last pixel (see the x wrap in the scanline code)
 	rectangle visibleArea;
-	visibleArea.set(0, 512, 0, 512);
+	if (m_frame_ss == 1)
+		visibleArea.set(0, NATIVE_SIZE, 0, NATIVE_SIZE);
+	else
+		visibleArea.set(0, bufferSize() - 1, 0, bufferSize() - 1);
 
 	if (p->flatShade)
 	{

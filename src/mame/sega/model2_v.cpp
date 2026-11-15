@@ -90,7 +90,10 @@
 
 #include "emu.h"
 #include "model2.h"
+#include "model2_shader.h"
 #include "model2rd.ipp"
+
+#include "osdepend.h"
 
 #include "corefloat.h"
 
@@ -101,6 +104,13 @@
 #define pz      p[0]
 #define pu      p[1]
 #define pv      p[2]
+
+
+// Supersampling factor of the 3D layer (1 = native), from the OSD's 3D supersampling setting
+int model2_supersample_factor(running_machine &machine)
+{
+	return std::clamp(machine.osd().supersample(), 1, osd::GPU_MAX_SUPERSAMPLE);
+}
 
 
 
@@ -606,6 +616,311 @@ void model2_renderer::model2_3d_render(polygon *poly, const rectangle &cliprect)
 	}
 }
 
+// Appends one polygon to the host-GPU frame: resolves everything the software scanline routines read from
+// the polygon (texture header, colour base through the palette RAM) into a state record, and fan-triangulates
+// it. Returns false for polygons the software renderer does not draw either.
+bool model2_renderer::gpu_add_polygon(polygon *poly, const rectangle &cliprect, std::vector<u32> &state, std::vector<m2_gpu_vertex> &verts)
+{
+	u8 const renderer = (poly->texheader[0] >> 13) & 3;
+	rectangle vp(m_ss * (poly->viewport[0] + m_xoffs), m_ss * (poly->viewport[2] + m_xoffs),
+	             m_ss * ((384-poly->viewport[3]) + m_yoffs), m_ss * ((384-poly->viewport[1]) + m_yoffs));
+	vp &= cliprect;
+	if (vp.empty() || renderer == 1)
+		return false;
+
+	s32 d[MODEL2_SHADER_STATE_WORDS] = {};
+	u32 const colorbase = (poly->texheader[3] >> 6) & 0x3ff;
+	u32 const color = m_state.m_palram[colorbase + 0x1000] & 0x7fff;
+	d[0] = renderer | (BIT(poly->texheader[0], 15) << 8);
+	d[1] = poly->texlod;
+	d[2] = poly->luma;
+	d[12] = 0x0000 / 2 + (BIT(color, 0, 5) << 8);
+	d[13] = 0x4000 / 2 + (BIT(color, 5, 5) << 8);
+	d[14] = 0x8000 / 2 + (BIT(color, 10, 5) << 8);
+	d[16] = vp.min_x;
+	d[17] = vp.min_y;
+	d[18] = vp.max_x;
+	d[19] = vp.max_y;
+
+	if (renderer & 2)
+	{
+		// mirroring disables smooth wrapping
+		u32 const mirx = BIT(poly->texheader[0], 8);
+		u32 const miry = BIT(poly->texheader[0], 9);
+		u32 const wrapx = BIT(poly->texheader[0], 6) & ~mirx;
+		u32 const wrapy = BIT(poly->texheader[0], 7) & ~miry;
+		d[0] |= (wrapx << 9) | (wrapy << 10) | (mirx << 11) | (miry << 12);
+		d[0] |= BIT(poly->texheader[2], 12) << 13;
+		d[0] |= (BIT(poly->texheader[0], 12) << 15) | (BIT(poly->texheader[0], 10, 2) << 16);
+		d[4] = 32 << BIT(poly->texheader[0], 0, 3);
+		d[5] = 32 << BIT(poly->texheader[0], 3, 3);
+		d[6] = 32 * BIT(poly->texheader[2], 0, 6);
+		d[7] = 32 * BIT(poly->texheader[2], 6, 5);
+		d[8] = BIT(poly->texheader[2], 13) * 128;
+		d[9] = BIT(poly->texheader[2], 14, 2) * 128;
+		d[10] = (poly->texheader[1] & 0xff) << 7;
+
+		for (int i = 0; i < poly->num_vertices; i++)
+		{
+			poly->v[i].pz = 1.0f / (poly->v[i].pz + std::numeric_limits<float>::min());
+			poly->v[i].pu = poly->v[i].pu * poly->v[i].pz * (1.0f / 8.0f);
+			poly->v[i].pv = poly->v[i].pv * poly->v[i].pz * (1.0f / 8.0f);
+		}
+	}
+
+	u32 const prim = state.size() / MODEL2_SHADER_STATE_WORDS;
+	state.insert(state.end(), d, d + MODEL2_SHADER_STATE_WORDS);
+
+	// the varyings are screen-linear 1/z, u/z and v/z, the same values the software scanlines interpolate
+	m2_gpu_vertex vv[8];
+	for (int i = 0; i < poly->num_vertices; i++)
+		vv[i] = { poly->v[i].x, poly->v[i].y, 0.0f, 1.0f, prim, poly->v[i].pz, poly->v[i].pu, poly->v[i].pv };
+	for (int i = 1; i + 1 < poly->num_vertices; i++)
+	{
+		verts.push_back(vv[0]);
+		verts.push_back(vv[i]);
+		verts.push_back(vv[i + 1]);
+	}
+	return true;
+}
+
+bool model2_state::gpu_init()
+{
+	if (!m_gpu_checked)
+	{
+		m_gpu_checked = true;
+		m_gpu_engine = machine().osd().get_gpu_engine("model2");
+		if (m_gpu_engine)
+		{
+			osd::gpu_shader_module module;
+			module.name = "model2";
+			module.fragment_source = MODEL2_FRAGMENT_SOURCE;
+			module.set_varyings(MODEL2_SHADER_VARYINGS, osd::gpu_varying_mode::NOPERSPECTIVE, machine().osd().msaa() > 0);
+			module.state_stride = MODEL2_SHADER_STATE_WORDS;
+			module.binding_count = 4;
+			module.binding_name[0] = "tex_sheets";
+			module.binding_format[0] = osd::gpu_texture_format::R16UI;
+			module.binding_name[1] = "luma_ram";
+			module.binding_format[1] = osd::gpu_texture_format::R8UI;
+			module.binding_name[2] = "color_xlat";
+			module.binding_format[2] = osd::gpu_texture_format::R16UI;
+			module.binding_name[3] = "gamma_ramp";
+			module.binding_format[3] = osd::gpu_texture_format::R8UI;
+			m_gpu_module = m_gpu_engine->create_shader_module(module);
+
+			osd::gpu_texture_desc desc;
+			desc.format = osd::gpu_texture_format::R16UI;
+			desc.width = 512;
+			desc.height = 2048;
+			m_gpu_tex_sheets = m_gpu_engine->create_texture(desc);
+			desc.width = 256;
+			desc.height = 96;
+			m_gpu_xlat = m_gpu_engine->create_texture(desc);
+			desc.format = osd::gpu_texture_format::R8UI;
+			desc.height = 128;
+			m_gpu_luma = m_gpu_engine->create_texture(desc);
+			desc.height = 1;
+			m_gpu_gamma = m_gpu_engine->create_texture(desc);
+
+			if (!m_gpu_module || !m_gpu_tex_sheets || !m_gpu_xlat || !m_gpu_luma || !m_gpu_gamma)
+				m_gpu_engine = nullptr;
+			else
+			{
+				m_gpu_shadow_tex = make_unique_clear<u16[]>(512 * 2048);
+				m_gpu_shadow_luma = make_unique_clear<u8[]>(0x8000);
+				m_gpu_shadow_xlat = make_unique_clear<u16[]>(0xc000 / 2);
+				m_gpu_layer.allocate(512, 512);
+			}
+		}
+	}
+	return m_gpu_engine != nullptr && !m_gpu_engine->failed();
+}
+
+// Starts drawing the 3D layer on the host GPU; gpu_layer_collect() delivers it into destmap, with the coverage in alpha.
+// Returns false when the GPU cannot produce the frame; the caller then renders it in software.
+bool model2_state::gpu_layer_submit(const rectangle &ss_cliprect)
+{
+	m_gpu_layer_pending = false;
+	m_gpu_layer_ready = false;
+	if (!gpu_init())
+		return false;
+
+	raster_state *raster = m_raster.get();
+	m_gpu_state.clear();
+	m_gpu_vertices.clear();
+	for (int window = raster->cur_window; window >= 0; window--)
+	{
+		for (int z = raster->min_z; z <= raster->max_z; z++)
+		{
+			for (polygon *poly = raster->poly_sorted_list[z]; poly != nullptr; poly = (polygon *)poly->next)
+			{
+				if (poly->window == window)
+				{
+					// the GPU path works on a copy, so a frame it cannot produce can still be rendered from the original
+					polygon gpu_poly = *poly;
+					model2_3d_project(&gpu_poly, m_renderer->supersample());
+					m_renderer->gpu_add_polygon(&gpu_poly, ss_cliprect, m_gpu_state, m_gpu_vertices);
+				}
+			}
+		}
+	}
+
+	// Without an output scale the GPU averages the covered samples down to the native size.
+	bool const native = (m_output_scale == 1);
+	bitmap_rgb32 &destmap = native ? m_gpu_layer : m_renderer->destmap();
+	int const ss = m_renderer->supersample();
+	rectangle const out_cliprect = native ?
+			rectangle(ss_cliprect.min_x / ss, (ss_cliprect.max_x + 1) / ss - 1, ss_cliprect.min_y / ss, (ss_cliprect.max_y + 1) / ss - 1) :
+			ss_cliprect;
+	u32 const prim_count = m_gpu_state.size() / MODEL2_SHADER_STATE_WORDS;
+	if (prim_count == 0)
+	{
+		destmap.fill(0x00000000, out_cliprect);
+		m_layer_native = native;
+		m_layer_from_gpu = true;
+		m_gpu_layer_ready = true;
+		return true;
+	}
+
+	// Texture RAM and the colour tables are written by the CPU at any time, so the copy last sent to the GPU
+	// decides what changed. The texture sheets are the first 1 MB of each texture RAM.
+	osd::gpu_texture_update updates[4];
+	int update_count = 0;
+	{
+		u16 *const shadow = m_gpu_shadow_tex.get();
+		u16 const *const sheet[2] = { reinterpret_cast<u16 const *>(&m_textureram0[0]), reinterpret_cast<u16 const *>(&m_textureram1[0]) };
+		int first = -1, last = -1;
+		for (int row = 0; row < 2048; row++)
+		{
+			u16 const *const src = sheet[row >> 10] + (row & 1023) * 512;
+			u16 *const dst = shadow + row * 512;
+			if (m_gpu_full_upload || memcmp(dst, src, 512 * sizeof(u16)))
+			{
+				memcpy(dst, src, 512 * sizeof(u16));
+				if (first < 0)
+					first = row;
+				last = row;
+			}
+		}
+		if (first >= 0)
+		{
+			osd::gpu_texture_update &u = updates[update_count++];
+			u.texture = m_gpu_tex_sheets;
+			u.x = 0;
+			u.y = first;
+			u.w = 512;
+			u.h = last - first + 1;
+			u.data = shadow + first * 512;
+			u.pitch_bytes = 512 * sizeof(u16);
+		}
+	}
+	if (m_gpu_full_upload || memcmp(m_gpu_shadow_luma.get(), m_lumaram.get(), 0x8000))
+	{
+		memcpy(m_gpu_shadow_luma.get(), m_lumaram.get(), 0x8000);
+		osd::gpu_texture_update &u = updates[update_count++];
+		u.texture = m_gpu_luma;
+		u.w = 256;
+		u.h = 128;
+		u.data = m_gpu_shadow_luma.get();
+	}
+	if (m_gpu_full_upload || memcmp(m_gpu_shadow_xlat.get(), m_colorxlat.get(), 0xc000))
+	{
+		memcpy(m_gpu_shadow_xlat.get(), m_colorxlat.get(), 0xc000);
+		osd::gpu_texture_update &u = updates[update_count++];
+		u.texture = m_gpu_xlat;
+		u.w = 256;
+		u.h = 96;
+		u.data = m_gpu_shadow_xlat.get();
+	}
+	if (m_gpu_full_upload || memcmp(m_gpu_shadow_gamma, m_gamma_table, 256))
+	{
+		memcpy(m_gpu_shadow_gamma, m_gamma_table, 256);
+		osd::gpu_texture_update &u = updates[update_count++];
+		u.texture = m_gpu_gamma;
+		u.w = 256;
+		u.h = 1;
+		u.data = m_gpu_shadow_gamma;
+	}
+	m_gpu_full_upload = false;
+
+	osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, 0, m_gpu_vertices.size());
+	draw.variant = osd::gpu_aniso_variant(machine().osd().anisotropy());
+	draw.bindings[0] = m_gpu_tex_sheets;
+	draw.bindings[1] = m_gpu_luma;
+	draw.bindings[2] = m_gpu_xlat;
+	draw.bindings[3] = m_gpu_gamma;
+
+	// The layer is read back into destmap, or averaged into m_gpu_layer; the coverage is in alpha.
+	osd::gpu_readback_rect readback;
+	readback.x = ss_cliprect.min_x;
+	readback.y = ss_cliprect.min_y;
+	readback.w = ss_cliprect.width();
+	readback.h = ss_cliprect.height();
+	readback.out = &destmap.pix(out_cliprect.min_y, out_cliprect.min_x);
+	readback.stride = destmap.rowpixels();
+	int const msaa = machine().osd().msaa();
+	if (native)
+	{
+		readback.downsample = ss;
+		readback.coverage = true;
+	}
+	else if (msaa > 0)
+	{
+		// the layer is transparent where no polygon was drawn: an edge pixel averages the covered samples only
+		readback.coverage = true;
+	}
+
+	osd::gpu_frame frame;
+	frame.target.width = m_renderer->destmap().width();
+	frame.target.height = m_renderer->destmap().height();
+	frame.target.depth = osd::gpu_depth_mode::ORDER;
+	frame.target.msaa_samples = msaa;
+	frame.target.msaa_per_sample = msaa > 0;
+	frame.updates = updates;
+	frame.update_count = update_count;
+	frame.vertices = m_gpu_vertices.data();
+	frame.vertex_count = m_gpu_vertices.size();
+	frame.varyings_per_vertex = MODEL2_SHADER_VARYINGS;
+	frame.prim_state = m_gpu_state.data();
+	frame.prim_count = prim_count;
+	frame.state_stride = MODEL2_SHADER_STATE_WORDS;
+	frame.commands = &draw;
+	frame.command_count = 1;
+	frame.readbacks = &readback;
+	frame.readback_count = 1;
+	frame.defer_readback = true;
+	if (!m_gpu_engine->submit_frame(frame))
+	{
+		// the textures may not have reached the GPU
+		m_gpu_full_upload = true;
+		return false;
+	}
+
+	m_layer_native = native;
+	m_gpu_layer_pending = true;
+	return true;
+}
+
+// Waits for the layer started by gpu_layer_submit(); false if it could not be delivered.
+bool model2_state::gpu_layer_collect()
+{
+	if (m_gpu_layer_ready)
+	{
+		m_gpu_layer_ready = false;
+		return true;
+	}
+	if (!m_gpu_layer_pending)
+		return false;
+	m_gpu_layer_pending = false;
+	if (!m_gpu_engine->collect_frame())
+	{
+		m_gpu_full_upload = true;
+		return false;
+	}
+	m_layer_from_gpu = true;
+	return true;
+}
+
 /*
     Projection:
 
@@ -640,13 +955,13 @@ void model2_state::vertical_sync_w(u16 data)
 }
 
 /* 3D Rasterizer projection: projects a polygon into screen coordinates */
-inline void model2_state::model2_3d_project(polygon *poly)
+inline void model2_state::model2_3d_project(polygon *poly, int ss)
 {
 	for (int i = 0; i < poly->num_vertices; i++)
 	{
-		/* project the vertices */
-		poly->v[i].x = m_crtc_xoffset + poly->center[0] + (poly->v[i].x / (poly->v[i].pz + std::numeric_limits<float>::min()));
-		poly->v[i].y = ((384 - poly->center[1])+m_crtc_yoffset) - (poly->v[i].y / (poly->v[i].pz + std::numeric_limits<float>::min()));
+		/* project the vertices into destmap space (scaled by ss, the host-GPU supersampling factor) */
+		poly->v[i].x = ss * (m_crtc_xoffset + poly->center[0] + (poly->v[i].x / (poly->v[i].pz + std::numeric_limits<float>::min())));
+		poly->v[i].y = ss * (((384 - poly->center[1])+m_crtc_yoffset) - (poly->v[i].y / (poly->v[i].pz + std::numeric_limits<float>::min())));
 	}
 }
 
@@ -683,7 +998,7 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	// if the geometrizer hasn't presented a new frame, just copy the previous frame and bail
 	if (m_render_done)
 	{
-		copybitmap_trans(bitmap, m_renderer->destmap(), 0, 0, 0, 0, cliprect, 0x00000000);
+		downsample_3d_layer(bitmap, cliprect);
 		return;
 	}
 
@@ -691,6 +1006,15 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	if (raster->poly_list_index == 0)
 		return;
 
+	if (gpu_layer_collect())
+	{
+		downsample_3d_layer(bitmap, cliprect);
+		m_render_done = true;
+		return;
+	}
+
+	// software frames are drawn at native size
+	m_layer_from_gpu = false;
 	m_renderer->destmap().fill(0x00000000, cliprect);
 	m_renderer->fillmap().fill(0x00, cliprect);
 
@@ -711,7 +1035,7 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 					if (poly->window == window)
 					{
 						/* project and render */
-						model2_3d_project(poly);
+						model2_3d_project(poly, 1);
 						m_renderer->model2_3d_render(poly, cliprect);
 					}
 
@@ -722,9 +1046,137 @@ void model2_state::render_polygons(bitmap_rgb32 &bitmap, const rectangle &clipre
 	}
 	m_renderer->wait("End of frame");
 
-	copybitmap_trans(bitmap, m_renderer->destmap(), 0, 0, 0, 0, cliprect, 0x00000000);
+	downsample_3d_layer(bitmap, cliprect);
 
 	m_render_done = true;
+}
+
+// Box-filter downsample of the 3D polygon layer (m_renderer->destmap()/fillmap(), supersampled for GPU frames and native for software frames)
+// into the real screen bitmap. Only opaque (fillmap-marked) source texels are averaged, and a
+// destination pixel is left untouched (transparent) if none of its source block is opaque, so
+// the tilemap/sprite layers drawn before/after this one in screen_update() still show through
+// wherever no polygon covers that pixel - a plain average would incorrectly blend edges to black.
+void model2_state::downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect)
+{
+	bitmap_rgb32 &src = m_renderer->destmap();
+	bitmap_ind8 &srcfill = m_renderer->fillmap();
+	bool const from_gpu = m_layer_from_gpu;
+	// the GPU layer is supersampled, a software layer is drawn at native size
+	int const ss = from_gpu ? m_renderer->supersample() : 1;
+
+	// The GPU has already averaged the covered samples to the native size.
+	if (from_gpu && m_layer_native)
+	{
+		for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+		{
+			u32 const *const srcrow = &m_gpu_layer.pix(y);
+			u32 *const dest = &bitmap.pix(y);
+
+			for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+			{
+				if (srcrow[x] >> 24)
+					dest[x] = srcrow[x];
+			}
+		}
+		return;
+	}
+
+	// At the output scale the GPU layer has the screen's resolution, so its opaque texels are copied as they are.
+	if (m_output_scale > 1 && from_gpu)
+	{
+		for (int y = cliprect.min_y * ss; y <= (cliprect.max_y + 1) * ss - 1; y++)
+		{
+			u32 const *const srcrow = &src.pix(y);
+			u32 *const dest = &bitmap.pix(y);
+
+			// the GPU layer carries its coverage in alpha
+			for (int x = cliprect.min_x * ss; x <= (cliprect.max_x + 1) * ss - 1; x++)
+			{
+				if (srcrow[x] >> 24)
+					dest[x] = srcrow[x];
+			}
+		}
+		return;
+	}
+
+	// A software layer is native: each opaque texel fills its block of output pixels.
+	if (m_output_scale > 1)
+	{
+		int const scale = m_output_scale;
+
+		for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+		{
+			u8 const *const fillrow = &srcfill.pix(y);
+			u32 const *const srcrow = &src.pix(y);
+
+			for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+			{
+				if (!fillrow[x])
+					continue;
+
+				for (int dy = 0; dy < scale; dy++)
+					std::fill_n(&bitmap.pix(y * scale + dy, x * scale), scale, srcrow[x]);
+			}
+		}
+		return;
+	}
+
+	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		int const sy0 = y * ss;
+		u32 *const dest = &bitmap.pix(y);
+
+		for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+		{
+			int const sx0 = x * ss;
+			u32 r = 0, g = 0, b = 0, count = 0;
+
+			for (int sy = 0; sy < ss; sy++)
+			{
+				u8 const *const fillrow = &srcfill.pix(sy0 + sy);
+				u32 const *const srcrow = &src.pix(sy0 + sy);
+
+				for (int sx = 0; sx < ss; sx++)
+				{
+					if (from_gpu ? (srcrow[sx0 + sx] >> 24) != 0 : fillrow[sx0 + sx] != 0)
+					{
+						rgb_t const c(srcrow[sx0 + sx]);
+						r += c.r();
+						g += c.g();
+						b += c.b();
+						count++;
+					}
+				}
+			}
+
+			if (count > 0)
+				dest[x] = rgb_t(r / count, g / count, b / count);
+		}
+	}
+}
+
+// Nearest-neighbour enlargement of a native-size layer into the screen bitmap at the output scale.
+// A non-opaque layer leaves the destination untouched where the layer is zero (transparent).
+void model2_state::enlarge_layer(bitmap_rgb32 &bitmap, const bitmap_rgb32 &layer, const rectangle &cliprect, bool opaque)
+{
+	int const scale = m_output_scale;
+
+	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		u32 const *const src = &layer.pix(y);
+
+		for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
+		{
+			if (!opaque && !src[x])
+				continue;
+
+			for (int dy = 0; dy < scale; dy++)
+			{
+				u32 *const dest = &bitmap.pix(y * scale + dy);
+				std::fill_n(&dest[x * scale], scale, src[x]);
+			}
+		}
+	}
 }
 
 // direct framebuffer drawing (enabled with render test mode, Last Bronx title screen)
@@ -2461,7 +2913,22 @@ void model2_state::video_start()
 
 	m_sys24_bitmap.allocate(width, height+4);
 
-	m_renderer = std::make_unique<model2_renderer>(*this);
+	// The supersampling factor belongs to the host-GPU path: it is only raised when the engine exists and works
+	// at start. Without one the 3D layer is drawn at native size, which is the software renderer.
+	int const ss = gpu_init() ? model2_supersample_factor(machine()) : 1;
+
+	// With the 3D output scale enabled the screen is presented at the supersampling factor times
+	// its native size. The tilemaps and the frame buffer view still draw at native size.
+	if (machine().osd().supersample_output() && ss > 1)
+	{
+		m_output_scale = ss;
+		rectangle scaled_visarea(visarea.min_x * m_output_scale, (visarea.max_x + 1) * m_output_scale - 1,
+				visarea.min_y * m_output_scale, (visarea.max_y + 1) * m_output_scale - 1);
+		m_screen->configure(m_screen->width() * m_output_scale, m_screen->height() * m_output_scale,
+				scaled_visarea, m_screen->frame_period());
+	}
+
+	m_renderer = std::make_unique<model2_renderer>(*this, ss);
 
 	/* initialize the hardware rasterizer */
 	raster_init(*memregion("textures"));
@@ -2514,31 +2981,65 @@ u32 model2_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, con
 		}
 	}
 
+	// At the output scale the cliprect is in screen pixels; the layers are drawn at native size.
+	int const scale = m_output_scale;
+	rectangle const native_cliprect(
+			cliprect.min_x / scale, cliprect.max_x / scale,
+			cliprect.min_y / scale, cliprect.max_y / scale);
+	rectangle const &clip = (scale > 1) ? native_cliprect : cliprect;
+
+	// The polygon list is complete, so the GPU can start on the 3D layer while the tilemaps are drawn.
+	m_gpu_layer_pending = false;
+	m_gpu_layer_ready = false;
+	if (!m_render_test_mode && !m_render_done && m_raster->poly_list_index != 0)
+	{
+		int const ss = m_renderer->supersample();
+		rectangle const ss_cliprect(
+				clip.min_x * ss, (clip.max_x + 1) * ss - 1,
+				clip.min_y * ss, (clip.max_y + 1) * ss - 1);
+		gpu_layer_submit(ss_cliprect);
+	}
+
 	//logerror("--- frame ---\n");
 	bitmap.fill(m_palette->pen(0), cliprect);
-	m_sys24_bitmap.fill(0, cliprect);
+	m_sys24_bitmap.fill(0, clip);
 
 	// draw tilemap B as opaque
 	for (int layer = 3; layer >= 2; layer--)
-		m_tiles->draw(screen, m_sys24_bitmap, cliprect, layer << 1, 0, TILEMAP_DRAW_OPAQUE);
+		m_tiles->draw(screen, m_sys24_bitmap, clip, layer << 1, 0, TILEMAP_DRAW_OPAQUE);
 
 	for (int layer = 1; layer >= 0; layer--)
-		m_tiles->draw(screen, m_sys24_bitmap, cliprect, layer << 1, 0, 0);
+		m_tiles->draw(screen, m_sys24_bitmap, clip, layer << 1, 0, 0);
 
-	copybitmap_trans(bitmap, m_sys24_bitmap, 0, 0, 0, 0, cliprect, 0);
+	if (scale > 1)
+		enlarge_layer(bitmap, m_sys24_bitmap, clip, false);
+	else
+		copybitmap_trans(bitmap, m_sys24_bitmap, 0, 0, 0, 0, clip, 0);
 
 	/* tell the rasterizer we're starting a frame */
 	if (m_render_test_mode == true)
-		draw_framebuffer(bitmap, cliprect);
+	{
+		if (scale > 1)
+		{
+			m_sys24_bitmap.fill(0, clip);
+			draw_framebuffer(m_sys24_bitmap, clip);
+			enlarge_layer(bitmap, m_sys24_bitmap, clip, false);
+		}
+		else
+			draw_framebuffer(bitmap, clip);
+	}
 	else
-		render_polygons(bitmap, cliprect);
+		render_polygons(bitmap, clip);
 
-	m_sys24_bitmap.fill(0, cliprect);
+	m_sys24_bitmap.fill(0, clip);
 
 	for (int layer = 3; layer >= 0; layer--)
-		m_tiles->draw(screen, m_sys24_bitmap, cliprect, (layer<<1) | 1, 0, 0);
+		m_tiles->draw(screen, m_sys24_bitmap, clip, (layer<<1) | 1, 0, 0);
 
-	copybitmap_trans(bitmap, m_sys24_bitmap, 0, 0, 0, 0, cliprect, 0);
+	if (scale > 1)
+		enlarge_layer(bitmap, m_sys24_bitmap, clip, false);
+	else
+		copybitmap_trans(bitmap, m_sys24_bitmap, 0, 0, 0, 0, clip, 0);
 
 	return 0;
 }

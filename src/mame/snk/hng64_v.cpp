@@ -3,6 +3,8 @@
 #include "emu.h"
 #include "hng64.h"
 
+#include "osdepend.h"
+
 #include <algorithm>
 
 #define LOG_3D           (1 << 1)
@@ -768,10 +770,8 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 #endif
 
 	// Initialize some buffers
-	if (m_fbcontrol[0] & 0x01) //FIXME: Is the register correct? check with HW tests
-		bitmap.fill(m_palette->pen(0), cliprect);
-	else
-		bitmap.fill(m_palette->black_pen(), cliprect);
+	const pen_t background = (m_fbcontrol[0] & 0x01) ? m_palette->pen(0) : m_palette->black_pen(); //FIXME: Is the register correct? check with HW tests
+	bitmap.fill(background, cliprect);
 
 	screen.priority().fill(0x00, cliprect);
 
@@ -844,6 +844,9 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 	// while the 3D is currently positioned badly due to unhandled 3D packet registers, it should still go behind the shutters, not in front
 	// it could also be a unique mixing case
 
+	// the polygons are complete: the host GPU draws them while the tilemaps behind the 3D are drawn
+	m_poly_renderer->gpu_submit();
+
 	// tilemaps with 'priority' 0x10 - 0x1f are always behind the 3d?
 	for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
 	{
@@ -874,6 +877,8 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 	*/
 
 	// 3d gets drawn next
+	m_poly_renderer->gpu_collect();
+
 	// 3D palette half, same bit as spriteblendtype
 	const u16 palbase = BIT(m_tcram[0x4c / 4], 16) ? 0x800 : 0x000;
 
@@ -895,12 +900,65 @@ u32 hng64_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, cons
 			// value is midpoint?
 			xscroll += 256;
 
+			const int ss = m_poly_renderer->supersample();
+			if (ss > 1)
+			{
+				// Supersampled: resolve every sample covered by the output pixel through the palette and average
+				// them.  Samples with no 3D pixel count as whatever is already on screen.  The vertical squash
+				// from the 512 line buffer to the screen is a box filter over the true span, not a row pick.
+				const int size = m_poly_renderer->bufferSize();
+				const u16 *const buffer = m_poly_renderer->colorBuffer3d();
+				for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
+				{
+					const int ytop = y - visarea.top();
+					const int row0 = std::min((ytop * size) / ysize, size - 1);
+					const int row1 = std::clamp(((ytop + 1) * size) / ysize, row0 + 1, size);
+					const int count = (row1 - row0) * ss;
+					u32 *dst = &bitmap.pix(y, cliprect.left());
+
+					for (int x = cliprect.left(); x <= cliprect.right(); x++)
+					{
+						const int sx = ((((cliprect.left() + x) + xscroll) & 0x1ff) * ss);
+						const rgb_t under = *dst;
+						int opaque = 0;
+						int r = 0;
+						int g = 0;
+						int b = 0;
+
+						for (int row = row0; row < row1; row++)
+						{
+							const u16 *const src = &buffer[(row * size) + sx];
+							for (int k = 0; k < ss; k++)
+							{
+								const u16 srcpix = src[k];
+								rgb_t color = under;
+								if (srcpix & 0x07ff)
+								{
+									color = clut_3d[(srcpix & 0xf7ff) | palbase];
+									if (srcpix & 0x0800)
+										color = alpha_blend_r32(under, color, 0x80);
+									opaque++;
+								}
+								r += color.r();
+								g += color.g();
+								b += color.b();
+							}
+						}
+
+						if (opaque)
+							*dst = rgb_t(r / count, g / count, b / count);
+
+						dst++;
+					}
+				}
+			}
+			else
 			// Blit the color buffer into the primary bitmap
 			for (int y = cliprect.top(); y <= cliprect.bottom(); y++)
 			{
 				const int realy = (((y-visarea.top()) * yinc) >> 16);
 
-				const u16 *src = &m_poly_renderer->colorBuffer3d()[((realy) & 0x1ff) * 512];
+				const u16 *src = &m_poly_renderer->colorBuffer3d()[((realy) & 0x1ff) * m_poly_renderer->bufferSize()];
 				u32 *dst = &bitmap.pix(y, cliprect.left());
 
 				for (int x = cliprect.left(); x <= cliprect.right(); x++)

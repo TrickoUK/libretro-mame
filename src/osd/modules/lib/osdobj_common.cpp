@@ -214,6 +214,7 @@ osd_common_t::~osd_common_t()
 
 void osd_common_t::register_options()
 {
+#ifndef __LIBRETRO__
 	REGISTER_MODULE(m_mod_man, FONT_OSX);
 	REGISTER_MODULE(m_mod_man, FONT_WINDOWS);
 	REGISTER_MODULE(m_mod_man, FONT_DWRITE);
@@ -222,8 +223,10 @@ void osd_common_t::register_options()
 #else
 	REGISTER_MODULE(m_mod_man, FONT_SDL);
 #endif
+#endif
 	REGISTER_MODULE(m_mod_man, FONT_NONE);
 
+#ifndef __LIBRETRO__
 #if defined(SDLMAME_EMSCRIPTEN)
 	REGISTER_MODULE(m_mod_man, RENDERER_SDL1); // don't bother trying to use video acceleration in browsers
 #endif
@@ -253,7 +256,11 @@ void osd_common_t::register_options()
 #endif
 #endif
 	REGISTER_MODULE(m_mod_man, RENDERER_NONE);
+#else
+	REGISTER_MODULE(m_mod_man, RENDERER_RETRO);
+#endif
 
+#ifndef __LIBRETRO__
 	REGISTER_MODULE(m_mod_man, SOUND_WASAPI);
 	REGISTER_MODULE(m_mod_man, SOUND_XAUDIO2);
 	REGISTER_MODULE(m_mod_man, SOUND_COREAUDIO);
@@ -268,17 +275,25 @@ void osd_common_t::register_options()
 #endif
 #ifndef NO_USE_PULSEAUDIO
 	REGISTER_MODULE(m_mod_man, SOUND_PULSEAUDIO);
-#endif
+#endif 
 #ifndef NO_USE_PIPEWIRE
 	REGISTER_MODULE(m_mod_man, SOUND_PIPEWIRE);
 #endif
 	REGISTER_MODULE(m_mod_man, SOUND_NONE);
+#else
+	REGISTER_MODULE(m_mod_man, SOUND_RETRO);
+#endif
 
+#ifndef __LIBRETRO__
 	REGISTER_MODULE(m_mod_man, MONITOR_SDL);
 	REGISTER_MODULE(m_mod_man, MONITOR_WIN32);
 	REGISTER_MODULE(m_mod_man, MONITOR_DXGI);
 	REGISTER_MODULE(m_mod_man, MONITOR_MAC);
+#else
+	REGISTER_MODULE(m_mod_man, MONITOR_RETRO);
+#endif
 
+#ifndef __LIBRETRO__
 #ifdef SDLMAME_MACOSX
 	REGISTER_MODULE(m_mod_man, DEBUG_OSX);
 #endif
@@ -289,9 +304,14 @@ void osd_common_t::register_options()
 	REGISTER_MODULE(m_mod_man, DEBUG_GDBSTUB);
 	REGISTER_MODULE(m_mod_man, DEBUG_NONE);
 #endif
+#else
+	REGISTER_MODULE(m_mod_man, DEBUG_NONE);
+#endif
 
+#ifndef __LIBRETRO__
 	REGISTER_MODULE(m_mod_man, NETDEV_TAPTUN);
 	REGISTER_MODULE(m_mod_man, NETDEV_PCAP);
+#endif
 	REGISTER_MODULE(m_mod_man, NETDEV_NONE);
 
 #ifndef NO_USE_MIDI
@@ -299,6 +319,7 @@ void osd_common_t::register_options()
 #endif
 	REGISTER_MODULE(m_mod_man, MIDI_NONE);
 
+#ifndef __LIBRETRO__
 #if defined(OSD_SDL)
 	REGISTER_MODULE(m_mod_man, KEYBOARDINPUT_SDL);
 #endif
@@ -308,8 +329,12 @@ void osd_common_t::register_options()
 	REGISTER_MODULE(m_mod_man, KEYBOARDINPUT_RAWINPUT);
 	REGISTER_MODULE(m_mod_man, KEYBOARDINPUT_DINPUT);
 	REGISTER_MODULE(m_mod_man, KEYBOARDINPUT_WIN32);
+#else
+	REGISTER_MODULE(m_mod_man, KEYBOARDINPUT_RETRO);
+#endif
 	REGISTER_MODULE(m_mod_man, KEYBOARD_NONE);
 
+#ifndef __LIBRETRO__
 #if defined(OSD_SDL)
 	REGISTER_MODULE(m_mod_man, MOUSEINPUT_SDL);
 #endif
@@ -319,8 +344,12 @@ void osd_common_t::register_options()
 	REGISTER_MODULE(m_mod_man, MOUSEINPUT_RAWINPUT);
 	REGISTER_MODULE(m_mod_man, MOUSEINPUT_DINPUT);
 	REGISTER_MODULE(m_mod_man, MOUSEINPUT_WIN32);
+#else
+	REGISTER_MODULE(m_mod_man, MOUSEINPUT_RETRO);
+#endif
 	REGISTER_MODULE(m_mod_man, MOUSE_NONE);
 
+#ifndef __LIBRETRO__
 #if defined(OSD_SDL)
 	REGISTER_MODULE(m_mod_man, LIGHTGUNINPUT_SDL);
 #endif
@@ -330,8 +359,12 @@ void osd_common_t::register_options()
 	REGISTER_MODULE(m_mod_man, LIGHTGUN_X11);
 	REGISTER_MODULE(m_mod_man, LIGHTGUNINPUT_RAWINPUT);
 	REGISTER_MODULE(m_mod_man, LIGHTGUNINPUT_WIN32);
+#else
+	REGISTER_MODULE(m_mod_man, LIGHTGUNINPUT_RETRO);
+#endif
 	REGISTER_MODULE(m_mod_man, LIGHTGUN_NONE);
 
+#ifndef __LIBRETRO__
 #if defined(OSD_SDL)
 	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_SDLGAME);
 	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_SDLJOY);
@@ -340,19 +373,23 @@ void osd_common_t::register_options()
 	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_MACGAME);
 	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_MACJOY);
 #endif
+#if !defined(OSD_SDL) && defined(USE_SDL_JOYSTICK)
+	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_SDLJOY);
+#endif
 	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_WINHYBRID);
 	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_DINPUT);
 	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_XINPUT);
-#if !defined(OSD_SDL) && defined(USE_SDL_JOYSTICK)
-	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_SDLJOY);
+#else
+	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_RETRO);
 #endif
 	REGISTER_MODULE(m_mod_man, JOYSTICK_NONE);
 
 	REGISTER_MODULE(m_mod_man, OUTPUT_NONE);
 	REGISTER_MODULE(m_mod_man, OUTPUT_CONSOLE);
 	REGISTER_MODULE(m_mod_man, OUTPUT_NETWORK);
+#ifndef __LIBRETRO__
 	REGISTER_MODULE(m_mod_man, OUTPUT_WIN32);
-
+#endif
 
 	// after initialization we know which modules are supported
 	update_option(OSD_FONT_PROVIDER, m_mod_man.get_module_names(OSD_FONT_PROVIDER));

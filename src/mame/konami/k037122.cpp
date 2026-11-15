@@ -158,9 +158,40 @@ TILE_GET_INFO_MEMBER(k037122_device::tile_info)
 }
 
 
-void k037122_device::tile_draw( screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect )
+void k037122_device::tile_draw_enlarged( screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale )
 {
-	const rectangle &visarea = screen.visible_area();
+	if( output_scale <= 1 )
+	{
+		tile_draw( screen, bitmap, cliprect );
+		return;
+	}
+
+	const rectangle native_clip(
+			cliprect.min_x / output_scale, cliprect.max_x / output_scale,
+			cliprect.min_y / output_scale, cliprect.max_y / output_scale );
+	if( m_layer.width() <= native_clip.max_x || m_layer.height() <= native_clip.max_y )
+		m_layer.resize( bitmap.width() / output_scale + 1, bitmap.height() / output_scale + 1 );
+	m_layer.fill( 0, native_clip );
+	tile_draw( screen, m_layer, native_clip, output_scale );
+
+	for( int y = cliprect.min_y; y <= cliprect.max_y; y++ )
+	{
+		uint32_t const *const src = &m_layer.pix( y / output_scale, 0 );
+		uint32_t *const dst = &bitmap.pix( y );
+		for( int x = cliprect.min_x; x <= cliprect.max_x; x++ )
+		{
+			uint32_t const p = src[ x / output_scale ];
+			if( p & 0xff000000 )
+				dst[ x ] = p;
+		}
+	}
+}
+
+void k037122_device::tile_draw( screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale )
+{
+	// the layer is drawn at native size; the screen may be presented larger
+	const rectangle visarea( screen.visible_area().min_x / output_scale, screen.visible_area().max_x / output_scale,
+			screen.visible_area().min_y / output_scale, screen.visible_area().max_y / output_scale );
 
 	int16_t const scrollx = m_reg[0x8] >> 16;
 	int16_t scrolly = m_reg[0x8] & 0xffff;

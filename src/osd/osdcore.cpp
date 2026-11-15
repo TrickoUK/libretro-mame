@@ -4,8 +4,7 @@
 #include "osdcore.h"
 #include <thread>
 #include <chrono>
-
-#if defined(SDLMAME_ANDROID)
+#if defined(SDLMAME_ANDROID) && !defined(__LIBRETRO__)
 #include <android/log.h>
 #endif
 
@@ -65,8 +64,8 @@ void osd_output::pop(osd_output *delegate)
 
 void osd_vprintf_error(util::format_argument_pack<char> const &args)
 {
-#if defined(SDLMAME_ANDROID)
-	__android_log_write(ANDROID_LOG_ERROR, "MAME", util::string_format(args).c_str());
+#if defined(SDLMAME_ANDROID) && !defined(__LIBRETRO__)
+	__android_log_write(ANDROID_LOG_ERROR, "%s", util::string_format(args).c_str());
 #else
 	if (m_ptr >= 0) m_stack[m_ptr]->output_callback(OSD_OUTPUT_CHANNEL_ERROR, args);
 #endif
@@ -80,8 +79,8 @@ void osd_vprintf_error(util::format_argument_pack<char> const &args)
 
 void osd_vprintf_warning(util::format_argument_pack<char> const &args)
 {
-#if defined(SDLMAME_ANDROID)
-	__android_log_write(ANDROID_LOG_WARN, "MAME", util::string_format(args).c_str());
+#if defined(SDLMAME_ANDROID) && !defined(__LIBRETRO__)
+	__android_log_write(ANDROID_LOG_WARN, "%s", util::string_format(args).c_str());
 #else
 	if (m_ptr >= 0) m_stack[m_ptr]->output_callback(OSD_OUTPUT_CHANNEL_WARNING, args);
 #endif
@@ -95,8 +94,8 @@ void osd_vprintf_warning(util::format_argument_pack<char> const &args)
 
 void osd_vprintf_info(util::format_argument_pack<char> const &args)
 {
-#if defined(SDLMAME_ANDROID)
-	__android_log_write(ANDROID_LOG_INFO, "MAME", util::string_format(args).c_str());
+#if defined(SDLMAME_ANDROID) && !defined(__LIBRETRO__)
+	__android_log_write(ANDROID_LOG_INFO, "%s", util::string_format(args).c_str());
 #else
 	if (m_ptr >= 0) m_stack[m_ptr]->output_callback(OSD_OUTPUT_CHANNEL_INFO, args);
 #endif
@@ -110,8 +109,8 @@ void osd_vprintf_info(util::format_argument_pack<char> const &args)
 
 void osd_vprintf_verbose(util::format_argument_pack<char> const &args)
 {
-#if defined(SDLMAME_ANDROID)
-	__android_log_write( ANDROID_LOG_VERBOSE, "MAME", util::string_format(args).c_str());
+#if defined(SDLMAME_ANDROID) && !defined(__LIBRETRO__)
+	__android_log_write( ANDROID_LOG_VERBOSE, "%s", util::string_format(args).c_str());
 #else
 	if (m_ptr >= 0) m_stack[m_ptr]->output_callback(OSD_OUTPUT_CHANNEL_VERBOSE, args);
 #endif
@@ -125,8 +124,8 @@ void osd_vprintf_verbose(util::format_argument_pack<char> const &args)
 
 void osd_vprintf_debug(util::format_argument_pack<char> const &args)
 {
-#if defined(SDLMAME_ANDROID)
-	__android_log_write(ANDROID_LOG_DEBUG, "MAME", util::string_format(args).c_str());
+#if defined(SDLMAME_ANDROID) && !defined(__LIBRETRO__)
+	__android_log_write(ANDROID_LOG_DEBUG, "%s", util::string_format(args).c_str());
 #else
 	if (m_ptr >= 0) m_stack[m_ptr]->output_callback(OSD_OUTPUT_CHANNEL_DEBUG, args);
 #endif

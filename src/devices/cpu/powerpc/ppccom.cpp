@@ -46,8 +46,6 @@ static constexpr uint64_t DOUBLE_ZERO = 0;
 
 static constexpr uint32_t CODEPAGE_SIZE = 0x1'0000'0000ULL / 4096 / 8;
 
-static constexpr uint32_t SPR60X_HID0_ICFI          = 0x0000'0800;
-
 /***************************************************************************
     PRIVATE GLOBAL VARIABLES
 ***************************************************************************/
@@ -250,6 +248,7 @@ ppc_device::ppc_device(
 	, m_drcuml(*this, CACHE_SIZE + sizeof(internal_ppc_state))
 	, m_drcfe(nullptr)
 	, m_drcoptions(0)
+	, m_track_physical_code(false)
 	, m_reservation_mask(~uint32_t(reservation_size - 1))
 	, m_dasm(powerpc_disassembler())
 {
@@ -583,6 +582,7 @@ void ppc_device::device_start()
 
 	// init bitmap of which logical pages have compiled code
 	m_codepage_bits.assign(CODEPAGE_SIZE, 0);    // 0x1'0000'0000 / 4096 = 0x10'0000
+	m_physpage_bits.assign(CODEPAGE_SIZE, 0);
 
 	m_entry = nullptr;
 	m_nocode = nullptr;
@@ -1059,6 +1059,7 @@ void ppc_device::static_generate_memory_handlers()
 	}
 }
 
+
 void ppc_device::state_export(const device_state_entry &entry)
 {
 	switch (entry.index())
@@ -1248,23 +1249,39 @@ void ppc_device::state_string_export(const device_state_entry &entry, std::strin
 
 
 /*-------------------------------------------------
-    device_post_load - a state load rewrites RAM
-    behind the DRC's back, so blocks compiled from
-    the old contents must not be reused
--------------------------------------------------*/
-
-void ppc_device::device_post_load()
-{
-	m_cache_dirty = true;
-}
-
-
-/*-------------------------------------------------
     ppccom_exit - common cleanup/exit
 -------------------------------------------------*/
 
 void ppc_device::device_stop()
 {
+}
+
+
+/*-------------------------------------------------
+    device_post_load - rebuild the DRC mode,
+    which is only updated when the MSR changes
+-------------------------------------------------*/
+
+void ppc_device::device_post_load()
+{
+	// same as generate_update_mode()
+	const u32 msr = m_core->msr;
+	u32 mode = (m_flavor == PPC_MODEL_601) ? BIT(m_core->spr[SPR603_HID0], 3) : (msr & MSR_LE);
+
+	if ((m_cap & PPCCAP_OEA) || (m_flavor == PPC_MODEL_403GCX))
+	{
+		mode |= (msr & MSROEA_DR) ? 0x02 : 0;
+	}
+
+	if (m_cap & PPCCAP_4XX)
+	{
+		mode |= (msr & MSR4XX_PE) ? 0x02 : 0;
+	}
+	mode |= (msr & MSR_PR) ? 0x04 : 0;
+	m_core->mode = mode;
+
+	// the compiled code may be for different memory contents
+	m_cache_dirty = true;
 }
 
 
@@ -1756,11 +1773,79 @@ bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 		if (BIT(m_codepage_bits[page >> 3], page & 7))
 		{
 			m_drcuml.hash_invalidate_range(page << 12, (page << 12) | 0xfff);
+			m_code_snapshots.erase(page);
 			invalidated = true;
 		}
 		page++;
 	}
 	return invalidated;
+}
+
+
+/*-------------------------------------------------
+    snapshot_code_page - remember the contents of
+    a page the DRC has just compiled code from
+    (see icache_flash_invalidate)
+-------------------------------------------------*/
+
+void ppc_device::snapshot_code_page(uint32_t page, uint32_t physbase)
+{
+	auto const [it, inserted] = m_code_snapshots.try_emplace(page);
+	if (!inserted && it->second.physbase == physbase)
+		return;
+
+	code_page_snapshot &snap = it->second;
+	snap.physbase = physbase;
+	if (!snap.words)
+		snap.words = std::make_unique<uint32_t []>(0x1000 / 4);
+
+	// Copy the page straight out of host memory when it is plain RAM or ROM
+	// (the common case), otherwise fetch it a word at a time.
+	const void *const src = (m_cap & PPCCAP_4XX) ? m_cache32.read_ptr(physbase) : m_cache64.read_ptr(physbase);
+	snap.raw = src != nullptr;
+	if (snap.raw)
+	{
+		memcpy(snap.words.get(), src, 0x1000);
+		return;
+	}
+	for (int i = 0; i < 0x1000 / 4; i++)
+		snap.words[i] = m_pr32(physbase + i * 4);
+}
+
+
+/*-------------------------------------------------
+    icache_flash_invalidate - HID0[ICFI] was set:
+    discard compiled code for every page whose
+    bytes changed since it was compiled.  Returns
+    true if anything was invalidated.
+-------------------------------------------------*/
+
+bool ppc_device::icache_flash_invalidate()
+{
+	std::vector<uint32_t> changed;
+	for (auto const &[page, snap] : m_code_snapshots)
+	{
+		if (snap.raw)
+		{
+			const void *const src = (m_cap & PPCCAP_4XX) ? m_cache32.read_ptr(snap.physbase) : m_cache64.read_ptr(snap.physbase);
+			if (!src || memcmp(snap.words.get(), src, 0x1000))
+				changed.push_back(page);
+			continue;
+		}
+
+		for (int i = 0; i < 0x1000 / 4; i++)
+		{
+			if (snap.words[i] != m_pr32(snap.physbase + i * 4))
+			{
+				changed.push_back(page);
+				break;
+			}
+		}
+	}
+
+	for (uint32_t page : changed)
+		invalidate_code_range(page << 12, (page << 12) | 0xfff);
+	return !changed.empty();
 }
 
 
@@ -2237,18 +2322,6 @@ void ppc_device::ppccom_execute_mtspr()
 				m_core->spr[m_core->param0] = m_core->param1;
 				return;
 
-			// register that affects the instruction cache
-			case SPR603_HID0:
-				// flush the I-cache on a 0->1 transition of ICFI, konamim2 does this
-				// valid on all OEA parts except 601
-				if ((m_flavor != PPC_MODEL_601) && m_core->m_codepage_any
-						&& ((m_core->param1 & ~m_core->spr[SPR603_HID0]) & SPR60X_HID0_ICFI))
-				{
-					invalidate_code_range(0, 0xffffffff);
-				}
-				m_core->spr[m_core->param0] = m_core->param1;
-				return;
-
 			// registers that affect the memory map
 			case SPROEA_SDR1:
 			case SPROEA_IBAT0L:
@@ -2373,6 +2446,17 @@ void ppc_device::ppccom_execute_mtspr()
 				return;
 
 			/* write-through no-ops */
+			case SPR603_HID0:
+			{
+				m_core->spr[m_core->param0] = m_core->param1;
+
+				// Setting ICFI invalidates the whole instruction cache.  Tell the
+				// DRC (via param1) whether compiled code was discarded, so it can
+				// leave the current block like it does after an icbi.
+				const bool icfi = m_core->param1 & 0x00000800;
+				m_core->param1 = (icfi && icache_flash_invalidate()) ? 1 : 0;
+				return;
+			}
 			case SPR603_RPA:
 			case SPR603_IABR:
 			case SPR603_HID2:

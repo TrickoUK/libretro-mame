@@ -1,3 +1,22 @@
+# **Libretro notice** #
+
+Before sending bug reports to the upstream bug tracker, make sure the bugs are reproducible in the latest standalone release.
+
+To build libretro MAME core from source you need to use `Makefile.libretro` make file:
+
+```
+make -f Makefile.libretro
+```
+
+
+For faster building after the initial makefile creation:
+
+```
+make -f Makefile.libretro PREMAKE=0
+```
+
+For Windows install `lld` for much faster linking.
+
 # MAME
 
 ## What is MAME?

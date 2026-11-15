@@ -319,11 +319,19 @@ private:
 
 uint32_t jetwave_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
+	int const os = m_k001005->output_scale();
+
 	bitmap.fill(m_palette->pen(0), cliprect);
 
-	m_k001604->draw_back_layer(screen, bitmap, cliprect);
+	m_k001005->draw_2d_layer(bitmap, cliprect, [this, &screen, os] (bitmap_rgb32 &layer, const rectangle &clip)
+			{
+				m_k001604->draw_back_layer(screen, layer, clip, os);
+			});
 	m_k001005->draw(bitmap, cliprect);
-	m_k001604->draw_front_layer(screen, bitmap, cliprect);
+	m_k001005->draw_2d_layer(bitmap, cliprect, [this, &screen, os] (bitmap_rgb32 &layer, const rectangle &clip)
+			{
+				m_k001604->draw_front_layer(screen, layer, clip, os);
+			});
 
 	return 0;
 }
@@ -352,14 +360,20 @@ uint32_t midnrun_state::screen_update(screen_device &screen, bitmap_rgb32 &bitma
 {
 	bitmap.fill(m_palette->pen(0), cliprect);
 
-	m_k056832->tilemap_draw_dj(screen, bitmap, cliprect, 1, 0, 0);
+	m_k001005->draw_2d_layer(bitmap, cliprect, [this, &screen] (bitmap_rgb32 &layer, const rectangle &clip)
+			{
+				m_k056832->tilemap_draw_dj(screen, layer, clip, 1, 0, 0);
+			});
 
 	if (m_konppc->output_3d_enabled())
 	{
 		m_k001005->draw(bitmap, cliprect);
 	}
 
-	m_k056832->tilemap_draw_dj(screen, bitmap, cliprect, 0, 0, 0);
+	m_k001005->draw_2d_layer(bitmap, cliprect, [this, &screen] (bitmap_rgb32 &layer, const rectangle &clip)
+			{
+				m_k056832->tilemap_draw_dj(screen, layer, clip, 0, 0, 0);
+			});
 
 	return 0;
 }

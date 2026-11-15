@@ -233,7 +233,9 @@ Notes:
 
 #include "cdrom.h"
 
+#include <iterator>
 #include <sstream>
+#include <string_view>
 
 
 namespace {
@@ -347,15 +349,35 @@ private:
 	optional_ioport_array<3> m_gunx;
 	optional_ioport_array<3> m_guny;
 
+	// One instruction of the game program (loaded from disc into main RAM) that the
+	// no-gun-flash HACK replaces, guarded by four nearby words that must match first
+	struct noflash_patch
+	{
+		offs_t sig_addr;
+		uint32_t sig[4];
+		offs_t addr;
+		uint32_t orig;
+		uint32_t patched;
+	};
+
+	static const noflash_patch TOTLVICE_NOFLASH[];
+	static const noflash_patch EVILNGT_NOFLASH[];
+	static const noflash_patch HELLNGT_NOFLASH[];
+
 	uint16_t m_sio_data = 0; // Konami SIO
 	uint32_t m_ata_int = 0; // TEST
 	emu_timer *m_atapi_timer = nullptr;
+	const noflash_patch *m_noflash = nullptr;
+	unsigned m_noflash_count = 0;
+	emu_timer *m_noflash_timer = nullptr;
 
 	TIMER_CALLBACK_MEMBER(atapi_delay)
 	{
 		m_atapi_timer->adjust(attotime::never);
 		m_ata_int = param;
 	}
+
+	TIMER_CALLBACK_MEMBER(noflash_check);
 
 	void debug_help_command(const std::vector<std::string_view> &params);
 	void debug_commands(const std::vector<std::string_view> &params);
@@ -691,6 +713,62 @@ void konamim2_state::konami_eeprom_w(uint16_t data)
  *
  *************************************/
 
+// HACK: the light gun games fill the whole screen with a bright quad for a few frames after
+// every trigger pull, so the gun's photo sensor can see the beam. The emulated guns read the
+// aim directly, so the flash only gets in the way. The game programs are loaded from disc,
+// so the patches go into main RAM once each program has been loaded.
+//  - Total Vice: the routine at 0x4005c314 queues the white 512x384 flash quad to the
+//    Triangle Engine; it returns straight away (blr).
+//  - Evil Night/Hell Night: the 512x384 flash routine returns straight away, and in the
+//    320x240 gun handler the branch that skips the flash quad when no gun is sensing is
+//    always taken (beq -> b).
+const konamim2_state::noflash_patch konamim2_state::TOTLVICE_NOFLASH[] =
+{
+	{ 0x4005c504, { 0x3d602019, 0x616b0003, 0x916c0000, 0x3d404010 }, 0x4005c314, 0x9421fff8, 0x4e800020 },
+};
+
+const konamim2_state::noflash_patch konamim2_state::EVILNGT_NOFLASH[] =
+{
+	{ 0x4005fb20, { 0x3d202019, 0x61290003, 0x913f0000, 0x3fe04013 }, 0x4005f9f8, 0x9421fff0, 0x4e800020 },
+	{ 0x400a0518, { 0x57de063e, 0x2c1e0000, 0x418203b4, 0x3f404013 }, 0x400a0520, 0x418203b4, 0x480003b4 },
+};
+
+const konamim2_state::noflash_patch konamim2_state::HELLNGT_NOFLASH[] =
+{
+	{ 0x4005f6f4, { 0x3d202019, 0x61290003, 0x913f0000, 0x3fe04012 }, 0x4005f5cc, 0x9421fff0, 0x4e800020 },
+	{ 0x4009c410, { 0x57de063e, 0x2c1e0000, 0x418203b4, 0x3f404012 }, 0x4009c418, 0x418203b4, 0x480003b4 },
+};
+
+TIMER_CALLBACK_MEMBER(konamim2_state::noflash_check)
+{
+	address_space &space = m_ppc1->space(AS_PROGRAM);
+	bool patched = false;
+
+	for (unsigned i = 0; i < m_noflash_count; i++)
+	{
+		noflash_patch const &p = m_noflash[i];
+		if (space.read_dword(p.addr) != p.orig)
+			continue;
+
+		bool match = true;
+		for (unsigned j = 0; j < std::size(p.sig) && match; j++)
+			match = space.read_dword(p.sig_addr + j * 4) == p.sig[j];
+
+		if (match)
+		{
+			space.write_dword(p.addr, p.patched);
+			patched = true;
+		}
+	}
+
+	// the CPUs may already have compiled the original code
+	if (patched)
+	{
+		m_ppc1->set_cache_dirty();
+		m_ppc2->set_cache_dirty();
+	}
+}
+
 void konamim2_state::machine_start()
 {
 	m_ppc1->ppcdrc_set_options(PPCDRC_COMPATIBLE_OPTIONS);
@@ -702,6 +780,30 @@ void konamim2_state::machine_start()
 	// TODO: REMOVE
 	m_atapi_timer = timer_alloc(FUNC(konamim2_state::atapi_delay), this);
 	m_atapi_timer->adjust( attotime::never );
+
+	// no-gun-flash HACK (see noflash_check()); only these exact program versions are covered
+	std::string_view const name = machine().system().name;
+	if (name == "totlvice")
+	{
+		m_noflash = TOTLVICE_NOFLASH;
+		m_noflash_count = std::size(TOTLVICE_NOFLASH);
+	}
+	else if (name == "evilngt")
+	{
+		m_noflash = EVILNGT_NOFLASH;
+		m_noflash_count = std::size(EVILNGT_NOFLASH);
+	}
+	else if (name == "hellngt")
+	{
+		m_noflash = HELLNGT_NOFLASH;
+		m_noflash_count = std::size(HELLNGT_NOFLASH);
+	}
+
+	if (m_noflash)
+	{
+		m_noflash_timer = timer_alloc(FUNC(konamim2_state::noflash_check), this);
+		m_noflash_timer->adjust(attotime::from_hz(60), 0, attotime::from_hz(60));
+	}
 
 	if (machine().debug_flags & DEBUG_FLAG_ENABLED)
 	{

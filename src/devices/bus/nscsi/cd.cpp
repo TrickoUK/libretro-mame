@@ -1,5 +1,9 @@
 // license:BSD-3-Clause
 // copyright-holders:Olivier Galibert
+#ifdef __LIBRETRO__
+extern int CDD_status;
+#endif
+
 #include "emu.h"
 #include "emuopts.h"
 
@@ -1120,6 +1124,9 @@ void nscsi_cdrom_device::scsi_command()
 		nscsi_full_device::scsi_command();
 		break;
 	}
+#ifdef __LIBRETRO__
+	CDD_status = (m_scsi_cmdbuf[4]) ? 0x3100 : 0;
+#endif
 }
 
 attotime nscsi_cdrom_2x_device::scsi_data_byte_period()

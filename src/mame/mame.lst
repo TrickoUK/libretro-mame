@@ -17073,8 +17073,10 @@ zoomer
 deathsm2
 
 @source:cave/cv1k.cpp
+akatana
 ddpdfk
 ddpdfk10
+ddpsdoj
 deathsml
 dfkbl
 dsmbl
@@ -20140,7 +20142,7 @@ zigzagb2
 rockclim
 
 @source:galaxian/galaxold.cpp
-4in1
+4funin1
 bullsdrtg
 devilfshv
 dingov
@@ -21649,6 +21651,7 @@ cm1codara
 cm1codarb
 cm1spa
 cmast91
+cmast91g
 cmast97
 cmast97a
 cmast97b
@@ -22134,6 +22137,7 @@ wldfruit
 @source:igs/igs_m036.cpp
 cjbq
 cjddzsp
+cjddzsp122cn
 cjdh2
 cjdh2a
 cjdh2b
@@ -29622,8 +29626,8 @@ rs3230
 48in1a
 48in1b
 48in1c
+4in1
 4in1a
-4in1b
 60in1
 fruitwld
 fruitwlda
@@ -30864,6 +30868,39 @@ gangrose
 tsarevna
 tsarevnaa
 
+@source:misc/cv1k.cpp
+akatana                         // (c) 2010 Cave (AMI license) - 2010/ 8/13 MASTER VER.
+ddpdfk                          // (c) 2008 Cave (AMI license) - 2008/06/23  MASTER VER 1.5
+ddpdfk10                        // (c) 2008 Cave (AMI license) - 2008/05/16  MASTER VER
+ddpsdoj                         // (c) 2012 Cave - 2012/04/20
+deathsml                        // (c) 2007 Cave (AMI license) - 2007/10/09 MASTER VER
+dfkbl                           // (c) 2010 Cave (AMI license) - 2010/1/18 BLACK LABEL
+dsmbl                           // (c) 2008 Cave (AMI license) - 2008/10/06 MEGABLACK LABEL VER
+espgal2                         // (c) 2005 Cave (AMI license) - 2005/11/14.MASTER VER.
+espgal2a                        // (c) 2005 Cave (AMI license) - 2005/11/14 MASTER VER
+espgal2b                        // (c) 2005 Cave (AMI license) - 2005/11/14 MASTER VER
+futari10                        // (c) 2006 Cave (AMI license) - 2006/10/23 MASTER VER.
+futari15                        // (c) 2006 Cave (AMI license) - 2006/12/8.MASTER VER. 1.54.
+futari15a                       // (c) 2006 Cave (AMI license) - 2006/12/8 MASTER VER 1.54
+futaribl                        // (c) 2007 Cave (AMI license) - 2009/11/27 INTERNATIONAL BL - Another Ver
+futariblj                       // (c) 2007 Cave (AMI license) - 2007/12/11 BLACK LABEL VER
+ibara                           // (c) 2005 Cave (AMI license) - 2005/03/22 MASTER VER.. '06. 3. 7 ver.
+ibarao                          // (c) 2005 Cave (AMI license) - 2005/03/22 MASTER VER..
+ibarablk                        // (c) 2005 Cave (AMI license) - 2006/02/06. MASTER VER.
+ibarablka                       // (c) 2005 Cave (AMI license) - 2006/02/06 MASTER VER.
+mmmbanc                         // (c) 2007 Cave (AMI license) - 2007/06/05 MASTER VER.
+mmpork                          // (c) 2007 Cave (AMI license) - 2007/ 4/17 MASTER VER.
+mushisam                        // (c) 2004 Cave (AMI license) - 2004/10/12.MASTER VER.
+mushisama                       // (c) 2004 Cave (AMI license) - 2004/10/12 MASTER VER.
+mushisamb                       // (c) 2004 Cave (AMI license) - 2004/10/12 MASTER VER
+mushitam                        // (c) 2005 Cave (AMI license) - 2005/09/09.MASTER VER
+mushitama                       // (c) 2005 Cave (AMI license) - 2005/09/09 MASTER VER
+pinkswts                        // (c) 2006 Cave (AMI license) - 2006/04/06 MASTER VER....
+pinkswtsa                       // (c) 2006 Cave (AMI license) - 2006/04/06 MASTER VER...
+pinkswtsb                       // (c) 2006 Cave (AMI license) - 2006/04/06 MASTER VER.
+pinkswtsx                       // (c) 2006 Cave (AMI license) - 2006/xx/xx MASTER VER.
+pinkswtssc                      // bootleg
+
 @source:misc/cvs.cpp
 8ball
 8ball1
@@ -32055,6 +32092,7 @@ goldnpke
 goldnpkf
 goldnpkg
 goldnpkh
+goldnpki
 goldnpkr
 goodluck
 gp_jpn22
@@ -32095,6 +32133,7 @@ icpf80_21
 icproul
 jkrbonus
 jokercar
+jokerush
 kmhpan
 lespendu
 lespenduj
@@ -32111,6 +32150,7 @@ olym65bj
 olym65wc
 op5cards
 phnxjokr
+pk5_07sb
 pmpoker
 poker91
 pokerdub
@@ -32145,6 +32185,7 @@ super98
 superdbl
 techtrna
 techtrnb
+touksysp
 unkdep
 unkicpf40
 unkicpf80
@@ -32165,6 +32206,14 @@ witchcrdi
 witchcrdj
 witchgme
 witchgmea
+witchgmeb
+witchgmec
+witchgmed
+witchgmee
+witchgmef
+witchgmeg
+witchgmeh
+witchgmei
 witchjol
 wldwitch
 wldwitcha
@@ -32189,6 +32238,7 @@ wldwitchs
 wldwitcht
 wldwitchu
 wldwitchv
+wldwitchw
 wstrike
 wstrikea
 wtchjack
@@ -32726,6 +32776,10 @@ fruitstbh
 fruitstbi
 fruitstbj
 fruitstbk
+fruitstbl
+fruitstbm
+fruitstbn
+fruitstbo
 goldnjkr
 goldnjkra
 
@@ -35884,18 +35938,25 @@ nespal
 smb3bl
 
 @source:nintendo/nes_clone.cpp
+2pathlet
 afbm7800
 croaky
 dancexpt
 danzkara
 digezlg
 dnce2000
+flshdnce
+glkdance
+nes9in1
+nvbaseb
 nytsudo
 papsudok
 pjoypj001
 popstar
 pv95in1
 racechl8
+rumblstn
+twindncr
 vtvppong
 vtvsocr
 
@@ -36646,7 +36707,9 @@ cexpert
 
 @source:novag/cforte.cpp
 cfortea
+cfortea1
 cforteb
+cforteb1
 
 @source:novag/cnchess.cpp
 cnchess
@@ -45684,6 +45747,7 @@ queenbee
 queenbee107u
 queenbee117a
 queenbee123a
+queenbee124a
 queenbeeb
 queenbeei
 queenbeesa
@@ -47960,6 +48024,7 @@ trsvidtx
 @source:trs/coco12.cpp
 cd6809
 coco
+coco2
 coco2b
 coco2bh
 cocoh
@@ -48032,7 +48097,12 @@ trs80l2
 trs80dt1
 
 @source:trs/trs80m2.cpp
+tandy6k
+tandy6khd
+trs80m12
 trs80m16
+trs80m16b
+trs80m16bhd
 trs80m2
 
 @source:trs/trs80m3.cpp

@@ -1283,6 +1283,12 @@ void voodoo_renderer::register_save(save_proxy &save)
 //  and compute the raster parameters
 //-------------------------------------------------
 
+void voodoo_renderer::compute_raster(rasterizer_params &raster)
+{
+	raster.compute(m_fbi_reg, m_tmu0_reg, m_tmu1_reg);
+}
+
+
 poly_data &voodoo_renderer::alloc_poly()
 {
 	// allocate poly data and compute the rasterization parameters
@@ -1362,6 +1368,33 @@ u32 voodoo_renderer::enqueue_triangle(poly_data &poly, vertex_t const *vert)
 	info->polys++;
 	poly.info = info;
 	return render_triangle<0>(global_cliprect, poly.info->callback, vert[0], vert[1], vert[2]);
+}
+
+
+//-------------------------------------------------
+//  count_fastfill - the pixel count of a fastfill
+//  operation without drawing it
+//-------------------------------------------------
+
+u32 voodoo_renderer::count_fastfill(poly_data &poly)
+{
+	auto const fbzmode = poly.raster.fbzmode();
+	if (!fbzmode.rgb_buffer_mask() && !fbzmode.aux_buffer_mask())
+		return 0;
+	vertex_t v1(poly.clipleft, poly.cliptop);
+	vertex_t v2(poly.clipright, poly.clipbottom);
+	return render_tile<0>(global_cliprect, render_delegate(&voodoo_renderer::rasterizer_null, this), v1, v2);
+}
+
+
+//-------------------------------------------------
+//  count_triangle - the pixel count of a triangle
+//  without drawing it
+//-------------------------------------------------
+
+u32 voodoo_renderer::count_triangle(vertex_t const *vert)
+{
+	return render_triangle<0>(global_cliprect, render_delegate(&voodoo_renderer::rasterizer_null, this), vert[0], vert[1], vert[2]);
 }
 
 

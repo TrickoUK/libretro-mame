@@ -33,6 +33,85 @@
 
 #include <ctime>
 
+#if defined(__LIBRETRO__)
+extern int RLOOP;
+extern int ENDEXEC;
+extern mame_machine_manager *retro_manager;
+extern core_options *retro_global_options;
+extern void retro_loop(running_machine *machine);
+extern void retro_execute();
+extern void free_man();
+
+static running_machine *retro_global_machine;
+static const machine_config *retro_global_config;
+static bool firstgame = true;
+static bool started_empty = false;
+static bool mfirst = false;
+
+void mame_machine_manager::mmchange()
+{
+   mfirst = false;
+
+   // check the state of the machine
+   if (m_new_driver_pending)
+   {
+      // set up new system name and adjust device options accordingly
+      m_options.set_system_name(m_new_driver_pending->name);
+      m_firstrun = true;
+      mfirst = true;
+   }
+   else
+   {
+      if (retro_global_machine->exit_pending())
+         m_options.set_system_name("");
+   }
+}
+
+void free_machineconfig()
+{
+	retro_manager->set_machine(nullptr);
+
+	delete retro_global_machine;
+	delete retro_global_config;
+}
+
+void retro_finish()
+{
+	retro_global_machine->retro_machine_exit();
+
+	free_machineconfig();
+	free_man();
+}
+
+void retro_main_loop()
+{
+	retro_global_machine->retro_loop();
+
+	if (ENDEXEC)
+	{
+		ENDEXEC = 0;
+
+		retro_manager->mmchange();
+
+		if (mfirst)
+		{
+			//restart a new driver from UI
+			retro_execute();
+		}
+		else
+		{
+			RLOOP = 0;
+
+			free_machineconfig();
+
+			//FIXME restart empty driver else it crash
+			// we quit using retroarch (ESC or Menu)
+			retro_execute();
+		}
+	}
+}
+#endif
+
 
 //**************************************************************************
 //  MACHINE MANAGER
@@ -234,10 +313,11 @@ void mame_machine_manager::start_luaengine()
 
 int mame_machine_manager::execute()
 {
+#if !defined(__LIBRETRO__)
 	bool started_empty = false;
 
 	bool firstgame = true;
-
+#endif
 	// loop across multiple hard resets
 	bool exit_pending = false;
 	int error = EMU_ERR_NONE;
@@ -276,6 +356,18 @@ int mame_machine_manager::execute()
 			valid.check_shared_source(*system);
 		}
 
+#if defined(__LIBRETRO__)
+		retro_global_config = new machine_config(*system, m_options);
+
+		retro_global_machine = new running_machine(*retro_global_config, *this);
+
+		set_machine(&(*retro_global_machine));
+
+		error = retro_global_machine->run(is_empty);
+		m_firstrun = false;
+
+		return error;
+#endif
 		// create the machine configuration
 		machine_config config(*system, m_options);
 

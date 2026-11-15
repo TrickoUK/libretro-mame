@@ -110,7 +110,7 @@ protected:
 	virtual uint32_t execute_max_cycles() const noexcept override;
 	virtual void execute_run() override;
 	void update_ticks();
-	void execute_one(bool check_debugger);
+	void execute_one(bool check_debugger, bool idle_skip);
 
 	// device_memory_interface implementation
 	virtual space_config_vector memory_space_config() const override;
@@ -303,6 +303,20 @@ protected:
 private:
 	dspp_internal_state m_local_core; // for non-DRC mode
 
+	// Idle-loop skipping (interpreter only) - see check_idle_loop()
+	void check_idle_loop(uint16_t loop_pc);
+	virtual bool idle_safe_read(offs_t addr) const { return false; }
+protected:
+	int32_t     m_idle_pc;
+private:
+	bool        m_idle_dirty;
+
+	// Plain RAM at the bottom of the data space, read and written directly
+	// instead of through the address space (0 words when the map has no such RAM)
+	uint16_t *  m_data_ram = nullptr;
+	uint32_t    m_data_ram_words = 0;
+	dspp_internal_state m_idle_state;
+
 	// DMA
 	struct fifo_dma
 	{
@@ -449,6 +463,9 @@ protected:
 	virtual void execute_run() override;
 
 	void data_bulldog_map(address_map &map) ATTR_COLD;
+
+	// Plain RAM and the side-effect-free status registers
+	virtual bool idle_safe_read(offs_t addr) const override { return addr < 0x2e0 || addr == 0x3de || addr == 0x3df; }
 };
 
 /***************************************************************************

@@ -20,6 +20,7 @@
 #include "divtlb.h"
 
 #include <algorithm>
+#include <memory>
 #include <unordered_map>
 
 
@@ -245,6 +246,8 @@ public:
 	void ppcdrc_add_fastram(offs_t start, offs_t end, uint8_t readonly, void *base);
 	void ppcdrc_add_hotspot(offs_t pc, uint32_t opcode, uint32_t cycles);
 
+	virtual void signal_external_write(offs_t physical_address, u32 length) override;
+
 	virtual TIMER_CALLBACK_MEMBER(decrementer_int_callback);
 	TIMER_CALLBACK_MEMBER(ppc4xx_buffered_dma_callback);
 	TIMER_CALLBACK_MEMBER(ppc4xx_fit_callback);
@@ -294,7 +297,7 @@ protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
 	virtual void device_stop() override ATTR_COLD;
-	virtual void device_post_load() override;
+	virtual void device_post_load() override ATTR_COLD;
 
 	// device_execute_interface overrides
 	virtual uint32_t execute_min_cycles() const noexcept override { return 1; }
@@ -629,6 +632,13 @@ protected:
 	std::vector<uint8_t>  m_codepage_bits;              // 1 bit for each 4K page
 	uint32_t              m_codewrite_skip_page = ~uint32_t(0);   // 601 write-watch: page to leave unmarked for one recompile
 
+	// For signal_external_write(): which physical pages have compiled code, and the
+	// logical pages of the blocks compiled from them.  Only tracked once another
+	// bus master has reported a write.
+	bool                  m_track_physical_code;
+	std::vector<uint8_t>  m_physpage_bits;              // 1 bit for each 4K page
+	std::unordered_map<uint32_t, std::vector<uint32_t>> m_physpage_logical;
+
 	// Code reuse cache.  The PCI PowerMac 68K DRC frequently regenerates the exact
 	// same code at the exact same address, so keep a cache of translations.  Entries
 	// record the physical address and a signature over every word of the sequence, and
@@ -661,6 +671,22 @@ protected:
 	void note_code_page(uint32_t page) { if (page != m_codewrite_skip_page) { m_codepage_bits[page >> 3] |= 1 << (page & 7); m_core->m_codepage_any = 1; } }
 	bool code_page_has_code(offs_t addr) const { uint32_t const page = (addr >> 12) & 0xfffff; return BIT(m_codepage_bits[page >> 3], page & 7); }
 	bool invalidate_code_range(offs_t start, offs_t end);
+	void note_physical_code(const opcode_desc *desclist);
+
+	// 603-family instruction cache flash invalidate (HID0[ICFI]): code can be
+	// replaced by writers the DRC never sees (DMA, another CPU), and software
+	// then invalidates the whole icache instead of issuing icbi.  Keep a copy of
+	// every compiled code page so an ICFI only discards pages whose bytes
+	// actually changed, rather than flushing the entire cache each time.
+	struct code_page_snapshot
+	{
+		uint32_t physbase;
+		bool raw;                           // words hold the page's host memory bytes, not fetched values
+		std::unique_ptr<uint32_t []> words;
+	};
+	std::unordered_map<uint32_t, code_page_snapshot> m_code_snapshots;    // keyed by effective page number
+	void snapshot_code_page(uint32_t page, uint32_t physbase);
+	bool icache_flash_invalidate();
 
 	// reservation granularity
 	uint32_t m_reservation_mask;

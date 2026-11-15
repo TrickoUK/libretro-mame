@@ -12,6 +12,17 @@
 
 #pragma once
 
+#include <vector>
+
+// Host-GPU rendering through osd::gpu_engine (see CLAUDE.md "Chosen first
+// target"). gpu_queued_cmd (below) embeds osd::gpu_vertex/gpu_blend_mode by
+// value, and the frame being built holds osd::gpu_command values. Both
+// headers are OSD-agnostic (no EGL/GL). osd_interface::get_gpu_engine()
+// returns nullptr when the path is off or unavailable, so m_gpu_engine below
+// is always safe to store either way.
+#include "interface/gpurender.h"
+#include "interface/gpuengine.h"
+
 #include "machine/ram.h"
 
 #define PSXGPU_DEBUG_VIEWER ( 0 )
@@ -221,7 +232,212 @@ private:
 	void psx_gpu_init( int n_gputype );
 	void gpu_reset();
 	void gpu_read( uint32_t *p_ram, int32_t n_size );
-	void gpu_write( uint32_t *p_ram, int32_t n_size );
+	// base_address: the real RAM byte address p_ram[0] came from, or
+	// PGXP_NO_ADDRESS (the default) when there isn't one (the direct
+	// single-word GP0 port write - see write()'s case 0x00 - has no
+	// derivable RAM address; a plain CPU-port write, not the DMA path
+	// real vertex volume flows through). See CLAUDE.md Phase 4c and the
+	// m_packet_shadow comment below.
+	static constexpr uint32_t PGXP_NO_ADDRESS = 0xffffffffu;
+	void gpu_write( uint32_t *p_ram, int32_t n_size, uint32_t base_address = PGXP_NO_ADDRESS );
+
+	// GPU-accelerated rendering (Phase 2): only the four polygon primitives
+	// are routed to the GPU; lines/rects/sprites/dots/framebuffer-copy
+	// commands still use the original software VRAM path (see CLAUDE.md).
+	// Lazily acquires the GPU render target on first call (see psx.cpp) -
+	// deliberately NOT done in device_start()/device_reset(), which run
+	// too early (before RetroArch sets up its own graphics context; see
+	// the comment in device_start()). Not const because of the lazy init.
+	bool gpu_active();
+	bool m_gpu_active_checked = false;
+
+	// Per-call EGL context acquisition (one eglMakeCurrent pair per
+	// set_texture_page()/submit_triangle()/set_clip_rect() call) was too slow
+	// for a real polygon-heavy scene. Rather than holding the context
+	// across multiple calls to amortize that cost - which was tried and
+	// found to eventually corrupt shared driver state once control returns
+	// to MAME/RetroArch's scheduler in between (see CLAUDE.md/plan file
+	// Phase 2 status) - primitive submission is deferred: gpu_submit_
+	// triangle_pair()/gpu_maybe_set_texture_page()/gpu_maybe_set_clip_
+	// rect() queue commands here instead of calling the engine directly.
+	// gpu_update_screen() then turns the whole queue into one frame
+	// description and submits it in a single synchronous call - control
+	// never returns to the scheduler while the engine's context is current,
+	// so the risky interleaving is structurally impossible, not just
+	// unlikely, while still paying only one context acquisition for the
+	// whole frame.
+	//
+	// A structured list (not opaque closures) so gpu_update_screen() can
+	// also merge consecutive TRIANGLE commands that share the same
+	// textured/blend/filterable state into one draw instead of one draw per
+	// triangle - per-draw-call overhead, independent of the EGL
+	// context-switching problem above, is itself significant for a real
+	// polygon-heavy scene.
+	struct gpu_queued_cmd
+	{
+		enum class kind_t { TRIANGLE, TEXPARAM, CLIP, COPY, TEXWIN } kind;
+		osd::gpu_vertex tri[3];
+		bool textured = false;
+		bool filterable = true;
+		osd::gpu_blend_mode blend = osd::gpu_blend_mode::NONE;
+		int tex_tx = 0, tex_ty = 0, tex_tp = 0, tex_clutx = 0, tex_cluty = 0;
+		int tw_and_u = 255, tw_and_v = 255, tw_off_u = 0, tw_off_v = 0;
+		int tw_interleave = 0;
+		int clip_x1 = 0, clip_y1 = 0, clip_x2 = 0, clip_y2 = 0;
+		int copy_sx = 0, copy_sy = 0, copy_dx = 0, copy_dy = 0, copy_w = 0, copy_h = 0;
+	};
+	std::vector<gpu_queued_cmd> m_gpu_queue;
+	osd::gpu_blend_mode gpu_blend_mode_for( uint8_t n_cmd ) const;
+	void gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable = true, int cull_mask = 0 );
+	void gpu_submit_triangle_pair( const osd::gpu_vertex &v0, const osd::gpu_vertex &v1, const osd::gpu_vertex &v2, const osd::gpu_vertex &v3, int n_points, bool textured, osd::gpu_blend_mode blend, bool filterable = true, int cull_mask = 0 );
+	static int gpu_polygon_cull_mask( const PAIR *n_coord, int n_points );
+	void gpu_force_no_clip();
+	void gpu_restore_from_vram();
+	bool gpu_submit_flat_polygon( int n_points );
+	static void gpu_set_polygon_uv_clamp( osd::gpu_vertex *v, int n_points, bool may_be_2d = false, bool window_active = false );
+	static void gpu_apply_uv_offsets( const PAIR *n_coord, osd::gpu_vertex *v, int n_points, bool &may_be_2d );
+	static bool gpu_detect_2d_polygon( const PAIR *n_coord, const osd::gpu_vertex *v, int n_points );
+	bool gpu_filter_eligible( int exclude_mode, osd::gpu_blend_mode blend ) const;
+	bool gpu_submit_flat_textured_polygon( int n_points );
+	bool gpu_submit_gouraud_polygon( int n_points );
+	bool gpu_submit_gouraud_textured_polygon( int n_points );
+	bool gpu_submit_flat_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, PAIR n_bgr );
+	bool gpu_submit_textured_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, uint8_t n_u0, uint8_t n_v0, PAIR n_bgr, int32_t n_tx, int32_t n_ty, int32_t n_tp, uint32_t n_clutx, uint32_t n_cluty );
+	bool gpu_submit_vram_fill_rectangle( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h, PAIR n_bgr );
+	bool gpu_submit_image_stamp( int32_t n_x, int32_t n_y, int32_t n_w, int32_t n_h );
+	bool gpu_submit_dot( int32_t n_x, int32_t n_y, PAIR n_bgr );
+	bool gpu_submit_textured_dot( int32_t n_x, int32_t n_y, uint8_t n_u0, uint8_t n_v0, PAIR n_bgr, int32_t n_tx, int32_t n_ty, int32_t n_tp, uint32_t n_clutx, uint32_t n_cluty );
+	bool gpu_submit_line( int32_t n_x0, int32_t n_y0, int32_t n_x1, int32_t n_y1, float r0, float g0, float b0, float r1, float g1, float b1, uint8_t n_cmd );
+	bool gpu_queue_copy_rect( int32_t n_sx, int32_t n_sy, int32_t n_dx, int32_t n_dy, int32_t n_w, int32_t n_h );
+	bool gpu_update_screen( bitmap_rgb32 &bitmap );
+
+	// Host-GPU engine (null when the path is off or unavailable). The shader
+	// module and the VRAM texture are created with the engine on first use.
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	bitmap_rgb32 m_gpu_fallback;    // the native-size picture drawn by the software path while the screen is scaled
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_vram_tex = osd::GPU_NULL_HANDLE;
+	int m_gpu_texfilter_mode = 0;
+
+	// State the queued commands leave behind. Texture page, window and draw
+	// area persist from frame to frame like the PS1 GPU's own registers; each
+	// primitive's copy of them goes into the frame's state table.
+	struct gpu_replay_state
+	{
+		int tx = 0, ty = 0, tp = 0, clutx = 0, cluty = 0;
+		int tw_and_u = 255, tw_and_v = 255, tw_off_u = 0, tw_off_v = 0, interleave = 0;
+		bool clip_valid = false;
+		int clip_x1 = 0, clip_y1 = 0, clip_x2 = 0, clip_y2 = 0;
+	};
+	gpu_replay_state m_gpu_replay;
+
+	// The frame being assembled from the queue by gpu_build_frame()
+	std::vector<float> m_gpu_frame_vertices;
+	std::vector<uint32_t> m_gpu_frame_state;
+	std::vector<osd::gpu_command> m_gpu_frame_commands;
+	uint32_t m_gpu_frame_vertex_count = 0;
+	void gpu_build_frame();
+	bool gpu_submit_frame( const osd::gpu_readback_rect *rects, int count );
+	bool gpu_send_frame( const osd::gpu_readback_rect *rects, int count, bool flush );
+	void gpu_frame_updates( std::vector<osd::gpu_texture_update> &updates );
+	void gpu_flush_chunk();
+
+	// Chunked submission (see gpu_flush_chunk()): the queue is sent to the engine once it holds
+	// m_gpu_chunk_commands entries while the frame is still being emulated. 0 keeps the single submit per
+	// refresh. Only engines with caps().chunked_frames get a non-zero value; MAME_PS1_GPU_CHUNK overrides it.
+	size_t m_gpu_chunk_commands = 0;
+	bool m_gpu_chunk_failed = false;
+	// The VRAM texture as the engine last received it, so each submit uploads only the rows that changed
+	std::vector<uint16_t> m_gpu_vram_shadow;
+	bool m_gpu_vram_shadow_valid = false;
+	// MAME_GPU_PROF counters, reported every 300 frames by gpu_send_frame()
+	bool m_gpu_prof = false;
+	uint32_t m_gpu_prof_frames = 0;
+	uint32_t m_gpu_prof_chunks = 0;
+	double m_gpu_prof_chunk_ms = 0.0;
+
+	// The user-selectable internal-resolution multiplier (mame_psx_gpu_hle
+	// core option on the retro OSD - "disabled"/"2x"/"4x", read once at
+	// boot; see osdepend.h's gpu_render_scale() and CLAUDE.md "Chosen first
+	// target"). A cheap query (just returns a stored int on the retro OSD,
+	// no GPU context work), safe to call anywhere gpu_render_available() is
+	// also safe to call, including before gpu_active() has ever run.
+	// Defined in psx.cpp, not inline here - osd_interface (returned by
+	// machine().osd()) is only forward-declared where psx.h gets included
+	// by other drivers, not fully defined.
+	int gpu_scale() const;
+
+	// PGXP-style geometry/texture correction (CLAUDE.md Phase 4c): the CPU
+	// whose RAM-address shadow (see psxcpu_device::pgxp_ram_shadow_query())
+	// gpu_write() consults when filling m_packet_shadow[] for a DMA'd
+	// word. Stored from the psxcpu_device* every current caller already
+	// passes into the psxgpu_device constructor (previously used only to
+	// wire GPU read/write ports and DMA/IRQ, then discarded); no
+	// machine-config changes needed for any existing driver.
+	psxcpu_device *m_cpu = nullptr;
+
+	// Read once at device_start()/device_reset() (mame_psx_gpu_pgxp core
+	// option) so gpu_write() and the four polygon gpu_submit_* functions
+	// can skip PGXP work entirely when the feature is off.
+	bool m_gpu_pgxp_enabled = false;
+	// mame_psx_gpu_pgxp_tol: see osd_interface::gpu_render_pgxp_tolerance().
+	int m_gpu_pgxp_tolerance = -2;
+	// mame_psx_gpu_pgxp_vcache: see osd_interface::gpu_render_pgxp_vertex_cache().
+	bool m_gpu_pgxp_vcache = false;
+
+	// Shared by all four GTE-sourced polygon primitives (gpu_submit_flat_
+	// polygon/gouraud_polygon/flat_textured_polygon/gouraud_textured_
+	// polygon): resolves one vertex's target-space (x,y) and its
+	// osd::gpu_vertex::w (perspective-correct-interpolation divisor, see
+	// gpurender.h) from m_packet_shadow[entry_index] when valid, else the
+	// plain integer-coordinate + draw-offset + scale computation (and the
+	// affine-interpolation default w=1.0).
+	bool gpu_vertex_xyw( int entry_index, PAIR n_coord, float &out_x, float &out_y, float &out_w ) const;
+
+	// All-or-nothing wrapper around gpu_vertex_xyw() for a whole polygon's
+	// n_points vertices - see its definition in psx.cpp for why partial
+	// per-vertex correction must be avoided.
+	void gpu_resolve_polygon_pgxp( const int *entry_index, const PAIR *n_coord, int n_points, osd::gpu_vertex *v ) const;
+
+	// PACKET is a union of uint32_t n_entry[16] and the typed vertex
+	// structs (see its definition above) - this recovers which n_entry[]
+	// slot a given field (e.g. a vertex's n_coord) lives at, so
+	// m_packet_shadow[] (filled in lockstep with n_entry[] in
+	// gpu_write()) can be looked up for that exact field.
+	int gpu_entry_index( const PAIR &field ) const
+	{
+		return (int)( reinterpret_cast<const uint32_t *>( &field ) - m_packet.n_entry );
+	}
+
+	// Avoids re-issuing a set_texture_page() GL state change on every single
+	// textured polygon when consecutive polygons share one texture page -
+	// see gpu_maybe_set_texture_page() in psx.cpp. -1 means "nothing set
+	// yet this session", guaranteed to mismatch any real n_tx/n_ty (always
+	// >= 0). Texture *data* itself is no longer decoded/cached here at all -
+	// upload_vram() in gpu_update_screen() uploads the device's whole raw
+	// VRAM once per frame and the GPU shader decodes CLUT/bpp addressing
+	// directly from it (see psxgpu_shader.h) - this
+	// cache is now purely about skipping redundant queued commands.
+	int32_t m_gpu_last_tx = -1;
+	int32_t m_gpu_last_ty = -1;
+	int32_t m_gpu_last_tp = -1;
+	int32_t m_gpu_last_clutx = -1;
+	int32_t m_gpu_last_cluty = -1;
+	int32_t m_gpu_last_tw_and_u = -1, m_gpu_last_tw_and_v = -1, m_gpu_last_tw_off_u = -1, m_gpu_last_tw_off_v = -1;
+	int32_t m_gpu_last_interleave = -1;
+	void gpu_maybe_set_texture_page( int n_tx, int n_ty, int tp, int n_clutx, int n_cluty, bool use_window = true );
+
+	// Avoids calling set_clip_rect() (a GL scissor-state change) on every
+	// polygon when consecutive polygons share the same PS1 draw area,
+	// mirroring the texture-page cache above. false until the first
+	// polygon submission each session, guaranteeing the first call always
+	// applies whatever draw area is current at that point.
+	bool m_gpu_drawarea_cached = false;
+	uint32_t m_gpu_last_drawarea_x1 = 0;
+	uint32_t m_gpu_last_drawarea_y1 = 0;
+	uint32_t m_gpu_last_drawarea_x2 = 0;
+	uint32_t m_gpu_last_drawarea_y2 = 0;
+	void gpu_maybe_set_clip_rect();
 
 	int32_t m_n_tx;
 	int32_t m_n_ty;
@@ -231,6 +447,13 @@ private:
 	int32_t n_iy;
 	int32_t n_ti;
 
+	uint16_t *p_vram = nullptr; // m_ram's storage
+	// Row count of p_vram (width is always 1024 words) - passed to
+	// the engine's VRAM texture so its shader can wrap texture-
+	// page row addressing by the actual VRAM height, exactly like
+	// p_p_vram's row lookup table already does for the CPU path (see
+	// psx_gpu_init()).
+	int m_vram_height = 0;
 	uint32_t n_vramx;
 	uint32_t n_vramy;
 	uint32_t n_twy;
@@ -262,6 +485,26 @@ private:
 	bool m_check_stp;
 
 	PACKET m_packet;
+
+	// PGXP (CLAUDE.md Phase 4c): one shadow slot per m_packet.n_entry[]
+	// word, filled in lockstep with it in gpu_write() - the consumption
+	// end of the GTE-write -> GPR -> RAM -> DMA-to-GPU chain
+	// psxcpu_device implements the rest of (m_pgxp_gpr/m_pgxp_ram_shadow
+	// there). A vertex's n_coord field and its shadow always share the
+	// same n_entry[] index (PACKET is a union of uint32_t n_entry[16]
+	// and the typed structs), so gpu_vertex_xyw() takes that index
+	// directly rather than re-deriving a lookup key from the vertex's
+	// value - replacing Phase 4b's value-keyed cache, which needed a
+	// fixed-point-word key because it had no way to know which specific
+	// GP0 word produced a given vertex.
+	struct pgxp_word_shadow
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+		float w = 1.0f;
+		bool valid = false;
+	};
+	pgxp_word_shadow m_packet_shadow[ 16 ];
 
 	uint16_t *p_p_vram[ 1024 ];
 
@@ -298,6 +541,7 @@ private:
 
 	void vblank(screen_device &screen, bool vblank_state);
 	uint32_t update_screen(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	uint32_t update_screen_software(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
 #if defined(PSXGPU_DEBUG_VIEWER) && PSXGPU_DEBUG_VIEWER
 	void DebugMeshInit();

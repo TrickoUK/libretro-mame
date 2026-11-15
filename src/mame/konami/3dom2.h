@@ -20,6 +20,8 @@
 
 #include "screen.h"
 
+#include "endianness.h"
+
 
 #define M2_BAD_TIMING       0       // HACK
 
@@ -142,12 +144,49 @@ public:
 	uint32_t cpu_id_r(address_space &space);
 	void cpu_id_w(address_space &space, uint32_t data);
 
-	uint8_t read_bus8(offs_t offset);
-	uint16_t read_bus16(offs_t offset);
-	uint32_t read_bus32(offs_t offset);
-	void write_bus8(offs_t offset, uint8_t data);
-	void write_bus16(offs_t offset, uint16_t data);
-	void write_bus32(offs_t offset, uint32_t data);
+	// PowerBus RAM accessors.  Defined inline because the Triangle Engine
+	// calls them for every framebuffer and Z-buffer pixel it touches.
+	uint8_t read_bus8(offs_t offset)
+	{
+		assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
+		offset &= m_ram_mask;
+		return *(reinterpret_cast<uint8_t *>(&m_ram[0]) + BYTE8_XOR_BE(offset));
+	}
+
+	uint16_t read_bus16(offs_t offset)
+	{
+		assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
+		offset &= m_ram_mask;
+		return *reinterpret_cast<uint16_t *>(reinterpret_cast<uint8_t *>(&m_ram[0]) + WORD2_XOR_BE(offset));
+	}
+
+	uint32_t read_bus32(offs_t offset)
+	{
+		assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
+		offset &= m_ram_mask;
+		return *reinterpret_cast<uint32_t *>(reinterpret_cast<uint8_t *>(&m_ram[0]) + DWORD_XOR_BE(offset));
+	}
+
+	void write_bus8(offs_t offset, uint8_t data)
+	{
+		assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
+		offset &= m_ram_mask;
+		*(reinterpret_cast<uint8_t *>(&m_ram[0]) + BYTE8_XOR_BE(offset)) = data;
+	}
+
+	void write_bus16(offs_t offset, uint16_t data)
+	{
+		assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
+		offset &= m_ram_mask;
+		*reinterpret_cast<uint16_t *>(reinterpret_cast<uint8_t *>(&m_ram[0]) + WORD2_XOR_BE(offset)) = data;
+	}
+
+	void write_bus32(offs_t offset, uint32_t data)
+	{
+		assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
+		offset &= m_ram_mask;
+		*reinterpret_cast<uint32_t *>(reinterpret_cast<uint8_t *>(&m_ram[0]) + DWORD_XOR_BE(offset)) = data;
+	}
 
 	void * ram_ptr() { return m_ram.get(); }
 	offs_t ram_start() { return RAM_BASE; }

@@ -254,7 +254,7 @@ void m2_bda_device::device_start()
 
 	// Set a timer to pull data from the DSPP FIFO into the DACs
 	m_dac_timer = timer_alloc(FUNC(m2_bda_device::dac_update), this);
-	m_dac_timer->adjust(attotime::from_hz(16.9345));
+	m_dac_timer->adjust(attotime::from_hz(44100));
 }
 
 
@@ -297,6 +297,8 @@ void m2_bda_device::device_add_mconfig(machine_config &config)
 	M2_MPEG(config, m_mpeg, DERIVED_CLOCK(1, 1));
 //  m_mpeg->int_handler().set(m_powerbus, FUNC(m2_powerbus_device::int_line<BDAINT_MPEG_LINE>));
 
+	// The DSPP runs from the BDA clock. Its audio programs need more than the 384 cycles per sample that the
+	// 16.9344MHz audio master clock would give, so a slower clock cannot keep the DAC FIFO fed.
 	DSPP_BULLDOG(config, m_dspp, DERIVED_CLOCK(1, 1));
 	m_dspp->int_handler().set(m_powerbus, FUNC(m2_powerbus_device::int_line<BDAINT_DSP_LINE>));
 	m_dspp->dma_read_handler().set(FUNC(m2_bda_device::read_bus8));
@@ -358,92 +360,6 @@ void m2_bda_device::cpu_id_w(address_space &space, uint32_t data)
 	// TODO: How should this work?
 	logerror("%s: CPUID: %x\n", machine().describe_context(), data);
 }
-
-
-//-------------------------------------------------
-//  read_bus8 - Read 8-bit data from the PowerBus
-//-------------------------------------------------
-
-uint8_t m2_bda_device::read_bus8(offs_t offset)
-{
-	assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
-
-	offset &= m_ram_mask;
-	uint8_t *ptr = reinterpret_cast<uint8_t *>(&m_ram[0]) + BYTE8_XOR_BE(offset);
-	return *ptr;
-}
-
-
-//-------------------------------------------------
-//  read_bus16 - Read 16-bit data from the PowerBus
-//-------------------------------------------------
-
-uint16_t m2_bda_device::read_bus16(offs_t offset)
-{
-	assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
-
-	offset &= m_ram_mask;
-	uint8_t *ptr = reinterpret_cast<uint8_t *>(&m_ram[0]) + WORD2_XOR_BE(offset);
-	return *reinterpret_cast<uint16_t *>(ptr);
-}
-
-
-//-------------------------------------------------
-//  read_bus32 - Read 32-bit data from the PowerBus
-//-------------------------------------------------
-
-uint32_t m2_bda_device::read_bus32(offs_t offset)
-{
-	assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
-
-	offset &= m_ram_mask;
-
-	uint8_t *ptr = reinterpret_cast<uint8_t *>(&m_ram[0]) + DWORD_XOR_BE(offset);
-	return *reinterpret_cast<uint32_t *>(ptr);
-}
-
-
-//-------------------------------------------------
-//  write_bus8 - Write 8-bit data to the PowerBus
-//-------------------------------------------------
-
-void m2_bda_device::write_bus8(offs_t offset, uint8_t data)
-{
-	assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
-
-	offset &= m_ram_mask;
-	uint8_t *ptr = reinterpret_cast<uint8_t *>(&m_ram[0]) + BYTE8_XOR_BE(offset);
-	*ptr = data;
-}
-
-
-//-------------------------------------------------
-//  write_bus16 - Write 16-bit data to the PowerBus
-//-------------------------------------------------
-
-void m2_bda_device::write_bus16(offs_t offset, uint16_t data)
-{
-	assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
-
-	offset &= m_ram_mask;
-	uint8_t *ptr = reinterpret_cast<uint8_t *>(&m_ram[0]) + WORD2_XOR_BE(offset);
-	*reinterpret_cast<uint16_t *>(ptr) = data;
-}
-
-
-//-------------------------------------------------
-//  write_bus32 - Write 32-bit data to the PowerBus
-//-------------------------------------------------
-
-void m2_bda_device::write_bus32(offs_t offset, uint32_t data)
-{
-	assert(offset >= RAM_BASE && offset <= RAM_BASE + m_ram_mask);
-
-	offset &= m_ram_mask;
-	uint8_t *ptr = reinterpret_cast<uint8_t *>(&m_ram[0]) + DWORD_XOR_BE(offset);
-	*reinterpret_cast<uint32_t *>(ptr) = data;
-}
-
 
 
 /***************************************************************************

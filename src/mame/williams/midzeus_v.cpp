@@ -14,6 +14,11 @@
 
 #include "endianness.h"
 
+#include "interface/gpuengine.h"
+#include "osdepend.h"
+
+#include <cstring>
+
 
 #define LOG_ZEUS    (1U << 1)
 #define LOG_PTR     (1U << 2)
@@ -296,9 +301,20 @@ void midzeus_state::exit_handler()
  *
  *************************************/
 
-uint32_t midzeus_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+void midzeus_state::device_post_load()
+{
+	// the Zeus 2 boards draw through zeus2_device and never create the polygon renderer
+	if (m_poly)
+		m_poly->gpu_reset();
+}
+
+uint32_t midzeus_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
 	m_poly->wait("VIDEO_UPDATE");
+
+	// the host GPU path draws the frame's polygons and reads back the rows on screen
+	if (m_poly->gpu_screen_update(bitmap, cliprect))
+		return 0;
 
 	if (DEBUG_KEYS && machine().input().code_pressed(KEYCODE_V)) // waveram drawing case
 	{
@@ -314,11 +330,11 @@ uint32_t midzeus_state::screen_update(screen_device &screen, bitmap_ind16 &bitma
 
 		for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
 		{
-			uint16_t *const dest = &bitmap.pix(y);
+			uint32_t *const dest = &bitmap.pix(y);
 			for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
 			{
 				uint8_t const tex = get_texel_8bit(base, y, x, m_texel_width);
-				dest[x] = (tex << 8) | tex;
+				dest[x] = m_palette->pen(((tex << 8) | tex) & 0x7fff);
 			}
 		}
 
@@ -330,9 +346,9 @@ uint32_t midzeus_state::screen_update(screen_device &screen, bitmap_ind16 &bitma
 		int const xoffs = screen.visible_area().min_x;
 		for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
 		{
-			uint16_t *const dest = &bitmap.pix(y);
+			uint32_t *const dest = &bitmap.pix(y);
 			for (int x = cliprect.min_x; x <= cliprect.max_x; x++)
-				dest[x] = WAVERAM_READPIX(base, y, x - xoffs) & 0x7fff;
+				dest[x] = m_palette->pen(WAVERAM_READPIX(base, y, x - xoffs) & 0x7fff);
 		}
 	}
 
@@ -601,7 +617,9 @@ void midzeus_state::zeus_register_update(offs_t offset)
 					// m_zeusbase[0x46] = ??? = 0x00000000
 					// m_zeusbase[0x4c] = ??? = 0x00808080 (brightness?)
 					// m_zeusbase[0x4e] = ??? = 0x00808080 (brightness?)
-					mz_poly_extra_data& extra = m_poly->object_data().next();
+					// the host GPU path copies the record, so it takes a local one and the software polygon list does not grow
+					mz_poly_extra_data gpu_extra {};
+					mz_poly_extra_data &extra = m_poly->gpu_active() ? gpu_extra : m_poly->object_data().next();
 					poly_vertex vert[4];
 
 					vert[0].x = (int16_t)m_zeusbase[0x08];
@@ -616,7 +634,7 @@ void midzeus_state::zeus_register_update(offs_t offset)
 					extra.solidcolor = m_zeusbase[0x00];
 					extra.zoffset = 0x7fff;
 
-					m_poly->zeus_draw_solid_quad(m_zeus_cliprect, vert);
+					m_poly->zeus_draw_solid_quad(m_zeus_cliprect, vert, extra);
 					m_poly->wait("Normal");
 				}
 				else
@@ -650,6 +668,7 @@ void midzeus_state::zeus_register_update(offs_t offset)
 			// MK4: Written in tandem with 0xcc
 			// MK4: Writes either 0x80 (and 0x000000 to 0xcc) or 0x00 (and 0x800000 to 0xcc)
 			m_zeus_renderbase = waveram1_ptr_from_expanded_addr(m_zeusbase[0x84] << 16);
+			m_poly->gpu_flip();
 			break;
 
 		case 0xb0:
@@ -674,6 +693,13 @@ void midzeus_state::zeus_register_update(offs_t offset)
 						WAVERAM_WRITE16(dest, 2, m_zeusbase[0xb2]);
 					if (m_zeusbase[0xb6] & 0x00800000)
 						WAVERAM_WRITE16(dest, 3, m_zeusbase[0xb2] >> 16);
+
+					// wave RAM 0 holds the textures and palettes the host GPU path samples; frame-buffer words go to the target as stamps
+					if (m_zeusbase[0xb6] & 0x80000000)
+						m_poly->gpu_mark_frame_buffer(dest, m_zeusbase[0xb6] & 0x00f00000);
+					else
+						m_poly->gpu_mark_texture(dest);
+
 					if (m_zeusbase[0xb6] & 0x00020000)
 						m_zeusbase[0xb4]++;
 				}
@@ -686,7 +712,11 @@ void midzeus_state::zeus_register_update(offs_t offset)
 				const uint32_t *src;
 
 				if (m_zeusbase[0xb6] & 0x80000000)
+				{
+					// the CPU reads pixels the target does not hold back, so the host GPU path stops for the rest of the session
+					m_poly->gpu_latch_off("CPU read of the frame buffer");
 					src = (const uint32_t *)waveram1_ptr_from_expanded_addr(m_zeusbase[0xb4]);
+				}
 				else
 					src = (const uint32_t *)waveram0_ptr_from_expanded_addr(m_zeusbase[0xb4]);
 
@@ -722,6 +752,7 @@ void midzeus_state::zeus_register_update(offs_t offset)
 
 		case 0xcc:
 			m_screen->update_partial(m_screen->vpos());
+			m_poly->gpu_flip();
 
 			if (DEBUG_KEYS)
 				m_log_fifo = machine().input().code_pressed(KEYCODE_L);
@@ -1177,7 +1208,9 @@ void midzeus_renderer::zeus_draw_quad(int long_fmt, const uint32_t *databuffer, 
 			clipvert[i].y += 0.0005f;
 	}
 
-	mz_poly_extra_data& extra = m_state.m_poly->object_data().next();
+	// the host GPU path copies the record, so it takes a local one and the software polygon list does not grow
+	mz_poly_extra_data gpu_extra {};
+	mz_poly_extra_data &extra = m_state.m_poly->gpu_active() ? gpu_extra : m_state.m_poly->object_data().next();
 
 	if (ctrl_word & 0x01000000)
 	{
@@ -1214,27 +1247,45 @@ void midzeus_renderer::zeus_draw_quad(int long_fmt, const uint32_t *databuffer, 
 	extra.transcolor = ((ctrl_word >> 16) & 1) ? 0 : 0x100;
 	extra.palbase = m_state.waveram0_ptr_from_block_addr(m_state.m_zeus_palbase);
 
-	// Near-plane clipping can turn a quad into three to six vertices. Submit
-	// exactly that many: a fourth vertex is uninitialized for a clipped triangle.
 	const render_delegate callback(&midzeus_renderer::render_poly, this);
+	capture_polygon<4>(m_state.m_zeus_cliprect, clipvert, numverts, extra, callback);
+}
+
+// Capture point for every quad, solid fill and clear: the clipped screen-space polygon and its state record. The record is
+// stamped with the draw row base set by register 0x84 at this point. The software back end rasterises the polygon at the next
+// wait() and writes to the row base current then.
+// Near-plane clipping can turn a quad into three to six vertices. Submit exactly that many: a fourth vertex is
+// uninitialized for a clipped triangle.
+template <int Params>
+void midzeus_renderer::capture_polygon(const rectangle& clip, const vertex_t* vert, uint32_t numverts, mz_poly_extra_data& state, const render_delegate& callback)
+{
+	state.renderbase = m_state.m_zeus_renderbase;
+
+	// the host GPU path takes the polygon in place of the software rasteriser; Params is 0 for the solid fill
+	if (gpu_active())
+	{
+		gpu_add_polygon(clip, vert, numverts, state, Params == 0);
+		return;
+	}
+
 	switch (numverts)
 	{
 		case 3:
-			m_state.m_poly->render_polygon<3, 4>(m_state.m_zeus_cliprect, callback, clipvert);
+			render_polygon<3, Params>(clip, callback, vert);
 			break;
 		case 4:
-			m_state.m_poly->render_polygon<4, 4>(m_state.m_zeus_cliprect, callback, clipvert);
+			render_polygon<4, Params>(clip, callback, vert);
 			break;
 		case 5:
-			m_state.m_poly->render_polygon<5, 4>(m_state.m_zeus_cliprect, callback, clipvert);
+			render_polygon<5, Params>(clip, callback, vert);
 			break;
 		case 6:
-			m_state.m_poly->render_polygon<6, 4>(m_state.m_zeus_cliprect, callback, clipvert);
+			render_polygon<6, Params>(clip, callback, vert);
 			break;
 	}
 }
 
-void midzeus_renderer::zeus_draw_solid_quad(const rectangle& rect, const vertex_t *vert)
+void midzeus_renderer::zeus_draw_solid_quad(const rectangle& rect, const vertex_t *vert, mz_poly_extra_data& state)
 {
 	// The quad names its last pixel but poly.h's extents are half-open.
 	// Axis-aligned rectangles got an unambiguous last pixel, so grow it.
@@ -1258,7 +1309,7 @@ void midzeus_renderer::zeus_draw_solid_quad(const rectangle& rect, const vertex_
 				p.y += 1.0f;
 		}
 	}
-	m_state.m_poly->render_polygon<4, 0>(rect, render_delegate(&midzeus_renderer::render_poly_solid_fixedz, this), v);
+	capture_polygon<0>(rect, v, 4, state, render_delegate(&midzeus_renderer::render_poly_solid_fixedz, this));
 }
 
 
@@ -1555,3 +1606,5 @@ void midzeus_state::log_waveram(uint32_t length_and_base)
 	for (i = 0; i < numoctets; i++)
 		LOGWAVE("\t%02X: %08X %08X\n", i, ptr[i*2], ptr[i*2+1]);
 }
+
+#include "midzeus_gpu.ipp"

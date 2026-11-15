@@ -359,12 +359,50 @@ uint8_t polepos_state::namco_53xx_k_r()
 	return 0;
 }
 
+// Optional "Gamepad stick" steering (not arcade behaviour, off by default). The wheel is a free-
+// spinning encoder, and the game treats the spin rate as the steering input: counts raise a
+// steering angle (clamped at +/-127, a few units per count) that it pulls back to centre on its
+// own at speed, so a steady spin holds a steady turn. Measured in polepos: 0.5 counts per frame
+// holds about 14, 1 count about 32, and from about 1.5 counts it runs to full lock; a jump of 12 or
+// more counts in one frame is ignored. MAME drives a dial from a stick as a spin rate too, but at
+// about 4.8 counts per frame at full stick, so all but the first third of the stick is full lock.
+// Here the stick deflection (after the Steering Response curve) sets the spin rate of a virtual
+// wheel, with full stick at the chosen Stick Steering Speed. Not saved in save states.
+uint8_t polepos_state::steering_position_r()
+{
+	const ioport_value config = m_steering_config ? m_steering_config->read() : 0;
+	if (!BIT(config, 5))
+	{
+		m_stick_mode = false;
+		return m_steer_io->read();
+	}
+
+	const attotime now = machine().time();
+	if (!m_stick_mode)
+	{
+		// switching from the dial: carry on from where it was
+		m_stick_mode = true;
+		m_stick_pos = m_steer_last;
+		m_stick_time = now;
+	}
+	else if (now > m_stick_time && !machine().side_effects_disabled())
+	{
+		static constexpr double counts_per_frame[] = { 1.5, 2.0, 3.0, 4.0 };
+		const ioport_value stick = m_stick_io->read();
+		const double d = (double(stick) - 0x80) / ((stick >= 0x80) ? 0x7f : 0x80);
+		const double rate = gamepad_steering::response(d, config) * counts_per_frame[BIT(config, 6, 2)];
+		m_stick_pos = std::fmod(m_stick_pos + rate * m_screen->frame_period().as_hz() * (now - m_stick_time).as_double(), 256.0);
+		m_stick_time = now;
+	}
+	return uint8_t(int(std::floor(m_stick_pos)) & 0xff);
+}
+
 uint8_t polepos_state::steering_changed_r()
 {
 	if (!machine().side_effects_disabled())
 	{
 		/* read the current steering value and update our delta */
-		uint8_t const steer_new = m_steer_io->read();
+		uint8_t const steer_new = steering_position_r();
 		m_steer_accum += (int8_t)(steer_new - m_steer_last) * 2;
 		m_steer_last = steer_new;
 
@@ -497,6 +535,21 @@ void polepos2_state::polepos2_z8002_map_1(address_map &map)
  * Input port definitions
  *********************************************************************/
 
+// not hardware settings: steer with a gamepad stick instead of a spinner (see steering_position_r)
+#define POLEPOS_GAMEPAD_STEERING \
+	PORT_START("STICK") \
+	PORT_BIT( 0xff, 0x80, IPT_PADDLE ) PORT_NAME("Steering (gamepad stick)") PORT_MINMAX(0x00,0xff) PORT_SENSITIVITY(100) PORT_KEYDELTA(8) PORT_CONDITION("STEERING", 0x20, EQUALS, 0x20) \
+	PORT_START("STEERING") \
+	PORT_CONFNAME( 0x20, 0x00, "Steering Input" ) \
+	PORT_CONFSETTING(    0x00, "Wheel / spinner (arcade)" ) \
+	PORT_CONFSETTING(    0x20, "Gamepad stick" ) \
+	PORT_GAMEPAD_STEERING_RESPONSE \
+	PORT_CONFNAME( 0xc0, 0x40, "Stick Steering Speed" ) \
+	PORT_CONFSETTING(    0x00, "Slow" ) \
+	PORT_CONFSETTING(    0x40, "Medium" ) \
+	PORT_CONFSETTING(    0x80, "Fast" ) \
+	PORT_CONFSETTING(    0xc0, "Very fast" )
+
 static INPUT_PORTS_START( polepos )
 	PORT_START("IN0")
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_UNUSED )
@@ -566,6 +619,8 @@ static INPUT_PORTS_START( polepos )
 
 	PORT_START("STEER")
 	PORT_BIT( 0xff, 0x00, IPT_DIAL ) PORT_SENSITIVITY(30) PORT_KEYDELTA(4)
+
+	POLEPOS_GAMEPAD_STEERING
 INPUT_PORTS_END
 
 
@@ -693,6 +748,8 @@ static INPUT_PORTS_START( topracern )
 
 	PORT_START("STEER")
 	PORT_BIT( 0xff, 0x00, IPT_DIAL ) PORT_SENSITIVITY(30) PORT_KEYDELTA(4)
+
+	POLEPOS_GAMEPAD_STEERING
 INPUT_PORTS_END
 
 
@@ -999,7 +1056,7 @@ void polepos_state::topracern_io(address_map &map)
 	map.global_mask(0xff);
 	z80_io(map);
 	// extra direct mapped inputs read
-	map(0x02, 0x02).portr("STEER").nopw();
+	map(0x02, 0x02).r(FUNC(polepos_state::steering_position_r)).nopw();
 	map(0x03, 0x03).portr("IN0").w("dac", FUNC(dac_byte_interface::data_w));
 	map(0x04, 0x04).portr("DSWA").nopw(); // explosion sound trigger
 	map(0x05, 0x05).portr("DSWB").w(FUNC(polepos_state::bootleg_soundlatch_w));

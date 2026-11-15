@@ -2128,13 +2128,25 @@ static INPUT_PORTS_START( gunblade )
 	PORT_BIT(0xff, 0xb1, IPT_AD_STICK_X) PORT_MINMAX(0x69, 0xff) PORT_SENSITIVITY(50) PORT_KEYDELTA(5) PORT_CENTERDELTA(0) PORT_PLAYER(1)
 
 	PORT_MODIFY("P1_Y")
+	// Gunblade's driver omits PORT_REVERSE here (unlike sibling rchase2, whose ports it
+	// PORT_INCLUDEs, which has it on both axes) - correct against a real ADC gun pot or the
+	// standalone-MAME evdev lightgun driver, but the retro OSD's RETRO_DEVICE_LIGHTGUN screen-Y
+	// convention feeds this AD_STICK_Y port inverted, so restore the reverse for libretro only.
+#ifdef __LIBRETRO__
+	PORT_BIT(0xff, 0x5f, IPT_AD_STICK_Y) PORT_MINMAX(0x11, 0xae) PORT_SENSITIVITY(50) PORT_KEYDELTA(5) PORT_CENTERDELTA(0) PORT_PLAYER(1) PORT_REVERSE
+#else
 	PORT_BIT(0xff, 0x5f, IPT_AD_STICK_Y) PORT_MINMAX(0x11, 0xae) PORT_SENSITIVITY(50) PORT_KEYDELTA(5) PORT_CENTERDELTA(0) PORT_PLAYER(1)
+#endif
 
 	PORT_MODIFY("P2_X")
 	PORT_BIT(0xff, 0x50, IPT_AD_STICK_X) PORT_MINMAX(0x00, 0x96) PORT_SENSITIVITY(50) PORT_KEYDELTA(5) PORT_CENTERDELTA(0) PORT_PLAYER(2)
 
 	PORT_MODIFY("P2_Y")
+#ifdef __LIBRETRO__
+	PORT_BIT(0xff, 0x5f, IPT_AD_STICK_Y) PORT_MINMAX(0x11, 0xae) PORT_SENSITIVITY(50) PORT_KEYDELTA(5) PORT_CENTERDELTA(0) PORT_PLAYER(2) PORT_REVERSE
+#else
 	PORT_BIT(0xff, 0x5f, IPT_AD_STICK_Y) PORT_MINMAX(0x11, 0xae) PORT_SENSITIVITY(50) PORT_KEYDELTA(5) PORT_CENTERDELTA(0) PORT_PLAYER(2)
+#endif
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( indy500 )
@@ -7583,6 +7595,17 @@ void model2_state::init_zerogun()
 	ROM[0x700/4] = 0x08000004;
 }
 
+void model2_state::init_hotd()
+{
+	// HACK: the game code fires a full-screen white "photo flash" quad every time the
+	// trigger is pulled (regardless of hit/miss). Patching the routine's entry point to
+	// an immediate `ret` skips the flash draw without touching gameplay/scoring.
+	// Community-sourced fix (mamecheat.co.uk); verified only against this Revision A dump -
+	// hotdo/hotdp use different maincpu ROMs and are not covered.
+	u32 *ROM = &memregion("maincpu")->as_u32();
+	ROM[0x18610/4] = 0x0a000000;
+}
+
 void model2_state::init_sgt24h()
 {
 	//u32 *ROM = &memregion("maincpu")->as_u32();
@@ -7729,7 +7752,7 @@ GAMEL(1996, stcca,      stcc,     stcc,         indy500,   model2c_state, empty_
 GAMEL(1996, stcco,      stcc,     stcc,         indy500,   model2c_state, empty_init,    ROT0, "Sega",   "Sega Touring Car Championship", MACHINE_NOT_WORKING, layout_vr )
 GAME( 1996, waverunr,   0,        waverunr,     waverunr,  model2c_state, empty_init,    ROT0, "Sega",   "Wave Runner (Japan, Revision A)", MACHINE_NOT_WORKING )
 GAME( 1997, bel,        0,        bel,          bel,       model2c_state, empty_init,    ROT0, "Sega / EPL Productions", "Behind Enemy Lines", MACHINE_NOT_WORKING )
-GAME( 1997, hotd,       0,        hotd,         hotd,      model2c_state, empty_init,    ROT0, "Sega",   "The House of the Dead (Revision A)", MACHINE_NOT_WORKING )
+GAME( 1997, hotd,       0,        hotd,         hotd,      model2c_state, init_hotd,     ROT0, "Sega",   "The House of the Dead (Revision A)", MACHINE_NOT_WORKING )
 GAME( 1997, hotdo,      hotd,     hotd,         hotd,      model2c_state, empty_init,    ROT0, "Sega",   "The House of the Dead", MACHINE_NOT_WORKING )
 GAME( 1997, hotdp,      hotd,     hotd,         hotd,      model2c_state, empty_init,    ROT0, "Sega",   "The House of the Dead (prototype)", MACHINE_NOT_WORKING )
 GAME( 1997, overrev,    0,        overrev2c,    overrev,   model2c_state, empty_init,    ROT0, "Jaleco", "Over Rev (Model 2C, Revision A)", MACHINE_NOT_WORKING )

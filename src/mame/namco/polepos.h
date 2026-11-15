@@ -15,6 +15,8 @@
 #include "machine/gen_latch.h"
 #include "machine/timer.h"
 #include "sound/namco.h"
+#include "gamepad_steering.h"
+
 #include "emupal.h"
 #include "screen.h"
 #include "tilemap.h"
@@ -42,7 +44,9 @@ public:
 		m_road_region(*this, "road"),
 		m_scalelut_region(*this, "scalelut"),
 		m_analog_io(*this, {"BRAKE", "ACCEL"}),
-		m_steer_io(*this, "STEER")
+		m_steer_io(*this, "STEER"),
+		m_stick_io(*this, "STICK"),
+		m_steering_config(*this, "STEERING")
 	{ }
 
 	int auto_start_r();
@@ -73,10 +77,15 @@ protected:
 	required_region_ptr<uint8_t> m_scalelut_region;
 	required_ioport_array<2> m_analog_io;
 	required_ioport m_steer_io;
+	optional_ioport m_stick_io;
+	optional_ioport m_steering_config;
 
 	uint8_t m_steer_last = 0;
 	uint8_t m_steer_delta = 0;
 	int16_t m_steer_accum = 0;
+	bool m_stick_mode = false;
+	double m_stick_pos = 0.0;
+	attotime m_stick_time;
 	uint8_t m_adc_input = 0;
 	int8_t m_auto_start_mask = 0;
 
@@ -89,6 +98,7 @@ protected:
 	uint8_t m_sub_irq_mask = 0;
 
 	uint8_t analog_r();
+	uint8_t steering_position_r();
 	uint8_t ready_r();
 	void gasel_w(int state);
 	void sb0_w(int state);

@@ -9,6 +9,23 @@
 #include "emu.h"
 #include "osdwindow.h"
 
+#ifdef __LIBRETRO__
+#include "render/drawretro.h"
+#else
+#include "render/drawnone.h"
+#include "render/drawbgfx.h"
+#if (USE_OPENGL)
+#include "render/drawogl.h"
+#endif
+#if defined(OSD_WINDOWS)
+#include "render/drawgdi.h"
+#include "render/drawd3d.h"
+#elif defined(OSD_SDL)
+#include "render/draw13.h"
+#include "render/drawsdl.h"
+#endif
+#endif
+
 // osd/modules
 #include "lib/osdobj_common.h"
 #include "monitor/monitor_module.h"

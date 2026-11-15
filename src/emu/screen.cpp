@@ -23,6 +23,9 @@
 #include <cstdio>
 #include <set>
 
+#ifdef __LIBRETRO__
+#include "libretro/osdretro.h"
+#endif
 
 //**************************************************************************
 //  DEBUGGING
@@ -325,6 +328,10 @@ void screen_device::device_start()
 	if ((m_video_attributes & VIDEO_UPDATE_SCANLINE) != 0 || !m_scanline_cb.isunset())
 		m_scanline_timer = timer_alloc(FUNC(screen_device::scanline_tick), this);
 
+#ifdef __LIBRETRO__
+	screen_configured = 0;
+#endif
+
 	// configure the screen with the default parameters
 	configure(m_width, m_height, m_visarea, attotime(0, m_frame_period));
 
@@ -483,6 +490,15 @@ void screen_device::configure(int width, int height, const rectangle &visarea, a
 	else
 		m_vblank_period = m_scantime * (height - visarea.height());
 
+#ifdef __LIBRETRO__
+	/* Performance hack fix for "pong" and "breakout" */
+	if (screen_configured > 10
+			&& width == m_width
+			&& height == m_height
+			&& floorf(ATTOSECONDS_TO_HZ(frame_period.as_attoseconds())) == floorf(ATTOSECONDS_TO_HZ(m_frame_period)))
+		return;
+#endif
+
 	// we are now fully configured with the new parameters
 	// and can safely call time_until_pos(), etc.
 
@@ -503,6 +519,17 @@ void screen_device::configure(int width, int height, const rectangle &visarea, a
 
 	// adjust speed if necessary
 	machine().video().update_refresh_speed();
+
+#ifdef __LIBRETRO__
+	float retro_fps_new = ATTOSECONDS_TO_HZ(m_frame_period);
+	if (!screen_configured
+			&& retro_fps_new != retro_fps
+			&& retro_fps_new <= 120.0f
+			&& retro_fps_new >= 40.0f)
+		retro_fps = retro_fps_new;
+
+	screen_configured++;
+#endif
 }
 
 

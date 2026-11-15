@@ -7,6 +7,7 @@
 //============================================================
 #if defined(OSD_WINDOWS) || defined(SDLMAME_WIN32)
 // standard windows headers
+#define NOMINMAX
 #include <windows.h>
 #include <process.h>
 #include <tchar.h>
@@ -29,6 +30,10 @@
 
 #if defined(SDLMAME_LINUX) || defined(SDLMAME_BSD) || defined(SDLMAME_HAIKU) || defined(SDLMAME_EMSCRIPTEN) || defined(SDLMAME_MACOSX)
 #include <pthread.h>
+#endif
+
+#if defined(__LIBRETRO__)
+extern int thread_mode;
 #endif
 
 //============================================================
@@ -87,6 +92,11 @@ static void spin_while_not(const volatile AtomType *atom, MainType val, osd_tick
 
 int osd_get_num_processors(bool heavy_mt)
 {
+#if defined(__LIBRETRO__)
+	if (!thread_mode)
+		return 1;
+#endif 
+
 #if defined(SDLMAME_EMSCRIPTEN)
 	// multithreading is not supported at this time
 	return 1;
@@ -279,6 +289,11 @@ osd_work_queue *osd_work_queue_alloc(int flags)
 #if defined(SDLMAME_EMSCRIPTEN)
 	// threads are not supported at all
 	threadnum = 0;
+#endif
+
+#if defined(__LIBRETRO__)	
+	if (!thread_mode)
+		threadnum = 0;
 #endif
 
 	// clamp to the maximum

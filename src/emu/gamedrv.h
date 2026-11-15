@@ -40,6 +40,11 @@ struct machine_flags
 		ROT180              = FLIP_X | FLIP_Y,
 		ROT270              = FLIP_Y | SWAP_XY,
 
+		TYPE_ARCADE         = 0x0000'0008,   // coin-operated machine for public use
+		TYPE_CONSOLE        = 0x0000'0010,   // console system
+		TYPE_COMPUTER       = 0x0000'0018,   // any kind of computer including home computers, minis, calculators, ...
+		TYPE_OTHER          = 0x0000'0038,   // any other emulated system (e.g. clock, satellite receiver, ...)
+
 		NO_COCKTAIL         = 0x0000'0040,  // screen flip support is missing
 		IS_BIOS_ROOT        = 0x0000'0080,  // this driver entry is a BIOS root
 		REQUIRES_ARTWORK    = 0x0000'0100,  // requires external artwork for key game elements
@@ -51,6 +56,11 @@ struct machine_flags
 };
 
 DECLARE_ENUM_BITWISE_OPERATORS(machine_flags::type);
+
+constexpr u64 MACHINE_TYPE_ARCADE               = machine_flags::TYPE_ARCADE;
+constexpr u64 MACHINE_TYPE_CONSOLE              = machine_flags::TYPE_CONSOLE;
+constexpr u64 MACHINE_TYPE_COMPUTER             = machine_flags::TYPE_COMPUTER;
+constexpr u64 MACHINE_TYPE_OTHER                = machine_flags::TYPE_OTHER;
 
 
 /// \addtogroup machinedef
@@ -264,7 +274,7 @@ extern game_driver const GAME_NAME(NAME)                                \
 	ROM_NAME(NAME),                                                     \
 	nullptr,                                                            \
 	nullptr,                                                            \
-	machine_flags::type(u32((MONITOR) | (FLAGS))),                      \
+	machine_flags::type(u32((MONITOR) | (FLAGS) | MACHINE_TYPE_ARCADE)),\
 	#NAME                                                               \
 };
 
@@ -336,7 +346,7 @@ extern game_driver const GAME_NAME(NAME)                                \
 	ROM_NAME(NAME),                                                     \
 	nullptr,                                                            \
 	&LAYOUT,                                                            \
-	machine_flags::type(u32((MONITOR) | (FLAGS))),                      \
+	machine_flags::type(u32((MONITOR) | (FLAGS) | MACHINE_TYPE_ARCADE)),\
 	#NAME                                                               \
 };
 
@@ -408,10 +418,10 @@ extern game_driver const GAME_NAME(NAME)                                \
 
 
 #define CONS(YEAR, NAME, PARENT, COMPAT, MACHINE, INPUT, CLASS, INIT, COMPANY, FULLNAME, FLAGS) \
-		SYST(YEAR, NAME, PARENT, COMPAT, MACHINE, INPUT, CLASS, INIT, COMPANY, FULLNAME, FLAGS)
+		SYST(YEAR, NAME, PARENT, COMPAT, MACHINE, INPUT, CLASS, INIT, COMPANY, FULLNAME, FLAGS | MACHINE_TYPE_CONSOLE)
 
 #define COMP(YEAR, NAME, PARENT, COMPAT, MACHINE, INPUT, CLASS, INIT, COMPANY, FULLNAME, FLAGS) \
-		SYST(YEAR, NAME, PARENT, COMPAT, MACHINE, INPUT, CLASS, INIT, COMPANY, FULLNAME, FLAGS)
+		SYST(YEAR, NAME, PARENT, COMPAT, MACHINE, INPUT, CLASS, INIT, COMPANY, FULLNAME, FLAGS | MACHINE_TYPE_COMPUTER)
 
 /// \}
 

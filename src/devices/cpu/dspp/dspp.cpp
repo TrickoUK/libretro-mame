@@ -226,11 +226,22 @@ void dspp_device::device_start()
 		m_core = &m_local_core;
 	}
 	memset(m_core, 0, sizeof(dspp_internal_state));
+	m_idle_pc = -1;
+	m_idle_dirty = true;
 
 	// Get our address spaces
 	space(AS_PROGRAM).cache(m_code_cache);
 	space(AS_PROGRAM).specific(m_code);
 	space(AS_DATA).specific(m_data);
+
+	// The Bulldog data map starts with 0x2e0 words of plain RAM
+	m_data_ram_words = (type() == DSPP_BULLDOG) ? 0x2e0 : 0;
+	if (m_data_ram_words)
+	{
+		m_data_ram = static_cast<uint16_t *>(space(AS_DATA).get_read_ptr(0));
+		if (!m_data_ram)
+			m_data_ram_words = 0;
+	}
 
 	// Register our state for the debugger
 	state_add(DSPP_PC,         "PC",        m_core->m_pc);
@@ -465,6 +476,11 @@ uint16_t dspp_device::read_op(offs_t pc)
 
 inline uint16_t dspp_device::read_data(offs_t addr)
 {
+	if (addr < m_data_ram_words)
+		return m_data_ram[addr];
+
+	if (!idle_safe_read(addr))
+		m_idle_dirty = true;
 	return m_data.read_word(addr);
 }
 
@@ -475,6 +491,12 @@ inline uint16_t dspp_device::read_data(offs_t addr)
 
 inline void dspp_device::write_data(offs_t addr, uint16_t data)
 {
+	m_idle_dirty = true;
+	if (addr < m_data_ram_words)
+	{
+		m_data_ram[addr] = data;
+		return;
+	}
 	m_data.write_word(addr, data);
 }
 
@@ -787,7 +809,7 @@ uint32_t dspp_device::execute_max_cycles() const noexcept
 //  execute_run - core execution loop
 //-------------------------------------------------
 
-inline void dspp_device::execute_one(bool check_debugger)
+inline void dspp_device::execute_one(bool check_debugger, bool idle_skip)
 {
 	// Only run if enabled
 	if (m_core->m_dspx_control & DSPX_CONTROL_GWILLING)
@@ -795,13 +817,20 @@ inline void dspp_device::execute_one(bool check_debugger)
 		if (check_debugger)
 			debugger_instruction_hook(m_core->m_pc);
 
+		const uint16_t pc = m_core->m_pc;
 		m_core->m_op = read_op(m_core->m_pc);
 		//logerror("%04x: %04x\n", (uint16_t)m_core->m_pc, (uint16_t)m_core->m_op);
 		update_pc();
 
 		// Decode and execute
 		if (m_core->m_op & 0x8000)
+		{
 			exec_control();
+
+			// Backward branch (or SLEEP): possibly the end of an idle loop
+			if (idle_skip && m_core->m_pc <= pc)
+				check_idle_loop(m_core->m_pc);
+		}
 		else
 			exec_arithmetic();
 	}
@@ -841,7 +870,7 @@ void dspp_device::execute_run()
 
 		if (!m_core->m_flag_sleep)
 		{
-			execute_one(check_debugger);
+			execute_one(check_debugger, false);
 		}
 
 		m_frame_counter -= start - m_core->m_icount;
@@ -876,12 +905,57 @@ void dspp_bulldog_device::execute_run()
 
 	const bool check_debugger = debugger_enabled();
 
+	// Other devices (and the host CPU) only run between timeslices, so idle
+	// loop detection can't carry over from the previous one
+	m_idle_pc = -1;
+
 	do
 	{
 		update_ticks();
 		update_fifo_dma();
-		execute_one(check_debugger);
+		execute_one(check_debugger, !check_debugger);
 	} while (m_core->m_icount > 0);
+}
+
+
+//-------------------------------------------------
+//  check_idle_loop - called each time a backward
+//  branch lands on loop_pc.  DSPP programs spin
+//  between sample frames polling the output FIFO
+//  status, which only changes when another device
+//  (the DAC timer) runs - never within this
+//  timeslice.  If a loop iteration wrote nothing,
+//  serviced no DMA, read only plain RAM/status
+//  registers and returned to an identical core
+//  state, every further iteration this timeslice
+//  is identical too, so skip whole iterations,
+//  keeping the cycle count and tick clock exactly
+//  as if they had run.
+//-------------------------------------------------
+
+void dspp_device::check_idle_loop(uint16_t loop_pc)
+{
+	if (m_idle_pc == loop_pc && !m_idle_dirty)
+	{
+		dspp_internal_state cur;
+		memcpy(&cur, m_core, sizeof(cur));
+		cur.m_icount = m_idle_state.m_icount;
+		cur.m_tclock = m_idle_state.m_tclock;
+
+		const int32_t len = m_idle_state.m_icount - m_core->m_icount;
+		if (len > 0 && m_core->m_icount > len && memcmp(&cur, &m_idle_state, sizeof(cur)) == 0)
+		{
+			// Leave 1..len cycles to run normally so the timeslice ends
+			// exactly where it would have
+			const int32_t skip = ((m_core->m_icount - 1) / len) * len;
+			m_core->m_icount -= skip;
+			m_core->m_tclock -= skip;
+		}
+	}
+
+	m_idle_pc = loop_pc;
+	m_idle_dirty = false;
+	memcpy(&m_idle_state, m_core, sizeof(m_idle_state));
 }
 
 
@@ -1642,6 +1716,8 @@ void dspp_device::service_output_dma(int32_t channel)
 	if (dma.m_current_count == 0)
 		return;
 
+	m_idle_dirty = true;
+
 	// Transfer a maximum of 4 samples per tick
 	uint32_t count = dma.m_current_count;
 
@@ -1672,6 +1748,8 @@ void dspp_device::service_input_dma(int32_t channel)
 
 	if (dma.m_current_count == 0)
 		return;
+
+	m_idle_dirty = true;
 
 	// Transfer a maximum of 4 samples per tick
 	uint32_t count = dma.m_current_count;

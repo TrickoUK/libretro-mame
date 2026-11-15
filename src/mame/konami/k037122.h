@@ -16,7 +16,11 @@ public:
 
 	k037122_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 
-	void tile_draw( screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect );
+	void tile_draw( screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale = 1 );
+
+	// Draws the layer for a screen presented at output_scale times its native size: the layer is drawn at
+	// native size and its opaque pixels are enlarged onto the bitmap with sharp pixels.
+	void tile_draw_enlarged( screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect, int output_scale );
 	uint32_t sram_r(offs_t offset);
 	void sram_w(offs_t offset, uint32_t data, uint32_t mem_mask = ~0);
 	uint32_t char_r(offs_t offset);
@@ -34,6 +38,7 @@ protected:
 
 private:
 	// internal state
+	bitmap_rgb32 m_layer;
 	tilemap_t* m_tilemap_128 = nullptr;
 	tilemap_t* m_tilemap_256 = nullptr;
 

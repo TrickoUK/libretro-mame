@@ -211,6 +211,18 @@ end
 
 --------------------------------------------------
 --
+--@src/devices/video/cat6613.h,VIDEOS["CAT6613"] = true
+--------------------------------------------------
+
+if VIDEOS["CAT6613"] then
+	files {
+		MAME_DIR .. "src/devices/video/cat6613.cpp",
+		MAME_DIR .. "src/devices/video/cat6613.h",
+	}
+end
+
+--------------------------------------------------
+--
 --@src/devices/video/cdp1861.h,VIDEOS["CDP1861"] = true
 --------------------------------------------------
 
@@ -1877,6 +1889,8 @@ if VIDEOS["VOODOO"] then
 		MAME_DIR .. "src/devices/video/voodoo_2.h",
 		MAME_DIR .. "src/devices/video/voodoo_banshee.cpp",
 		MAME_DIR .. "src/devices/video/voodoo_banshee.h",
+		MAME_DIR .. "src/devices/video/voodoo_gpu.cpp",
+		MAME_DIR .. "src/devices/video/voodoo_gpu.h",
 		MAME_DIR .. "src/devices/video/voodoo_regs.h",
 		MAME_DIR .. "src/devices/video/voodoo_render.cpp",
 		MAME_DIR .. "src/devices/video/voodoo_render.h",

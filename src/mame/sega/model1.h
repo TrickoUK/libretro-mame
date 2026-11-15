@@ -26,6 +26,8 @@
 
 #include <functional>
 
+class model1_renderer;
+
 class model1_state : public driver_device
 {
 public:
@@ -74,6 +76,7 @@ public:
 	{
 		float x = 0, y = 0, z = 0;
 		float xx = 0, yy = 0;
+		float fx = 0, fy = 0;   // screen position before it is truncated to s
 		spoint_t s;
 	};
 
@@ -284,6 +287,11 @@ protected:
 	std::unique_ptr<quad_t[]> m_quaddb;
 	quad_t      *m_quadpt;
 	std::unique_ptr<quad_t *[]> m_quadind;
+
+	// host-GPU path for the below-HUD 3D pass (model1_gpu.ipp)
+	friend class model1_renderer;
+	struct gpu_renderer_deleter { void operator()(model1_renderer *renderer) const; };
+	std::unique_ptr<model1_renderer, gpu_renderer_deleter> m_gpu_renderer;
 
 	uint16_t  m_v60_copro_ram_adr = 0;
 	uint16_t  m_v60_copro_ram_latch[2]{};

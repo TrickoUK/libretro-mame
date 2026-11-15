@@ -49,6 +49,21 @@
 #include <sstream>
 #include <utility>
 
+#if defined(__LIBRETRO__)
+mame_machine_manager *retro_manager;
+
+void retro_execute()
+{
+	retro_manager->execute();
+}
+
+void free_man()
+{
+	util::archive_file::cache_clear();
+	delete retro_manager;
+}
+#endif
+
 
 //**************************************************************************
 //  CONSTANTS
@@ -253,6 +268,10 @@ void cli_frontend::start_execution(mame_machine_manager *manager, const std::vec
 	if (!m_options.command().empty())
 	{
 		execute_commands(exename);
+#ifdef __LIBRETRO__
+		/* Signal 'retro_load_game' to not continue */
+		m_result = 1;
+#endif
 		return;
 	}
 
@@ -291,11 +310,20 @@ int cli_frontend::execute(std::vector<std::string> &args)
 {
 	// wrap the core execution in a try/catch to field all fatal errors
 	m_result = EMU_ERR_NONE;
+
+#if defined(__LIBRETRO__)
+	retro_manager = mame_machine_manager::instance(m_options, m_osd);
+#else
 	mame_machine_manager *manager = mame_machine_manager::instance(m_options, m_osd);
+#endif
 
 	try
 	{
+#if defined(__LIBRETRO__)
+		start_execution(retro_manager, args);
+#else
 		start_execution(manager, args);
+#endif
 	}
 	// handle exceptions of various types
 	catch (emu_fatalerror &fatal)
@@ -355,8 +383,10 @@ int cli_frontend::execute(std::vector<std::string> &args)
 		m_result = EMU_ERR_FATALERROR;
 	}
 
+#if !defined(__LIBRETRO__)
 	util::archive_file::cache_clear();
 	delete manager;
+#endif
 
 	return m_result;
 }

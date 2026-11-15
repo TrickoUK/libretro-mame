@@ -26,6 +26,8 @@
 #include "sound/scsp.h"
 #include "video/poly.h"
 
+#include "interface/gpuengine.h"
+
 #include "emupal.h"
 #include "screen.h"
 
@@ -33,6 +35,14 @@
 
 
 class model2_renderer;
+
+// vertex layout of the host-GPU path (see osd/interface/gpuengine.h)
+struct m2_gpu_vertex
+{
+	float x, y, z, w;
+	u32 prim;
+	float ooz, uoz, voz;
+};
 
 class model2_state : public driver_device
 {
@@ -98,6 +108,7 @@ public:
 	void init_rchase2();
 	void init_manxttdx();
 	void init_zerogun();
+	void init_hotd();
 	void init_sgt24h();
 	void init_srallyc();
 	void init_powsledm();
@@ -153,6 +164,28 @@ protected:
 	std::unique_ptr<raster_state> m_raster;
 	std::unique_ptr<geo_state> m_geo;
 	bitmap_rgb32 m_sys24_bitmap;
+	int m_output_scale = 1;
+
+	// host-GPU renderer (see model2_shader.h); the engine is null when the path is off or has failed
+	osd::gpu_engine *m_gpu_engine = nullptr;
+	bool m_gpu_checked = false;
+	bool m_gpu_full_upload = true;
+	bool m_gpu_layer_pending = false;   // a layer was submitted at the start of screen_update() and not collected
+	bool m_gpu_layer_ready = false;     // the GPU layer is already in destmap (no polygons)
+	bool m_layer_from_gpu = false;      // the 3D layer holds its coverage in alpha, fillmap is not written
+	bool m_layer_native = false;        // the GPU layer was averaged to native size into m_gpu_layer, destmap is not written
+	bitmap_rgb32 m_gpu_layer;           // native-size GPU layer, zero where no polygon covers the pixel
+	osd::gpu_handle m_gpu_module = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_tex_sheets = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_luma = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_xlat = osd::GPU_NULL_HANDLE;
+	osd::gpu_handle m_gpu_gamma = osd::GPU_NULL_HANDLE;
+	std::unique_ptr<u16[]> m_gpu_shadow_tex;    // last uploaded texture sheets (2 x 512 x 1024 words)
+	std::unique_ptr<u8[]> m_gpu_shadow_luma;
+	std::unique_ptr<u16[]> m_gpu_shadow_xlat;
+	u8 m_gpu_shadow_gamma[256]{};
+	std::vector<u32> m_gpu_state;
+	std::vector<m2_gpu_vertex> m_gpu_vertices;
 	u8 m_gearsel = 0;
 	u8 m_lightgun_mux = 0;
 
@@ -240,6 +273,11 @@ protected:
 	void render_frame_start();
 	void geo_parse();
 	void render_polygons(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	bool gpu_init();
+	bool gpu_layer_submit(const rectangle &ss_cliprect);
+	bool gpu_layer_collect();
+	void downsample_3d_layer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void enlarge_layer(bitmap_rgb32 &bitmap, const bitmap_rgb32 &layer, const rectangle &cliprect, bool opaque);
 	void draw_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
 	void model2_timers(machine_config &config) ATTR_COLD;
@@ -321,7 +359,7 @@ private:
 	void model2_3d_process_polygon(raster_state *raster, u32 attr);
 
 	// inliners
-	inline void model2_3d_project(polygon *poly);
+	inline void model2_3d_project(polygon *poly, int ss);
 	inline u16 float_to_zval(float floatval, s32 z_adjust);
 	inline bool check_culling(raster_state *raster, u32 attr, float min_z, float max_z);
 };
@@ -662,13 +700,19 @@ struct m2_poly_extra_data
 	u8       luma;
 };
 
+// The host-GPU path renders the 3D layer at the supersampling factor times the linear resolution of the
+// real screen and averages it back down, for polygon edge antialiasing that real Model 2 hardware had via a
+// dedicated AA circuit this driver doesn't otherwise emulate. The factor comes from the OSD's 3D supersampling
+// setting (1 = native resolution). Software frames are always drawn at native size.
+int model2_supersample_factor(running_machine &machine);
+
 // 0x10000 = size of the poly_sorted_list array
 class model2_renderer : public poly_manager<float, m2_poly_extra_data, 4>
 {
 public:
 	using polygon = model2_state::polygon;
 
-	model2_renderer(model2_state& state) :
+	model2_renderer(model2_state& state, int ss) :
 		poly_manager<float, m2_poly_extra_data, 4>(state.machine()),
 		m_render_callbacks{
 				{ &model2_renderer::draw_scanline_solid<false>, this },
@@ -676,17 +720,20 @@ public:
 				{ &model2_renderer::draw_scanline_tex<false>, this },
 				{ &model2_renderer::draw_scanline_tex<true>, this } },
 		m_state(state),
-		m_destmap(512, 512),
-		m_fillmap(512, 512),
+		m_ss(ss),
+		m_destmap(512 * m_ss, 512 * m_ss),
+		m_fillmap(512 * m_ss, 512 * m_ss),
 		m_xoffs(90),
 		m_yoffs(-8)
 	{
 	}
 
+	int supersample() const { return m_ss; }
 	bitmap_rgb32 &destmap() { return m_destmap; }
 	bitmap_ind8 &fillmap() { return m_fillmap; }
 
 	void model2_3d_render(polygon *poly, const rectangle &cliprect);
+	bool gpu_add_polygon(polygon *poly, const rectangle &cliprect, std::vector<u32> &state, std::vector<m2_gpu_vertex> &verts);
 	void set_xoffset(int16_t xoffs) { m_xoffs = xoffs; }
 	void set_yoffset(int16_t yoffs) { m_yoffs = yoffs; }
 
@@ -700,6 +747,8 @@ private:
 	render_delegate m_render_callbacks[4];
 
 	model2_state &m_state;
+	// host-GPU supersampling factor of destmap/fillmap (1 without an engine)
+	int m_ss;
 	bitmap_rgb32 m_destmap;
 	bitmap_ind8 m_fillmap;
 	int16_t m_xoffs, m_yoffs;

@@ -9,6 +9,7 @@
 #include "cpu/v60/v60.h"
 #include "machine/gen_latch.h"
 #include "machine/timer.h"
+#include "gamepad_steering.h"
 #include "jaleco_ms32_sysctrl.h"
 #include "ms32_sprite.h"
 #include "sound/ymf271.h"
@@ -189,6 +190,7 @@ public:
 		ms32_state(mconfig, type, tag)
 		, m_road_vram(*this, "road_vram", 0x10000, ENDIANNESS_LITTLE)
 		, m_io_analog(*this, "AN%u", 0U)
+		, m_steering_config(*this, "STEERING")
 		, m_fpu(*this, "fpu%u", 0U)
 		, m_road_ctrl(*this, "road_ctrl")
 		, m_road_lineram(*this, "road_lineram", 0x10000, ENDIANNESS_LITTLE)
@@ -208,6 +210,9 @@ private:
 	memory_share_creator<u16> m_road_vram;
 
 	required_ioport_array<3> m_io_analog;
+	// optional gamepad steering assists (see gamepad_steering.h)
+	optional_ioport m_steering_config;
+	gamepad_steering m_gamepad_steering;
 	required_device_array<jaleco_fpu_device, 2> m_fpu;
 	required_shared_ptr<u32> m_road_ctrl;
 	memory_share_creator<u16> m_road_lineram;

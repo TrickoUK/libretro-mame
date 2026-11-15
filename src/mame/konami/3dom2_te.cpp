@@ -12,8 +12,12 @@
 #include "3dom2.h"
 
 #include "endianness.h"
+#include "multibyte.h"
+#include "osdepend.h"
 
+#include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <sstream>
 
 //#define VERBOSE 1
@@ -33,7 +37,13 @@
     - Polystar blending is incorrect (intro)
 */
 
-#define TEST_TIMING     1
+// TEST_TIMING models Triangle Engine busy time: it counts triangles and
+// memory accesses and holds back the end-of-command interrupt for the
+// estimated cycle count. The estimate is uncalibrated and charges each
+// access in turn, far slower than the chip's quoted fill rates, so games
+// wait on it and drop frames (Polystars falls to 30-50 fps in stage 1).
+// With it off, the interrupt is raised as soon as the list finishes.
+#define TEST_TIMING     0
 
 #if TEST_TIMING
 enum
@@ -734,8 +744,34 @@ void m2_te_device::device_start()
 	save_item(NAME(m_tm.m_regs));
 	save_item(NAME(m_db.m_regs));
 
+	// Supersampling scale from the front end's supersampling setting, limited to 2x
+	m_ss_shift = (machine().osd().supersample() >= 2) ? 1 : 0;
+
 	// Allocate timers
 	m_done_timer = timer_alloc(FUNC(m2_te_device::command_done), this);
+
+	// Multi-threaded rasterization work queues - see flush_span_jobs().
+	for (auto &queue : m_render_queue)
+		queue = osd_work_queue_alloc(WORK_QUEUE_FLAG_MULTI | WORK_QUEUE_FLAG_HIGH_FREQ);
+
+	for (int band = 0; band < NUM_RENDER_BANDS; band++)
+	{
+		m_bands[band].dev = this;
+		m_bands[band].band = band;
+	}
+}
+
+
+//-------------------------------------------------
+//  device_post_load - restored state invalidates
+//  the render and texture snapshots
+//-------------------------------------------------
+
+void m2_te_device::device_post_load()
+{
+	m_ss_surfaces.clear();
+	m_snapshot_dirty = true;
+	m_tex_dirty = true;
 }
 
 
@@ -813,6 +849,14 @@ uint32_t m2_te_device::read(offs_t offset)
 
 void m2_te_device::write(offs_t offset, uint32_t data)
 {
+	// Any register write may touch state the render path reads live
+	// (m_gc/m_es/m_tm/m_db, or m_pipram directly below) - mark the current
+	// snapshot stale so the next queue_span_job() takes a fresh one instead
+	// of reusing one that no longer reflects this write. Unconditional and
+	// cheap (just a bool) regardless of which register this actually is -
+	// see render_snapshot/m_snapshot_dirty.
+	m_snapshot_dirty = true;
+
 	uint32_t unit = (offset >> 11) & 7;
 	uint32_t reg = offset & 0x1ff;
 	te_reg_wmode wmode = static_cast<te_reg_wmode>((offset >> 9) & 3);
@@ -880,6 +924,7 @@ void m2_te_device::write(offs_t offset, uint32_t data)
 			if (reg < 0x400 / 4)
 			{
 				m_pipram[reg] = data;
+				m_tex_dirty = true;
 				return;
 			}
 			else if ((reg - 0x400 / 4) < sizeof(m_tm) / 4)
@@ -1165,13 +1210,16 @@ void m2_te_device::setup_triangle(uint32_t flags)
 	se_vtx vc = m_se.vertices[2];
 
 	// Truncate XY coordinates to integers
-	va.x = int_trunc(va.x);
-	vb.x = int_trunc(vb.x);
-	vc.x = int_trunc(vc.x);
+	// Native pixel positions first, so every edge of a native pixel lands on
+	// the first sample of its block of samples
+	const float ssf = float(1U << m_ss_shift);
+	va.x = int_trunc(va.x) * ssf;
+	vb.x = int_trunc(vb.x) * ssf;
+	vc.x = int_trunc(vc.x) * ssf;
 
-	va.y = int_trunc(va.y);
-	vb.y = int_trunc(vb.y);
-	vc.y = int_trunc(vc.y);
+	va.y = int_trunc(va.y) * ssf;
+	vb.y = int_trunc(vb.y) * ssf;
+	vc.y = int_trunc(vc.y) * ssf;
 
 
 	// Scale and truncate colors
@@ -1406,6 +1454,12 @@ void m2_te_device::setup_triangle(uint32_t flags)
 	m_es.slope_vw = ieee754_to_tefix(vw_slope, textbits);
 	m_es.slope_w = ieee754_to_tefix(w_slope, depthbits);
 
+	// Plane gradients per sample row, from the same plane equation as the
+	// slopes (the slope is the change down the long edge)
+	m_ss_ddy_uw = ieee754_to_tefix(-(v1->uw * x23 + v2->uw * x31 + v3->uw * x12) * iaria, textbits);
+	m_ss_ddy_vw = ieee754_to_tefix(-(v1->vw * x23 + v2->vw * x31 + v3->vw * x12) * iaria, textbits);
+	m_ss_ddy_w = ieee754_to_tefix(-(v1->w * x23 + v2->w * x31 + v3->w * x12) * iaria, depthbits);
+
 	m_es.r2l = !scan_lr;
 
 #if TEST_TIMING
@@ -1496,6 +1550,8 @@ void m2_te_device::walk_edges(uint32_t wrange)
 {
 	bool dsp_off = m_es.es_cntl & ESCNTL_DSPOFF;
 	bool du_scan = m_es.es_cntl & ESCNTL_DUSCAN;
+	const uint32_t ss_rows = 1U << m_ss_shift;
+	uint32_t omit_rows = ss_rows;
 	bool omit_right = true;
 	bool scan_lr = m_es.r2l == false;
 
@@ -1570,11 +1626,14 @@ void m2_te_device::walk_edges(uint32_t wrange)
 
 	do
 	{
-		// Render the pixels from this span
-		walk_span(wrange, omit_right, y, xs, xe, r, g, b, a, uw, vw, w);
+		// Queue the pixels from this span for (possibly deferred,
+		// multi-threaded) rendering - see queue_span_job().
+		queue_span_job(wrange, omit_right, y, xs, xe, r, g, b, a, uw, vw, w);
 
 		// Now update the values
-		omit_right = false;
+		if (omit_rows)
+			omit_rows--;
+		omit_right = omit_rows != 0;
 		cf_short += xystep;
 		cf_long += m_es.xystep_long;
 
@@ -1683,7 +1742,10 @@ void m2_te_device::walk_edges(uint32_t wrange)
 			xe = m_es.x2;
 
 			if (scan_lr)
+			{
+				omit_rows = ss_rows;
 				omit_right = true;
+			}
 		}
 
 		y = next_y;
@@ -1697,9 +1759,10 @@ void m2_te_device::walk_edges(uint32_t wrange)
 //  texcoord_gen -
 //-------------------------------------------------
 
-void m2_te_device::texcoord_gen(uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
+inline ATTR_FORCE_INLINE void m2_te_device::texcoord_gen(pixel_scratch &ps, const span_regs &rg, uint32_t wrange, uint32_t uw, uint32_t vw, uint32_t w,
 								uint32_t & uo, uint32_t & vo, uint32_t & wo)
 {
+	const auto &m_es = rg.es;
 
 	// Perspective correction
 	if (!(m_es.es_cntl & ESCNTL_PERSPECTIVEOFF))
@@ -1768,7 +1831,7 @@ void m2_te_device::texcoord_gen(uint32_t wrange, uint32_t uw, uint32_t vw, uint3
 //  lod_calc -
 //-------------------------------------------------
 
-uint32_t m2_te_device::lod_calc(uint32_t u0, uint32_t v0, uint32_t u1, uint32_t v1)
+inline ATTR_FORCE_INLINE uint32_t m2_te_device::lod_calc(uint32_t u0, uint32_t v0, uint32_t u1, uint32_t v1)
 {
 	return 0;
 }
@@ -1778,8 +1841,10 @@ uint32_t m2_te_device::lod_calc(uint32_t u0, uint32_t v0, uint32_t u1, uint32_t 
 //  get_tram_bitdepth
 //-------------------------------------------------
 
-uint32_t m2_te_device::get_tram_bitdepth()
+inline ATTR_FORCE_INLINE uint32_t m2_te_device::get_tram_bitdepth(pixel_scratch &ps, const span_regs &rg)
 {
+	const auto &m_tm = rg.tm;
+
 	// TODO: Could cache this
 	const uint32_t tex_type = m_tm.tex_exptype;
 
@@ -1799,12 +1864,14 @@ uint32_t m2_te_device::get_tram_bitdepth()
 //-------------------------------------------------
 //  get_texture_color -
 //-------------------------------------------------
-void m2_te_device::get_texture_color(uint32_t u, uint32_t v, uint32_t lod,
+inline ATTR_FORCE_INLINE void m2_te_device::get_texture_color(pixel_scratch &ps, const span_regs &rg, uint32_t u, uint32_t v, uint32_t lod,
 									uint32_t & r, uint32_t & g, uint32_t & b, uint32_t & a, uint32_t & s)
 {
+	const auto &m_tm = rg.tm;
+
 	uint32_t texaddr;
 	uint32_t texbit;
-	uint32_t texdepth = get_tram_bitdepth();
+	uint32_t texdepth = get_tram_bitdepth(ps, rg);
 
 	// TODO: Multiple LODs
 	uint32_t filter = (m_tm.tex_addr_cntl >> TXTADDRCNTL_R12FILTERSEL_SHIFT) & TXTADDRCNTL_FILTERSEL_MASK;
@@ -1814,8 +1881,8 @@ void m2_te_device::get_texture_color(uint32_t u, uint32_t v, uint32_t lod,
 		case TXTADDRCNTL_FILTERSEL_POINT:
 		case TXTADDRCNTL_FILTERSEL_LINEAR: // TODO
 		{
-			addr_calc(u, v, lod, texaddr, texbit, texdepth);
-			get_texel(texaddr, texbit, texdepth, r, g, b, a, s);
+			addr_calc(ps, rg, u, v, lod, texaddr, texbit, texdepth);
+			get_texel(ps, rg, texaddr, texbit, texdepth, r, g, b, a, s);
 			break;
 		}
 
@@ -1828,14 +1895,14 @@ void m2_te_device::get_texture_color(uint32_t u, uint32_t v, uint32_t lod,
 			uint32_t r2, g2, b2, a2, s2;
 			uint32_t r3, g3, b3, a3, s3;
 
-			addr_calc(u, v, lod, texaddr, texbit, texdepth);
-			get_texel(texaddr, texbit, texdepth, r0, g0, b0, a0, s0);
-			addr_calc(u + 0x10, v, lod, texaddr, texbit, texdepth);
-			get_texel(texaddr, texbit, texdepth, r1, g1, b1, a1, s1);
-			addr_calc(u, v + 0x10, lod, texaddr, texbit, texdepth);
-			get_texel(texaddr, texbit, texdepth, r2, g2, b2, a2, s2);
-			addr_calc(u + 0x10, v + 0x10, lod, texaddr, texbit, texdepth);
-			get_texel(texaddr, texbit, texdepth, r3, g3, b3, a3, s3);
+			addr_calc(ps, rg, u, v, lod, texaddr, texbit, texdepth);
+			get_texel(ps, rg, texaddr, texbit, texdepth, r0, g0, b0, a0, s0);
+			addr_calc(ps, rg, u + 0x10, v, lod, texaddr, texbit, texdepth);
+			get_texel(ps, rg, texaddr, texbit, texdepth, r1, g1, b1, a1, s1);
+			addr_calc(ps, rg, u, v + 0x10, lod, texaddr, texbit, texdepth);
+			get_texel(ps, rg, texaddr, texbit, texdepth, r2, g2, b2, a2, s2);
+			addr_calc(ps, rg, u + 0x10, v + 0x10, lod, texaddr, texbit, texdepth);
+			get_texel(ps, rg, texaddr, texbit, texdepth, r3, g3, b3, a3, s3);
 
 			// LERP
 			uint32_t ufrac = u & 0xf;
@@ -1878,9 +1945,11 @@ void m2_te_device::get_texture_color(uint32_t u, uint32_t v, uint32_t lod,
 //-------------------------------------------------
 //  addr_calc -
 //-------------------------------------------------
-void m2_te_device::addr_calc(uint32_t u, uint32_t v, uint32_t lod,
+inline ATTR_FORCE_INLINE void m2_te_device::addr_calc(pixel_scratch &ps, const span_regs &rg, uint32_t u, uint32_t v, uint32_t lod,
 							uint32_t & texaddr, uint32_t & texbit, uint32_t & tdepth)
 {
+	const auto &m_tm = rg.tm;
+
 	uint32_t u_mask = (m_tm.uv_mask & TXTUVMASK_UMASK_MASK) >> TXTUVMASK_UMASK_SHIFT;
 	uint32_t v_mask = (m_tm.uv_mask & TXTUVMASK_VMASK_MASK) >> TXTUVMASK_VMASK_SHIFT;
 	uint32_t u_max = (m_tm.uv_max & TXTUVMAX_UMAX_MASK) >> TXTUVMAX_UMAX_SHIFT;
@@ -1926,9 +1995,13 @@ void m2_te_device::addr_calc(uint32_t u, uint32_t v, uint32_t lod,
 }
 
 
-void m2_te_device::get_texel(uint32_t tex_addr, uint32_t tex_bit, uint32_t tdepth,
+inline ATTR_FORCE_INLINE void m2_te_device::get_texel(pixel_scratch &ps, const span_regs &rg, uint32_t tex_addr, uint32_t tex_bit, uint32_t tdepth,
 							uint32_t & r, uint32_t & g, uint32_t & b, uint32_t & a, uint32_t & ssb)
 {
+	const auto &m_tm = rg.tm;
+	const uint32_t *m_tram = rg.tram;
+	const uint32_t *m_pipram = rg.pipram;
+
 	const uint32_t tex_type = m_tm.tex_exptype;
 
 	uint8_t rtex, gtex, btex, atex;
@@ -1943,7 +2016,7 @@ void m2_te_device::get_texel(uint32_t tex_addr, uint32_t tex_bit, uint32_t tdept
 	uint32_t tram_data = m_tram[tex_addr];
 
 #if TEST_TIMING
-	g_statistics[STAT_TEXEL_READS]++;
+	ps.stats[STAT_TEXEL_READS]++;
 #endif
 
 
@@ -2136,29 +2209,42 @@ static inline uint8_t multiply(uint8_t a, uint8_t b)
 //  texture_blend -
 //-------------------------------------------------
 
-void m2_te_device::texture_blend(
+inline ATTR_FORCE_INLINE void m2_te_device::texture_blend(pixel_scratch &ps, const span_regs &rg,
 	uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
 	uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 	uint32_t &ro, uint32_t &go, uint32_t &bo, uint32_t &ao, uint32_t &ssbo)
 {
+	const auto &m_tm = rg.tm;
+
 	uint32_t rbl = 0, gbl = 0, bbl = 0, abl = 0;
 
+	// rbl/gbl/bbl/abl (computed below) are only ever read by the two output
+	// switches' *_SEL_BLEND cases further down - skip the three select_lerp()
+	// calls (and the lerp/multiply/select_mul() calls they feed) entirely
+	// when neither output selector actually needs a blended result. This is
+	// the common case for flat/untextured or simple-textured draws and was
+	// previously computed unconditionally on every pixel regardless of
+	// whether the result was ever used.
+	const bool need_blend = (((m_tm.tex_tab_cntl & TXTTABCNTL_C_OSEL_MASK) >> TXTTABCNTL_C_OSEL_SHIFT) == TXTTABCNTL_CO_SEL_BLEND)
+		|| (((m_tm.tex_tab_cntl & TXTTABCNTL_A_OSEL_MASK) >> TXTTABCNTL_A_OSEL_SHIFT) == TXTTABCNTL_AO_SEL_BLEND);
+
+	if (need_blend)
 	{
 		uint32_t ar, ab, ag, aa;
 		uint32_t br, bb, bg, ba;
 		uint32_t tr, tb, tg;
 
-		select_lerp( (m_tm.tex_tab_cntl & TXTTABCNTL_C_ASEL_MASK) >> TXTTABCNTL_C_ASEL_SHIFT,
+		select_lerp(ps, rg, (m_tm.tex_tab_cntl & TXTTABCNTL_C_ASEL_MASK) >> TXTTABCNTL_C_ASEL_SHIFT,
 					ri, gi, bi, ai,
 					rt, gt, bt, at, ssbt,
 					ar, ag, ab );
 
-		select_lerp( (m_tm.tex_tab_cntl & TXTTABCNTL_C_BSEL_MASK) >> TXTTABCNTL_C_BSEL_SHIFT,
+		select_lerp(ps, rg, (m_tm.tex_tab_cntl & TXTTABCNTL_C_BSEL_MASK) >> TXTTABCNTL_C_BSEL_SHIFT,
 					ri, gi, bi, ai,
 					rt, gt, bt, at, ssbt,
 					br, bg, bb );
 
-		select_lerp( (m_tm.tex_tab_cntl & TXTTABCNTL_C_TSEL_MASK) >> TXTTABCNTL_C_TSEL_SHIFT,
+		select_lerp(ps, rg, (m_tm.tex_tab_cntl & TXTTABCNTL_C_TSEL_MASK) >> TXTTABCNTL_C_TSEL_SHIFT,
 					ri, gi, bi, ai,
 					rt, gt, bt, at, ssbt,
 					tr, tg, tb );
@@ -2173,11 +2259,11 @@ void m2_te_device::texture_blend(
 		{
 			// TODO: CHECK ME
 			// Alpha is multiply only
-			select_mul( (m_tm.tex_tab_cntl & TXTTABCNTL_A_ASEL_MASK) >> TXTTABCNTL_A_ASEL_SHIFT,
+			select_mul(ps, rg, (m_tm.tex_tab_cntl & TXTTABCNTL_A_ASEL_MASK) >> TXTTABCNTL_A_ASEL_SHIFT,
 						ai, at, ssbt,
 						aa);
 
-			select_mul( (m_tm.tex_tab_cntl & TXTTABCNTL_A_BSEL_MASK) >> TXTTABCNTL_A_BSEL_SHIFT,
+			select_mul(ps, rg, (m_tm.tex_tab_cntl & TXTTABCNTL_A_BSEL_MASK) >> TXTTABCNTL_A_BSEL_SHIFT,
 						ai, at, ssbt,
 						ba);
 
@@ -2245,11 +2331,13 @@ void m2_te_device::texture_blend(
 	}
 }
 
-void m2_te_device::select_lerp( uint32_t sel,
+inline ATTR_FORCE_INLINE void m2_te_device::select_lerp(pixel_scratch &ps, const span_regs &rg, uint32_t sel,
 								uint32_t ri, uint32_t gi, uint32_t bi, uint32_t ai,
 								uint32_t rt, uint32_t gt, uint32_t bt, uint32_t at, uint32_t ssbt,
 								uint32_t & ar, uint32_t & ag, uint32_t & ab )
 {
+	const auto &m_tm = rg.tm;
+
 	switch (sel)
 	{
 		case TXTTABCNTL_C_ABTSEL_AITER:
@@ -2313,9 +2401,11 @@ void m2_te_device::select_lerp( uint32_t sel,
 }
 
 
-void m2_te_device::select_mul(uint32_t sel, uint32_t ai, uint32_t at, uint32_t ssbt,
+inline ATTR_FORCE_INLINE void m2_te_device::select_mul(pixel_scratch &ps, const span_regs &rg, uint32_t sel, uint32_t ai, uint32_t at, uint32_t ssbt,
 							   uint32_t & a )
 {
+	const auto &m_tm = rg.tm;
+
 	switch (sel)
 	{
 		case TXTTABCNTL_A_ABSEL_AITER:
@@ -2350,15 +2440,19 @@ void m2_te_device::select_mul(uint32_t sel, uint32_t ai, uint32_t at, uint32_t s
 //  write_dst_pixel - Write pixel to framebuffer
 //-------------------------------------------------
 
-void m2_te_device::write_dst_pixel()
+inline ATTR_FORCE_INLINE void m2_te_device::write_dst_pixel(pixel_scratch &ps, const span_regs &rg)
 {
+	const auto &m_db = rg.db;
+
 	uint32_t mask = m_db.usergen_ctrl & DBUSERGENCTL_DESTOUT_MASK;
+	const uint32_t nx = ps.x >> rg.ss_shift;
+	const uint32_t ny = ps.y >> rg.ss_shift;
 
 	if (m_db.dst_ctrl & DBDESTCNTL_32BPP)
 	{
-		uint32_t dstaddr = m_db.dst_baseaddr + (m_dbstate.y * m_db.dst_xstride + m_dbstate.x) * sizeof(uint32_t);
+		uint32_t dstaddr = m_db.dst_baseaddr + (ny * m_db.dst_xstride + nx) * sizeof(uint32_t);
 
-		uint32_t old = m_bda->read_bus32(dstaddr);
+		uint32_t old = rg.dst_surf ? ss_read(*rg.dst_surf, ps.x, ps.y) : m_bda->read_bus32(dstaddr);
 		uint32_t out = 0;
 
 		uint8_t sdsb_a = (old >> 24) & 0xff;
@@ -2366,18 +2460,21 @@ void m2_te_device::write_dst_pixel()
 		uint8_t sg = (old >> 8) & 0xff;
 		uint8_t sb = old & 0xff;
 
-		out |= (mask & 8 ? (m_dbstate.dsb << 7) | (m_dbstate.dst.a >> 1) : sdsb_a) << 24;
-		out |= (mask & 4 ? m_dbstate.dst.r : sr) << 16;
-		out |= (mask & 2 ? m_dbstate.dst.g : sg) << 8;
-		out |= mask & 1 ? m_dbstate.dst.b : sb;
+		out |= (mask & 8 ? (ps.dsb << 7) | (ps.dst.a >> 1) : sdsb_a) << 24;
+		out |= (mask & 4 ? ps.dst.r : sr) << 16;
+		out |= (mask & 2 ? ps.dst.g : sg) << 8;
+		out |= mask & 1 ? ps.dst.b : sb;
 
-		m_bda->write_bus32(dstaddr, out);
+		if (rg.dst_surf)
+			ss_write(*rg.dst_surf, ps.x, ps.y, out);
+		else
+			m_bda->write_bus32(dstaddr, out);
 	}
 	else
 	{
-		uint32_t dstaddr = m_db.dst_baseaddr + (m_dbstate.y * m_db.dst_xstride + m_dbstate.x) * sizeof(uint16_t);
+		uint32_t dstaddr = m_db.dst_baseaddr + (ny * m_db.dst_xstride + nx) * sizeof(uint16_t);
 
-		uint16_t old = m_bda->read_bus16(dstaddr);
+		uint16_t old = rg.dst_surf ? ss_read(*rg.dst_surf, ps.x, ps.y) : m_bda->read_bus16(dstaddr);
 		uint16_t out = 0;
 
 		uint8_t sdsb_a = (old >> 15) & 0x1;
@@ -2385,16 +2482,19 @@ void m2_te_device::write_dst_pixel()
 		uint8_t sg = (old >> 5) & 0x1f;
 		uint8_t sb = old & 0x1f;
 
-		out |= (mask & 8 ? m_dbstate.dsb : sdsb_a) << 15;
-		out |= (mask & 4 ? m_dbstate.dst.r >> 3 : sr) << 10;
-		out |= (mask & 2 ? m_dbstate.dst.g >> 3 : sg) << 5;
-		out |= mask & 1 ? m_dbstate.dst.b >> 3 : sb;
+		out |= (mask & 8 ? ps.dsb : sdsb_a) << 15;
+		out |= (mask & 4 ? ps.dst.r >> 3 : sr) << 10;
+		out |= (mask & 2 ? ps.dst.g >> 3 : sg) << 5;
+		out |= mask & 1 ? ps.dst.b >> 3 : sb;
 
-		m_bda->write_bus16(dstaddr, out);
+		if (rg.dst_surf)
+			ss_write(*rg.dst_surf, ps.x, ps.y, out);
+		else
+			m_bda->write_bus16(dstaddr, out);
 	}
 
 #if TEST_TIMING
-	g_statistics[STAT_PIXEL_STORES]++;
+	ps.stats[STAT_PIXEL_STORES]++;
 #endif
 }
 
@@ -2403,13 +2503,21 @@ void m2_te_device::write_dst_pixel()
 //  destination_blend -
 //-------------------------------------------------
 
-void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb)
+inline ATTR_FORCE_INLINE void m2_te_device::destination_blend(pixel_scratch &ps, const span_regs &rg, uint32_t x, uint32_t y, uint32_t w, const rgba & ti_color, uint8_t ssb)
 {
-	m_dbstate.x = x;
-	m_dbstate.y = y;
-	m_dbstate.w = w;
-	m_dbstate.ti = ti_color;
-	m_dbstate.ssb = ssb;
+	const auto &m_gc = rg.gc;
+	const auto &m_db = rg.db;
+
+	ps.x = x;
+	ps.y = y;
+	ps.w = w;
+	ps.ti = ti_color;
+	ps.ssb = ssb;
+
+	// x and y address samples; clipping, dithering and the Z offsets work in
+	// native pixels
+	const uint32_t nx = x >> rg.ss_shift;
+	const uint32_t ny = y >> rg.ss_shift;
 
 	bool dis = false;
 	bool zpixout = true;
@@ -2423,16 +2531,18 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 	[[maybe_unused]] uint32_t zgel = 0;
 
 	uint32_t zaddr;
+	int32_t zxs = 0;
+	int32_t zys = 0;
 
 	// FBCLIP
 	{
 		uint32_t xclip = (m_db.fbclip & DBFBCLIP_XFBCLIP_MASK) >> DBFBCLIP_XFBCLIP_SHIFT;
 		uint32_t yclip = (m_db.fbclip & DBFBCLIP_YFBCLIP_MASK) >> DBFBCLIP_YFBCLIP_SHIFT;
 
-		fbclipdis = (x >= xclip) || (y >= yclip);
+		fbclipdis = (nx >= xclip) || (ny >= yclip);
 
 		if (fbclipdis)
-			m_db.status |= DBSTATUS_FBCLIP;
+			ps.status_bits |= DBSTATUS_FBCLIP;
 	}
 
 	// WINCLIP
@@ -2442,20 +2552,20 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 		uint32_t ymin = (m_db.y_winclip & DBFBYWINCLIP_YMIN_MASK) >> DBFBYWINCLIP_YMIN_SHIFT;
 		uint32_t ymax = (m_db.y_winclip & DBFBYWINCLIP_YMAX_MASK) >> DBFBYWINCLIP_YMAX_SHIFT;
 
-		bool inside = (x >= xmin) && (x < xmax) && (y >= ymin) && (y < ymax);
+		bool inside = (nx >= xmin) && (nx < xmax) && (ny >= ymin) && (ny < ymax);
 
 		winclipdis = ((m_db.usergen_ctrl & DBUSERGENCTL_WCLIPINEN) && inside) ||
 					((m_db.usergen_ctrl & DBUSERGENCTL_WCLIPOUTEN) && !inside);
 
 		if (winclipdis)
-			m_db.status |= DBSTATUS_WINCLIP;
+			ps.status_bits |= DBSTATUS_WINCLIP;
 	}
 
-	select_src_pixel();
+	select_src_pixel(ps, rg);
 
-	select_tex_pixel();
+	select_tex_pixel(ps, rg);
 
-	select_alpha_dsb();
+	select_alpha_dsb(ps, rg);
 
 
 	{
@@ -2472,7 +2582,7 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 			dm11 = txtcnst1 & 0xff; txtcnst1 >>= 8;
 			dm20 = srccnst0 & 0xff; srccnst0 >>= 8;
 			dm21 = srccnst1 & 0xff; srccnst1 >>= 8;
-			m_dbstate.blend.b = color_blend(m_dbstate.texpath.b, m_dbstate.ti.b, m_dbstate.srcpath.b, m_dbstate.src.b, dm10, dm11, dm20, dm21);
+			ps.blend.b = color_blend(ps, rg, ps.texpath.b, ps.ti.b, ps.srcpath.b, ps.src.b, dm10, dm11, dm20, dm21);
 
 			// TODO: ALURGEL for each
 
@@ -2481,41 +2591,41 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 			dm11 = txtcnst1 & 0xff; txtcnst1 >>= 8;
 			dm20 = srccnst0 & 0xff; srccnst0 >>= 8;
 			dm21 = srccnst1 & 0xff; srccnst1 >>= 8;
-			m_dbstate.blend.g = color_blend(m_dbstate.texpath.g, m_dbstate.ti.g, m_dbstate.srcpath.g, m_dbstate.src.g, dm10, dm11, dm20, dm21);
+			ps.blend.g = color_blend(ps, rg, ps.texpath.g, ps.ti.g, ps.srcpath.g, ps.src.g, dm10, dm11, dm20, dm21);
 
 			// Red
 			dm10 = txtcnst0 & 0xff;
 			dm11 = txtcnst1 & 0xff;
 			dm20 = srccnst0 & 0xff;
 			dm21 = srccnst1 & 0xff;
-			m_dbstate.blend.r = color_blend(m_dbstate.texpath.r, m_dbstate.ti.r, m_dbstate.srcpath.r, m_dbstate.src.r, dm10, dm11, dm20, dm21);
+			ps.blend.r = color_blend(ps, rg, ps.texpath.r, ps.ti.r, ps.srcpath.r, ps.src.r, dm10, dm11, dm20, dm21);
 		}
 		else
 		{
-			m_dbstate.blend.r = m_dbstate.ti.r;
-			m_dbstate.blend.g = m_dbstate.ti.g;
-			m_dbstate.blend.b = m_dbstate.ti.b;
+			ps.blend.r = ps.ti.r;
+			ps.blend.g = ps.ti.g;
+			ps.blend.b = ps.ti.b;
 		}
 
 		// Dithering
 		if (m_db.usergen_ctrl & DBUSERGENCTL_DITHEREN)
 		{
-			uint32_t dith_x = x & 3;
-			uint32_t dith_y = y & 3;
+			uint32_t dith_x = nx & 3;
+			uint32_t dith_y = ny & 3;
 
 			uint32_t dith_mtx = dith_y & 2 ? m_db.dither_mat_b : m_db.dither_mat_a;
 			uint32_t idx = 7 ^ (((dith_y & 1) << 2) | dith_x);
 			uint8_t val = (dith_mtx >> (idx * 4)) & 0xf;
 
-			m_dbstate.dst.r = dither(m_dbstate.blend.r, val);
-			m_dbstate.dst.g = dither(m_dbstate.blend.g, val);
-			m_dbstate.dst.b = dither(m_dbstate.blend.b, val);
+			ps.dst.r = dither(ps.blend.r, val);
+			ps.dst.g = dither(ps.blend.g, val);
+			ps.dst.b = dither(ps.blend.b, val);
 		}
 		else
 		{
-			m_dbstate.dst.r = m_dbstate.blend.r;
-			m_dbstate.dst.g = m_dbstate.blend.g;
-			m_dbstate.dst.b = m_dbstate.blend.b;
+			ps.dst.r = ps.blend.r;
+			ps.dst.g = ps.blend.g;
+			ps.dst.b = ps.blend.b;
 		}
 	}
 
@@ -2526,8 +2636,13 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 		int32_t x_offs = util::sext((m_db.z_offset & DBZOFFS_XOFFS_MASK) >> DBZOFFS_XOFFS_SHIFT, 12);
 		int32_t y_offs = util::sext((m_db.z_offset & DBZOFFS_YOFFS_MASK) >> DBZOFFS_YOFFS_SHIFT, 12);
 
-		x_offs += m_dbstate.x;
-		y_offs += m_dbstate.y;
+		const int32_t zx = int32_t(ps.x) + (x_offs << rg.ss_shift);
+		const int32_t zy = int32_t(ps.y) + (y_offs << rg.ss_shift);
+		zxs = zx;
+		zys = zy;
+
+		x_offs += nx;
+		y_offs += ny;
 
 		uint32_t x_clip = (m_db.z_clip & DBZCLIP_XCLIP_MASK) >> DBZCLIP_XCLIP_SHIFT;
 		uint32_t y_clip = (m_db.z_clip & DBZCLIP_YCLIP_MASK) >> DBZCLIP_YCLIP_SHIFT;
@@ -2545,7 +2660,7 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 	zclipdis = zclip && (m_db.discard_ctrl & DBDISCARDCTL_ZCLIPDISEN);
 
 	if (zclipdis)
-		m_db.status |= DBSTATUS_ZCLIP;
+		ps.status_bits |= DBSTATUS_ZCLIP;
 
 	// Z-path
 	if (!(m_gc.te_master_mode & TEMASTER_MODE_DZBUF) &&
@@ -2553,11 +2668,11 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 		!zclip)
 	{
 #if TEST_TIMING
-		g_statistics[STAT_ZBUFFER_LOADS]++;
+		ps.stats[STAT_ZBUFFER_LOADS]++;
 #endif
 
 #if 1 // TODO: Why are we using this?
-		int32_t zdiff = w - m_bda->read_bus16(zaddr);
+		int32_t zdiff = w - (rg.z_surf ? ss_read(*rg.z_surf, uint32_t(zxs), uint32_t(zys)) : m_bda->read_bus16(zaddr));
 #else
 		// Shift W back to 0.23
 		uint16_t oldw = m_bda->read_bus16(zaddr);
@@ -2580,21 +2695,21 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 			zpixout = m_db.z_ctrl & 1;//DBZCNTL_ZPIXOUT_GT;
 			zbufout = m_db.z_ctrl & 2;//DBZCNTL_ZBUFOUT_GT;
 			zgel |= 4;
-			m_db.status |= DBSTATUS_ZFUNC_GT;
+			ps.status_bits |= DBSTATUS_ZFUNC_GT;
 		}
 		else if (zdiff == 0)
 		{
 			zpixout = m_db.z_ctrl & DBZCNTL_ZPIXOUT_EQ;
 			zbufout = m_db.z_ctrl & DBZCNTL_ZBUFOUT_EQ;
 			zgel |= 2;
-			m_db.status |= DBSTATUS_ZFUNC_EQ;
+			ps.status_bits |= DBSTATUS_ZFUNC_EQ;
 		}
 		else
 		{
 			zpixout = m_db.z_ctrl & 0x10;//DBZCNTL_ZPIXOUT_LT;
 			zbufout = m_db.z_ctrl & 0x20;//DBZCNTL_ZBUFOUT_LT;
 			zgel |= 1;
-			m_db.status |= DBSTATUS_ZFUNC_LT;
+			ps.status_bits |= DBSTATUS_ZFUNC_LT;
 		}
 	}
 	else
@@ -2605,12 +2720,12 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 
 	// Discard logic
 	{
-		bool ssbdis = (m_db.discard_ctrl & DBDISCARDCTL_SSBDISEN) && (m_dbstate.ssb == 0);
+		bool ssbdis = (m_db.discard_ctrl & DBDISCARDCTL_SSBDISEN) && (ps.ssb == 0);
 
-		bool adis = (m_db.discard_ctrl & DBDISCARDCTL_ADISEN) && (m_dbstate.dst.a == 0);
+		bool adis = (m_db.discard_ctrl & DBDISCARDCTL_ADISEN) && (ps.dst.a == 0);
 
 		bool rgbdis = (m_db.discard_ctrl & DBDISCARDCTL_RGBDISEN) &&
-					(m_dbstate.dst.r == 0) && (m_dbstate.dst.g == 0) && (m_dbstate.dst.b == 0);
+					(ps.dst.r == 0) && (ps.dst.g == 0) && (ps.dst.b == 0);
 
 		dis = fbclipdis || winclipdis || zclipdis || ssbdis || adis || rgbdis;
 	}
@@ -2622,15 +2737,18 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 		if (zbufout && (m_db.usergen_ctrl & DBUSERGENCTL_ZOUTEN))
 		{
 #if TEST_TIMING
-			g_statistics[STAT_ZBUFFER_STORES]++;
+			ps.stats[STAT_ZBUFFER_STORES]++;
 #endif
-			m_bda->write_bus16(zaddr, w & 0xffff);
+			if (rg.z_surf)
+				ss_write(*rg.z_surf, uint32_t(zxs), uint32_t(zys), w & 0xffff);
+			else
+				m_bda->write_bus16(zaddr, w & 0xffff);
 		}
 
 		// Color
 		if (zpixout && (m_db.supergen_ctrl & DBSUPERGENCTL_DESTOUTEN))
 		{
-			write_dst_pixel();
+			write_dst_pixel(ps, rg);
 		}
 	}
 
@@ -2651,68 +2769,73 @@ void m2_te_device::destination_blend(uint32_t x, uint32_t y, uint32_t w, const r
 }
 
 // Select between texture unit and source pixel
-void m2_te_device::select_tex_pixel()
+inline ATTR_FORCE_INLINE void m2_te_device::select_tex_pixel(pixel_scratch &ps, const span_regs &rg)
 {
+	const auto &m_db = rg.db;
+
 	uint32_t cntl;
 
 	// TODO: REGBITS
-	if (m_dbstate.ti.a == 0)
+	if (ps.ti.a == 0)
 		cntl = (m_db.src_alpha_ctrl >> 4) & 3;
-	else if (m_dbstate.ti.a == 255)
+	else if (ps.ti.a == 255)
 		cntl = m_db.src_alpha_ctrl & 3;
 	else
 		cntl = (m_db.src_alpha_ctrl >> 2) & 3;
 
 	switch (cntl)
 	{
-		case 0: m_dbstate.texpath.a = m_dbstate.ti.a;   break;
-		case 1: m_dbstate.texpath.a = 255;              break;
-		case 2: m_dbstate.texpath.a = 0;                break;
+		case 0: ps.texpath.a = ps.ti.a;   break;
+		case 1: ps.texpath.a = 255;              break;
+		case 2: ps.texpath.a = 0;                break;
 	}
 
 	switch ((m_db.txt_mult_cntl & DBTXTMULTCNTL_INSEL_MASK) >> DBTXTMULTCNTL_INSEL_SHIFT)
 	{
 		case DBTXTMULTCNTL_INSEL_CTI:
 		{
-			m_dbstate.texpath.r = m_dbstate.ti.r;
-			m_dbstate.texpath.g = m_dbstate.ti.g;
-			m_dbstate.texpath.b = m_dbstate.ti.b;
+			ps.texpath.r = ps.ti.r;
+			ps.texpath.g = ps.ti.g;
+			ps.texpath.b = ps.ti.b;
 			break;
 		}
 		case DBTXTMULTCNTL_INSEL_CONSTANT:
 		{
 			uint32_t cnst = m_db.const_in;
-			m_dbstate.texpath.r = (cnst >> 16) & 0xff;
-			m_dbstate.texpath.g = (cnst >> 8) & 0xff;
-			m_dbstate.texpath.b = cnst & 0xff;
+			ps.texpath.r = (cnst >> 16) & 0xff;
+			ps.texpath.g = (cnst >> 8) & 0xff;
+			ps.texpath.b = cnst & 0xff;
 			break;
 		}
 		case DBTXTMULTCNTL_INSEL_COMPSRC:
 		{
-			m_dbstate.texpath.r = ~m_dbstate.src.r;
-			m_dbstate.texpath.g = ~m_dbstate.src.g;
-			m_dbstate.texpath.b = ~m_dbstate.src.b;
+			ps.texpath.r = ~ps.src.r;
+			ps.texpath.g = ~ps.src.g;
+			ps.texpath.b = ~ps.src.b;
 			break;
 		}
 		case DBTXTMULTCNTL_INSEL_ATI:
 		{
-			m_dbstate.texpath.r = m_dbstate.ti.a;
-			m_dbstate.texpath.g = m_dbstate.ti.a;
-			m_dbstate.texpath.b = m_dbstate.ti.a;
+			ps.texpath.r = ps.ti.a;
+			ps.texpath.g = ps.ti.a;
+			ps.texpath.b = ps.ti.a;
 			break;
 		}
 	}
 
 	if (m_db.txt_mult_cntl & DBTXTMULTCNTL_TXTRJUST)
 	{
-		m_dbstate.texpath.r >>= 3;
-		m_dbstate.texpath.g >>= 3;
-		m_dbstate.texpath.b >>= 3;
+		ps.texpath.r >>= 3;
+		ps.texpath.g >>= 3;
+		ps.texpath.b >>= 3;
 	}
 }
 
-void m2_te_device::select_src_pixel()
+inline ATTR_FORCE_INLINE void m2_te_device::select_src_pixel(pixel_scratch &ps, const span_regs &rg)
 {
+	const auto &m_gc = rg.gc;
+	const auto &m_db = rg.db;
+
 	if ((m_db.usergen_ctrl & DBUSERGENCTL_SRCINEN)
 		&& (m_db.usergen_ctrl & DBUSERGENCTL_BLENDEN)
 		&& !(m_gc.te_master_mode & TEMASTER_MODE_DBLEND))
@@ -2720,60 +2843,63 @@ void m2_te_device::select_src_pixel()
 		int32_t x_offs = util::sext((m_db.src_offset & DBSRCOFFS_XOFFS_MASK) >> DBSRCOFFS_XOFFS_SHIFT, 12);
 		int32_t y_offs = util::sext((m_db.src_offset & DBSRCOFFS_YOFFS_MASK) >> DBSRCOFFS_YOFFS_SHIFT, 12);
 
-		x_offs += m_dbstate.x;
-		y_offs += m_dbstate.y;
+		const uint32_t sxs = uint32_t(int32_t(ps.x) + (x_offs << rg.ss_shift));
+		const uint32_t sys = uint32_t(int32_t(ps.y) + (y_offs << rg.ss_shift));
+
+		x_offs += ps.x >> rg.ss_shift;
+		y_offs += ps.y >> rg.ss_shift;
 
 		uint32_t addr = y_offs * m_db.src_xstride + x_offs;
 
 		if (m_db.src_ctrl & DBSRCCNTL_32BPP)
 		{
 			uint32_t srcaddr = m_db.src_baseaddr + addr * sizeof(uint32_t);
-			uint32_t srcval = m_bda->read_bus32(srcaddr);
+			uint32_t srcval = rg.src_surf ? ss_read(*rg.src_surf, sxs, sys) : m_bda->read_bus32(srcaddr);
 
-			m_dbstate.src.a = ((srcval >> 24) & 0x7f) << 1;
-			m_dbstate.src.r = (srcval >> 16) & 0xff;
-			m_dbstate.src.g = (srcval >>  8) & 0xff;
-			m_dbstate.src.b = (srcval >>  0) & 0xff;
+			ps.src.a = ((srcval >> 24) & 0x7f) << 1;
+			ps.src.r = (srcval >> 16) & 0xff;
+			ps.src.g = (srcval >>  8) & 0xff;
+			ps.src.b = (srcval >>  0) & 0xff;
 
 			if (m_db.src_ctrl & DBSRCCNTL_MSBREP)
-				m_dbstate.src.a |= (m_dbstate.src.a >> 6) & 1;
+				ps.src.a |= (ps.src.a >> 6) & 1;
 
-			m_dbstate.dsb = (srcval >> 31) & 1;
+			ps.dsb = (srcval >> 31) & 1;
 		}
 		else
 		{
 			uint32_t srcaddr = m_db.src_baseaddr + addr * sizeof(uint16_t);
-			uint32_t srcval = m_bda->read_bus16(srcaddr);
+			uint32_t srcval = rg.src_surf ? ss_read(*rg.src_surf, sxs, sys) : m_bda->read_bus16(srcaddr);
 
-			m_dbstate.src.r = (srcval >> 10) & 0x1f;
-			m_dbstate.src.g = (srcval >> 5) & 0x1f;
-			m_dbstate.src.b = srcval & 0x1f;
-			m_dbstate.src.a = 0;
+			ps.src.r = (srcval >> 10) & 0x1f;
+			ps.src.g = (srcval >> 5) & 0x1f;
+			ps.src.b = srcval & 0x1f;
+			ps.src.a = 0;
 
-			m_dbstate.dsb = srcval & 0x8000;
-			m_dbstate.src.r <<= 3;
-			m_dbstate.src.g <<= 3;
-			m_dbstate.src.b <<= 3;
+			ps.dsb = srcval & 0x8000;
+			ps.src.r <<= 3;
+			ps.src.g <<= 3;
+			ps.src.b <<= 3;
 
 			if (m_db.src_ctrl & DBSRCCNTL_MSBREP)
 			{
-				m_dbstate.src.r |= (m_dbstate.src.r >> 5);
-				m_dbstate.src.g |= (m_dbstate.src.g >> 5);
-				m_dbstate.src.b |= (m_dbstate.src.b >> 5);
+				ps.src.r |= (ps.src.r >> 5);
+				ps.src.g |= (ps.src.g >> 5);
+				ps.src.b |= (ps.src.b >> 5);
 			}
 		}
 #if TEST_TIMING
-		g_statistics[STAT_PIXEL_LOADS]++;
+		ps.stats[STAT_PIXEL_LOADS]++;
 #endif
 	}
 	else
 	{
 		// Source input disabled
-		m_dbstate.dsb = 0;
-		m_dbstate.src.r = 0;
-		m_dbstate.src.g = 0;
-		m_dbstate.src.b = 0;
-		m_dbstate.src.a = 0;
+		ps.dsb = 0;
+		ps.src.r = 0;
+		ps.src.g = 0;
+		ps.src.b = 0;
+		ps.src.a = 0;
 	}
 
 	// Now
@@ -2781,46 +2907,46 @@ void m2_te_device::select_src_pixel()
 	{
 		case DBSRCMULTCNTL_INSEL_SRC:
 		{
-			m_dbstate.srcpath.r = m_dbstate.src.r;
-			m_dbstate.srcpath.g = m_dbstate.src.g;
-			m_dbstate.srcpath.b = m_dbstate.src.b;
+			ps.srcpath.r = ps.src.r;
+			ps.srcpath.g = ps.src.g;
+			ps.srcpath.b = ps.src.b;
 			break;
 		}
 		case DBSRCMULTCNTL_INSEL_CONSTANT:
 		{
 			uint32_t cnst = m_db.const_in;
-			m_dbstate.srcpath.r = (cnst >> 16) & 0xff;
-			m_dbstate.srcpath.g = (cnst >> 8) & 0xff;
-			m_dbstate.srcpath.b = (cnst >> 0) & 0xff;
+			ps.srcpath.r = (cnst >> 16) & 0xff;
+			ps.srcpath.g = (cnst >> 8) & 0xff;
+			ps.srcpath.b = (cnst >> 0) & 0xff;
 			break;
 		}
 		case DBSRCMULTCNTL_INSEL_COMPCTI:
 		{
-			m_dbstate.srcpath.r = ~m_dbstate.ti.r;
-			m_dbstate.srcpath.g = ~m_dbstate.ti.g;
-			m_dbstate.srcpath.b = ~m_dbstate.ti.b;
+			ps.srcpath.r = ~ps.ti.r;
+			ps.srcpath.g = ~ps.ti.g;
+			ps.srcpath.b = ~ps.ti.b;
 			break;
 		}
 		case DBSRCMULTCNTL_INSEL_TEXALPHA:
 		{
-			m_dbstate.srcpath.r = m_dbstate.src.a;
-			m_dbstate.srcpath.g = m_dbstate.src.a;
-			m_dbstate.srcpath.b = m_dbstate.src.a;
+			ps.srcpath.r = ps.src.a;
+			ps.srcpath.g = ps.src.a;
+			ps.srcpath.b = ps.src.a;
 			break;
 		}
 	}
 
 	if (m_db.src_mult_cntl & DBSRCMULTCNTL_SRCRJUST)
 	{
-		m_dbstate.srcpath.r >>= 3;
-		m_dbstate.srcpath.g >>= 3;
-		m_dbstate.srcpath.b >>= 3;
+		ps.srcpath.r >>= 3;
+		ps.srcpath.g >>= 3;
+		ps.srcpath.b >>= 3;
 	}
 
-	m_dbstate.srcpath.a = m_dbstate.src.a;
+	ps.srcpath.a = ps.src.a;
 }
 
-uint8_t m2_te_device::dither(uint8_t in, uint8_t dithval)
+inline ATTR_FORCE_INLINE uint8_t m2_te_device::dither(uint8_t in, uint8_t dithval)
 {
 	int32_t res;
 	int32_t sgn_val;
@@ -2840,23 +2966,25 @@ uint8_t m2_te_device::dither(uint8_t in, uint8_t dithval)
 	return (uint8_t)res;
 }
 
-uint8_t m2_te_device::get_src_coef(uint8_t cti, uint8_t dm2const0, uint8_t dm2const1)
+inline ATTR_FORCE_INLINE uint8_t m2_te_device::get_src_coef(pixel_scratch &ps, const span_regs &rg, uint8_t cti, uint8_t dm2const0, uint8_t dm2const1)
 {
+	const auto &m_db = rg.db;
+
 	uint32_t sel=0;
 	uint8_t cnst, coef=0;
 
 	switch ((m_db.src_mult_cntl & DBSRCMULTCNTL_SRCCONSTCNTL_MASK) >> DBSRCMULTCNTL_SRCCONSTCNTL_SHIFT)
 	{
-		case DBSRCMULTCNTL_SRCCONSTCNTL_TEXSSB: sel = m_dbstate.ssb;    break;
-		case DBSRCMULTCNTL_SRCCONSTCNTL_SRCDSB: sel = m_dbstate.dsb;    break;
+		case DBSRCMULTCNTL_SRCCONSTCNTL_TEXSSB: sel = ps.ssb;    break;
+		case DBSRCMULTCNTL_SRCCONSTCNTL_SRCDSB: sel = ps.dsb;    break;
 	}
 
 	cnst = sel ? dm2const1 : dm2const0;
 
 	switch ((m_db.src_mult_cntl & DBSRCMULTCNTL_COEFSEL_MASK) >> DBSRCMULTCNTL_COEFSEL_SHIFT)
 	{
-		case DBSRCMULTCNTL_COEFSEL_ATI:         coef = m_dbstate.texpath.a;     break;
-		case DBSRCMULTCNTL_COEFSEL_ASRC:        coef = m_dbstate.srcpath.a;     break;
+		case DBSRCMULTCNTL_COEFSEL_ATI:         coef = ps.texpath.a;     break;
+		case DBSRCMULTCNTL_COEFSEL_ASRC:        coef = ps.srcpath.a;     break;
 		case DBSRCMULTCNTL_COEFSEL_CONSTANT:    coef = cnst;                    break;
 		case DBSRCMULTCNTL_COEFSEL_CTI:         coef = cti;                     break;
 	}
@@ -2867,8 +2995,10 @@ uint8_t m2_te_device::get_src_coef(uint8_t cti, uint8_t dm2const0, uint8_t dm2co
 		return coef;
 }
 
-uint8_t m2_te_device::get_tex_coef(uint8_t cs, uint8_t dm1const0, uint8_t dm1const1)
+inline ATTR_FORCE_INLINE uint8_t m2_te_device::get_tex_coef(pixel_scratch &ps, const span_regs &rg, uint8_t cs, uint8_t dm1const0, uint8_t dm1const1)
 {
+	const auto &m_db = rg.db;
+
 	uint32_t sel=0;
 	uint8_t cnst, coef=0;
 
@@ -2876,16 +3006,16 @@ uint8_t m2_te_device::get_tex_coef(uint8_t cs, uint8_t dm1const0, uint8_t dm1con
 	uint32_t cntl = ((m_db.txt_mult_cntl & DBTXTMULTCNTL_TXTCONSTCNTL_MASK) >> DBTXTMULTCNTL_TXTCONSTCNTL_SHIFT);
 
 	if (cntl == DBTXTMULTCNTL_TXTCONSTCNTL_TEXSSB)
-		sel = m_dbstate.ssb;
+		sel = ps.ssb;
 	else if (cntl == DBTXTMULTCNTL_TXTCONSTCNTL_SRCDSB)
-		sel = m_dbstate.dsb;
+		sel = ps.dsb;
 
 	cnst = sel ? dm1const1 : dm1const0;
 
 	switch ((m_db.txt_mult_cntl & DBTXTMULTCNTL_COEFSEL_MASK) >> DBTXTMULTCNTL_COEFSEL_SHIFT)
 	{
-		case DBTXTMULTCNTL_COEFSEL_ATI:         coef = m_dbstate.texpath.a;     break;
-		case DBTXTMULTCNTL_COEFSEL_ASRC:        coef = m_dbstate.srcpath.a;     break;
+		case DBTXTMULTCNTL_COEFSEL_ATI:         coef = ps.texpath.a;     break;
+		case DBTXTMULTCNTL_COEFSEL_ASRC:        coef = ps.srcpath.a;     break;
 		case DBTXTMULTCNTL_COEFSEL_CONSTANT:    coef = cnst;                    break;
 		case DBTXTMULTCNTL_COEFSEL_CSRC:        coef = cs;                      break;
 	}
@@ -2896,8 +3026,11 @@ uint8_t m2_te_device::get_tex_coef(uint8_t cs, uint8_t dm1const0, uint8_t dm1con
 		return coef;
 }
 
-void m2_te_device::select_alpha_dsb()
+inline ATTR_FORCE_INLINE void m2_te_device::select_alpha_dsb(pixel_scratch &ps, const span_regs &rg)
 {
+	const auto &m_gc = rg.gc;
+	const auto &m_db = rg.db;
+
 	if ((m_db.usergen_ctrl & DBUSERGENCTL_BLENDEN) && !(m_gc.te_master_mode & TEMASTER_MODE_DBLEND))
 	{
 		uint32_t sel = 0;
@@ -2905,8 +3038,8 @@ void m2_te_device::select_alpha_dsb()
 
 		switch ((m_db.dst_alpha_ctrl & DBDSTACNTL_ADESTCONSTCNTL_MASK) >> DBDSTACNTL_ADESTCONSTCNTL_SHIFT)
 		{
-			case 0: sel = m_dbstate.ssb;    break;
-			case 1: sel = m_dbstate.dsb;    break;
+			case 0: sel = ps.ssb;    break;
+			case 1: sel = ps.dsb;    break;
 		}
 
 		if (sel)
@@ -2916,47 +3049,49 @@ void m2_te_device::select_alpha_dsb()
 
 		switch ((m_db.dst_alpha_ctrl & DBDSTACNTL_ADESTSEL_MASK) >> DBDSTACNTL_ADESTSEL_SHIFT)
 		{
-			case 0: m_dbstate.dst.a = m_dbstate.texpath.a;  break;
-			case 1: m_dbstate.dst.a = aconst;               break;
-			case 2: m_dbstate.dst.a = m_dbstate.srcpath.a;  break;
-			case 3: m_dbstate.dst.a = m_dbstate.blend.r;    break;
+			case 0: ps.dst.a = ps.texpath.a;  break;
+			case 1: ps.dst.a = aconst;               break;
+			case 2: ps.dst.a = ps.srcpath.a;  break;
+			case 3: ps.dst.a = ps.blend.r;    break;
 		}
 
 		switch ((m_db.ssbdsb_ctrl & DBSSBDSBCNTL_DSBSEL_MASK) >> DBSSBDSBCNTL_DSBSEL_SHIFT)
 		{
-			case 0: m_dbstate.dsb = m_dbstate.ssb;      break;
-			case 1: m_dbstate.dsb = (m_db.ssbdsb_ctrl & DBSSBDSBCNTL_DSBCONST_MASK) >> DBSSBDSBCNTL_DSBCONST_SHIFT; break;
-			case 2: m_dbstate.dsb = m_dbstate.dsb;      break;
+			case 0: ps.dsb = ps.ssb;      break;
+			case 1: ps.dsb = (m_db.ssbdsb_ctrl & DBSSBDSBCNTL_DSBCONST_MASK) >> DBSSBDSBCNTL_DSBCONST_SHIFT; break;
+			case 2: ps.dsb = ps.dsb;      break;
 		}
 	}
 	else
 	{
-		m_dbstate.dst.a = m_dbstate.texpath.a;
-		m_dbstate.dsb = m_dbstate.ssb;
+		ps.dst.a = ps.texpath.a;
+		ps.dsb = ps.ssb;
 	}
 }
 
 
-uint8_t m2_te_device::color_blend(uint8_t ct, uint8_t cti, uint8_t cs, uint8_t csrc,
+inline ATTR_FORCE_INLINE uint8_t m2_te_device::color_blend(pixel_scratch &ps, const span_regs &rg, uint8_t ct, uint8_t cti, uint8_t cs, uint8_t csrc,
 								uint8_t dm10, uint8_t dm11,
 								uint8_t dm20, uint8_t dm21)
 {
 	uint8_t tcoef, scoef;
 	uint16_t tm, sm;
 
-	tcoef = get_tex_coef(csrc, dm10, dm11);
-	scoef = get_src_coef(cti, dm20, dm21);
+	tcoef = get_tex_coef(ps, rg, csrc, dm10, dm11);
+	scoef = get_src_coef(ps, rg, cti, dm20, dm21);
 
 	tm = (tcoef == 255) ? ct : ((ct == 255) ? tcoef : ((tcoef * ct) >> 8));
 	sm = (scoef == 255) ? cs : ((cs == 255) ? scoef : ((scoef * cs) >> 8));
 
-	return alu_calc(tm, sm);
+	return alu_calc(ps, rg, tm, sm);
 }
 
 #if 1
 
-uint8_t m2_te_device::alu_calc(uint16_t a, uint16_t b)
+inline ATTR_FORCE_INLINE uint8_t m2_te_device::alu_calc(pixel_scratch &ps, const span_regs &rg, uint16_t a, uint16_t b)
 {
+	const auto &m_db = rg.db;
+
 	int32_t result = 0;
 	uint32_t blendout;
 	uint32_t carry = 0;
@@ -3058,13 +3193,28 @@ uint8_t m2_te_device::alu_calc(uint16_t a, uint16_t b)
 //  walk_span -
 //-------------------------------------------------
 
-void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
+void m2_te_device::walk_span(pixel_scratch &ps, uint32_t wrange, bool omit_right,
 							 uint32_t y, uint32_t xs, uint32_t xe,
 							 int32_t r, int32_t g, int32_t b, int32_t a,
 							 uint32_t uw, uint32_t vw,
-							 uint32_t w)
+							 uint32_t w,
+							 uint32_t es_r2l,
+							 uint32_t es_ddx_r, uint32_t es_ddx_g, uint32_t es_ddx_b, uint32_t es_ddx_a,
+							 uint32_t es_ddx_uw, uint32_t es_ddx_vw, uint32_t es_ddx_w)
 {
-	bool scan_lr = !m_es.r2l;
+	// Private copy of this job's register state for the per-pixel functions
+	// below.  Framebuffer/Z stores go through uint16_t/uint32_t pointers
+	// into emulated RAM, and without strict aliasing the compiler must
+	// otherwise assume any of them could modify the snapshot, re-loading and
+	// re-decoding every register after every pixel.  A local whose address
+	// never escapes (the pixel functions are force-inlined) can't alias RAM.
+	const span_regs rg{ ps.cfg->gc, ps.cfg->es, ps.cfg->tm, ps.cfg->db, ps.cfg->tex->tram.data(), ps.cfg->tex->pipram.data(),
+			ps.cfg->dst_surf, ps.cfg->z_surf, ps.cfg->src_surf, m_ss_shift };
+
+	const auto &m_gc = rg.gc;
+	const auto &m_tm = rg.tm;
+
+	bool scan_lr = !es_r2l;
 
 	// TODO: Is this correct?
 	xe = scan_lr ? xe + 1 : xe - 1;
@@ -3097,13 +3247,35 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		else
 		{
 			xs -= 1;
-			r -= m_es.ddx_r;
-			g -= m_es.ddx_g;
-			b -= m_es.ddx_b;
-			a -= m_es.ddx_a;
-			uw -= m_es.ddx_uw;
-			vw -= m_es.ddx_vw;
-			w -= m_es.ddx_w;
+			r -= es_ddx_r;
+			g -= es_ddx_g;
+			b -= es_ddx_b;
+			a -= es_ddx_a;
+			uw -= es_ddx_uw;
+			vw -= es_ddx_vw;
+			w -= es_ddx_w;
+		}
+	}
+	else if (m_ss_shift)
+	{
+		// The right end of a span is inclusive, so its native pixel is covered
+		// by every sample up to the last one of its block
+		const uint32_t mask = (1U << m_ss_shift) - 1;
+		if (scan_lr)
+		{
+			xe = ((xe - 1) | mask) + 1;
+		}
+		else
+		{
+			const uint32_t extra = (xs | mask) - xs;
+			xs += extra;
+			r += es_ddx_r * extra;
+			g += es_ddx_g * extra;
+			b += es_ddx_b * extra;
+			a += es_ddx_a * extra;
+			uw += es_ddx_uw * extra;
+			vw += es_ddx_vw * extra;
+			w += es_ddx_w * extra;
 		}
 	}
 
@@ -3111,6 +3283,25 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 	{
 		g_debug = true;
 	}
+
+	// A span whose end lies before its start has no pixels
+	if (scan_lr ? (int32_t(xe - xs) < 0) : (int32_t(xs - xe) < 0))
+		return;
+
+	// ps is owned by the caller (one instance per render job batch, e.g.
+	// per band when running on a worker thread) and accumulates
+	// status_bits/stats across every pixel this call and any other queued
+	// jobs in the same batch touch - destination_blend() (and the
+	// functions it calls) fully overwrite the per-pixel fields (x, y, w,
+	// ti, ssb, ...) at the top of every call, so reusing one instance
+	// across many pixels/jobs is safe.
+	bool memo_valid = false;
+	uint32_t memo_uw = 0, memo_vw = 0, memo_w = 0;
+	uint32_t memo_u = 0, memo_v = 0, memo_lod = 0;
+	uint32_t memo_rt = 0, memo_gt = 0, memo_bt = 0, memo_at = 0, memo_ssbt = 0;
+#if TEST_TIMING
+	uint32_t memo_reads = 0;
+#endif
 
 	while (xs != xe)
 	{
@@ -3140,13 +3331,73 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		{
 			uint32_t u, v;
 
-			// UV and W
-			texcoord_gen(wrange, uw, vw, w, u, v, w16);
+			// UV and W.  Every sample of a native pixel textures at the native
+			// pixel's own position, as the hardware does, so texels are never
+			// filtered between positions the hardware does not sample
+			uint32_t uw_t = uw;
+			uint32_t vw_t = vw;
+			uint32_t w_t = w;
+			if (m_ss_shift)
+			{
+				const uint32_t mask = (1U << m_ss_shift) - 1;
+				const uint32_t fx = sx & mask;
+				const uint32_t fy = sy & mask;
+				uw_t = std::clamp<int32_t>(int32_t(uw - fx * es_ddx_uw - fy * ps.ddy_uw), 0, 0x007fffff);
+				vw_t = std::clamp<int32_t>(int32_t(vw - fx * es_ddx_vw - fy * ps.ddy_vw), 0, 0x007fffff);
+				w_t = std::clamp<int32_t>(int32_t(w - fx * es_ddx_w - fy * ps.ddy_w), 0, 0x007fffff);
+			}
 
-			// TODO: FIXME
-			uint32_t lod = lod_calc(u, v, u, v);
+			// The samples of a native pixel share their texture coordinates, so
+			// the last lookup is reused when they repeat
+			uint32_t lod;
+			const bool same_input = memo_valid && uw_t == memo_uw && vw_t == memo_vw && w_t == memo_w;
+			if (same_input)
+			{
+				u = memo_u;
+				v = memo_v;
+				lod = memo_lod;
+			}
+			else
+			{
+				texcoord_gen(ps, rg, wrange, uw_t, vw_t, w_t, u, v, w16);
 
-			get_texture_color(u, v, lod, rt, gt, bt, at, ssbt);
+				// TODO: FIXME
+				lod = lod_calc(u, v, u, v);
+			}
+
+			if (same_input || (memo_valid && u == memo_u && v == memo_v && lod == memo_lod))
+			{
+				rt = memo_rt;
+				gt = memo_gt;
+				bt = memo_bt;
+				at = memo_at;
+				ssbt = memo_ssbt;
+#if TEST_TIMING
+				ps.stats[STAT_TEXEL_READS] += memo_reads;
+#endif
+			}
+			else
+			{
+#if TEST_TIMING
+				const uint32_t reads_before = ps.stats[STAT_TEXEL_READS];
+#endif
+				get_texture_color(ps, rg, u, v, lod, rt, gt, bt, at, ssbt);
+#if TEST_TIMING
+				memo_reads = ps.stats[STAT_TEXEL_READS] - reads_before;
+#endif
+				memo_valid = true;
+				memo_uw = uw_t;
+				memo_vw = vw_t;
+				memo_w = w_t;
+				memo_u = u;
+				memo_v = v;
+				memo_lod = lod;
+				memo_rt = rt;
+				memo_gt = gt;
+				memo_bt = bt;
+				memo_at = at;
+				memo_ssbt = ssbt;
+			}
 		}
 		else
 		{
@@ -3177,7 +3428,7 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		uint32_t ssbo = ssbt;
 
 		// Blend iterated RGB with texel
-		texture_blend(ri, gi, bi, ai,
+		texture_blend(ps, rg, ri, gi, bi, ai,
 					  rt, gt, bt, at, ssbt,
 					  ro, go, bo, ao, ssbo);
 
@@ -3193,30 +3444,30 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		texout.b = bo;
 		texout.a = ao;
 
-		destination_blend(sx, sy, w16, texout, ssbo);
+		destination_blend(ps, rg, sx, sy, w16, texout, ssbo);
 
 		// Update interpolated paramters
 		if (scan_lr)
 		{
 			xs += 1;
-			r += m_es.ddx_r;
-			g += m_es.ddx_g;
-			b += m_es.ddx_b;
-			a += m_es.ddx_a;
-			uw += m_es.ddx_uw;
-			vw += m_es.ddx_vw;
-			w += m_es.ddx_w;
+			r += es_ddx_r;
+			g += es_ddx_g;
+			b += es_ddx_b;
+			a += es_ddx_a;
+			uw += es_ddx_uw;
+			vw += es_ddx_vw;
+			w += es_ddx_w;
 		}
 		else
 		{
 			xs -= 1;
-			r -= m_es.ddx_r;
-			g -= m_es.ddx_g;
-			b -= m_es.ddx_b;
-			a -= m_es.ddx_a;
-			uw -= m_es.ddx_uw;
-			vw -= m_es.ddx_vw;
-			w -= m_es.ddx_w;
+			r -= es_ddx_r;
+			g -= es_ddx_g;
+			b -= es_ddx_b;
+			a -= es_ddx_a;
+			uw -= es_ddx_uw;
+			vw -= es_ddx_vw;
+			w -= es_ddx_w;
 		}
 
 		// Clamp to 11.8
@@ -3233,8 +3484,534 @@ void m2_te_device::walk_span(uint32_t wrange, bool omit_right,
 		w = std::clamp<int32_t>(w, 0, 0x007fffff);
 
 #if TEST_TIMING
-		g_statistics[STAT_PIXELS_PROCESSED]++;
+		ps.stats[STAT_PIXELS_PROCESSED]++;
 #endif
+	}
+}
+
+
+//-------------------------------------------------
+//  queue_span_job - capture one scanline's worth of
+//  walk_span() arguments instead of rendering it
+//  immediately, so it can be rendered on a worker
+//  thread later. Bucketed by row so every row is
+//  always handled by the same band (see span_job).
+//-------------------------------------------------
+
+void m2_te_device::queue_span_job(uint32_t wrange, bool omit_right, uint32_t y, uint32_t xs, uint32_t xe, int32_t r, int32_t g, int32_t b, int32_t a, uint32_t uw, uint32_t vw, uint32_t w)
+{
+	span_job job;
+	job.wrange = wrange;
+	job.omit_right = omit_right;
+	job.y = y;
+	job.xs = xs;
+	job.xe = xe;
+	job.r = r;
+	job.g = g;
+	job.b = b;
+	job.a = a;
+	job.uw = uw;
+	job.vw = vw;
+	job.w = w;
+
+	// Capture this triangle's edge-state deltas now, not at render time -
+	// see span_job's comment for why.
+	job.r2l = m_es.r2l;
+	job.ddx_r = m_es.ddx_r;
+	job.ddx_g = m_es.ddx_g;
+	job.ddx_b = m_es.ddx_b;
+	job.ddx_a = m_es.ddx_a;
+	job.ddy_uw = m_ss_ddy_uw;
+	job.ddy_vw = m_ss_ddy_vw;
+	job.ddy_w = m_ss_ddy_w;
+	job.ddx_uw = m_es.ddx_uw;
+	job.ddx_vw = m_es.ddx_vw;
+	job.ddx_w = m_es.ddx_w;
+
+	// Lazily (re)snapshot the render-relevant config the first time it's
+	// needed after a register write - see render_snapshot/m_snapshot_dirty.
+	// Reused for every subsequent job until the next write() sets the dirty
+	// flag again, so this is a cheap ~17KB copy per config change, not per
+	// job/scanline.
+	if (m_snapshot_dirty || m_tex_dirty)
+	{
+		if (m_tex_dirty)
+		{
+			auto tex = std::make_shared_for_overwrite<texture_snapshot>();
+			memcpy(tex->pipram.data(), m_pipram.get(), PIP_RAM_WORDS * sizeof(uint32_t));
+			memcpy(tex->tram.data(), m_tram.get(), TEXTURE_RAM_WORDS * sizeof(uint32_t));
+			m_cur_tex = std::move(tex);
+			m_tex_dirty = false;
+		}
+
+		auto snap = std::make_shared_for_overwrite<render_snapshot>();
+		snap->gc = m_gc;
+		snap->es = m_es;
+		snap->tm = m_tm;
+		snap->db = m_db;
+		snap->tex = m_cur_tex;
+		if (m_ss_shift)
+			ss_resolve(*snap);
+		m_cur_snapshot = std::move(snap);
+		m_snapshot_dirty = false;
+	}
+	job.snapshot = m_cur_snapshot;
+
+	m_span_jobs[y % NUM_RENDER_BANDS].push_back(std::move(job));
+
+	if (++m_staged_jobs >= PUBLISH_JOB_COUNT)
+		publish_span_jobs();
+}
+
+
+//-------------------------------------------------
+//  render_band - osd_work_item callback: render
+//  every job published for one band, on whichever
+//  worker thread this item is scheduled on. The
+//  item keeps taking published batches until the
+//  band has none left, so jobs within a band always
+//  run in their original submission order on a
+//  single thread, and different bands never touch
+//  the same framebuffer row, so this needs no
+//  locking against other concurrently-running bands.
+//-------------------------------------------------
+
+void *m2_te_device::render_band(void *param, int threadid)
+{
+	band_state &bs = *static_cast<band_state *>(param);
+
+	for (;;)
+	{
+		{
+			std::lock_guard<std::mutex> guard(bs.lock);
+			if (bs.pending.empty())
+			{
+				bs.scheduled = false;
+				return nullptr;
+			}
+			bs.work.clear();
+			std::swap(bs.work, bs.pending);
+		}
+
+		for (const span_job &job : bs.work)
+		{
+			// Jobs in this list may have been queued under different config
+			// generations - each job renders against the snapshot that was
+			// current when it was queued, not whatever the live device
+			// members hold now.
+			bs.ps.cfg = job.snapshot.get();
+			bs.ps.ddy_uw = job.ddy_uw;
+			bs.ps.ddy_vw = job.ddy_vw;
+			bs.ps.ddy_w = job.ddy_w;
+
+			bs.dev->walk_span(bs.ps, job.wrange, job.omit_right, job.y, job.xs, job.xe,
+				job.r, job.g, job.b, job.a, job.uw, job.vw, job.w,
+				job.r2l, job.ddx_r, job.ddx_g, job.ddx_b, job.ddx_a, job.ddx_uw, job.ddx_vw, job.ddx_w);
+		}
+	}
+}
+
+
+//-------------------------------------------------
+//  publish_span_jobs - hand the staged jobs of
+//  every band to the workers and start a render
+//  item for each band that is not already being
+//  drained. Rendering then proceeds while the
+//  emulation thread carries on with triangle setup;
+//  flush_span_jobs() waits for it at the points
+//  where the CPU needs the finished picture.
+//-------------------------------------------------
+
+void m2_te_device::publish_span_jobs()
+{
+	m_staged_jobs = 0;
+
+	for (int band = 0; band < NUM_RENDER_BANDS; band++)
+	{
+		std::vector<span_job> &staged = m_span_jobs[band];
+		if (staged.empty())
+			continue;
+
+		band_state &bs = m_bands[band];
+		bool start;
+		{
+			std::lock_guard<std::mutex> guard(bs.lock);
+			if (bs.pending.empty())
+				std::swap(bs.pending, staged);
+			else
+				std::move(staged.begin(), staged.end(), std::back_inserter(bs.pending));
+			start = !bs.scheduled;
+			bs.scheduled = true;
+		}
+		staged.clear();
+
+		if (start)
+			osd_work_item_queue(m_render_queue[band % NUM_RENDER_QUEUES], render_band, &bs, WORK_ITEM_FLAG_AUTO_RELEASE);
+	}
+}
+
+
+//-------------------------------------------------
+//  flush_span_jobs - publish whatever is still
+//  staged, wait for the workers to finish every
+//  band, and merge their locally-accumulated
+//  status/statistics into the real device state.
+//  Register writes do not need this mid-list (each
+//  queued job carries its own config snapshot - see
+//  render_snapshot/queue_span_job()), so it is only
+//  called at genuine synchronization points: list
+//  end and the safety net at the end of execute(),
+//  where the CPU actually needs rendering to be
+//  complete (e.g. it may read the framebuffer right
+//  after).
+//-------------------------------------------------
+
+void m2_te_device::flush_span_jobs()
+{
+	publish_span_jobs();
+
+	bool done = true;
+	for (auto *queue : m_render_queue)
+		done = osd_work_queue_wait(queue, osd_ticks_per_second() * 100) && done;
+	if (!done)
+	{
+		// Real timeout (100s) - a worker thread may still be writing its
+		// band's pixel_scratch/framebuffer rows. Don't touch the band state
+		// or m_ram any further this call; better to drop a batch of
+		// rendering than race on it. Should never happen in practice -
+		// WORK_QUEUE_FLAG_HIGH_FREQ makes osd_work_queue_wait() spin-wait
+		// for real completion instead of relying on an event that can be
+		// missed for a queue flushed this frequently.
+		logerror("m2_te_device: render queue wait timed out\n");
+		return;
+	}
+
+	for (band_state &bs : m_bands)
+	{
+		m_db.status |= bs.ps.status_bits;
+#if TEST_TIMING
+		for (int s = 0; s < 16; s++)
+			g_statistics[s] += bs.ps.stats[s];
+#endif
+		bs.ps = pixel_scratch{};
+	}
+
+	if (m_ss_shift)
+		ss_writeback();
+}
+
+
+
+/***************************************************************************
+    SUPERSAMPLED SURFACES
+***************************************************************************/
+
+//-------------------------------------------------
+//  ss_get - find (or make) the supersampled copy of
+//  a framebuffer or Z buffer
+//-------------------------------------------------
+
+m2_te_device::ss_surface *m2_te_device::ss_get(uint32_t base, uint32_t stride, uint32_t bpp, bool is_z, uint32_t width, uint32_t height, bool create)
+{
+	const uint32_t max_native = 2048U >> m_ss_shift;
+
+	// The refresh compares whole eight-byte blocks, so rows must not share them
+	if (stride == 0 || ((stride * bpp) & 7) || (base & 7))
+		return nullptr;
+
+	for (auto &sp : m_ss_surfaces)
+	{
+		ss_surface &s = *sp;
+		if (s.base == base && s.stride == stride && s.bpp == bpp && s.is_z == is_z)
+		{
+			width = std::min(std::max(width, s.width), std::min(stride, max_native));
+			height = std::min(std::max(height, s.height), max_native);
+
+			if (width > s.width || height > s.height)
+			{
+				// Workers may be drawing into the old arrays
+				flush_span_jobs();
+				s.valid = false;
+				s.width = width;
+				s.height = height;
+			}
+			return &s;
+		}
+	}
+
+	if (!create)
+		return nullptr;
+
+	width = std::min(width, std::min(stride, max_native));
+	height = std::min(height, max_native);
+	if (width == 0 || height == 0)
+		return nullptr;
+
+	const uint64_t last = uint64_t(base) + (uint64_t(height - 1) * stride + width) * bpp;
+	if (base < m_bda->ram_start() || last > uint64_t(m_bda->ram_end()) + 1)
+		return nullptr;
+
+	// Make room by dropping a surface that no snapshot of this list uses
+	if (m_ss_surfaces.size() >= 32)
+	{
+		auto it = std::find_if(m_ss_surfaces.begin(), m_ss_surfaces.end(), [this] (const auto &p) { return p->gen != m_list_gen; });
+		if (it == m_ss_surfaces.end())
+			return nullptr;
+		flush_span_jobs();
+		m_ss_surfaces.erase(it);
+	}
+
+	auto s = std::make_unique<ss_surface>();
+	s->base = base;
+	s->stride = stride;
+	s->bpp = bpp;
+	s->is_z = is_z;
+	s->width = width;
+	s->height = height;
+	m_ss_surfaces.push_back(std::move(s));
+	return m_ss_surfaces.back().get();
+}
+
+
+//-------------------------------------------------
+//  ss_acquire - bring a surface up to date with RAM
+//  before a list draws to it: rows the CPU (or the
+//  previous write-back) left different are
+//  replicated into the samples
+//-------------------------------------------------
+
+void m2_te_device::ss_acquire(ss_surface &s)
+{
+	const uint32_t sh = m_ss_shift;
+	const uint32_t ss = 1U << sh;
+
+	if (!s.valid)
+	{
+		s.pitch = s.width * ss;
+		s.rows = s.height * ss;
+		s.row_slot = s.width * s.bpp + 16;
+		s.data = std::make_unique<uint32_t []>(size_t(s.pitch) * s.rows);
+		s.native_copy = std::make_unique<uint8_t []>(size_t(s.row_slot) * s.height);
+		s.dirty = std::make_unique<uint8_t []>(s.rows);
+		s.touched = false;
+	}
+
+	const uint8_t *const ram = static_cast<const uint8_t *>(m_bda->ram_ptr());
+	const uint32_t ram_off = s.base - m_bda->ram_start();
+
+	for (uint32_t ny = 0; ny < s.height; ny++)
+	{
+		// Compare whole eight-byte blocks: the RAM keeps each block's bytes in
+		// host order, so a row that is not block aligned shares blocks with
+		// its neighbours
+		const uint32_t off = ram_off + ny * s.stride * s.bpp;
+		const uint32_t lo = off & ~7U;
+		const uint32_t hi = (off + s.width * s.bpp + 7) & ~7U;
+		uint8_t *const copy = s.native_copy.get() + size_t(ny) * s.row_slot;
+
+		if (s.valid && !memcmp(copy, ram + lo, hi - lo))
+			continue;
+
+		memcpy(copy, ram + lo, hi - lo);
+
+		const uint32_t addr = s.base + ny * s.stride * s.bpp;
+		for (uint32_t nx = 0; nx < s.width; nx++)
+		{
+			const uint32_t v = (s.bpp == 4) ? m_bda->read_bus32(addr + nx * 4) : m_bda->read_bus16(addr + nx * 2);
+			for (uint32_t j = 0; j < ss; j++)
+			{
+				uint32_t *const dst = s.data.get() + size_t(ny * ss + j) * s.pitch + nx * ss;
+				for (uint32_t i = 0; i < ss; i++)
+					dst[i] = v;
+			}
+		}
+	}
+
+	s.valid = true;
+	s.gen = m_list_gen;
+}
+
+
+//-------------------------------------------------
+//  ss_resolve - pick the supersampled surfaces the
+//  snapshot's draws use, refreshing each from RAM
+//  the first time a list uses it
+//-------------------------------------------------
+
+void m2_te_device::ss_resolve(render_snapshot &snap)
+{
+	const auto &db = snap.db;
+
+	snap.dst_surf = nullptr;
+	snap.z_surf = nullptr;
+	snap.src_surf = nullptr;
+
+	// Destination colour
+	{
+		const uint32_t xclip = (db.fbclip & DBFBCLIP_XFBCLIP_MASK) >> DBFBCLIP_XFBCLIP_SHIFT;
+		const uint32_t yclip = (db.fbclip & DBFBCLIP_YFBCLIP_MASK) >> DBFBCLIP_YFBCLIP_SHIFT;
+		const uint32_t bpp = (db.dst_ctrl & DBDESTCNTL_32BPP) ? 4 : 2;
+		snap.dst_surf = ss_get(db.dst_baseaddr, db.dst_xstride, bpp, false, xclip, yclip, true);
+	}
+
+	// Z buffer
+	if (!(snap.gc.te_master_mode & TEMASTER_MODE_DZBUF) && (db.usergen_ctrl & DBUSERGENCTL_ZBUFEN))
+	{
+		const uint32_t xclip = (db.z_clip & DBZCLIP_XCLIP_MASK) >> DBZCLIP_XCLIP_SHIFT;
+		const uint32_t yclip = (db.z_clip & DBZCLIP_YCLIP_MASK) >> DBZCLIP_YCLIP_SHIFT;
+		snap.z_surf = ss_get(db.z_baseaddr, db.dst_xstride, 2, true, xclip, yclip, true);
+	}
+
+	// Source colour: only a buffer that is already supersampled
+	if ((db.usergen_ctrl & DBUSERGENCTL_SRCINEN) && (db.usergen_ctrl & DBUSERGENCTL_BLENDEN))
+	{
+		const uint32_t bpp = (db.src_ctrl & DBSRCCNTL_32BPP) ? 4 : 2;
+		snap.src_surf = ss_get(db.src_baseaddr, db.src_xstride, bpp, false, 0, 0, false);
+	}
+
+	for (ss_surface *s : { snap.dst_surf, snap.z_surf, snap.src_surf })
+		if (s && (!s->valid || s->gen != m_list_gen))
+			ss_acquire(*s);
+}
+
+
+//-------------------------------------------------
+//  ss_writeback - average the samples that drawing
+//  changed back down into RAM. Runs at list end,
+//  when the workers are idle, so the rows of each
+//  surface are split across them.
+//-------------------------------------------------
+
+void m2_te_device::ss_writeback()
+{
+	const uint32_t ss = 1U << m_ss_shift;
+
+	for (auto &sp : m_ss_surfaces)
+	{
+		ss_surface &s = *sp;
+		if (!s.valid)
+			continue;
+
+		// Rows of one surface never share eight-byte RAM blocks (see ss_get()),
+		// so chunks can run in parallel; surfaces go one at a time in case two
+		// of them overlap in RAM.
+		uint32_t dirty_rows = 0;
+		for (uint32_t ny = 0; ny < s.height; ny++)
+			for (uint32_t j = 0; j < ss; j++)
+				if (s.dirty[ny * ss + j])
+				{
+					dirty_rows++;
+					break;
+				}
+		if (dirty_rows == 0)
+			continue;
+		if (dirty_rows < SS_WRITEBACK_MIN_ROWS)
+		{
+			ss_writeback_rows(s, 0, s.height);
+			continue;
+		}
+
+		const uint32_t chunk = std::max<uint32_t>((s.height + SS_WRITEBACK_CHUNKS - 1) / SS_WRITEBACK_CHUNKS, 1);
+		uint32_t items = 0;
+		for (uint32_t y = 0; y < s.height && items < SS_WRITEBACK_CHUNKS; y += chunk)
+			m_wb_items[items++] = ss_writeback_item{ this, &s, y, std::min(y + chunk, s.height) };
+		for (uint32_t i = 0; i < items; i++)
+			osd_work_item_queue(m_render_queue[i % NUM_RENDER_QUEUES], ss_writeback_work, &m_wb_items[i], WORK_ITEM_FLAG_AUTO_RELEASE);
+
+		bool done = true;
+		for (auto *queue : m_render_queue)
+			done = osd_work_queue_wait(queue, osd_ticks_per_second() * 100) && done;
+		if (!done)
+			logerror("m2_te_device: write-back queue wait timed out\n");
+	}
+}
+
+
+void *m2_te_device::ss_writeback_work(void *param, int threadid)
+{
+	const ss_writeback_item &item = *static_cast<const ss_writeback_item *>(param);
+	item.dev->ss_writeback_rows(*item.surf, item.row_begin, item.row_end);
+	return nullptr;
+}
+
+
+//-------------------------------------------------
+//  ss_writeback_rows - average one surface's
+//  changed native rows [row_begin, row_end)
+//  into RAM
+//-------------------------------------------------
+
+void m2_te_device::ss_writeback_rows(ss_surface &s, uint32_t row_begin, uint32_t row_end)
+{
+	const uint32_t sh = m_ss_shift;
+	const uint32_t ss = 1U << sh;
+	const uint32_t count = ss * ss;
+	uint8_t *const ram = static_cast<uint8_t *>(m_bda->ram_ptr());
+
+	for (uint32_t ny = row_begin; ny < row_end; ny++)
+	{
+		bool any = false;
+		for (uint32_t j = 0; j < ss; j++)
+			any |= s.dirty[ny * ss + j] != 0;
+		if (!any)
+			continue;
+		for (uint32_t j = 0; j < ss; j++)
+			s.dirty[ny * ss + j] = 0;
+
+		const uint32_t addr = s.base + ny * s.stride * s.bpp;
+		for (uint32_t nx = 0; nx < s.width; nx++)
+		{
+			const uint32_t *const first = s.data.get() + size_t(ny * ss) * s.pitch + nx * ss;
+			uint32_t out;
+
+			if (s.is_z)
+			{
+				// Depth is not averaged: keep the first sample
+				out = first[0];
+			}
+			else if (s.bpp == 4)
+			{
+				uint32_t sa = 0, sr = 0, sg = 0, sb = 0, sd = 0;
+				for (uint32_t j = 0; j < ss; j++)
+					for (uint32_t i = 0; i < ss; i++)
+					{
+						const uint32_t p = first[j * s.pitch + i];
+						sd += (p >> 31) & 1;
+						sa += (p >> 24) & 0x7f;
+						sr += (p >> 16) & 0xff;
+						sg += (p >> 8) & 0xff;
+						sb += p & 0xff;
+					}
+				out = ((sd * 2 >= count) ? 0x80000000U : 0) | (((sa + count / 2) / count) << 24) |
+						(((sr + count / 2) / count) << 16) | (((sg + count / 2) / count) << 8) | ((sb + count / 2) / count);
+			}
+			else
+			{
+				uint32_t sr = 0, sg = 0, sb = 0, sd = 0;
+				for (uint32_t j = 0; j < ss; j++)
+					for (uint32_t i = 0; i < ss; i++)
+					{
+						const uint32_t p = first[j * s.pitch + i];
+						sd += (p >> 15) & 1;
+						sr += (p >> 10) & 0x1f;
+						sg += (p >> 5) & 0x1f;
+						sb += p & 0x1f;
+					}
+				out = ((sd * 2 >= count) ? 0x8000U : 0) | (((sr + count / 2) / count) << 10) |
+						(((sg + count / 2) / count) << 5) | ((sb + count / 2) / count);
+			}
+
+			if (s.bpp == 4)
+				m_bda->write_bus32(addr + nx * 4, out);
+			else
+				m_bda->write_bus16(addr + nx * 2, out);
+		}
+
+		// Remember what was written so the next refresh only sees other writers
+		const uint32_t off = (s.base - m_bda->ram_start()) + ny * s.stride * s.bpp;
+		const uint32_t lo = off & ~7U;
+		const uint32_t hi = (off + s.width * s.bpp + 7) & ~7U;
+		memcpy(s.native_copy.get() + size_t(ny) * s.row_slot, ram + lo, hi - lo);
 	}
 }
 
@@ -3287,6 +4064,12 @@ void m2_te_device::illegal_inst()
 
 void m2_te_device::execute()
 {
+	m_list_gen++;
+	m_snapshot_dirty = true;
+	// The CPU can write texture RAM and PIP RAM directly through its address
+	// map, so take a fresh copy for the snapshots of this list.
+	m_tex_dirty = true;
+
 #if TEST_TIMING
 	memset(g_statistics, 0, sizeof(g_statistics));
 #endif
@@ -3299,6 +4082,20 @@ void m2_te_device::execute()
 		{
 			case INST_WRITE_REG:
 			{
+				// WRITE_REG can mutate texture/blend/destination config
+				// (including reloading texture RAM via load_texture()) that
+				// span jobs still sitting in the queue were rendered
+				// against - but write() now marks the current snapshot
+				// stale instead of requiring a synchronous flush+wait here,
+				// and every queued job carries a shared_ptr to whichever
+				// snapshot was current when it was queued (see
+				// render_snapshot/queue_span_job()/render_band()), so it's
+				// safe to apply the write immediately without blocking on
+				// in-flight worker-thread rendering. Jobs now accumulate
+				// across possibly many register writes and are only
+				// actually dispatched+waited-for at the real synchronization
+				// points below (list end / safety net at execute()'s end).
+
 				uint32_t offs = inst & 0xffff;
 				int32_t cnt = (inst >> 16) & 0xff;
 
@@ -3397,6 +4194,11 @@ void m2_te_device::execute()
 		if (m_gc.irp == m_gc.iwp)
 		{
 			m_state = m_gc.te_master_mode & TEICNTL_STPL ? TE_STOPPED : TE_PAUSED;
+
+			// The CPU may react to this interrupt by immediately reading
+			// the framebuffer (or chaining straight into the next list) -
+			// make sure every queued job has actually been rendered first.
+			flush_span_jobs();
 			set_interrupt(INTSTAT_LIST_END);
 		}
 		else if (m_gc.te_master_mode & (TEICNTL_STPI | TEICNTL_STEP))
@@ -3404,6 +4206,12 @@ void m2_te_device::execute()
 			m_state = TE_STOPPED;
 		}
 	};
+
+	// Safety net for any loop-exit path that didn't already flush above
+	// (e.g. TEICNTL_STPI/STEP) - execute() must never return with jobs
+	// still queued, and g_statistics below must reflect every job this
+	// call issued.
+	flush_span_jobs();
 
 #if TEST_TIMING
 /*
@@ -3420,14 +4228,17 @@ void m2_te_device::execute()
     Bend - 66 M pix
 */
 
+	// Supersampling draws several samples per native pixel; the modelled
+	// hardware time counts native pixels
+	const uint32_t px_shift = m_ss_shift * 2;
 	uint32_t total_cycles = (g_statistics[STAT_TRIANGLES_PROCESSED] * 100) +
-							(g_statistics[STAT_TEXEL_READS]) +
+							(g_statistics[STAT_TEXEL_READS] >> px_shift) +
 //                          (g_statistics[STAT_PIXELS_PROCESSED]) +
-							(g_statistics[STAT_PIXEL_LOADS]) +
-							(g_statistics[STAT_PIXEL_STORES]) +
+							(g_statistics[STAT_PIXEL_LOADS] >> px_shift) +
+							(g_statistics[STAT_PIXEL_STORES] >> px_shift) +
 							(g_statistics[STAT_TEXEL_BYTES]/4) +
-							(g_statistics[STAT_ZBUFFER_LOADS]) +
-							(g_statistics[STAT_ZBUFFER_STORES]);
+							(g_statistics[STAT_ZBUFFER_LOADS] >> px_shift) +
+							(g_statistics[STAT_ZBUFFER_STORES] >> px_shift);
 #if 0
 	logerror(">>> END OF LIST <<<\n");
 	logerror("Triangles: %u\n", g_statistics[STAT_TRIANGLES_PROCESSED]);
@@ -3574,6 +4385,8 @@ uint32_t m2_te_device::readbits_from_ram(uint32_t & src_addr, uint32_t & bit_off
 
 void m2_te_device::load_texture()
 {
+	m_tex_dirty = true;
+
 	switch (m_tm.texld_cntl & TXTLDCNTL_LDMODE_MASK)
 	{
 		case TXTLDCNTL_LDMODE_TEXLOAD:
@@ -3792,8 +4605,34 @@ void m2_te_device::load_texture()
 				// TRAM destination must be 32-bit aligned
 				assert((dstaddr & 3) == 0);
 
+				// RAM is a big-endian 64-bit bus (read_bus8() reads byte
+				// offset ^ 7 on a little-endian host), so an aligned run of 8
+				// source bytes in address order is one native 64-bit RAM word
+				// read big-endian.  Copy those a word at a time; the byte loop
+				// below still handles unaligned heads/tails and anything that
+				// would run off the end of RAM or TRAM.
+				const uint8_t *const ram = static_cast<const uint8_t *>(m_bda->ram_ptr());
+				const uint32_t ram_mask = m_bda->ram_end() - m_bda->ram_start();
+				uint8_t *const tram = reinterpret_cast<uint8_t *>(&m_tram[0]);
+
 				while (bytes > 0)
 				{
+					const uint32_t offs = srcaddr & ram_mask;
+					if (bytes >= 8 && !(offs & 7) && (offs + 7) <= ram_mask && (dstaddr + 8) <= TEXTURE_RAM_WORDS * 4)
+					{
+						uint64_t data;
+						memcpy(&data, ram + offs, sizeof(data));
+						put_u64be(tram + dstaddr, data);
+						dstaddr += 8;
+						srcaddr += 8;
+						bytes -= 8;
+
+#if TEST_TIMING
+						g_statistics[STAT_TEXEL_BYTES] += 8;
+#endif
+						continue;
+					}
+
 #if 0
 					uint32_t data = m_bda->read_bus32(srcaddr);
 					write_tram32(dstaddr, data);
