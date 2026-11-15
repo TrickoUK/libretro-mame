@@ -2348,11 +2348,24 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		record_clear(target.clear_color, clear_color, clear_depth);
 	record_barrier();
 
+	// Copies into different textures need no ordering between them: each texture has its own image and memory, so their
+	// writes never overlap. A copy into a texture that an earlier copy of this group wrote waits for it (the regions may
+	// overlap), and the group as a whole is ordered before the commands by the barrier after it.
+	int group = 0;
 	for (int i = 0; i < frame.update_count; i++)
 	{
+		bool written = false;
+		for (int j = group; j < i && !written; j++)
+			written = frame.updates[j].texture == frame.updates[i].texture;
+		if (written)
+		{
+			record_barrier();
+			group = i;
+		}
 		record_update(frame.updates[i], update_at[i], m_staging);
-		record_barrier();
 	}
+	if (frame.update_count > 0)
+		record_barrier();
 	for (int i = 0; i < frame.command_count; i++)
 	{
 		const osd::gpu_command &c = frame.commands[i];
