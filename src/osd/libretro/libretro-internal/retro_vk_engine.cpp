@@ -412,9 +412,11 @@ bool retro_vk_engine::note_result(bool ok, int &streak, const char *what)
 	return false;
 }
 
+// zero for a handle that names no texture (the profile counts the updates of a refused frame too)
 int retro_vk_engine::texel_bytes(osd::gpu_handle texture) const
 {
-	return get_format_info(m_textures.find(texture)->second.desc.format).bytes;
+	const auto it = m_textures.find(texture);
+	return (it != m_textures.end()) ? get_format_info(it->second.desc.format).bytes : 0;
 }
 
 
