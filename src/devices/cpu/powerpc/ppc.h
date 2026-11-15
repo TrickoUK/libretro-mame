@@ -673,19 +673,30 @@ protected:
 	bool invalidate_code_range(offs_t start, offs_t end);
 	void note_physical_code(const opcode_desc *desclist);
 
-	// 603-family instruction cache flash invalidate (HID0[ICFI]): code can be
-	// replaced by writers the DRC never sees (DMA, another CPU), and software
-	// then invalidates the whole icache instead of issuing icbi.  Keep a copy of
-	// every compiled code page so an ICFI only discards pages whose bytes
-	// actually changed, rather than flushing the entire cache each time.
+	// Instruction cache flash invalidate (HID0[ICFI], every OEA part except the
+	// 601): code can be replaced by writers the DRC never sees (DMA, another
+	// CPU), and software then invalidates the whole icache instead of issuing
+	// icbi.  Keep a copy of every writable page code was compiled from (pages
+	// that can't be written can't change), so an ICFI only discards code from
+	// pages whose bytes changed, rather than flushing the entire cache each time.
+	// If a page's memory no longer matches its snapshot when more code is
+	// compiled from it, the page holds blocks from two versions of its bytes, so
+	// the snapshot is marked dirty and the next ICFI discards the page regardless.
+	// Snapshots stay across TLB and icbi invalidations, which can leave blocks
+	// entered from a neighbouring page that still hold code from the page; only
+	// an ICFI that discards the page or a full cache flush removes them.
 	struct code_page_snapshot
 	{
-		uint32_t physbase;
-		bool raw;                           // words hold the page's host memory bytes, not fetched values
-		std::unique_ptr<uint32_t []> words;
+		offs_t physbase;
+		bool dirty;                         // code was compiled from bytes that differ from these
+		std::unique_ptr<uint8_t []> bytes;  // the page's host memory contents
 	};
 	std::unordered_map<uint32_t, code_page_snapshot> m_code_snapshots;    // keyed by effective page number
-	void snapshot_code_page(uint32_t page, uint32_t physbase);
+	bool has_icache_flash_invalidate() const;
+	const uint8_t *code_page_memory(offs_t physbase) const;
+	bool code_snapshot_matches(const code_page_snapshot &snap) const;
+	void snapshot_code_page(uint32_t page, offs_t physbase);
+	void snapshot_sequence_pages(const opcode_desc *first, const opcode_desc *last);
 	bool icache_flash_invalidate();
 
 	// reservation granularity

@@ -46,6 +46,8 @@ static constexpr uint64_t DOUBLE_ZERO = 0;
 
 static constexpr uint32_t CODEPAGE_SIZE = 0x1'0000'0000ULL / 4096 / 8;
 
+static constexpr uint32_t SPR60X_HID0_ICFI          = 0x0000'0800;
+
 /***************************************************************************
     PRIVATE GLOBAL VARIABLES
 ***************************************************************************/
@@ -1773,7 +1775,6 @@ bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 		if (BIT(m_codepage_bits[page >> 3], page & 7))
 		{
 			m_drcuml.hash_invalidate_range(page << 12, (page << 12) | 0xfff);
-			m_code_snapshots.erase(page);
 			invalidated = true;
 		}
 		page++;
@@ -1783,33 +1784,108 @@ bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 
 
 /*-------------------------------------------------
+    has_icache_flash_invalidate - true if HID0
+    has the ICFI bit, which is the case on every
+    OEA part except the 601
+-------------------------------------------------*/
+
+bool ppc_device::has_icache_flash_invalidate() const
+{
+	return (m_cap & PPCCAP_OEA) && (m_flavor != PPC_MODEL_601);
+}
+
+
+/*-------------------------------------------------
+    code_page_memory - host memory backing a whole
+    writable physical code page, or nullptr if the
+    page is read-only, handler-backed or not one
+    contiguous block of host memory
+-------------------------------------------------*/
+
+const uint8_t *ppc_device::code_page_memory(offs_t physbase) const
+{
+	if (!m_program->get_write_ptr(physbase))
+		return nullptr;
+
+	// The pointers address the bus-width unit holding the address, so compare
+	// against the start of the page's last 64-bit unit.
+	auto const *const base = static_cast<const uint8_t *>(m_program->get_read_ptr(physbase));
+	if (!base || (static_cast<const uint8_t *>(m_program->get_read_ptr(physbase | 0xff8)) != (base + 0xff8)))
+		return nullptr;
+	return base;
+}
+
+
+/*-------------------------------------------------
+    code_snapshot_matches - true if a code page
+    snapshot still holds what its physical page
+    contains
+-------------------------------------------------*/
+
+bool ppc_device::code_snapshot_matches(const code_page_snapshot &snap) const
+{
+	const uint8_t *const mem = code_page_memory(snap.physbase);
+	return mem && !memcmp(snap.bytes.get(), mem, 0x1000);
+}
+
+
+/*-------------------------------------------------
     snapshot_code_page - remember the contents of
-    a page the DRC has just compiled code from
+    a writable page the DRC is compiling code from
     (see icache_flash_invalidate)
 -------------------------------------------------*/
 
-void ppc_device::snapshot_code_page(uint32_t page, uint32_t physbase)
+void ppc_device::snapshot_code_page(uint32_t page, offs_t physbase)
 {
-	auto const [it, inserted] = m_code_snapshots.try_emplace(page);
-	if (!inserted && it->second.physbase == physbase)
+	// Read-only and handler-backed pages can't be rewritten, so they need no
+	// snapshot (and get no checksum in the compiled code either).
+	const uint8_t *const mem = code_page_memory(physbase);
+	if (!mem)
 		return;
 
+	auto const [it, inserted] = m_code_snapshots.try_emplace(page);
 	code_page_snapshot &snap = it->second;
-	snap.physbase = physbase;
-	if (!snap.words)
-		snap.words = std::make_unique<uint32_t []>(0x1000 / 4);
-
-	// Copy the page straight out of host memory when it is plain RAM or ROM
-	// (the common case), otherwise fetch it a word at a time.
-	const void *const src = (m_cap & PPCCAP_4XX) ? m_cache32.read_ptr(physbase) : m_cache64.read_ptr(physbase);
-	snap.raw = src != nullptr;
-	if (snap.raw)
+	if (!inserted && (snap.physbase == physbase))
 	{
-		memcpy(snap.words.get(), src, 0x1000);
+		// Blocks compiled from this page earlier used the snapshot's bytes, and
+		// the code being compiled uses what memory holds now.  If the two differ,
+		// the snapshot can no longer vouch for every block compiled from the
+		// page, so the next ICFI has to discard them all.
+		if (!snap.dirty && !code_snapshot_matches(snap))
+			snap.dirty = true;
 		return;
 	}
-	for (int i = 0; i < 0x1000 / 4; i++)
-		snap.words[i] = m_pr32(physbase + i * 4);
+
+	snap.physbase = physbase;
+	snap.dirty = false;
+	if (!snap.bytes)
+		snap.bytes = std::make_unique<uint8_t []>(0x1000);
+	memcpy(snap.bytes.get(), mem, 0x1000);
+}
+
+
+/*-------------------------------------------------
+    snapshot_sequence_pages - snapshot every page
+    an instruction sequence was compiled from
+-------------------------------------------------*/
+
+void ppc_device::snapshot_sequence_pages(const opcode_desc *first, const opcode_desc *last)
+{
+	if (!has_icache_flash_invalidate())
+		return;
+
+	uint32_t lastpage = ~uint32_t(0);
+	for (const opcode_desc *desc = first; ; desc = desc->next())
+	{
+		// a descriptor that faulted has no valid physical address
+		if (!desc->compiler_page_fault() && ((desc->pc >> 12) != lastpage))
+		{
+			lastpage = desc->pc >> 12;
+			snapshot_code_page(lastpage, desc->physpc & ~offs_t(0xfff));
+		}
+		if (desc == last)
+			break;
+	}
 }
 
 
@@ -1825,26 +1901,28 @@ bool ppc_device::icache_flash_invalidate()
 	std::vector<uint32_t> changed;
 	for (auto const &[page, snap] : m_code_snapshots)
 	{
-		if (snap.raw)
-		{
-			const void *const src = (m_cap & PPCCAP_4XX) ? m_cache32.read_ptr(snap.physbase) : m_cache64.read_ptr(snap.physbase);
-			if (!src || memcmp(snap.words.get(), src, 0x1000))
-				changed.push_back(page);
-			continue;
-		}
-
-		for (int i = 0; i < 0x1000 / 4; i++)
-		{
-			if (snap.words[i] != m_pr32(snap.physbase + i * 4))
-			{
-				changed.push_back(page);
-				break;
-			}
-		}
+		if (snap.dirty || !code_snapshot_matches(snap))
+			changed.push_back(page);
 	}
 
-	for (uint32_t page : changed)
-		invalidate_code_range(page << 12, (page << 12) | 0xfff);
+	for (uint32_t const page : changed)
+	{
+		offs_t const start = page << 12;
+		offs_t const end = start | 0xfff;
+		invalidate_code_range(start, end);
+		m_code_snapshots.erase(page);
+
+		// A block holds sequences from up to COMPILE_BACKWARDS_BYTES before its
+		// entry point to COMPILE_FORWARDS_BYTES after it, and branches between
+		// them are local jumps that skip the hash entry's checks.  So also drop
+		// the hash entries of every sequence that can share a block with code
+		// from this page; the hash table itself backs the start up by a further
+		// sequence length.  The neighbouring pages' contents didn't change, so
+		// their snapshots and code page bits stay.
+		offs_t const widestart = start - std::min<offs_t>(start, COMPILE_BACKWARDS_BYTES);
+		offs_t const wideend = end + std::min<offs_t>(~end, COMPILE_BACKWARDS_BYTES + COMPILE_FORWARDS_BYTES);
+		m_drcuml.hash_invalidate_range(widestart, wideend);
+	}
 	return !changed.empty();
 }
 
@@ -2322,6 +2400,20 @@ void ppc_device::ppccom_execute_mtspr()
 				m_core->spr[m_core->param0] = m_core->param1;
 				return;
 
+			// register that affects the instruction cache
+			case SPR603_HID0:
+				m_core->spr[m_core->param0] = m_core->param1;
+
+				// Setting ICFI invalidates the whole instruction cache on every OEA
+				// part except the 601 (konamim2 relies on it).  Tell the DRC (via
+				// param1) whether compiled code was discarded, so it can leave the
+				// current block like it does after an icbi.  The 601 has no ICFI;
+				// its HID0 holds the little-endian mode bit, which the DRC picks
+				// up itself after the write.
+				if (has_icache_flash_invalidate())
+					m_core->param1 = ((m_core->param1 & SPR60X_HID0_ICFI) && icache_flash_invalidate()) ? 1 : 0;
+				return;
+
 			// registers that affect the memory map
 			case SPROEA_SDR1:
 			case SPROEA_IBAT0L:
@@ -2446,17 +2538,6 @@ void ppc_device::ppccom_execute_mtspr()
 				return;
 
 			/* write-through no-ops */
-			case SPR603_HID0:
-			{
-				m_core->spr[m_core->param0] = m_core->param1;
-
-				// Setting ICFI invalidates the whole instruction cache.  Tell the
-				// DRC (via param1) whether compiled code was discarded, so it can
-				// leave the current block like it does after an icbi.
-				const bool icfi = m_core->param1 & 0x00000800;
-				m_core->param1 = (icfi && icache_flash_invalidate()) ? 1 : 0;
-				return;
-			}
 			case SPR603_RPA:
 			case SPR603_IABR:
 			case SPR603_HID2:

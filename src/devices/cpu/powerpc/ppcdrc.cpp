@@ -529,17 +529,16 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 			}
 			note_physical_code(desclist);
 
-			// and re-snapshot them, as a fresh compile would, so a later icache
-			// flash invalidate still notices if this code is replaced
-			if (m_cap & PPCCAP_603_MMU)
+			// The reused code is the whole block generated for this window:
+			// snapshot the pages of every sequence in it, as a fresh compile
+			// does, so a later icache flash invalidate still notices if any of
+			// this code is replaced
+			const opcode_desc *desclast = desclist;
+			while (desclast->next() != nullptr)
 			{
-				for (const opcode_desc *curdesc = desclist; ; curdesc = curdesc->next())
-				{
-					snapshot_code_page(curdesc->pc >> 12, curdesc->physpc & ~0xfff);
-					if (curdesc == seqend)
-						break;
-				}
+				desclast = desclast->next();
 			}
+			snapshot_sequence_pages(desclist, desclast);
 			m_codewrite_skip_page = ~uint32_t(0);
 			m_last_reuse = reusekey;
 			return;
@@ -583,15 +582,7 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 
 				// and what those pages held, so an icache flash invalidate can tell
 				// whether the code was replaced behind the DRC's back
-				if (m_cap & PPCCAP_603_MMU)
-				{
-					for (const opcode_desc *curdesc = seqhead; ; curdesc = curdesc->next())
-					{
-						snapshot_code_page(curdesc->pc >> 12, curdesc->physpc & ~0xfff);
-						if (curdesc == seqlast)
-							break;
-					}
-				}
+				snapshot_sequence_pages(seqhead, seqlast);
 
 				// if we don't have a hash for this mode/pc, or if we are overriding all, add one
 				if (override || !m_drcuml.hash_exists(mode, seqhead->pc))
@@ -2284,10 +2275,11 @@ void ppc_device::generate_sequence_instruction(drcuml_block &block, compiler_sta
 
 		// If the page's entry can't fetch at compile time (evicted, flushed, or only
 		// filled by data accesses so far), fill it for fetch now as the TLB mismatch
-		// handler would.  Otherwise the block gets an unconditional mismatch exit, or
-		// a compare against a data-only entry, and is recompiled as soon as the page
-		// is fetched through the proper entry; with a busy vtlb (Konami Viper's 603e)
-		// that was thousands of recompiles per second.
+		// handler would.  Without a fetchable entry the block would get an
+		// unconditional mismatch exit, or a compare against a data-only entry, and be
+		// recompiled as soon as the page is fetched through the proper entry; with a
+		// busy vtlb (Konami Viper's 603e) that adds up to thousands of recompiles per
+		// second.
 		if (!(tlbtable[desc->pc >> 12] & (1 << ppccom_fetch_intention())))
 			compile_time_tlb_fill(desc->pc);
 
@@ -4635,7 +4627,7 @@ bool ppc_device::generate_instruction_1f(drcuml_block &block, compiler_state *co
 					// thus, update mode for that scenario in case HID0_LM changed
 					generate_update_mode(block);                                // <update mode>
 				}
-				else if (spr == SPR603_HID0 && (m_cap & PPCCAP_603_MMU))
+				else if (spr == SPR603_HID0 && has_icache_flash_invalidate())
 				{
 					// ppccom_execute_mtspr() sets param1 if an icache flash
 					// invalidate discarded compiled code, which may include this
