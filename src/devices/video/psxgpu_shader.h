@@ -13,13 +13,14 @@
     1 = only texels with the STP bit set, 2 = only texels with it clear.
 
     Varyings: v0-v3 vertex colour (a PS1 modulation factor, 0.5 = neutral),
-    v4-v5 texel coordinates, v6-v9 the texel rectangle (u_min, v_min, u_max,
-    v_max) filtered taps are clamped to.
+    v4-v5 texel coordinates.
 
-    Primitive state record, 13 words: textured, texture filter mode
+    Primitive state record, 17 words: textured, texture filter mode
     (0 nearest, 1 bilinear, 2 trilinear, 3 three-point), texture page mode
     (0 4bpp, 1 8bpp, 2 15bpp), page x, page y, CLUT x, CLUT y, texture
-    window active, window and-u, and-v, offset-u, offset-v, interleave.
+    window active, window and-u, and-v, offset-u, offset-v, interleave, then
+    the texel rectangle filtered taps are clamped to (u_min, v_min, u_max,
+    v_max) as the bits of four floats.
 
 ***************************************************************************/
 #ifndef MAME_VIDEO_PSXGPU_SHADER_H
@@ -27,8 +28,8 @@
 
 #pragma once
 
-constexpr int PSXGPU_SHADER_STATE_WORDS = 13;
-constexpr int PSXGPU_SHADER_VARYINGS = 10;
+constexpr int PSXGPU_SHADER_STATE_WORDS = 17;
+constexpr int PSXGPU_SHADER_VARYINGS = 6;
 
 constexpr char PSXGPU_FRAGMENT_SOURCE[] =
 	"vec4 g_color;\n"
@@ -39,7 +40,7 @@ constexpr char PSXGPU_FRAGMENT_SOURCE[] =
 	"void load_state() {\n"
 	"    g_color = vec4(v0, v1, v2, v3);\n"
 	"    g_uv = vec2(v4, v5);\n"
-	"    g_uv_clamp = vec4(v6, v7, v8, v9);\n"
+	"    g_uv_clamp = vec4(intBitsToFloat(state(13)), intBitsToFloat(state(14)), intBitsToFloat(state(15)), intBitsToFloat(state(16)));\n"
 	"    s_textured = state(0);\n"
 	"    s_texfilter = state(1);\n"
 	"    s_tp = state(2);\n"

@@ -2638,6 +2638,10 @@ void psxgpu_device::gpu_build_frame()
 			run_filterable = cmd.filterable;
 			run_blend = cmd.blend;
 
+			// the texel rectangle filtered taps are clamped to is the same at every vertex of a primitive
+			const float uv_clamp[ 4 ] = { cmd.tri[ 0 ].u_min, cmd.tri[ 0 ].v_min, cmd.tri[ 0 ].u_max, cmd.tri[ 0 ].v_max };
+			uint32_t uv_clamp_bits[ 4 ];
+			std::memcpy( uv_clamp_bits, uv_clamp, sizeof( uv_clamp ) );
 			const uint32_t prim = (uint32_t)( m_gpu_frame_state.size() / PSXGPU_SHADER_STATE_WORDS );
 			const uint32_t state[ PSXGPU_SHADER_STATE_WORDS ] = {
 				cmd.textured ? 1u : 0u,
@@ -2646,14 +2650,15 @@ void psxgpu_device::gpu_build_frame()
 				// the identity window leaves addressing alone, so filtered taps one texel past 255 are not wrapped
 				( rs.tw_and_u == 255 && rs.tw_and_v == 255 && rs.tw_off_u == 0 && rs.tw_off_v == 0 ) ? 0u : 1u,
 				(uint32_t)rs.tw_and_u, (uint32_t)rs.tw_and_v, (uint32_t)rs.tw_off_u, (uint32_t)rs.tw_off_v,
-				(uint32_t)rs.interleave };
+				(uint32_t)rs.interleave,
+				uv_clamp_bits[ 0 ], uv_clamp_bits[ 1 ], uv_clamp_bits[ 2 ], uv_clamp_bits[ 3 ] };
 			m_gpu_frame_state.insert( m_gpu_frame_state.end(), std::begin( state ), std::end( state ) );
 
 			for( const osd::gpu_vertex &v : cmd.tri )
 			{
 				const float f[ 5 + PSXGPU_SHADER_VARYINGS ] = {
 					v.x, v.y, 0.0f, v.w, 0.0f,
-					v.r, v.g, v.b, v.a, v.u, v.v, v.u_min, v.v_min, v.u_max, v.v_max };
+					v.r, v.g, v.b, v.a, v.u, v.v };
 				const size_t at = m_gpu_frame_vertices.size();
 				m_gpu_frame_vertices.insert( m_gpu_frame_vertices.end(), std::begin( f ), std::end( f ) );
 				std::memcpy( &m_gpu_frame_vertices[ at + 4 ], &prim, sizeof( prim ) );
