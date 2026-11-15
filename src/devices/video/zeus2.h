@@ -114,6 +114,7 @@ private:
 	void gpu_write_pixel(uint32_t word, bool write_colour, uint32_t colour, bool write_depth, int32_t depth);
 	bool gpu_add_polygon(const zeus2_poly_extra_data &state, const vertex_t *vert, int numverts);
 	bool gpu_submit(const osd::gpu_readback_rect *readback, bool flush);
+	void gpu_check_flush();
 
 	zeus2_device *m_state;
 	vertex_t m_meshvert[3];   // pm3dli microcode vertex slots D, E and F
