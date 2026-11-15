@@ -1692,14 +1692,27 @@ void ppc_device::ppccom_tlb_fill()
 		return;
 	}
 
+	tlb_fill_translated(m_core->param0, address, m_core->param1);
+}
+
+
+/*-------------------------------------------------
+    tlb_fill_translated - cache a translation,
+    first retiring a stale entry for the same
+    effective page that maps a different physical
+    page
+-------------------------------------------------*/
+
+void ppc_device::tlb_fill_translated(offs_t pc, offs_t address, int intent)
+{
 	// Supervisor BATs and user page tables can map the same effective page
 	// to different physical pages. Retire the cached permissions along with
 	// the old physical address before caching this translation.
-	vtlb_entry const entry = vtlb_table()[m_core->param0 >> 12];
+	vtlb_entry const entry = vtlb_table()[pc >> 12];
 	if ((entry & FLAG_VALID) && !(entry & FLAG_FIXED) && ((entry ^ address) & ~uint32_t(POWERPC_MIN_PAGE_MASK)))
-		vtlb_flush_address(m_core->param0);
+		vtlb_flush_address(pc);
 
-	vtlb_fill(m_core->param0, address, m_core->param1);
+	vtlb_fill(pc, address, intent);
 }
 
 
@@ -1717,7 +1730,7 @@ void ppc_device::compile_time_tlb_fill(offs_t pc)
 	int const intent = ppccom_fetch_intention();
 	offs_t address = pc;
 	if (ppccom_translate_address_internal(intent, false, address) <= 1)
-		vtlb_fill(pc, address, intent);
+		tlb_fill_translated(pc, address, intent);
 }
 
 

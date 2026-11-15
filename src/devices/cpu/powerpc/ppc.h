@@ -675,6 +675,7 @@ protected:
 	void note_physical_code(const opcode_desc *desclist);
 	void note_sequence_pages(const opcode_desc *first, const opcode_desc *last);
 	void compile_time_tlb_fill(offs_t pc);
+	void tlb_fill_translated(offs_t pc, offs_t address, int intent);
 
 	// Instruction cache flash invalidate (HID0[ICFI], every OEA part except the
 	// 601): code can be replaced by writers the DRC never sees (DMA, another
