@@ -45,6 +45,7 @@ static constexpr uint64_t DOUBLE_FRAC = 0x000fffffffffffffU;
 static constexpr uint64_t DOUBLE_ZERO = 0;
 
 static constexpr uint32_t CODEPAGE_SIZE = 0x1'0000'0000ULL / 4096 / 8;
+static constexpr uint32_t CODE_PAGE_BYTES = 0x1000;
 
 static constexpr uint32_t SPR60X_HID0_ICFI          = 0x0000'0800;
 
@@ -1697,7 +1698,7 @@ void ppc_device::ppccom_tlb_fill()
     validate.  The 603 miss fields the translation
     writes are scratch values that every miss path
     recomputes just before it uses them, as the
-    frontend's own fetch translation relies on.
+    frontend's fetch translation already assumes.
 -------------------------------------------------*/
 
 void ppc_device::compile_time_tlb_fill(offs_t pc)
@@ -1835,7 +1836,7 @@ const uint8_t *ppc_device::code_page_memory(offs_t physbase) const
 bool ppc_device::code_snapshot_matches(const code_page_snapshot &snap) const
 {
 	const uint8_t *const mem = code_page_memory(snap.physbase);
-	return mem && !memcmp(snap.bytes.get(), mem, 0x1000);
+	return mem && std::equal(mem, mem + CODE_PAGE_BYTES, snap.bytes.get());
 }
 
 
@@ -1849,7 +1850,8 @@ bool ppc_device::code_snapshot_matches(const code_page_snapshot &snap) const
 void ppc_device::snapshot_code_page(uint32_t page, offs_t physbase)
 {
 	// Read-only and handler-backed pages can't be rewritten, so they need no
-	// snapshot (and get no checksum in the compiled code either).
+	// snapshot.  A writable page that isn't one contiguous block of host memory
+	// has none either and relies on the compiled code's checksum alone.
 	const uint8_t *const mem = code_page_memory(physbase);
 	if (!mem)
 		return;
@@ -1860,8 +1862,8 @@ void ppc_device::snapshot_code_page(uint32_t page, offs_t physbase)
 	{
 		snap.physbase = physbase;
 		snap.dirty = false;
-		snap.bytes = std::make_unique<uint8_t []>(0x1000);
-		memcpy(snap.bytes.get(), mem, 0x1000);
+		snap.bytes = std::make_unique<uint8_t []>(CODE_PAGE_BYTES);
+		std::copy_n(mem, CODE_PAGE_BYTES, snap.bytes.get());
 		snap.logical.push_back(page);
 		return;
 	}
@@ -1923,7 +1925,8 @@ bool ppc_device::icache_flash_invalidate()
 		}
 
 		// discard the code compiled from this physical page at every effective
-		// address it was compiled at
+		// address it was compiled at; invalidate_code_range() leaves the
+		// snapshots alone, so the iterator stays valid across these calls
 		for (uint32_t const page : snap.logical)
 			invalidate_code_range(page << 12, (page << 12) | 0xfff);
 		it = m_code_snapshots.erase(it);
