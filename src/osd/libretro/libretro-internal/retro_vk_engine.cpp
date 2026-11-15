@@ -349,7 +349,7 @@ retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device, const char *name)
 			m_timestamp_period = limits.timestampPeriod;
 			VkQueryPoolCreateInfo query_info = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
 			query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
-			query_info.queryCount = 2;
+			query_info.queryCount = 4;
 			m_timers = m_device.fn.create_query_pool(m_device.device(), &query_info, nullptr, &m_query_pool) == VK_SUCCESS;
 		}
 	}
@@ -812,11 +812,15 @@ bool retro_vk_engine::wait_in_flight()
 
 void retro_vk_engine::read_timer()
 {
-	uint64_t ts[2] = { 0, 0 };
-	if (m_device.fn.get_query_pool_results(m_device.device(), m_query_pool, 0, 2, sizeof(ts), ts, sizeof(uint64_t),
+	// a frame sent in two parts has a pair of timestamps around each part; the time between the parts is not counted
+	uint64_t ts[4] = { 0, 0, 0, 0 };
+	const uint32_t count = m_query_split ? 4 : 2;
+	if (m_device.fn.get_query_pool_results(m_device.device(), m_query_pool, 0, count, sizeof(ts), ts, sizeof(uint64_t),
 			VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
 	{
-		const uint64_t ticks = (ts[1] - ts[0]) & m_timestamp_mask;
+		uint64_t ticks = (ts[1] - ts[0]) & m_timestamp_mask;
+		if (m_query_split)
+			ticks += (ts[3] - ts[2]) & m_timestamp_mask;
 		m_last_gpu_ms = double(ticks) * m_timestamp_period * 1e-6;
 		m_gpu_ms_ready = true;
 	}
@@ -2160,8 +2164,9 @@ void retro_vk_engine::profile_report()
 	m_prof = profile_window();
 }
 
-// Records one frame: uploads, the command list, then the trailing read-backs. A frame with read-backs is waited for
-// unless it defers them, and a frame with a READBACK command in its list always is. Any other frame stays in flight.
+// Records one frame: uploads, the command list, then the trailing read-backs. A frame with trailing read-backs is waited
+// for unless it defers them. A frame with READBACK commands in its list is waited for up to its last READBACK; the
+// commands after that stay in flight, unless the trailing read-backs are waited for. Any other frame stays in flight.
 bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 {
 	m_stats = osd::gpu_engine_stats();
@@ -2235,6 +2240,7 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 	}
 	std::vector<size_t> command_at(frame.command_count, 0);
 	bool mid_list_readback = false;
+	int last_readback = -1;
 	bool output_pass = false;
 	for (int i = 0; i < frame.command_count; i++)
 	{
@@ -2248,6 +2254,7 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		{
 			command_at[i] = take(readback_bytes(c.readback));
 			mid_list_readback = true;
+			last_readback = i;
 			output_pass |= !c.readback.plain();
 		}
 	}
@@ -2303,14 +2310,21 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 	m_stats.uploaded_bytes += vertex_bytes + state_bytes;
 	m_stats.upload_ms = elapsed_ms(upload_start);
 
-	const bool waits = mid_list_readback || (frame.readback_count > 0 && !frame.defer_readback);
+	// When commands follow the last READBACK command and the end of the frame is not waited for anyway, the frame is
+	// sent in two parts: the commands up to and including that READBACK, which is waited for and its pixels written,
+	// then the rest, which stays in flight like a frame without read-backs. Both parts use the same staging buffer and
+	// descriptor pools, which are only reused after the next submit has waited for the second part.
+	const bool end_waits = frame.readback_count > 0 && !frame.defer_readback;
+	const bool split = last_readback >= 0 && last_readback + 1 < frame.command_count && !end_waits;
+	const bool waits = (mid_list_readback && !split) || end_waits;
+	double split_readback_ms = 0.0;
 	const auto draw_start = clock_type::now();
 	if (!begin_recording())
 		return false;
 	m_rendering = false;
 	if (m_timers)
 	{
-		m_device.fn.cmd_reset_query_pool(m_cmd, m_query_pool, 0, 2);
+		m_device.fn.cmd_reset_query_pool(m_cmd, m_query_pool, 0, 4);
 		m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_query_pool, 0);
 	}
 	if (clear_color || clear_depth)
@@ -2383,6 +2397,28 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 			break;
 		}
 		record_barrier();
+
+		if (split && i == last_readback)
+		{
+			// the first part ends here (no render pass is open after a READBACK); it carries the target's clear
+			if (m_timers)
+				m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_query_pool, 1);
+			if (!end_recording(true))
+				return false;
+			m_clear_pending = false;
+			const auto read_start = clock_type::now();
+			for (int r = 0; r <= last_readback; r++)
+				if (frame.commands[r].type == osd::gpu_command_type::READBACK)
+					unpack_readback(frame.commands[r].readback, m_staging.data + command_at[r] + readback_lut_bytes(frame.commands[r].readback));
+			split_readback_ms = elapsed_ms(read_start);
+
+			// the second part: a new recording, so the sample locations and the render pass state are set again by the
+			// draws that need them (begin_recording() and begin_rendering() forget what was recorded); the clip is kept
+			if (!begin_recording())
+				return false;
+			if (m_timers)
+				m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_query_pool, 2);
+		}
 	}
 	end_rendering();
 
@@ -2394,8 +2430,9 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 	}
 	const double readback_record_ms = frame.readback_count > 0 ? elapsed_ms(readback_start) : 0.0;
 	if (m_timers)
-		m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_query_pool, 1);
+		m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_query_pool, split ? 3 : 1);
 	m_query_pending = m_timers;
+	m_query_split = split;
 
 	const bool ok = end_recording(waits);
 	m_stats.draw_ms = elapsed_ms(draw_start);
@@ -2414,11 +2451,14 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		m_pending.clear();
 		for (int i = 0; i < frame.readback_count; i++)
 			m_pending.push_back({ frame.readbacks[i], readback_at[i] });
-		m_stats.readback_ms = readback_record_ms;
+		m_stats.readback_ms = readback_record_ms + split_readback_ms;
 		return true;
 	}
 	if (!waits)
+	{
+		m_stats.readback_ms = split_readback_ms;
 		return true;
+	}
 
 	// the read-back time is zero for a frame that reads nothing back
 	const auto read_start = clock_type::now();

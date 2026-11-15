@@ -10,9 +10,12 @@
     pixels into the frame's staging buffer. Each module's shader pair is
     compiled per variant, and its pipelines are created on first use and kept
     in a VkPipelineCache under the system's gpu-cache directory. Each frame is
-    recorded into one command buffer. A frame with read-backs (and without
-    defer_readback) is waited for before submit_frame() returns; any other
-    frame returns once it is submitted, and the next call waits for it first.
+    recorded into one command buffer. A frame with trailing read-backs (and
+    without defer_readback) is waited for before submit_frame() returns. A
+    frame with READBACK commands is submitted in two parts when commands
+    follow the last one: the first part is waited for, the second is not.
+    Any other frame returns once it is submitted, and the next call waits for
+    it first.
     Only compiled when HAVE_RETRO_GPU_TARGET is defined.
 ***************************************************************************/
 
@@ -262,6 +265,7 @@ private:
 	double m_timestamp_period = 0.0;
 	uint64_t m_timestamp_mask = 0;
 	bool m_query_pending = false;
+	bool m_query_split = false;         // the pending timestamps are two pairs, one around each part of a split frame
 	bool m_gpu_ms_ready = false;
 	double m_last_gpu_ms = 0.0;
 	// the first refused frame's reason, logged once with the session's decision
