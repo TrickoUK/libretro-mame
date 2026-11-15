@@ -160,7 +160,7 @@ private:
 		return samples > 1 && m_device.variable_sample_locations() && (m_device.sample_location_counts() & uint32_t(samples)) != 0;
 	}
 	void set_sample_locations(bool multisample);
-	void snap_triangles(const osd::gpu_frame &frame, uint8_t *vertices) const;
+	void snap_triangles(const osd::gpu_frame &frame, uint8_t *vertices);
 	bool reads_samples(const osd::gpu_readback_rect &r) const;
 	bool validate_update(const osd::gpu_texture_update &u);
 	bool valid_readback(const osd::gpu_readback_rect &r, const osd::gpu_target_desc &tg);
@@ -367,6 +367,8 @@ private:
 	uint64_t m_msaa_budget = 1024ULL * 1024 * 1024;
 	// the sample locations the command buffer was last given: 0 standard, 1 centre, -1 none yet
 	int m_locations_mode = -1;
+	// snap_triangles(): per vertex of the frame, whether a multisampled draw uses it
+	std::vector<uint8_t> m_snap_shared;
 	int m_msaa_logged_requested = 0, m_msaa_logged_granted = 0;
 };
 

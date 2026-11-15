@@ -1291,10 +1291,18 @@ bool retro_vk_engine::reads_samples(const osd::gpu_readback_rect &r) const
 
 // Overlay triangles drawn without multisampling are moved to pixel centres, so each covers the pixels whose centres it
 // contains rather than a sliver of samples. A triangle whose three vertices all sit on whole pixels (the pixel-aligned
-// rectangles) is left as it is. The vertices are the frame's copy in the staging buffer.
-void retro_vk_engine::snap_triangles(const osd::gpu_frame &frame, uint8_t *vertices) const
+// rectangles) is left as it is, and so is a triangle that a multisampled draw also uses, whose edges must stay where
+// they are for that draw. The vertices are the frame's copy in the staging buffer.
+void retro_vk_engine::snap_triangles(const osd::gpu_frame &frame, uint8_t *vertices)
 {
 	const size_t stride = size_t(5 + frame.varyings_per_vertex) * 4;
+	m_snap_shared.assign(frame.vertex_count, 0);
+	for (int i = 0; i < frame.command_count; i++)
+	{
+		const osd::gpu_command &c = frame.commands[i];
+		if (c.type == osd::gpu_command_type::DRAW && c.multisample)
+			std::fill_n(m_snap_shared.begin() + c.first_vertex, c.vertex_count, 1);
+	}
 	for (int i = 0; i < frame.command_count; i++)
 	{
 		const osd::gpu_command &c = frame.commands[i];
@@ -1302,11 +1310,14 @@ void retro_vk_engine::snap_triangles(const osd::gpu_frame &frame, uint8_t *verti
 			continue;
 		for (uint32_t t = 0; t + 3 <= c.vertex_count; t += 3)
 		{
+			const size_t first = size_t(c.first_vertex) + t;
+			if (m_snap_shared[first] || m_snap_shared[first + 1] || m_snap_shared[first + 2])
+				continue;
 			float *v[3] = {};
 			bool whole = true;
 			for (int k = 0; k < 3; k++)
 			{
-				v[k] = reinterpret_cast<float *>(vertices + (size_t(c.first_vertex) + t + k) * stride);
+				v[k] = reinterpret_cast<float *>(vertices + (first + k) * stride);
 				whole = whole && v[k][0] == std::floor(v[k][0]) && v[k][1] == std::floor(v[k][1]);
 			}
 			if (whole)
