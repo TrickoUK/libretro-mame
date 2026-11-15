@@ -438,6 +438,28 @@ void ppc_device::note_physical_code(const opcode_desc *desclist)
 
 
 /*-------------------------------------------------
+    note_sequence_pages - mark every effective
+    page an instruction sequence was compiled
+    from as holding compiled code
+-------------------------------------------------*/
+
+void ppc_device::note_sequence_pages(const opcode_desc *first, const opcode_desc *last)
+{
+	uint32_t lastpage = ~uint32_t(0);
+	for (const opcode_desc *desc = first; ; desc = desc->next())
+	{
+		if ((desc->pc >> 12) != lastpage)
+		{
+			lastpage = desc->pc >> 12;
+			note_code_page(lastpage);
+		}
+		if (desc == last)
+			break;
+	}
+}
+
+
+/*-------------------------------------------------
     reuse_entry_checks - re-verify the entry checks
     a block about to be reused was generated with,
     and put them in the same state as a fresh compile
@@ -484,10 +506,13 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 		log_opcode_desc(desclist, 0);
 
 	// Do a signature over every word of the sequence, so the reuse check below is exact.
+	// Also find the last descriptor.
 	uint32_t seqsig = 0;
+	const opcode_desc *desclast = nullptr;
 	for (const opcode_desc *desc = desclist; desc != nullptr; desc = desc->next())
 	{
 		seqsig = (seqsig * 31u) ^ desc->opptr;
+		desclast = desc;
 	}
 
 	const uint64_t reusekey = (uint64_t(mode) << 32) | pc;
@@ -514,17 +539,7 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 			// The reused code is the whole block generated for this window, so
 			// mark the pages of every sequence in it as having valid code again,
 			// as a fresh compile does
-			const opcode_desc *desclast = desclist;
-			uint32_t lastpage = ~uint32_t(0);
-			for (const opcode_desc *desc = desclist; desc != nullptr; desc = desc->next())
-			{
-				if ((desc->pc >> 12) != lastpage)
-				{
-					lastpage = desc->pc >> 12;
-					note_code_page(lastpage);
-				}
-				desclast = desc;
-			}
+			note_sequence_pages(desclist, desclast);
 			note_physical_code(desclist);
 
 			// and snapshot them, so a later icache flash invalidate still
@@ -548,6 +563,18 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 			// start the block
 			drcuml_block &block(m_drcuml.begin_block(4096));
 
+			if (desclist != nullptr)
+			{
+				// remember which effective pages hold compiled code: icbi, the 601
+				// write watch and ICFI only invalidate code on those pages, and
+				// tlbie/tlbia only bump the translation generation for them
+				note_sequence_pages(desclist, desclast);
+
+				// and what those pages held, so an icache flash invalidate can tell
+				// whether the code was replaced behind the DRC's back
+				snapshot_sequence_pages(desclist, desclast);
+			}
+
 			// loop until we get through all instruction sequences
 			for (seqhead = desclist; seqhead != nullptr; seqhead = seqlast->next())
 			{
@@ -565,15 +592,6 @@ void ppc_device::code_compile_block(uint8_t mode, offs_t pc)
 						break;
 				}
 				assert(seqlast != nullptr);
-
-				// remember that the effective pages this sequence covers now hold compiled
-				// code, so a later TLB invalidation of one of them can trigger a flush
-				for (uint32_t pg = seqhead->pc >> 12; pg <= (seqlast->pc >> 12); pg++)
-					note_code_page(pg);
-
-				// and what those pages held, so an icache flash invalidate can tell
-				// whether the code was replaced behind the DRC's back
-				snapshot_sequence_pages(seqhead, seqlast);
 
 				// if we don't have a hash for this mode/pc, or if we are overriding all, add one
 				if (override || !m_drcuml.hash_exists(mode, seqhead->pc))
@@ -2265,12 +2283,9 @@ void ppc_device::generate_sequence_instruction(drcuml_block &block, compiler_sta
 		const vtlb_entry *tlbtable = vtlb_table();
 
 		// If the page's entry can't fetch at compile time (evicted, flushed, or only
-		// filled by data accesses so far), fill it for fetch now as the TLB mismatch
+		// filled by data accesses so far), fill it for fetch as the TLB mismatch
 		// handler would.  Without a fetchable entry the block would get an
-		// unconditional mismatch exit, or a compare against a data-only entry, and be
-		// recompiled as soon as the page is fetched through the proper entry; with a
-		// busy vtlb (Konami Viper's 603e) that adds up to thousands of recompiles per
-		// second.
+		// unconditional mismatch exit, or a compare against a data-only entry.
 		if (!(tlbtable[desc->pc >> 12] & (1 << ppccom_fetch_intention())))
 			compile_time_tlb_fill(desc->pc);
 

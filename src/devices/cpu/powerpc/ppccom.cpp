@@ -45,7 +45,11 @@ static constexpr uint64_t DOUBLE_FRAC = 0x000fffffffffffffU;
 static constexpr uint64_t DOUBLE_ZERO = 0;
 
 static constexpr uint32_t CODEPAGE_SIZE = 0x1'0000'0000ULL / 4096 / 8;
-static constexpr uint32_t CODE_PAGE_BYTES = 0x1000;
+
+// MMU page geometry used for compiled code tracking
+static constexpr uint32_t MMU_PAGE_SHIFT = 12;
+static constexpr offs_t MMU_PAGE_BYTES = offs_t(1) << MMU_PAGE_SHIFT;
+static constexpr offs_t MMU_PAGE_OFFSET_MASK = MMU_PAGE_BYTES - 1;
 
 static constexpr uint32_t SPR60X_HID0_ICFI          = 0x0000'0800;
 
@@ -1062,7 +1066,6 @@ void ppc_device::static_generate_memory_handlers()
 	}
 }
 
-
 void ppc_device::state_export(const device_state_entry &entry)
 {
 	switch (entry.index())
@@ -1747,27 +1750,46 @@ void ppc_device::ppc_check_translation(ppc_entry_check *chk)
 
 
 /*-------------------------------------------------
-    invalidate_code_range - invalidate the hash
-    entries of every code page in an effective
-    address range whose translation changed, so
-    stale blocks are recompiled at next entry
-    instead of flushing the whole cache.  Returns
-    true if anything was invalidated.
+    invalidate_code_page - invalidate the hash
+    entries of every sequence that can share a
+    block with code from one effective page, so
+    those blocks are recompiled at next entry
+-------------------------------------------------*/
+
+void ppc_device::invalidate_code_page(uint32_t page)
+{
+	// A block holds sequences from up to COMPILE_BACKWARDS_BYTES before its
+	// entry point e to COMPILE_FORWARDS_BYTES after it, and branches between
+	// them are local jumps that skip the hash entry's checks.  A block holding
+	// code from address a therefore has e - COMPILE_BACKWARDS_BYTES <= a <=
+	// e + COMPILE_FORWARDS_BYTES, so its sequences start within
+	// COMPILE_BACKWARDS_BYTES + COMPILE_FORWARDS_BYTES of a on either side.
+	// Drop the hash entries of every sequence in that span around the page, not
+	// just those in the page itself.  Neighbouring pages keep their code page
+	// bits, as their contents didn't change.
+	constexpr offs_t BLOCK_REACH = COMPILE_BACKWARDS_BYTES + COMPILE_FORWARDS_BYTES;
+	offs_t const pagestart = offs_t(page) << MMU_PAGE_SHIFT;
+	offs_t const pageend = pagestart | MMU_PAGE_OFFSET_MASK;
+	m_drcuml.hash_invalidate_range(
+			pagestart - std::min<offs_t>(pagestart, BLOCK_REACH),
+			pageend + std::min<offs_t>(~pageend, BLOCK_REACH));
+}
+
+
+/*-------------------------------------------------
+    invalidate_code_range - invalidate the code
+    compiled from every page with compiled code in
+    an effective address range whose contents
+    changed (see invalidate_code_page), instead of
+    flushing the whole cache.  Returns true if
+    anything was invalidated.
 -------------------------------------------------*/
 
 bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 {
-	// A block holds sequences from up to COMPILE_BACKWARDS_BYTES before its
-	// entry point to COMPILE_FORWARDS_BYTES after it, and branches between them
-	// are local jumps that skip the hash entry's checks.  So for each page with
-	// code, drop the hash entries of every sequence that can share a block with
-	// code from the page, not just those in the page itself; the hash table
-	// backs the start up by a further sequence length, which catches sequences
-	// that start before the range and run into it.  Neighbouring pages keep
-	// their code page bits, as their contents didn't change.  For a large range
-	// the widened ranges of adjacent pages simply overlap.
-	uint32_t page = start >> 12;
-	uint32_t const lastpage = end >> 12;
+	// For a large range the widened ranges of adjacent pages simply overlap.
+	uint32_t page = start >> MMU_PAGE_SHIFT;
+	uint32_t const lastpage = end >> MMU_PAGE_SHIFT;
 	bool invalidated = false;
 
 	while (page <= lastpage)
@@ -1781,11 +1803,7 @@ bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 
 		if (BIT(m_codepage_bits[page >> 3], page & 7))
 		{
-			offs_t const pagestart = page << 12;
-			offs_t const pageend = pagestart | 0xfff;
-			m_drcuml.hash_invalidate_range(
-					pagestart - std::min<offs_t>(pagestart, COMPILE_BACKWARDS_BYTES),
-					pageend + std::min<offs_t>(~pageend, COMPILE_BACKWARDS_BYTES + COMPILE_FORWARDS_BYTES));
+			invalidate_code_page(page);
 			invalidated = true;
 		}
 		page++;
@@ -1820,8 +1838,9 @@ const uint8_t *ppc_device::code_page_memory(offs_t physbase) const
 
 	// The pointers address the bus-width unit holding the address, so compare
 	// against the start of the page's last 64-bit unit.
+	constexpr offs_t LAST_UNIT_OFFSET = MMU_PAGE_BYTES - 8;
 	auto const *const base = static_cast<const uint8_t *>(m_program->get_read_ptr(physbase));
-	if (!base || (static_cast<const uint8_t *>(m_program->get_read_ptr(physbase | 0xff8)) != (base + 0xff8)))
+	if (!base || (static_cast<const uint8_t *>(m_program->get_read_ptr(physbase | LAST_UNIT_OFFSET)) != (base + LAST_UNIT_OFFSET)))
 		return nullptr;
 	return base;
 }
@@ -1833,10 +1852,10 @@ const uint8_t *ppc_device::code_page_memory(offs_t physbase) const
     contains
 -------------------------------------------------*/
 
-bool ppc_device::code_snapshot_matches(const code_page_snapshot &snap) const
+bool ppc_device::code_snapshot_matches(uint32_t physpage, const code_page_snapshot &snap) const
 {
-	const uint8_t *const mem = code_page_memory(snap.physbase);
-	return mem && std::equal(mem, mem + CODE_PAGE_BYTES, snap.bytes.get());
+	const uint8_t *const mem = code_page_memory(offs_t(physpage) << MMU_PAGE_SHIFT);
+	return mem && std::equal(mem, mem + MMU_PAGE_BYTES, snap.bytes.get());
 }
 
 
@@ -1856,14 +1875,13 @@ void ppc_device::snapshot_code_page(uint32_t page, offs_t physbase)
 	if (!mem)
 		return;
 
-	auto const [it, inserted] = m_code_snapshots.try_emplace(physbase >> 12);
+	uint32_t const physpage = physbase >> MMU_PAGE_SHIFT;
+	auto const [it, inserted] = m_code_snapshots.try_emplace(physpage);
 	code_page_snapshot &snap = it->second;
 	if (inserted)
 	{
-		snap.physbase = physbase;
-		snap.dirty = false;
-		snap.bytes = std::make_unique<uint8_t []>(CODE_PAGE_BYTES);
-		std::copy_n(mem, CODE_PAGE_BYTES, snap.bytes.get());
+		snap.bytes = std::make_unique<uint8_t []>(MMU_PAGE_BYTES);
+		std::copy_n(mem, MMU_PAGE_BYTES, snap.bytes.get());
 		snap.logical.push_back(page);
 		return;
 	}
@@ -1875,7 +1893,7 @@ void ppc_device::snapshot_code_page(uint32_t page, offs_t physbase)
 	// code being compiled uses what memory holds now.  If the two differ, the
 	// snapshot can no longer vouch for every block compiled from the page, so
 	// the next ICFI has to discard them all.
-	if (!snap.dirty && !code_snapshot_matches(snap))
+	if (!snap.dirty && !code_snapshot_matches(physpage, snap))
 		snap.dirty = true;
 }
 
@@ -1894,10 +1912,10 @@ void ppc_device::snapshot_sequence_pages(const opcode_desc *first, const opcode_
 	for (const opcode_desc *desc = first; ; desc = desc->next())
 	{
 		// a descriptor that faulted has no valid physical address
-		if (!desc->compiler_page_fault() && ((desc->pc >> 12) != lastpage))
+		if (!desc->compiler_page_fault() && ((desc->pc >> MMU_PAGE_SHIFT) != lastpage))
 		{
-			lastpage = desc->pc >> 12;
-			snapshot_code_page(lastpage, desc->physpc & ~offs_t(0xfff));
+			lastpage = desc->pc >> MMU_PAGE_SHIFT;
+			snapshot_code_page(lastpage, desc->physpc & ~MMU_PAGE_OFFSET_MASK);
 		}
 		if (desc == last)
 			break;
@@ -1918,17 +1936,18 @@ bool ppc_device::icache_flash_invalidate()
 	for (auto it = m_code_snapshots.begin(); it != m_code_snapshots.end(); )
 	{
 		code_page_snapshot const &snap = it->second;
-		if (!snap.dirty && code_snapshot_matches(snap))
+		if (!snap.dirty && code_snapshot_matches(it->first, snap))
 		{
 			++it;
 			continue;
 		}
 
 		// discard the code compiled from this physical page at every effective
-		// address it was compiled at; invalidate_code_range() leaves the
-		// snapshots alone, so the iterator stays valid across these calls
+		// page it was compiled at, whatever that page's code page bit says;
+		// invalidate_code_page() leaves the snapshots alone, so the iterator
+		// stays valid across these calls
 		for (uint32_t const page : snap.logical)
-			invalidate_code_range(page << 12, (page << 12) | 0xfff);
+			invalidate_code_page(page);
 		it = m_code_snapshots.erase(it);
 		discarded = true;
 	}
