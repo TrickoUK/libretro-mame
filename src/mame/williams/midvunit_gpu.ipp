@@ -77,6 +77,8 @@ void midvunit_renderer::gpu_reset()
 {
 	m_gpu_generation++;
 	m_gpu_palette_full = true;
+	m_gpu_palette_row_lo = 0;
+	m_gpu_palette_row_hi = 0;
 	m_gpu_texture_lo = 0;
 	m_gpu_texture_hi = GPU_TEXTURE_WIDTH * GPU_TEXTURE_HEIGHT;
 	m_gpu_clip_page = -1;
@@ -96,6 +98,8 @@ void midvunit_renderer::gpu_latch_off(const char *reason)
 	osd_printf_verbose("midvunit: host GPU path off for the rest of the session: %s\n", reason);
 	m_gpu_ready = false;
 	m_gpu_engine = nullptr;
+	m_gpu_palette_row_lo = 0;
+	m_gpu_palette_row_hi = 0;
 	m_gpu_commands.clear();
 	m_gpu_vertices.clear();
 	m_gpu_state.clear();
@@ -119,8 +123,8 @@ void midvunit_renderer::gpu_mark_texture(uint32_t offset, uint32_t bytes)
 	}
 }
 
-// A CPU write to palette RAM. A changed entry is put into the command list, so the quads drawn after it resolve their
-// colours through it. Quads drawn before it keep the colour they were drawn with.
+// A CPU write to palette RAM. A changed entry goes into the shadow and marks its row, which is uploaded before the next quad, so
+// the quads drawn after it resolve their colours through it. Quads drawn before it keep the colour they were drawn with.
 void midvunit_renderer::gpu_palette_write(uint32_t index)
 {
 	if (!m_gpu_ready)
@@ -130,18 +134,21 @@ void midvunit_renderer::gpu_palette_write(uint32_t index)
 		return;
 	m_gpu_shadow_palette[index] = pen;
 
-	memcpy(gpu_arena_alloc(sizeof(pen)), &pen, sizeof(pen));
-	osd::gpu_texture_update update;
-	update.texture = m_gpu_palette;
-	update.x = index & 255;
-	update.y = index >> 8;
-	update.w = 1;
-	update.h = 1;
-	m_gpu_commands.push_back(osd::gpu_command::make_update(update));
+	const int row = int(index >> 8);
+	if (m_gpu_palette_row_hi <= m_gpu_palette_row_lo)
+	{
+		m_gpu_palette_row_lo = row;
+		m_gpu_palette_row_hi = row + 1;
+	}
+	else
+	{
+		m_gpu_palette_row_lo = std::min(m_gpu_palette_row_lo, row);
+		m_gpu_palette_row_hi = std::max(m_gpu_palette_row_hi, row + 1);
+	}
 }
 
-// Puts the pending texture RAM bytes and, after a reset, the whole palette into the command list. Called before each quad,
-// so a quad always sees the RAM and palette as they stood when the CPU triggered it.
+// Puts the pending texture RAM bytes and the changed palette rows (after a reset, the whole palette) into the command list, copied
+// as they stand now. Called before each quad, so a quad always sees the RAM and palette as they stood when the CPU triggered it.
 void midvunit_renderer::gpu_flush_updates()
 {
 	if (m_gpu_palette_full)
@@ -155,6 +162,21 @@ void midvunit_renderer::gpu_flush_updates()
 		update.w = 256;
 		update.h = GPU_PALETTE_ENTRIES / 256;
 		m_gpu_commands.push_back(osd::gpu_command::make_update(update));
+		m_gpu_palette_row_lo = 0;
+		m_gpu_palette_row_hi = 0;
+	}
+	else if (m_gpu_palette_row_hi > m_gpu_palette_row_lo)
+	{
+		const int rows = m_gpu_palette_row_hi - m_gpu_palette_row_lo;
+		memcpy(gpu_arena_alloc(size_t(rows) * 256 * sizeof(uint32_t)), &m_gpu_shadow_palette[size_t(m_gpu_palette_row_lo) * 256], size_t(rows) * 256 * sizeof(uint32_t));
+		osd::gpu_texture_update update;
+		update.texture = m_gpu_palette;
+		update.y = m_gpu_palette_row_lo;
+		update.w = 256;
+		update.h = rows;
+		m_gpu_commands.push_back(osd::gpu_command::make_update(update));
+		m_gpu_palette_row_lo = 0;
+		m_gpu_palette_row_hi = 0;
 	}
 
 	if (m_gpu_texture_hi > m_gpu_texture_lo)

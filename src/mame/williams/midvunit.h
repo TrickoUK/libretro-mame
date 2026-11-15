@@ -104,6 +104,8 @@ private:
 	int m_gpu_msaa = 0;                             // samples per target pixel (mame_3d_msaa), 0 for a single sample
 	bool m_gpu_texfilter = false;                   // bilinear filtering after the palette lookup (mame_3d_texfilter)
 	bool m_gpu_palette_full = false;
+	int m_gpu_palette_row_lo = 0;                   // palette rows (256 entries each) changed since the last upload, [lo, hi), empty when lo == hi
+	int m_gpu_palette_row_hi = 0;
 	uint32_t m_gpu_texture_lo = 0;                  // dirty byte range of the texture RAM, [lo, hi), empty when lo == hi
 	uint32_t m_gpu_texture_hi = 0;
 	int m_gpu_clip_page = -1;                       // page the last SET_CLIP covers, -1 at the start of a frame
