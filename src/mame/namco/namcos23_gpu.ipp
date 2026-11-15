@@ -77,8 +77,9 @@ bool namcos23_renderer::gpu_init()
 			else
 			{
 				// the decoded tile table packs the flip and swap attributes above the tile's byte offset
+				// (whole texture rows, the entries past the table are zero)
 				const u32 entries = (m_tileid_mask | 0xff) + 1;
-				m_gpu_tile_map_data = std::make_unique<u32[]>(entries);
+				m_gpu_tile_map_data = make_unique_clear<u32[]>(((entries + GPU_TILE_MAP_WIDTH - 1) / GPU_TILE_MAP_WIDTH) * GPU_TILE_MAP_WIDTH);
 				for (u32 i = 0; i < entries; i++)
 					m_gpu_tile_map_data[i] = m_tmrom_decoded[i] | (u32(m_texattr_decoded[i] & 7) << 28);
 				m_gpu_shadow_palette = make_unique_clear<u32[]>(0x8000);
@@ -340,7 +341,7 @@ bool namcos23_renderer::gpu_render(screen_device &screen, bitmap_rgb32 &bitmap)
 			osd::gpu_texture_update &map = updates[update_count++];
 			map.texture = m_gpu_tile_map;
 			map.w = GPU_TILE_MAP_WIDTH;
-			map.h = ((m_tileid_mask | 0xff) + 1) / GPU_TILE_MAP_WIDTH;
+			map.h = ((m_tileid_mask | 0xff) + GPU_TILE_MAP_WIDTH) / GPU_TILE_MAP_WIDTH;
 			map.data = m_gpu_tile_map_data.get();
 		}
 		gpu_update_changed(updates, update_count, m_gpu_palette, m_gpu_shadow_palette.get(), &m_state.m_palette->pen(0), 0x8000, 256, m_gpu_full_upload);
