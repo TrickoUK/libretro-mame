@@ -712,7 +712,8 @@ bool gpu_renderer::flush_rows(int buffer, u32 *out, std::pair<u32, u32> const *r
 //-------------------------------------------------
 
 bool gpu_renderer::submit_batch(int read_buffer, osd::gpu_readback_rect const *readbacks, int readback_count, bool read_first)
-{	bool const prof = profiling();
+{
+	bool const prof = profiling();
 	auto const t_start = std::chrono::steady_clock::now();
 	auto const ms_since = [] (std::chrono::steady_clock::time_point from) { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - from).count(); };
 	if (prof)
