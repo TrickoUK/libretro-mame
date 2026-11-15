@@ -35,6 +35,9 @@ constexpr uint64_t GPU_WAIT_TIMEOUT_NS = 5ULL * 1000 * 1000 * 1000;
 
 // frames that need under a quarter of the staging buffer, in a row, before the buffer is released to the size they need
 constexpr uint32_t STAGING_SHRINK_FRAMES = 300;
+// the pipeline cache is saved once this many submits of an engine have created no pipeline, so a session that ends
+// without a clean exit keeps them; a frame that created pipelines never saves
+constexpr uint32_t PIPELINE_CACHE_SAVE_SUBMITS = 300;
 
 double elapsed_ms(clock_type::time_point from)
 {
@@ -1148,6 +1151,8 @@ bool retro_vk_engine::ensure_output_pipeline(bool per_sample)
 		log_problem("output pass", "pipeline creation failed");
 		return false;
 	}
+	m_device.set_pipeline_cache_dirty(true);
+	m_submits_since_pipeline = 0;
 	return true;
 }
 
@@ -1461,12 +1466,19 @@ bool retro_vk_engine::submit_frame(const osd::gpu_frame &frame)
 {
 	if (failed())
 		return false;
+	bool ok;
 	if (!m_prof_on)
-		return note_result(submit_pending(frame), m_submit_failures, "submit");
-	m_prof_wait_ms = 0.0;
-	const auto start = clock_type::now();
-	const bool ok = note_result(submit_pending(frame), m_submit_failures, "submit");
-	profile_submit(frame, elapsed_ms(start));
+		ok = note_result(submit_pending(frame), m_submit_failures, "submit");
+	else
+	{
+		m_prof_wait_ms = 0.0;
+		const auto start = clock_type::now();
+		ok = note_result(submit_pending(frame), m_submit_failures, "submit");
+		profile_submit(frame, elapsed_ms(start));
+	}
+	// a run of submits without new pipelines: the cache has settled, so it is written out (once per change)
+	if (m_submits_since_pipeline < PIPELINE_CACHE_SAVE_SUBMITS && ++m_submits_since_pipeline == PIPELINE_CACHE_SAVE_SUBMITS)
+		save_pipeline_cache();
 	return ok;
 }
 
@@ -1525,8 +1537,8 @@ bool retro_vk_engine::create_pipeline_objects()
 	return true;
 }
 
-// Frees the pipelines, shader modules, descriptor pools and layouts, saving the pipeline cache first. Nothing is in
-// flight when the engine is destroyed, so the objects can go at once.
+// Frees the pipelines, shader modules, descriptor pools and layouts, saving the pipeline cache first (the cache itself
+// belongs to the device). Nothing is in flight when the engine is destroyed, so the objects can go at once.
 void retro_vk_engine::destroy_pipeline_objects()
 {
 	if (!m_device.valid())
@@ -1546,7 +1558,6 @@ void retro_vk_engine::destroy_pipeline_objects()
 		m_device.fn.destroy_descriptor_pool(dev, pool, nullptr);
 	m_desc_pools.clear();
 	m_desc_pool_next = 0;
-	m_device.fn.destroy_pipeline_cache(dev, m_pipeline_cache, nullptr);
 	for (size_t kind = 0; kind < 2; kind++)
 	{
 		m_device.fn.destroy_pipeline(dev, m_output_pipeline[kind], nullptr);
@@ -1571,6 +1582,10 @@ void retro_vk_engine::destroy_pipeline_objects()
 // and a cache that fails to create is left out: nothing depends on it.
 void retro_vk_engine::load_pipeline_cache()
 {
+	// a second engine on the device uses the cache the first one loaded
+	m_pipeline_cache = m_device.pipeline_cache();
+	if (m_pipeline_cache != VK_NULL_HANDLE)
+		return;
 	std::vector<uint8_t> data;
 	if (!m_cache_dir.empty())
 	{
@@ -1585,12 +1600,13 @@ void retro_vk_engine::load_pipeline_cache()
 	info.pInitialData = data.empty() ? nullptr : data.data();
 	if (m_device.fn.create_pipeline_cache(m_device.device(), &info, nullptr, &m_pipeline_cache) != VK_SUCCESS)
 		m_pipeline_cache = VK_NULL_HANDLE;
+	m_device.set_pipeline_cache(m_pipeline_cache);
 }
 
 // Writes the cache through a temporary file, so the file in place is always complete. A failure keeps the old file.
 void retro_vk_engine::save_pipeline_cache()
 {
-	if (!m_pipeline_cache_dirty || m_pipeline_cache == VK_NULL_HANDLE || m_cache_dir.empty())
+	if (!m_device.pipeline_cache_dirty() || m_pipeline_cache == VK_NULL_HANDLE || m_cache_dir.empty())
 		return;
 	const VkDevice dev = m_device.device();
 	size_t size = 0;
@@ -1615,7 +1631,7 @@ void retro_vk_engine::save_pipeline_cache()
 		}
 	}
 	if (std::rename(temp.c_str(), path.c_str()) == 0)
-		m_pipeline_cache_dirty = false;
+		m_device.set_pipeline_cache_dirty(false);
 	else
 		std::remove(temp.c_str());
 }
@@ -1812,7 +1828,8 @@ VkPipeline retro_vk_engine::get_pipeline(const pipeline_key &key, const program 
 		return VK_NULL_HANDLE;
 	}
 	m_pipelines.emplace(key, pipeline);
-	m_pipeline_cache_dirty = true;
+	m_device.set_pipeline_cache_dirty(true);
+	m_submits_since_pipeline = 0;
 	return pipeline;
 }
 

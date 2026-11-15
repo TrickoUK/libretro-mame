@@ -345,8 +345,12 @@ void vk_device::destroy()
 	if (m_device != VK_NULL_HANDLE)
 	{
 		fn.device_wait_idle(m_device);
+		if (m_pipeline_cache != VK_NULL_HANDLE)
+			fn.destroy_pipeline_cache(m_device, m_pipeline_cache, nullptr);
 		fn.destroy_device(m_device, nullptr);
 	}
+	m_pipeline_cache = VK_NULL_HANDLE;
+	m_pipeline_cache_dirty = false;
 	if (m_instance != VK_NULL_HANDLE)
 		fn.destroy_instance(m_instance, nullptr);
 	m_device = VK_NULL_HANDLE;

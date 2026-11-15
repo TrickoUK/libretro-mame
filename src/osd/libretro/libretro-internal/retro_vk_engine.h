@@ -9,7 +9,9 @@
     priority bits, channel lookup) runs a compute pass that writes the output
     pixels into the frame's staging buffer. Each module's shader pair is
     compiled per variant, and its pipelines are created on first use and kept
-    in a VkPipelineCache under the system's gpu-cache directory. Each frame is
+    in the device's VkPipelineCache, which every engine shares and which is
+    written to the system's gpu-cache directory once no pipelines have been
+    created for a while, and at exit. Each frame is
     recorded into one command buffer. A frame with trailing read-backs (and
     without defer_readback) is waited for before submit_frame() returns. A
     frame with READBACK commands is submitted in two parts when commands
@@ -233,13 +235,14 @@ private:
 	VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
 	VkSampler m_sampler_nearest = VK_NULL_HANDLE;
 	VkSampler m_sampler_linear = VK_NULL_HANDLE;
-	VkPipelineCache m_pipeline_cache = VK_NULL_HANDLE;
+	VkPipelineCache m_pipeline_cache = VK_NULL_HANDLE;   // the device's shared cache
 	// the read-back compute passes, [0] for a single-sample target (or one read once) and [1] for samples read one by one:
 	// each its module and pipeline; the layout (and the set layout) is shared
 	VkShaderModule m_output_module[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
 	VkPipeline m_output_pipeline[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
 	VkPipelineLayout m_output_layout = VK_NULL_HANDLE;
-	bool m_pipeline_cache_dirty = false;
+	// submits since this engine last created a pipeline; the shared cache is saved when it reaches PIPELINE_CACHE_SAVE_SUBMITS
+	uint32_t m_submits_since_pipeline = 0;
 	std::string m_cache_dir;
 
 	std::map<std::pair<osd::gpu_handle, uint32_t>, program> m_programs;
