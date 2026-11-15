@@ -83,7 +83,8 @@ void midvunit_renderer::gpu_reset()
 	m_gpu_commands.clear();
 	m_gpu_vertices.clear();
 	m_gpu_state.clear();
-	m_gpu_blobs.clear();
+	m_gpu_arena.clear();
+	m_gpu_patches.clear();
 }
 
 // The target does not match the CPU's view of the frame buffer (the CPU read or wrote it, which the adapter does not
@@ -98,7 +99,8 @@ void midvunit_renderer::gpu_latch_off(const char *reason)
 	m_gpu_commands.clear();
 	m_gpu_vertices.clear();
 	m_gpu_state.clear();
-	m_gpu_blobs.clear();
+	m_gpu_arena.clear();
+	m_gpu_patches.clear();
 	m_gpu_clip_page = -1;
 }
 
@@ -128,15 +130,13 @@ void midvunit_renderer::gpu_palette_write(uint32_t index)
 		return;
 	m_gpu_shadow_palette[index] = pen;
 
-	auto &blob = m_gpu_blobs.emplace_back(1);
-	blob[0] = pen;
+	memcpy(gpu_arena_alloc(sizeof(pen)), &pen, sizeof(pen));
 	osd::gpu_texture_update update;
 	update.texture = m_gpu_palette;
 	update.x = index & 255;
 	update.y = index >> 8;
 	update.w = 1;
 	update.h = 1;
-	update.data = blob.data();
 	m_gpu_commands.push_back(osd::gpu_command::make_update(update));
 }
 
@@ -147,18 +147,13 @@ void midvunit_renderer::gpu_flush_updates()
 	if (m_gpu_palette_full)
 	{
 		m_gpu_palette_full = false;
-		auto &blob = m_gpu_blobs.emplace_back(GPU_PALETTE_ENTRIES);
 		for (int i = 0; i < GPU_PALETTE_ENTRIES; i++)
-		{
-			const uint32_t pen = m_palette.pen(i);
-			m_gpu_shadow_palette[i] = pen;
-			blob[i] = pen;
-		}
+			m_gpu_shadow_palette[i] = m_palette.pen(i);
+		memcpy(gpu_arena_alloc(GPU_PALETTE_ENTRIES * sizeof(uint32_t)), m_gpu_shadow_palette.get(), GPU_PALETTE_ENTRIES * sizeof(uint32_t));
 		osd::gpu_texture_update update;
 		update.texture = m_gpu_palette;
 		update.w = 256;
 		update.h = GPU_PALETTE_ENTRIES / 256;
-		update.data = blob.data();
 		m_gpu_commands.push_back(osd::gpu_command::make_update(update));
 	}
 
@@ -167,19 +162,27 @@ void midvunit_renderer::gpu_flush_updates()
 		// whole rows, from the first to the last one touched
 		const uint32_t first_row = m_gpu_texture_lo / GPU_TEXTURE_WIDTH;
 		const uint32_t rows = (m_gpu_texture_hi - 1) / GPU_TEXTURE_WIDTH - first_row + 1;
-		auto &blob = m_gpu_blobs.emplace_back(rows * GPU_TEXTURE_WIDTH / 4);
 		const uint8_t *const ram = (const uint8_t *)m_state.m_textureram.target();
-		memcpy(blob.data(), ram + first_row * GPU_TEXTURE_WIDTH, rows * GPU_TEXTURE_WIDTH);
+		memcpy(gpu_arena_alloc(rows * GPU_TEXTURE_WIDTH), ram + first_row * GPU_TEXTURE_WIDTH, rows * GPU_TEXTURE_WIDTH);
 		osd::gpu_texture_update update;
 		update.texture = m_gpu_texture;
 		update.y = first_row;
 		update.w = GPU_TEXTURE_WIDTH;
 		update.h = rows;
-		update.data = blob.data();
 		m_gpu_commands.push_back(osd::gpu_command::make_update(update));
 		m_gpu_texture_lo = 0;
 		m_gpu_texture_hi = 0;
 	}
+}
+
+// Reserves bytes in the arena for the update command pushed next and returns where its copy goes. The command's data pointer is
+// set when the frame is sent, since the arena moves as it grows.
+uint8_t *midvunit_renderer::gpu_arena_alloc(size_t bytes)
+{
+	const size_t offset = (m_gpu_arena.size() + 3) & ~size_t(3);
+	m_gpu_arena.resize(offset + bytes);
+	m_gpu_patches.emplace_back(m_gpu_commands.size(), offset);
+	return m_gpu_arena.data() + offset;
 }
 
 // The rounding of poly_manager::round_coordinate() (private there): the nearest integer, a half rounds down.
@@ -553,6 +556,10 @@ bool midvunit_renderer::gpu_screen_update(bitmap_rgb32 &bitmap, bool changed)
 	readback.downsample = m_gpu_scale;
 	readback.opaque = true;
 
+	// the update commands point into the arena, which is complete now
+	for (const auto &patch : m_gpu_patches)
+		m_gpu_commands[patch.first].update.data = m_gpu_arena.data() + patch.second;
+
 	osd::gpu_frame frame;
 	frame.target.width = GPU_PAGE_WIDTH * m_gpu_scale;
 	frame.target.height = GPU_TARGET_HEIGHT * m_gpu_scale;
@@ -575,7 +582,8 @@ bool midvunit_renderer::gpu_screen_update(bitmap_rgb32 &bitmap, bool changed)
 	m_gpu_commands.clear();
 	m_gpu_vertices.clear();
 	m_gpu_state.clear();
-	m_gpu_blobs.clear();
+	m_gpu_arena.clear();
+	m_gpu_patches.clear();
 	m_gpu_clip_page = -1;
 
 	if (!submitted)

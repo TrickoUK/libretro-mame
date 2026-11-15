@@ -29,7 +29,7 @@
 #include "emupal.h"
 #include "screen.h"
 
-#include <deque>
+#include <utility>
 #include <vector>
 
 
@@ -83,6 +83,7 @@ private:
 
 	bool gpu_init();
 	void gpu_flush_updates();
+	uint8_t *gpu_arena_alloc(size_t bytes);
 	void gpu_add_quad(const vertex_t *vert, uint8_t nudge_x, uint8_t nudge_y, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage);
 	bool gpu_row_span(const vertex_t *vert, int32_t row, const rectangle &clip, int32_t &x0, int32_t &x1, float (&param)[2], float (&dpdx)[2]) const;
 	bool gpu_needs_rows(const vertex_t *vert) const;
@@ -109,7 +110,8 @@ private:
 	std::vector<osd::gpu_command> m_gpu_commands;
 	std::vector<gpu_vertex> m_gpu_vertices;
 	std::vector<uint32_t> m_gpu_state;
-	std::deque<std::vector<uint32_t>> m_gpu_blobs;  // copies the command list points at, kept until the frame is submitted
+	std::vector<uint8_t> m_gpu_arena;               // copies of the data the update commands upload, at offsets aligned to four bytes
+	std::vector<std::pair<size_t, size_t> > m_gpu_patches;  // (command index, arena offset) of each update, set when the frame is sent
 };
 
 class midvunit_base_state : public driver_device
