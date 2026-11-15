@@ -2300,12 +2300,21 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		std::memcpy(m_staging.data + vertex_at, frame.vertices, vertex_bytes);
 	if (target.msaa_samples > 0 && !centre_samples(target.msaa_samples))
 		snap_triangles(frame, m_staging.data + vertex_at);
-	std::memset(m_staging.data + state_at, 0, state_bytes);
-	if (frame.prim_state && frame.prim_count > 0 && frame.state_stride > 0)
+	if (frame.prim_state && frame.prim_count > 0 && frame.state_stride > 0 && frame.state_stride % 4 == 0)
 	{
-		for (uint32_t i = 0; i < frame.prim_count; i++)
-			std::memcpy(m_staging.data + state_at + size_t(i) * rec_texels * 16,
-					frame.prim_state + size_t(i) * frame.state_stride, size_t(frame.state_stride) * 4);
+		// a record of whole texels is laid out in the staging buffer as in the frame: one copy, no padding
+		std::memcpy(m_staging.data + state_at, frame.prim_state, size_t(frame.prim_count) * frame.state_stride * 4);
+	}
+	else
+	{
+		// the words of each record, then zeros up to the next whole texel
+		std::memset(m_staging.data + state_at, 0, state_bytes);
+		if (frame.prim_state && frame.prim_count > 0 && frame.state_stride > 0)
+		{
+			for (uint32_t i = 0; i < frame.prim_count; i++)
+				std::memcpy(m_staging.data + state_at + size_t(i) * rec_texels * 16,
+						frame.prim_state + size_t(i) * frame.state_stride, size_t(frame.state_stride) * 4);
+		}
 	}
 	m_stats.uploaded_bytes += vertex_bytes + state_bytes;
 	m_stats.upload_ms = elapsed_ms(upload_start);
