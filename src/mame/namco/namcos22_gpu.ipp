@@ -19,7 +19,8 @@ bool namcos22_renderer::gpu_init()
 	{
 		m_gpu_checked = true;
 		m_gpu_engine = m_state.machine().osd().get_gpu_engine("namcos22");
-		if (m_gpu_engine && m_gpu_engine->caps().max_texture_size >= 4096)
+		// the shader's blend weight is a second fragment output, which needs dual-source blending
+		if (m_gpu_engine && m_gpu_engine->caps().max_texture_size >= 4096 && m_gpu_engine->caps().dual_source_blend)
 		{
 			osd::gpu_shader_module module;
 			module.name = "namcos22";
@@ -74,7 +75,9 @@ bool namcos22_renderer::gpu_init()
 		}
 		else
 		{
-			if (m_gpu_engine)
+			if (m_gpu_engine && !m_gpu_engine->caps().dual_source_blend)
+				osd_printf_verbose("namcos22: host GPU path unavailable, the device has no dual-source blending\n");
+			else if (m_gpu_engine)
 				osd_printf_verbose("namcos22: host GPU path unavailable, the largest texture is %d texels and 4096 are needed\n", m_gpu_engine->caps().max_texture_size);
 			m_gpu_engine = nullptr;
 		}
