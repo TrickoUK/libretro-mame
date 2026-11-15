@@ -759,6 +759,7 @@ bool retro_vk_engine::begin_recording()
 	if (m_device.fn.reset_command_pool(m_device.device(), m_pool, 0) != VK_SUCCESS)
 		return false;
 	m_locations_mode = -1;
+	m_resolved = false;
 	VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	return m_device.fn.begin_command_buffer(m_cmd, &begin) == VK_SUCCESS;
@@ -841,6 +842,7 @@ void retro_vk_engine::record_barrier()
 // CLEAR and the target's own clear ignore the clip.
 void retro_vk_engine::record_clear(const float *rgba, bool color, bool depth)
 {
+	m_resolved = false;
 	if (m_target.msaa_samples > 0)
 	{
 		record_clear_multisample(rgba, color, depth);
@@ -925,9 +927,13 @@ void retro_vk_engine::record_clear_multisample(const float *rgba, bool color, bo
 	m_device.fn.cmd_end_rendering(m_cmd);
 }
 
-// Averages the samples of the colour target into the single-sample image the read-backs read.
+// Averages the samples of the colour target into the single-sample image the read-backs read. Read-backs with nothing
+// drawn, copied or cleared between them share one resolve.
 void retro_vk_engine::record_resolve()
 {
+	if (m_resolved)
+		return;
+	m_resolved = true;
 	VkImageResolve region = {};
 	region.srcSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
 	region.dstSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
@@ -941,6 +947,7 @@ void retro_vk_engine::record_resolve()
 // Copies through the scratch image, so the source is the target as it was before the command.
 void retro_vk_engine::record_copy(const osd::gpu_command &c)
 {
+	m_resolved = false;
 	VkImageCopy region = {};
 	region.srcSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
 	region.dstSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
@@ -1954,6 +1961,7 @@ VkSampler retro_vk_engine::sampler_for(const texture &t) const
 // attachments load what is there, since the clears are recorded before the first draw.
 void retro_vk_engine::begin_rendering(bool use_depth)
 {
+	m_resolved = false;
 	m_recorded = recorded_state();
 	VkRenderingAttachmentInfo color = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
 	color.imageView = m_color.view;

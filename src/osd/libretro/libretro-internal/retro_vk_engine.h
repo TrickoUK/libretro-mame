@@ -371,6 +371,8 @@ private:
 	uint64_t m_msaa_budget = 1024ULL * 1024 * 1024;
 	// the sample locations the command buffer was last given: 0 standard, 1 centre, -1 none yet
 	int m_locations_mode = -1;
+	// m_resolve holds the colour target as it stands: nothing was drawn, copied or cleared since the last resolve in this recording
+	bool m_resolved = false;
 	// snap_triangles(): per vertex of the frame, whether a multisampled draw uses it
 	std::vector<uint8_t> m_snap_shared;
 	int m_msaa_logged_requested = 0, m_msaa_logged_granted = 0;
