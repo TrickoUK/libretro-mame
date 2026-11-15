@@ -83,8 +83,8 @@ enum : int
 	S_FOGROW,                   // row of the fog table
 	S_FOGMASK,                  // fog delta mask
 	S_BILINMASK,                // texture bilinear fraction mask
-	S_BUFROW,                   // first target row of the buffer, native pixels (set at submit)
-	S_SCALE,                    // render scale (set at submit)
+	S_BUFROW,                   // first target row of the buffer, native pixels
+	S_SCALE,                    // render scale
 	S_TMU0 = 24,
 	S_TMU1 = 48,
 	STATE_WORDS = 72
@@ -146,7 +146,7 @@ public:
 		std::vector<u32> pixels;    // w * h, zero where nothing was written
 		std::vector<u32> depth;     // w * h, bit 16 set plus the 16-bit depth where written; empty if none
 	};
-	void set_geometry(u32 rowpixels, u32 rows);
+	void set_geometry(u32 rowpixels, u32 rows, int scale);
 	void add_lfb_pixel(int buffer, int x, int y, u32 argb);
 	void add_lfb_depth(int buffer, int x, int y, u16 depth);
 	std::vector<stamp> const &stamps() const { return m_stamps; }
@@ -187,6 +187,7 @@ private:
 	std::vector<u32> m_stage_z;             // depth of the open stamp, allocated on the first depth write
 	bool m_stage_has_z = false;
 	u32 m_stage_rowpixels = 0, m_stage_rows = 0;
+	int m_scale = 1;
 	int m_stage_buffer = -1;
 	int m_stage_x0 = 0, m_stage_y0 = 0, m_stage_x1 = -1, m_stage_y1 = -1;
 	std::vector<u32> m_lut = std::vector<u32>(LUT_ROWS * 256);
@@ -265,6 +266,8 @@ private:
 		std::map<std::string, u32> reasons;
 		u32 presents = 0;
 	};
+	bool submit_batch(int read_buffer, osd::gpu_readback_rect const *readbacks, int readback_count, bool read_first);
+
 	char const *m_why = nullptr;
 	profile_data m_prof;
 	running_machine &m_machine;
@@ -288,6 +291,10 @@ private:
 	u32 m_generation = 1;
 	u32 m_serial = 0;
 	std::function<void ()> m_target_lost;
+	// the engine frame of the last flush, kept so their storage is reused
+	std::vector<osd::gpu_texture_update> m_updates;
+	std::vector<gpu_vertex> m_verts;
+	std::vector<osd::gpu_command> m_commands;
 };
 
 } // namespace voodoo
