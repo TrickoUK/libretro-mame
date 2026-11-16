@@ -301,6 +301,7 @@ protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
 	virtual void device_stop() override ATTR_COLD;
+	virtual void device_pre_save() override ATTR_COLD;
 	virtual void device_post_load() override ATTR_COLD;
 
 	// device_execute_interface overrides
@@ -390,6 +391,9 @@ protected:
 
 		// FP save values
 		double fpscr_op[2];
+
+		// bit pattern of a finite result whose FPRF is not yet in fpscr, or FPRF_RESULT_NONE
+		uint64_t fprf_result;
 
 		uint32_t m_codepage_any;                    // nonzero if any page bit is set (UML-readable)
 		uint32_t m_translation_generation;          // bumped whenever the MMU mapping may have changed (UML-readable)
@@ -754,6 +758,8 @@ protected:
 	uml::code_handle *   m_exception[EXCEPTION_COUNT]; // array of exception handlers
 	uml::code_handle *   m_exception_norecover[EXCEPTION_COUNT];   // array of exception handlers
 	uml::code_handle *   m_fpscr_finish;
+	uml::code_handle *   m_fpscr_sync;
+	uml::code_handle *   m_fpscr_summary;
 	uml::code_handle *   m_code_write_reset;           // 601: recompile after a write to compiled code
 
 	// fast RAM
@@ -848,6 +854,9 @@ protected:
 	void generate_compute_flags(drcuml_block &block, const opcode_desc *desc, int updatecr, uint32_t xermask, int invertcarry);
 	void generate_shift_flags(drcuml_block &block, const opcode_desc *desc, uint32_t op);
 	void generate_fp_flags(drcuml_block &block, const opcode_desc *desc);
+	void fpscr_sync();
+	enum : unsigned { FPOP_A = 1, FPOP_B = 2, FPOP_C = 4 };    // floating-point operands an instruction reads
+	template <typename Op, typename Check> void generate_fp_arith(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, unsigned operands, Op &&op, Check &&check);
 	void generate_branch(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, int source, uint8_t link);
 	void generate_branch_bo(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, uint32_t bo, uint32_t bi, int source, int link);
 	bool generate_opcode(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc);

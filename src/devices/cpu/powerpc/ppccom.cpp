@@ -586,6 +586,7 @@ void ppc_device::device_start()
 	// allocate the core from the near cache
 	m_core = m_drcuml.cache_alloc_near<internal_ppc_state>();
 	memset(m_core, 0, sizeof(internal_ppc_state));
+	m_core->fprf_result = FPRF_RESULT_NONE;
 
 	// init bitmap of which logical pages have compiled code
 	m_codepage_bits.assign(CODEPAGE_SIZE, 0);    // 0x1'0000'0000 / 4096 = 0x10'0000
@@ -622,6 +623,8 @@ void ppc_device::device_start()
 	std::fill(std::begin(m_exception), std::end(m_exception), nullptr);
 	std::fill(std::begin(m_exception_norecover), std::end(m_exception_norecover), nullptr);
 	m_fpscr_finish = nullptr;
+	m_fpscr_sync = nullptr;
+	m_fpscr_summary = nullptr;
 	m_code_write_reset = nullptr;
 
 	/* initialize the implementation state tables */
@@ -881,7 +884,7 @@ void ppc_device::device_start()
 
 	for (int regnum = 0; regnum < 32; regnum++)
 		state_add(PPC_F0 + regnum, string_format("F%d", regnum), m_core->f[regnum]).formatstr("%12s");
-	state_add(PPC_FPSCR, "FPSCR", m_core->fpscr).formatstr("%08X");
+	state_add(PPC_FPSCR, "FPSCR", m_core->fpscr).callimport().callexport().formatstr("%08X");
 
 	state_add(STATE_GENPC, "GENPC", m_core->pc).noshow();
 	state_add(STATE_GENPCBASE, "CURPC", m_core->pc).noshow();
@@ -1067,6 +1070,32 @@ void ppc_device::static_generate_memory_handlers()
 	}
 }
 
+/*-------------------------------------------------
+    fpscr_sync - fold a deferred FPRF result into
+    the FPSCR; the result is always finite.  This
+    must classify like the FPRF tail of the DRC's
+    fpscr_finish
+-------------------------------------------------*/
+
+void ppc_device::fpscr_sync()
+{
+	uint64_t const bits = m_core->fprf_result;
+	if (bits == FPRF_RESULT_NONE)
+		return;
+	m_core->fprf_result = FPRF_RESULT_NONE;
+
+	uint64_t const magnitude = bits & 0x7fffffffffffffffULL;
+	bool const negative = BIT(bits, 63);
+	uint32_t fprf;
+	if (magnitude == 0)
+		fprf = negative ? FPRF_NEG_ZERO : FPRF_POS_ZERO;
+	else if (magnitude < 0x0010000000000000ULL)
+		fprf = negative ? FPRF_NEG_DENORM : FPRF_POS_DENORM;
+	else
+		fprf = negative ? FPRF_NEG_NORMAL : FPRF_POS_NORMAL;
+	m_core->fpscr = (m_core->fpscr & ~FPRF_MASK) | fprf;
+}
+
 void ppc_device::state_export(const device_state_entry &entry)
 {
 	switch (entry.index())
@@ -1090,6 +1119,10 @@ void ppc_device::state_export(const device_state_entry &entry)
 		case PPC_DEC:
 			m_debugger_temp = get_decrementer();
 			break;
+
+		case PPC_FPSCR:
+			fpscr_sync();
+			break;
 	}
 }
 
@@ -1097,6 +1130,10 @@ void ppc_device::state_import(const device_state_entry &entry)
 {
 	switch (entry.index())
 	{
+		case PPC_FPSCR:
+			m_core->fprf_result = FPRF_RESULT_NONE;
+			break;
+
 		case PPC_CR:
 			set_cr(m_debugger_temp);
 			break;
@@ -1265,12 +1302,26 @@ void ppc_device::device_stop()
 
 
 /*-------------------------------------------------
+    device_pre_save - fold any deferred FPRF into
+    the FPSCR, so the state holds its architected
+    value
+-------------------------------------------------*/
+
+void ppc_device::device_pre_save()
+{
+	fpscr_sync();
+}
+
+
+/*-------------------------------------------------
     device_post_load - rebuild the DRC mode,
     which is only updated when the MSR changes
 -------------------------------------------------*/
 
 void ppc_device::device_post_load()
 {
+	m_core->fprf_result = FPRF_RESULT_NONE;
+
 	// same as generate_update_mode()
 	const u32 msr = m_core->msr;
 	u32 mode = (m_flavor == PPC_MODEL_601) ? BIT(m_core->spr[SPR603_HID0], 3) : (msr & MSR_LE);
@@ -1300,6 +1351,7 @@ void ppc_device::device_post_load()
 void ppc_device::device_reset()
 {
 	m_checkstop = false;
+	m_core->fprf_result = FPRF_RESULT_NONE;
 
 	// the memory accessors are generated once, after the driver has added its fast RAM regions
 	if (!m_read8[0])
