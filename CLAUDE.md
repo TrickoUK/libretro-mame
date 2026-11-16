@@ -316,6 +316,11 @@ Full plan and rationale: `my-docs/upstream-pr-test-build.md`.
 - **Validate**: `./mame -validate <set>` for each affected set (the check upstream reviewers care about), then a boot with
   `-rompath /var/home/bazzite/Projects/mame-roms/roms -video none -sound none -nothrottle -seconds_to_run 60 <set>`
   (use `-video soft -snapshot_directory ... -str 60` for a visual check). Run `srcclean` on changed files first.
+- **Parallel headless runs**: a `-video none` MAME is effectively single-threaded and this machine has 8 physical
+  cores, so run benchmarks and counter runs about 6 at a time (`&` plus `wait` inside one `run_in_background`
+  command), with a game's before and after builds side by side. Compare within a pair, not against idle-machine
+  figures. Afterwards check for leftover MAMEs (a stopped task can leave one running) and kill them by PID. Not for
+  RetroArch/GPU runs that need real-time speed or the display.
 - **Self-review**: after the standalone check passes, run the `mame-review` skill (`.claude/skills/mame-review/`, from
   github.com/rb6502/mame-ai-tips, not an official mamedev tool) on `refs/upstream-tmp/master..<branch>`, fix Blocking and
   Tidy findings, rerun. `srcclean` is built in the worktree with `make TOOLS=1` (same command plus `TOOLS=1 REGENIE=1`) and
