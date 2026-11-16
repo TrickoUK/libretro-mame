@@ -777,7 +777,7 @@ void model3_state::configure_cpu()
 	/* set conservative DRC options */
 	m_maincpu->ppcdrc_set_options(PPCDRC_COMPATIBLE_OPTIONS);
 
-	// RAM is decoded by the MPC10x, so no DRC fast RAM
+	// RAM is decoded by the MPC10x, which hands its banks to the DRC as fast RAM windows
 }
 
 TIMER_CALLBACK_MEMBER(model3_state::model3_sound_timer_tick)

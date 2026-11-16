@@ -31,6 +31,7 @@
 
 // general constants
 #define PPC_MAX_FASTRAM         4
+#define PPC_MAX_FASTRAM_WINDOWS 4
 #define PPC_MAX_HOTSPOTS        16
 
 
@@ -245,6 +246,9 @@ public:
 	void ppcdrc_set_options(uint32_t options);
 	void bus_error() noexcept { m_bus_error = true; }
 	void ppcdrc_add_fastram(offs_t start, offs_t end, uint8_t readonly, void *base);
+	void ppcdrc_set_fastram_window_base(void *base, offs_t size);
+	void ppcdrc_clear_fastram_windows();
+	bool ppcdrc_map_fastram_window(offs_t start, offs_t end, offs_t offset);
 	void ppcdrc_add_hotspot(offs_t pc, uint32_t opcode, uint32_t cycles);
 
 	virtual void signal_external_write(offs_t physical_address, u32 length) override;
@@ -297,6 +301,7 @@ protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
 	virtual void device_stop() override ATTR_COLD;
+	virtual void device_pre_save() override ATTR_COLD;
 	virtual void device_post_load() override ATTR_COLD;
 
 	// device_execute_interface overrides
@@ -387,9 +392,17 @@ protected:
 		// FP save values
 		double fpscr_op[2];
 
+		// bit pattern of a finite result whose FPRF is not yet in fpscr, or FPRF_RESULT_NONE
+		uint64_t fprf_result;
+
 		uint32_t m_codepage_any;                    // nonzero if any page bit is set (UML-readable)
 		uint32_t m_translation_generation;          // bumped whenever the MMU mapping may have changed (UML-readable)
 		uint32_t m_codewatch_ea;                    // effective address of an in-progress store (601 write-watch)
+
+		// fast RAM windows a memory controller maps at run time (UML-readable)
+		uint32_t fastwin_start[PPC_MAX_FASTRAM_WINDOWS];
+		uint32_t fastwin_end[PPC_MAX_FASTRAM_WINDOWS];
+		uint32_t fastwin_offset[PPC_MAX_FASTRAM_WINDOWS];   // window offset minus start, modulo 2^32
 	};
 
 	internal_ppc_state *m_core;
@@ -745,6 +758,8 @@ protected:
 	uml::code_handle *   m_exception[EXCEPTION_COUNT]; // array of exception handlers
 	uml::code_handle *   m_exception_norecover[EXCEPTION_COUNT];   // array of exception handlers
 	uml::code_handle *   m_fpscr_finish;
+	uml::code_handle *   m_fpscr_sync;
+	uml::code_handle *   m_fpscr_summary;
 	uml::code_handle *   m_code_write_reset;           // 601: recompile after a write to compiled code
 
 	// fast RAM
@@ -759,6 +774,8 @@ protected:
 
 	uint32_t              m_fastram_select;
 	fast_ram_info       m_fastram[PPC_MAX_FASTRAM];
+	void *              m_fastwin_base = nullptr;   // RAM the run-time windows point into
+	offs_t              m_fastwin_size = 0;
 
 	// hotspots
 	// hotspot info
@@ -837,6 +854,9 @@ protected:
 	void generate_compute_flags(drcuml_block &block, const opcode_desc *desc, int updatecr, uint32_t xermask, int invertcarry);
 	void generate_shift_flags(drcuml_block &block, const opcode_desc *desc, uint32_t op);
 	void generate_fp_flags(drcuml_block &block, const opcode_desc *desc);
+	void fpscr_sync();
+	enum : unsigned { FPOP_A = 1, FPOP_B = 2, FPOP_C = 4 };    // floating-point operands an instruction reads
+	template <typename Op, typename Check> void generate_fp_arith(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, unsigned operands, Op &&op, Check &&check);
 	void generate_branch(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, int source, uint8_t link);
 	void generate_branch_bo(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, uint32_t bo, uint32_t bi, int source, int link);
 	bool generate_opcode(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc);

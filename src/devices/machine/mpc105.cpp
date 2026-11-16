@@ -252,10 +252,7 @@ void mpc105_host_device::map_extra(u64 memory_window_start, u64 memory_window_en
 
 void mpc105_host_device::install_ram()
 {
-	for (address_space *space : m_cpu_spaces)
-	{
-		space->unmap_readwrite(0, 0x3fff'ffff);
-	}
+	unmap_ram(0x3fff'ffff);
 	if (BIT(m_mccr[0], 19)) // MEMGO enables the RAM interface.
 	{
 		install_memory_banks(false, false);

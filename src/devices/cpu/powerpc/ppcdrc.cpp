@@ -286,6 +286,84 @@ void ppc_device::ppcdrc_add_fastram(offs_t start, offs_t end, uint8_t readonly, 
 
 
 /*-------------------------------------------------
+    ppcdrc_set_fastram_window_base - set the RAM
+    that run-time fast RAM windows point into;
+    must be called before the first reset, as the
+    memory accessors bake in the base
+-------------------------------------------------*/
+
+void ppc_device::ppcdrc_set_fastram_window_base(void *base, offs_t size)
+{
+	if (m_read8[0])
+	{
+		logerror("fast RAM window base set after the memory accessors were generated; ignored\n");
+		return;
+	}
+	m_fastwin_base = base;
+	m_fastwin_size = size;
+	ppcdrc_clear_fastram_windows();
+}
+
+
+/*-------------------------------------------------
+    ppcdrc_clear_fastram_windows - unmap all
+    run-time fast RAM windows
+-------------------------------------------------*/
+
+void ppc_device::ppcdrc_clear_fastram_windows()
+{
+	// an empty window has start > end, so no address matches it
+	for (int win = 0; win < PPC_MAX_FASTRAM_WINDOWS; win++)
+	{
+		m_core->fastwin_start[win] = 0xffffffff;
+		m_core->fastwin_end[win] = 0;
+		m_core->fastwin_offset[win] = 0;
+	}
+}
+
+
+/*-------------------------------------------------
+    ppcdrc_map_fastram_window - map the physical
+    range start-end to the window base plus offset;
+    returns false if the range can't be mapped,
+    leaving it to the address space
+-------------------------------------------------*/
+
+bool ppc_device::ppcdrc_map_fastram_window(offs_t start, offs_t end, offs_t offset)
+{
+	// The newest mapping wins, as in the address space: older windows overlapping it are
+	// dropped, so those addresses go through the address space if this one can't be mapped.
+	for (int win = 0; win < PPC_MAX_FASTRAM_WINDOWS; win++)
+	{
+		if ((m_core->fastwin_start[win] <= end) && (m_core->fastwin_end[win] >= start))
+		{
+			m_core->fastwin_start[win] = 0xffffffff;
+			m_core->fastwin_end[win] = 0;
+			m_core->fastwin_offset[win] = 0;
+		}
+	}
+
+	// accesses are made on the 64-bit bus layout, so the window must keep doubleword alignment
+	if (!m_fastwin_base || (end < start) || ((start | offset) & 7) || (BIT(end, 0, 3) != 7))
+		return false;
+	if ((offset >= m_fastwin_size) || ((end - start) > (m_fastwin_size - 1 - offset)))
+		return false;
+
+	for (int win = 0; win < PPC_MAX_FASTRAM_WINDOWS; win++)
+	{
+		if (m_core->fastwin_start[win] > m_core->fastwin_end[win])
+		{
+			m_core->fastwin_start[win] = start;
+			m_core->fastwin_end[win] = end;
+			m_core->fastwin_offset[win] = offset - start;
+			return true;
+		}
+	}
+	return false;
+}
+
+
+/*-------------------------------------------------
     ppcdrc_add_hotspot - add a new hotspot
 -------------------------------------------------*/
 
@@ -1481,24 +1559,10 @@ void ppc_device::static_generate_memory_accessor(
 		}
 	}
 
-	if (!debugger_enabled())
-		for (ramnum = 0; ramnum < PPC_MAX_FASTRAM; ramnum++)
-			if (m_fastram[ramnum].base != nullptr && (!iswrite || !m_fastram[ramnum].readonly))
+	// a fast RAM hit, with I0 the byte offset from fastbase
+	auto const fast_access =
+			[&block, size, iswrite, ismasked, fastxor] (void *fastbase)
 			{
-				void *fastbase = (uint8_t *)m_fastram[ramnum].base - m_fastram[ramnum].start;
-				uml::code_label skip = label++;
-
-				if (m_fastram[ramnum].end != 0xffffffff)
-				{
-					UML_CMP(block, I0, m_fastram[ramnum].end);         // cmp     i0,end
-					UML_JMPc(block, COND_A, skip);                     // ja      skip
-				}
-				if (m_fastram[ramnum].start != 0x00000000)
-				{
-					UML_CMP(block, I0, m_fastram[ramnum].start);       // cmp     i0,fastram_start
-					UML_JMPc(block, COND_B, skip);                     // jb      skip
-				}
-
 				if (!iswrite)
 				{
 					if (size == 1)
@@ -1561,9 +1625,47 @@ void ppc_device::static_generate_memory_accessor(
 					}
 					UML_RET(block);                                                             // ret
 				}
+			};
 
-				UML_LABEL(block, skip);                                                     // skip:
+	if (!debugger_enabled())
+	{
+		for (ramnum = 0; ramnum < PPC_MAX_FASTRAM; ramnum++)
+			if (m_fastram[ramnum].base != nullptr && (!iswrite || !m_fastram[ramnum].readonly))
+			{
+				void *fastbase = (uint8_t *)m_fastram[ramnum].base - m_fastram[ramnum].start;
+				uml::code_label skip = label++;
+
+				if (m_fastram[ramnum].end != 0xffffffff)
+				{
+					UML_CMP(block, I0, m_fastram[ramnum].end);         // cmp     i0,end
+					UML_JMPc(block, COND_A, skip);                     // ja      skip
+				}
+				if (m_fastram[ramnum].start != 0x00000000)
+				{
+					UML_CMP(block, I0, m_fastram[ramnum].start);       // cmp     i0,fastram_start
+					UML_JMPc(block, COND_B, skip);                     // jb      skip
+				}
+				fast_access(fastbase);
+				UML_LABEL(block, skip);                                // skip:
 			}
+
+		// run-time windows: the bounds and offset are read from the CPU state, so the
+		// memory controller can move RAM without regenerating the accessors
+		// NOTE: like the static regions, windows bypass the 601 code write watch, so they are left out with it
+		if (m_fastwin_base && !codewatch)
+			for (int win = 0; win < PPC_MAX_FASTRAM_WINDOWS; win++)
+			{
+				uml::code_label skip = label++;
+
+				UML_CMP(block, I0, mem(&m_core->fastwin_end[win]));            // cmp     i0,[fastwin_end]
+				UML_JMPc(block, COND_A, skip);                                 // ja      skip
+				UML_CMP(block, I0, mem(&m_core->fastwin_start[win]));          // cmp     i0,[fastwin_start]
+				UML_JMPc(block, COND_B, skip);                                 // jb      skip
+				UML_ADD(block, I0, I0, mem(&m_core->fastwin_offset[win]));     // add     i0,i0,[fastwin_offset]
+				fast_access(m_fastwin_base);
+				UML_LABEL(block, skip);                                        // skip:
+			}
+	}
 
 	// clear first, so a request this instruction never made can't discard an unrelated transfer
 	if (m_drcoptions & PPCDRC_BUS_RETRY)
@@ -2516,33 +2618,15 @@ static void generate_d_is_snan(drcuml_block &block, const uml::parameter &dst, c
 }
 
 /*-------------------------------------------------
-    static_generate_fpscr_finish - finally applies
-    the FPSCR bits
-
-    I0 = accumulated FPSCR bits to apply
-    I1 = result of the operation
+    generate_fpscr_summary - VX and FEX are never
+    written directly; they always reflect the
+    invalid-operation bits and the enabled
+    exceptions.  Works on the FPSCR in I2, uses I4
 -------------------------------------------------*/
 
-void ppc_device::static_generate_fpscr_finish()
+static void generate_fpscr_summary(drcuml_block &block)
 {
-	drcuml_block &block(m_drcuml.begin_invariant_block(100));
-	uml::code_label label = 1;
-	uml::code_label const lab_nan = label++;
-	uml::code_label const lab_inf = label++;
-	uml::code_label const lab_zero = label++;
-	uml::code_label const lab_denorm = label++;
-	uml::code_label const lab_done = label++;
-
-	alloc_handle(&m_fpscr_finish, "fpscr_finish");
-	UML_HANDLE(block, *m_fpscr_finish);
-
-	// OR in the new exception bits; latch FX on a 0->1 transition
-	UML_MOV(block, I2, FPSCR32);                                                // I2 = old fpscr
-	UML_OR(block, I3, I2, I0);                                                  // I3 = fpscr | newexc
-	UML_CMP(block, I3, I2);
-	UML_SETc(block, COND_NE, I4);                                               // a new exception bit raised?
-	UML_SHL(block, I4, I4, 31);                                                 // -> FPSCR_FX
-	UML_OR(block, I2, I3, I4);
+	using namespace uml;
 
 	// VX = OR of all the invalid-operation sub-bits
 	UML_TEST(block, I2, FPSCR_VX_ANY);
@@ -2560,9 +2644,71 @@ void ppc_device::static_generate_fpscr_finish()
 	UML_SHL(block, I4, I4, 30);
 	UML_AND(block, I2, I2, ~uint32_t(FPSCR_FEX));
 	UML_OR(block, I2, I2, I4);
+}
+
+/*-------------------------------------------------
+    static_generate_fpscr_finish - finally applies
+    the FPSCR bits
+
+    fpscr_finish:
+    I0 = accumulated FPSCR bits to apply
+    I1 = result of the operation
+
+    fpscr_sync (FPRF from the deferred result):
+    no inputs
+
+    fpscr_summary (VX and FEX after an FPSCR write):
+    no inputs
+-------------------------------------------------*/
+
+void ppc_device::static_generate_fpscr_finish()
+{
+	drcuml_block &block(m_drcuml.begin_invariant_block(128));
+	uml::code_label label = 1;
+	uml::code_label const lab_nan = label++;
+	uml::code_label const lab_inf = label++;
+	uml::code_label const lab_zero = label++;
+	uml::code_label const lab_denorm = label++;
+	uml::code_label const lab_done = label++;
+	uml::code_label const lab_fprf = label++;
+
+	alloc_handle(&m_fpscr_finish, "fpscr_finish");
+	UML_HANDLE(block, *m_fpscr_finish);
+
+	// OR in the new exception bits; latch FX on a 0->1 transition
+	UML_MOV(block, I2, FPSCR32);                                                // I2 = old fpscr
+	UML_OR(block, I3, I2, I0);                                                  // I3 = fpscr | newexc
+	UML_CMP(block, I3, I2);
+	UML_SETc(block, COND_NE, I4);                                               // a new exception bit raised?
+	UML_SHL(block, I4, I4, 31);                                                 // -> FPSCR_FX
+	UML_OR(block, I2, I3, I4);
+
+	generate_fpscr_summary(block);
+
+	// this result supersedes any deferred one
+	UML_DMOV(block, mem(&m_core->fprf_result), FPRF_RESULT_NONE);
+	UML_JMP(block, lab_fprf);
+
+	// fpscr_summary: recompute VX and FEX after an instruction wrote the FPSCR
+	alloc_handle(&m_fpscr_summary, "fpscr_summary");
+	UML_HANDLE(block, *m_fpscr_summary);
+	UML_MOV(block, I2, FPSCR32);
+	generate_fpscr_summary(block);
+	UML_MOV(block, FPSCR32, I2);
+	UML_RET(block);
+
+	// fpscr_sync: fold a deferred (finite) result into FPRF before the FPSCR is read
+	alloc_handle(&m_fpscr_sync, "fpscr_sync");
+	UML_HANDLE(block, *m_fpscr_sync);
+	UML_DMOV(block, I1, mem(&m_core->fprf_result));                                // I1 = deferred result
+	UML_DCMP(block, I1, FPRF_RESULT_NONE);
+	UML_RETc(block, COND_E);                                                       // nothing deferred
+	UML_DMOV(block, mem(&m_core->fprf_result), FPRF_RESULT_NONE);
+	UML_MOV(block, I2, FPSCR32);                                                   // I2 = old fpscr
 
 	// update FPRF from the result (i1 = raw bits)
 	// start off checking NaN and infinity
+	UML_LABEL(block, lab_fprf);                                                    // fprf:
 	UML_AND(block, I2, I2, ~uint32_t(FPRF_MASK));                                  // clear FPRF field
 	UML_DAND(block, I0, I1, 0x7fffffffffffffffULL);                                // i0 = absolute value of result
 	UML_DCMP(block, I0, 0x7ff0000000000000ULL);                                    // IEEE infinity constant
@@ -2620,17 +2766,18 @@ void ppc_device::static_generate_fpscr_finish()
     less annoying than a single function that takes
     7 bools or something though.
 
+    The operands arrive as bit patterns: A in I2,
+    B in I3 and C in I4.
+
     The output of all of these functions is:
     I0 = accumulated FPSCR flags
     I8 = 1 if any operand was infinity
 -------------------------------------------------*/
 
-static void generate_fp_invalid_addsub(drcuml_block &block, const uml::parameter &fa, const uml::parameter &fb, bool subtract)
+static void generate_fp_invalid_addsub(drcuml_block &block, bool subtract)
 {
 	using namespace uml;
 	UML_MOV(block, I0, 0);                                        // clear the flags accumulator
-	UML_ICOPYFD(block, I2, fa);                                   // capture the bit patterns of the two operands
-	UML_ICOPYFD(block, I3, fb);
 	generate_d_is_snan(block, I8, I2, I9);                        // set VXSNAN if either operand is SNaN
 	generate_d_is_snan(block, I8, I3, I9);
 	generate_d_is_inf(block, I4, I2);                             // I4 = operand A is infinity
@@ -2653,12 +2800,10 @@ static void generate_fp_invalid_addsub(drcuml_block &block, const uml::parameter
 	UML_OR(block, I8, I4, I8);                                  // I8 = either operand was infinity
 }
 
-static void generate_fp_invalid_mul(drcuml_block &block, const uml::parameter &fa, const uml::parameter &fc)
+static void generate_fp_invalid_mul(drcuml_block &block)
 {
 	using namespace uml;
 	UML_MOV(block, I0, 0);
-	UML_ICOPYFD(block, I2, fa);
-	UML_ICOPYFD(block, I4, fc);
 	generate_d_is_snan(block, I8, I2, I9);
 	generate_d_is_snan(block, I8, I4, I9);
 
@@ -2676,12 +2821,10 @@ static void generate_fp_invalid_mul(drcuml_block &block, const uml::parameter &f
 	UML_OR(block, I8, I8, I1);                                  // I8 = either operand was infinity
 }
 
-static void generate_fp_invalid_div(drcuml_block &block, const uml::parameter &fa, const uml::parameter &fb)
+static void generate_fp_invalid_div(drcuml_block &block)
 {
 	using namespace uml;
 	UML_MOV(block, I0, 0);
-	UML_ICOPYFD(block, I2, fa);
-	UML_ICOPYFD(block, I3, fb);
 
 	// calculate VXSNAN first
 	generate_d_is_snan(block, I8, I2, I9);
@@ -2713,11 +2856,10 @@ static void generate_fp_invalid_div(drcuml_block &block, const uml::parameter &f
 	UML_OR(block, I8, I4, I1);
 }
 
-static void generate_fp_invalid_sqrt(drcuml_block &block, const uml::parameter &fb, bool reciprocal)
+static void generate_fp_invalid_sqrt(drcuml_block &block, bool reciprocal)
 {
 	using namespace uml;
 	UML_MOV(block, I0, 0);
-	UML_ICOPYFD(block, I3, fb);
 	generate_d_is_snan(block, I8, I3, I9);
 	generate_d_is_nan(block, I8, I3);
 	UML_XOR(block, I8, I8, 1);
@@ -2737,24 +2879,20 @@ static void generate_fp_invalid_sqrt(drcuml_block &block, const uml::parameter &
 	generate_d_is_inf(block, I8, I3);
 }
 
-static void generate_fp_invalid_res(drcuml_block &block, const uml::parameter &fb)
+static void generate_fp_invalid_res(drcuml_block &block)
 {
 	using namespace uml;
 	UML_MOV(block, I0, 0);
-	UML_ICOPYFD(block, I3, fb);
 	generate_d_is_snan(block, I8, I3, I9);
 	generate_d_is_zero(block, I8, I3);
 	generate_d_set_fpscr(block, I8, FPSCR_ZX_BIT);
 	generate_d_is_inf(block, I8, I3);
 }
 
-static void generate_fp_invalid_madd(drcuml_block &block, const uml::parameter &fa, const uml::parameter &fb, const uml::parameter &fc)
+static void generate_fp_invalid_madd(drcuml_block &block)
 {
 	using namespace uml;
 	UML_MOV(block, I0, 0);
-	UML_ICOPYFD(block, I2, fa);
-	UML_ICOPYFD(block, I3, fb);
-	UML_ICOPYFD(block, I4, fc);
 
 	// get the NaN flags out of the way for the 3 operands
 	generate_d_is_snan(block, I8, I2, I9);
@@ -2784,11 +2922,10 @@ static void generate_fp_invalid_madd(drcuml_block &block, const uml::parameter &
 	UML_OR(block, I8, I8, I9);
 }
 
-static void generate_fp_invalid_rsp(drcuml_block &block, const uml::parameter &fb)
+static void generate_fp_invalid_rsp(drcuml_block &block)
 {
 	using namespace uml;
 	UML_MOV(block, I0, 0);
-	UML_ICOPYFD(block, I3, fb);
 	generate_d_is_snan(block, I8, I3, I9);
 	generate_d_is_inf(block, I8, I3);
 }
@@ -2820,12 +2957,68 @@ void ppc_device::generate_fp_flags(drcuml_block &block, const opcode_desc *desc)
 
 	// finish things up for FPSCR
 	UML_CALLH(block, *m_fpscr_finish);
+}
+
+
+/*-------------------------------------------------
+    generate_fp_arith - generate a floating-point
+    arithmetic instruction with its FPSCR update
+
+    The result is always written to frD, and
+    every exception modelled here (VX*, ZX, OX)
+    is detected from NaN or infinite operands or
+    results, so a finite result leaves the sticky
+    bits alone and only sets FPRF.  That is
+    deferred: the result is kept, and fpscr_sync
+    works out FPRF before anything reads FPSCR.
+-------------------------------------------------*/
+
+template <typename Op, typename Check>
+void ppc_device::generate_fp_arith(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, unsigned operands, Op &&op, Check &&check)
+{
+	using namespace uml;
+	uint32_t const opcode = desc->opptr;
+	code_label const finite = compiler->labelnum++;
+	code_label const done = compiler->labelnum++;
+
+	// the checks take the operands as bit patterns: A in I2, B in I3, C in I4
+	auto const copy_operands =
+			[this, &block, opcode, operands] ()
+			{
+				if (operands & FPOP_A)
+					UML_ICOPYFD(block, I2, F64(G_RA(opcode)));
+				if (operands & FPOP_B)
+					UML_ICOPYFD(block, I3, F64(G_RB(opcode)));
+				if (operands & FPOP_C)
+					UML_ICOPYFD(block, I4, F64(G_REGC(opcode)));
+			};
+	bool const overwritten =
+			((operands & FPOP_A) && (G_RA(opcode) == G_RD(opcode))) ||
+			((operands & FPOP_B) && (G_RB(opcode) == G_RD(opcode))) ||
+			((operands & FPOP_C) && (G_REGC(opcode) == G_RD(opcode)));
+
+	if (overwritten)
+		copy_operands();
+	op();
+
+	UML_ICOPYFD(block, I1, F64(G_RD(opcode)));                   // i1 = result bits
+	UML_DAND(block, I0, I1, 0x7fffffffffffffffULL);              // dand    i0,i1,~sign
+	UML_DCMP(block, I0, 0x7ff0000000000000ULL);                  // dcmp    i0,infinity
+	UML_JMPc(block, COND_B, finite);                             // jb      finite
+
+	if (!overwritten)
+		copy_operands();
+	check();
+	generate_fp_flags(block, desc);
+	UML_JMP(block, done);                                        // jmp     done
+
+	UML_LABEL(block, finite);                                    // finite:
+	UML_DMOV(block, mem(&m_core->fprf_result), I1);              // dmov    [fprf_result],i1
+	UML_LABEL(block, done);                                      // done:
 
 	// set CR1 based on FPSCR flags FX, FEX, VX, and OX
-	if (op & M_RC)
-	{
+	if (opcode & M_RC)
 		UML_ROLAND(block, CR32(1), FPSCR32, 4, 0x0f);
-	}
 }
 
 /*-------------------------------------------------
@@ -4773,37 +4966,49 @@ bool ppc_device::generate_instruction_3b(drcuml_block &block, compiler_state *co
 		case 0x15:  // FADDSx
 			if (!(m_drcoptions & PPCDRC_ACCURATE_SINGLES))
 				return generate_instruction_3f(block, compiler, desc);
-			generate_fp_invalid_addsub(block, F64(G_RA(op)), F64(G_RB(op)), false);
-			UML_FDADD(block, F0, F64(G_RA(op)), F64(G_RB(op)));                     // fdadd   f0,ra,rb
-			UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
-			generate_fp_flags(block, desc);
+			generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B,
+					[&] ()
+					{
+						UML_FDADD(block, F0, F64(G_RA(op)), F64(G_RB(op)));                     // fdadd   f0,ra,rb
+						UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
+					},
+					[&] () { generate_fp_invalid_addsub(block, false); });
 			return true;
 
 		case 0x14:  // FSUBSx
 			if (!(m_drcoptions & PPCDRC_ACCURATE_SINGLES))
 				return generate_instruction_3f(block, compiler, desc);
-			generate_fp_invalid_addsub(block, F64(G_RA(op)), F64(G_RB(op)), true);
-			UML_FDSUB(block, F0, F64(G_RA(op)), F64(G_RB(op)));                     // fdsub   f0,ra,rb
-			UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
-			generate_fp_flags(block, desc);
+			generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B,
+					[&] ()
+					{
+						UML_FDSUB(block, F0, F64(G_RA(op)), F64(G_RB(op)));                     // fdsub   f0,ra,rb
+						UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
+					},
+					[&] () { generate_fp_invalid_addsub(block, true); });
 			return true;
 
 		case 0x19:  // FMULSx
 			if (!(m_drcoptions & PPCDRC_ACCURATE_SINGLES))
 				return generate_instruction_3f(block, compiler, desc);
-			generate_fp_invalid_mul(block, F64(G_RA(op)), F64(G_REGC(op)));
-			UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
-			UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
-			generate_fp_flags(block, desc);
+			generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_C,
+					[&] ()
+					{
+						UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
+						UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
+					},
+					[&] () { generate_fp_invalid_mul(block); });
 			return true;
 
 		case 0x12:  // FDIVSx
 			if (!(m_drcoptions & PPCDRC_ACCURATE_SINGLES))
 				return generate_instruction_3f(block, compiler, desc);
-			generate_fp_invalid_div(block, F64(G_RA(op)), F64(G_RB(op)));
-			UML_FDDIV(block, F0, F64(G_RA(op)), F64(G_RB(op)));                         // fddiv   f0,ra,rb
-			UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
-			generate_fp_flags(block, desc);
+			generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B,
+					[&] ()
+					{
+						UML_FDDIV(block, F0, F64(G_RA(op)), F64(G_RB(op)));                         // fddiv   f0,ra,rb
+						UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
+					},
+					[&] () { generate_fp_invalid_div(block); });
 			return true;
 
 		case 0x18:  // FRESx
@@ -4811,52 +5016,67 @@ bool ppc_device::generate_instruction_3b(drcuml_block &block, compiler_state *co
 			{
 				return false;
 			}
-			generate_fp_invalid_res(block, F64(G_RB(op)));
-			UML_FSFRFLT(block, F0, F64(G_RB(op)), SIZE_QWORD);                              // fsfrlt  f0,rb,qword
-			UML_FSRECIP(block, F0, F0);                                         // fsrecip f0,f0
-			UML_FDFRFLT(block, F64(G_RD(op)), F0, SIZE_DWORD);                              // fdfrflt rd,f0,dword
-			generate_fp_flags(block, desc);
+			generate_fp_arith(block, compiler, desc, FPOP_B,
+					[&] ()
+					{
+						UML_FSFRFLT(block, F0, F64(G_RB(op)), SIZE_QWORD);                              // fsfrlt  f0,rb,qword
+						UML_FSRECIP(block, F0, F0);                                         // fsrecip f0,f0
+						UML_FDFRFLT(block, F64(G_RD(op)), F0, SIZE_DWORD);                              // fdfrflt rd,f0,dword
+					},
+					[&] () { generate_fp_invalid_res(block); });
 			return true;
 
 		case 0x1d:  // FMADDSx
 			if (!(m_drcoptions & PPCDRC_ACCURATE_SINGLES))
 				return generate_instruction_3f(block, compiler, desc);
-			generate_fp_invalid_madd(block, F64(G_RA(op)), F64(G_RB(op)), F64(G_REGC(op)));
-			UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
-			UML_FDADD(block, F0, F0, F64(G_RB(op)));                                // fdadd   f0,f0,rb
-			UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
-			generate_fp_flags(block, desc);
+			generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B | FPOP_C,
+					[&] ()
+					{
+						UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
+						UML_FDADD(block, F0, F0, F64(G_RB(op)));                                // fdadd   f0,f0,rb
+						UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
+					},
+					[&] () { generate_fp_invalid_madd(block); });
 			return true;
 
 		case 0x1c:  // FMSUBSx
 			if (!(m_drcoptions & PPCDRC_ACCURATE_SINGLES))
 				return generate_instruction_3f(block, compiler, desc);
-			generate_fp_invalid_madd(block, F64(G_RA(op)), F64(G_RB(op)), F64(G_REGC(op)));
-			UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
-			UML_FDSUB(block, F0, F0, F64(G_RB(op)));                                // fdsub   f0,f0,rb
-			UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
-			generate_fp_flags(block, desc);
+			generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B | FPOP_C,
+					[&] ()
+					{
+						UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
+						UML_FDSUB(block, F0, F0, F64(G_RB(op)));                                // fdsub   f0,f0,rb
+						UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
+					},
+					[&] () { generate_fp_invalid_madd(block); });
 			return true;
 
 		case 0x1f:  // FNMADDSx
 			if (!(m_drcoptions & PPCDRC_ACCURATE_SINGLES))
 				return generate_instruction_3f(block, compiler, desc);
-			generate_fp_invalid_madd(block, F64(G_RA(op)), F64(G_RB(op)), F64(G_REGC(op)));
-			UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
-			UML_FDADD(block, F0, F0, F64(G_RB(op)));                                // fdadd   f0,f0,rb
-			UML_FDNEG(block, F0, F0);                                               // fdneg   f0,f0
-			UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
-			generate_fp_flags(block, desc);
+			generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B | FPOP_C,
+					[&] ()
+					{
+						UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
+						UML_FDADD(block, F0, F0, F64(G_RB(op)));                                // fdadd   f0,f0,rb
+						UML_FDNEG(block, F0, F0);                                               // fdneg   f0,f0
+						UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
+					},
+					[&] () { generate_fp_invalid_madd(block); });
 			return true;
 
 		case 0x1e:  // FNMSUBSx
 			if (!(m_drcoptions & PPCDRC_ACCURATE_SINGLES))
 				return generate_instruction_3f(block, compiler, desc);
-			generate_fp_invalid_madd(block, F64(G_RA(op)), F64(G_RB(op)), F64(G_REGC(op)));
-			UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
-			UML_FDSUB(block, F0, F64(G_RB(op)), F0);                                // fdsub   f0,rb,f0
-			UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
-			generate_fp_flags(block, desc);
+			generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B | FPOP_C,
+					[&] ()
+					{
+						UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
+						UML_FDSUB(block, F0, F64(G_RB(op)), F0);                                // fdsub   f0,rb,f0
+						UML_FDRNDS(block, F64(G_RD(op)), F0);                                       // fdrnds  rd,f0
+					},
+					[&] () { generate_fp_invalid_madd(block); });
 			return true;
 	}
 
@@ -4881,27 +5101,39 @@ bool ppc_device::generate_instruction_3f(drcuml_block &block, compiler_state *co
 		switch (opswitch)
 		{
 			case 0x15:  // FADDx
-				generate_fp_invalid_addsub(block, F64(G_RA(op)), F64(G_RB(op)), false);
-				UML_FDADD(block, F64(G_RD(op)), F64(G_RA(op)), F64(G_RB(op)));              // fdadd   rd,ra,rb
-				generate_fp_flags(block, desc);
+				generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B,
+						[&] ()
+						{
+							UML_FDADD(block, F64(G_RD(op)), F64(G_RA(op)), F64(G_RB(op)));              // fdadd   rd,ra,rb
+						},
+						[&] () { generate_fp_invalid_addsub(block, false); });
 				return true;
 
 			case 0x14:  // FSUBx
-				generate_fp_invalid_addsub(block, F64(G_RA(op)), F64(G_RB(op)), true);
-				UML_FDSUB(block, F64(G_RD(op)), F64(G_RA(op)), F64(G_RB(op)));              // fdsub   rd,ra,rb
-				generate_fp_flags(block, desc);
+				generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B,
+						[&] ()
+						{
+							UML_FDSUB(block, F64(G_RD(op)), F64(G_RA(op)), F64(G_RB(op)));              // fdsub   rd,ra,rb
+						},
+						[&] () { generate_fp_invalid_addsub(block, true); });
 				return true;
 
 			case 0x19:  // FMULx
-				generate_fp_invalid_mul(block, F64(G_RA(op)), F64(G_REGC(op)));
-				UML_FDMUL(block, F64(G_RD(op)), F64(G_RA(op)), F64(G_REGC(op)));            // fdmul   rd,ra,rc
-				generate_fp_flags(block, desc);
+				generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_C,
+						[&] ()
+						{
+							UML_FDMUL(block, F64(G_RD(op)), F64(G_RA(op)), F64(G_REGC(op)));            // fdmul   rd,ra,rc
+						},
+						[&] () { generate_fp_invalid_mul(block); });
 				return true;
 
 			case 0x12:  // FDIVx
-				generate_fp_invalid_div(block, F64(G_RA(op)), F64(G_RB(op)));
-				UML_FDDIV(block, F64(G_RD(op)), F64(G_RA(op)), F64(G_RB(op)));              // fddiv   rd,ra,rb
-				generate_fp_flags(block, desc);
+				generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B,
+						[&] ()
+						{
+							UML_FDDIV(block, F64(G_RD(op)), F64(G_RA(op)), F64(G_RB(op)));              // fddiv   rd,ra,rb
+						},
+						[&] () { generate_fp_invalid_div(block); });
 				return true;
 
 			case 0x1a:  // FRSQRTEx
@@ -4909,9 +5141,12 @@ bool ppc_device::generate_instruction_3f(drcuml_block &block, compiler_state *co
 				{
 					return false;
 				}
-				generate_fp_invalid_sqrt(block, F64(G_RB(op)), true);
-				UML_FDRSQRT(block, F64(G_RD(op)), F64(G_RB(op)));                           // fdrsqrt rd,rb
-				generate_fp_flags(block, desc);
+				generate_fp_arith(block, compiler, desc, FPOP_B,
+						[&] ()
+						{
+							UML_FDRSQRT(block, F64(G_RD(op)), F64(G_RB(op)));                           // fdrsqrt rd,rb
+						},
+						[&] () { generate_fp_invalid_sqrt(block, true); });
 				return true;
 
 			case 0x17:  // FSELx
@@ -4925,32 +5160,44 @@ bool ppc_device::generate_instruction_3f(drcuml_block &block, compiler_state *co
 				return true;
 
 			case 0x1d:  // FMADDx
-				generate_fp_invalid_madd(block, F64(G_RA(op)), F64(G_RB(op)), F64(G_REGC(op)));
-				UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
-				UML_FDADD(block, F64(G_RD(op)), F0, F64(G_RB(op)));                         // fdadd   rd,f0,rb
-				generate_fp_flags(block, desc);
+				generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B | FPOP_C,
+						[&] ()
+						{
+							UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
+							UML_FDADD(block, F64(G_RD(op)), F0, F64(G_RB(op)));                         // fdadd   rd,f0,rb
+						},
+						[&] () { generate_fp_invalid_madd(block); });
 				return true;
 
 			case 0x1f:  // FNMADDx
-				generate_fp_invalid_madd(block, F64(G_RA(op)), F64(G_RB(op)), F64(G_REGC(op)));
-				UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
-				UML_FDADD(block, F0, F0, F64(G_RB(op)));                                    // fdadd   f0,f0,rb
-				UML_FDNEG(block, F64(G_RD(op)), F0);                                        // fdneg   rd,f0
-				generate_fp_flags(block, desc);
+				generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B | FPOP_C,
+						[&] ()
+						{
+							UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
+							UML_FDADD(block, F0, F0, F64(G_RB(op)));                                    // fdadd   f0,f0,rb
+							UML_FDNEG(block, F64(G_RD(op)), F0);                                        // fdneg   rd,f0
+						},
+						[&] () { generate_fp_invalid_madd(block); });
 				return true;
 
 			case 0x1c:  // FMSUBx
-				generate_fp_invalid_madd(block, F64(G_RA(op)), F64(G_RB(op)), F64(G_REGC(op)));
-				UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
-				UML_FDSUB(block, F64(G_RD(op)), F0, F64(G_RB(op)));                         // fdsub   rd,f0,rb
-				generate_fp_flags(block, desc);
+				generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B | FPOP_C,
+						[&] ()
+						{
+							UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
+							UML_FDSUB(block, F64(G_RD(op)), F0, F64(G_RB(op)));                         // fdsub   rd,f0,rb
+						},
+						[&] () { generate_fp_invalid_madd(block); });
 				return true;
 
 			case 0x1e:  // FNMSUBx
-				generate_fp_invalid_madd(block, F64(G_RA(op)), F64(G_RB(op)), F64(G_REGC(op)));
-				UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
-				UML_FDSUB(block, F64(G_RD(op)), F64(G_RB(op)), F0);                         // fdsub   rd,rb,f0
-				generate_fp_flags(block, desc);
+				generate_fp_arith(block, compiler, desc, FPOP_A | FPOP_B | FPOP_C,
+						[&] ()
+						{
+							UML_FDMUL(block, F0, F64(G_RA(op)), F64(G_REGC(op)));                       // fdmul   f0,ra,rc
+							UML_FDSUB(block, F64(G_RD(op)), F64(G_RB(op)), F0);                         // fdsub   rd,rb,f0
+						},
+						[&] () { generate_fp_invalid_madd(block); });
 				return true;
 		}
 	}
@@ -4965,6 +5212,7 @@ bool ppc_device::generate_instruction_3f(drcuml_block &block, compiler_state *co
 
 			case 0x000:  // FCMPU
 			case 0x020:  // FCMPO
+				UML_CALLH(block, *m_fpscr_sync);                                            // callh   fpscr_sync
 				UML_FDCMP(block, F64(G_RA(op)), F64(G_RB(op)));                             // fdcmp   ra,rb
 				UML_GETFLGS(block, I0, FLAG_C | FLAG_Z | FLAG_U);                           // getflgs i0,czu
 				UML_LOAD(block, I1, m_fcmp_cr_table, I0, SIZE_BYTE, SCALE_x1);              // load    i1,fcmp_cr_table,i0,byte
@@ -4981,9 +5229,12 @@ bool ppc_device::generate_instruction_3f(drcuml_block &block, compiler_state *co
 				return true;
 
 			case 0x00c:  // FRSPx
-				generate_fp_invalid_rsp(block, F64(G_RB(op)));
-				UML_FDRNDS(block, F64(G_RD(op)), F64(G_RB(op)));                            // fdrnds  rd,rb
-				generate_fp_flags(block, desc);
+				generate_fp_arith(block, compiler, desc, FPOP_B,
+						[&] ()
+						{
+							UML_FDRNDS(block, F64(G_RD(op)), F64(G_RB(op)));                            // fdrnds  rd,rb
+						},
+						[&] () { generate_fp_invalid_rsp(block); });
 				return true;
 
 			case 0x00e:  // FCTIWx
@@ -5016,40 +5267,51 @@ bool ppc_device::generate_instruction_3f(drcuml_block &block, compiler_state *co
 				return true;
 
 			case 0x046:  // MTFSB0x
+				UML_CALLH(block, *m_fpscr_sync);                                            // callh   fpscr_sync
 				UML_AND(block, FPSCR32, FPSCR32, ~(0x80000000 >> G_CRBD(op)));              // and     fpscr32,fpscr32,~(0x80000000 >> G_CRBD)
 				if (G_CRBD(op) >= 30)                                                       // crbD 30/31 = FPSCR[RN]
 					generate_set_fmod(block);
+				UML_CALLH(block, *m_fpscr_summary);                                         // callh   fpscr_summary
 				return true;
 
 			case 0x026:  // MTFSB1x
+				UML_CALLH(block, *m_fpscr_sync);                                            // callh   fpscr_sync
 				UML_OR(block, FPSCR32, FPSCR32, 0x80000000 >> G_CRBD(op));                  // or      fpscr32,fpscr32,(0x80000000 >> G_CRBD)
 				if (G_CRBD(op) >= 30)                                                       // crbD 30/31 = FPSCR[RN]
 					generate_set_fmod(block);
+				UML_CALLH(block, *m_fpscr_summary);                                         // callh   fpscr_summary
 				return true;
 
 			case 0x040:  // MCRFS
+				UML_CALLH(block, *m_fpscr_sync);                                            // callh   fpscr_sync
 				UML_ROLAND(block, CR32(G_CRFD(op)), FPSCR32, ((G_CRFS(op) - 7) & 7) * 4, 0x0f);
 																							// roland  [crd],[fpscr],shift,0x0f
 				UML_AND(block, FPSCR32, FPSCR32, ~CRMASK(G_CRFS(op)));                      // and     fpscr,fpscr,~crmask[crfs]
+				UML_CALLH(block, *m_fpscr_summary);                                         // callh   fpscr_summary
 				return true;
 
 			case 0x247:  // MFFSx
+				UML_CALLH(block, *m_fpscr_sync);                                            // callh   fpscr_sync
 				UML_MOV(block, mem(&m_core->tempdata.w.l), FPSCR32);                        // mov     [tempdata],fpscr
 				UML_FSMOV(block, F64(G_RD(op)), mem(&m_core->tempdata.d));                  // fsmov   rd,fpscr
 				return true;
 
 			case 0x2c7:  // MTFSFx
+				UML_CALLH(block, *m_fpscr_sync);                                            // callh   fpscr_sync
 				UML_FDMOV(block, mem(&m_core->tempdata.d), F64(G_RB(op)));                  // fdmov   [tempdata],fb
 				UML_ROLINS(block, FPSCR32, mem(&m_core->tempdata.w.l), 0, compute_crf_mask(G_FM(op)));
 																							// rolins  fpscr,rb,0,crf_mask
 				generate_set_fmod(block);                                                   // FPSCR[RN] may have changed
+				UML_CALLH(block, *m_fpscr_summary);                                         // callh   fpscr_summary
 				return true;
 
 			case 0x086:  // MTFSFIx
+				UML_CALLH(block, *m_fpscr_sync);                                            // callh   fpscr_sync
 				UML_ROLINS(block, FPSCR32, G_IMM(op), 28 - 4 * G_CRFD(op), CRMASK(G_CRFD(op)));
 																							// rolins  fpscr,rb,0,crf_mask
 				if (G_CRFD(op) == 7)                                                        // field 7 = FPSCR[RN]
 					generate_set_fmod(block);
+				UML_CALLH(block, *m_fpscr_summary);                                         // callh   fpscr_summary
 				return true;
 		}
 	}

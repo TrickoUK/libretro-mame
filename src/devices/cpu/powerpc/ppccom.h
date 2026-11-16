@@ -310,6 +310,7 @@ enum
 #define FPRF_NEG_NORMAL     0x00008000
 #define FPRF_POS_NORMAL     0x00004000
 #define FPRF_POS_ZERO       0x00002000
+#define FPRF_RESULT_NONE    0xffffffffffffffffULL   // 64-bit result sentinel, not an FPSCR value: no deferred FPRF result (a NaN, never deferred)
 
 // XER register bits
 #define XER_SO              0x80000000
