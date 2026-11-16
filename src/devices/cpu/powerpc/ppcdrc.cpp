@@ -286,6 +286,84 @@ void ppc_device::ppcdrc_add_fastram(offs_t start, offs_t end, uint8_t readonly, 
 
 
 /*-------------------------------------------------
+    ppcdrc_set_fastram_window_base - set the RAM
+    that run-time fast RAM windows point into;
+    must be called before the first reset, as the
+    memory accessors bake in the base
+-------------------------------------------------*/
+
+void ppc_device::ppcdrc_set_fastram_window_base(void *base, offs_t size)
+{
+	if (m_read8[0])
+	{
+		logerror("fast RAM window base set after the memory accessors were generated; ignored\n");
+		return;
+	}
+	m_fastwin_base = base;
+	m_fastwin_size = size;
+	ppcdrc_clear_fastram_windows();
+}
+
+
+/*-------------------------------------------------
+    ppcdrc_clear_fastram_windows - unmap all
+    run-time fast RAM windows
+-------------------------------------------------*/
+
+void ppc_device::ppcdrc_clear_fastram_windows()
+{
+	// an empty window has start > end, so no address matches it
+	for (int win = 0; win < PPC_MAX_FASTRAM_WINDOWS; win++)
+	{
+		m_core->fastwin_start[win] = 0xffffffff;
+		m_core->fastwin_end[win] = 0;
+		m_core->fastwin_offset[win] = 0;
+	}
+}
+
+
+/*-------------------------------------------------
+    ppcdrc_map_fastram_window - map the physical
+    range start-end to the window base plus offset;
+    returns false if the range can't be mapped,
+    leaving it to the address space
+-------------------------------------------------*/
+
+bool ppc_device::ppcdrc_map_fastram_window(offs_t start, offs_t end, offs_t offset)
+{
+	// The newest mapping wins, as in the address space: older windows overlapping it are
+	// dropped, so those addresses go through the address space if this one can't be mapped.
+	for (int win = 0; win < PPC_MAX_FASTRAM_WINDOWS; win++)
+	{
+		if ((m_core->fastwin_start[win] <= end) && (m_core->fastwin_end[win] >= start))
+		{
+			m_core->fastwin_start[win] = 0xffffffff;
+			m_core->fastwin_end[win] = 0;
+			m_core->fastwin_offset[win] = 0;
+		}
+	}
+
+	// accesses are made on the 64-bit bus layout, so the window must keep doubleword alignment
+	if (!m_fastwin_base || (end < start) || ((start | offset) & 7) || (BIT(end, 0, 3) != 7))
+		return false;
+	if ((offset >= m_fastwin_size) || ((end - start) > (m_fastwin_size - 1 - offset)))
+		return false;
+
+	for (int win = 0; win < PPC_MAX_FASTRAM_WINDOWS; win++)
+	{
+		if (m_core->fastwin_start[win] > m_core->fastwin_end[win])
+		{
+			m_core->fastwin_start[win] = start;
+			m_core->fastwin_end[win] = end;
+			m_core->fastwin_offset[win] = offset - start;
+			return true;
+		}
+	}
+	return false;
+}
+
+
+/*-------------------------------------------------
     ppcdrc_add_hotspot - add a new hotspot
 -------------------------------------------------*/
 
@@ -1481,24 +1559,10 @@ void ppc_device::static_generate_memory_accessor(
 		}
 	}
 
-	if (!debugger_enabled())
-		for (ramnum = 0; ramnum < PPC_MAX_FASTRAM; ramnum++)
-			if (m_fastram[ramnum].base != nullptr && (!iswrite || !m_fastram[ramnum].readonly))
+	// a fast RAM hit, with I0 the byte offset from fastbase
+	auto const fast_access =
+			[&block, size, iswrite, ismasked, fastxor] (void *fastbase)
 			{
-				void *fastbase = (uint8_t *)m_fastram[ramnum].base - m_fastram[ramnum].start;
-				uml::code_label skip = label++;
-
-				if (m_fastram[ramnum].end != 0xffffffff)
-				{
-					UML_CMP(block, I0, m_fastram[ramnum].end);         // cmp     i0,end
-					UML_JMPc(block, COND_A, skip);                     // ja      skip
-				}
-				if (m_fastram[ramnum].start != 0x00000000)
-				{
-					UML_CMP(block, I0, m_fastram[ramnum].start);       // cmp     i0,fastram_start
-					UML_JMPc(block, COND_B, skip);                     // jb      skip
-				}
-
 				if (!iswrite)
 				{
 					if (size == 1)
@@ -1561,9 +1625,47 @@ void ppc_device::static_generate_memory_accessor(
 					}
 					UML_RET(block);                                                             // ret
 				}
+			};
 
-				UML_LABEL(block, skip);                                                     // skip:
+	if (!debugger_enabled())
+	{
+		for (ramnum = 0; ramnum < PPC_MAX_FASTRAM; ramnum++)
+			if (m_fastram[ramnum].base != nullptr && (!iswrite || !m_fastram[ramnum].readonly))
+			{
+				void *fastbase = (uint8_t *)m_fastram[ramnum].base - m_fastram[ramnum].start;
+				uml::code_label skip = label++;
+
+				if (m_fastram[ramnum].end != 0xffffffff)
+				{
+					UML_CMP(block, I0, m_fastram[ramnum].end);         // cmp     i0,end
+					UML_JMPc(block, COND_A, skip);                     // ja      skip
+				}
+				if (m_fastram[ramnum].start != 0x00000000)
+				{
+					UML_CMP(block, I0, m_fastram[ramnum].start);       // cmp     i0,fastram_start
+					UML_JMPc(block, COND_B, skip);                     // jb      skip
+				}
+				fast_access(fastbase);
+				UML_LABEL(block, skip);                                // skip:
 			}
+
+		// run-time windows: the bounds and offset are read from the CPU state, so the
+		// memory controller can move RAM without regenerating the accessors
+		// NOTE: like the static regions, windows bypass the 601 code write watch, so they are left out with it
+		if (m_fastwin_base && !codewatch)
+			for (int win = 0; win < PPC_MAX_FASTRAM_WINDOWS; win++)
+			{
+				uml::code_label skip = label++;
+
+				UML_CMP(block, I0, mem(&m_core->fastwin_end[win]));            // cmp     i0,[fastwin_end]
+				UML_JMPc(block, COND_A, skip);                                 // ja      skip
+				UML_CMP(block, I0, mem(&m_core->fastwin_start[win]));          // cmp     i0,[fastwin_start]
+				UML_JMPc(block, COND_B, skip);                                 // jb      skip
+				UML_ADD(block, I0, I0, mem(&m_core->fastwin_offset[win]));     // add     i0,i0,[fastwin_offset]
+				fast_access(m_fastwin_base);
+				UML_LABEL(block, skip);                                        // skip:
+			}
+	}
 
 	// clear first, so a request this instruction never made can't discard an unrelated transfer
 	if (m_drcoptions & PPCDRC_BUS_RETRY)

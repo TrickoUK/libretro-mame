@@ -731,6 +731,7 @@ void ppc_device::device_start()
 	m_arg1 = 0;
 	m_fastram_select = 0;
 	memset(m_fastram, 0, sizeof(m_fastram));
+	ppcdrc_clear_fastram_windows();
 	m_hotspot_select = 0;
 	memset(m_hotspot, 0, sizeof(m_hotspot));
 

@@ -31,6 +31,7 @@
 
 // general constants
 #define PPC_MAX_FASTRAM         4
+#define PPC_MAX_FASTRAM_WINDOWS 4
 #define PPC_MAX_HOTSPOTS        16
 
 
@@ -245,6 +246,9 @@ public:
 	void ppcdrc_set_options(uint32_t options);
 	void bus_error() noexcept { m_bus_error = true; }
 	void ppcdrc_add_fastram(offs_t start, offs_t end, uint8_t readonly, void *base);
+	void ppcdrc_set_fastram_window_base(void *base, offs_t size);
+	void ppcdrc_clear_fastram_windows();
+	bool ppcdrc_map_fastram_window(offs_t start, offs_t end, offs_t offset);
 	void ppcdrc_add_hotspot(offs_t pc, uint32_t opcode, uint32_t cycles);
 
 	virtual void signal_external_write(offs_t physical_address, u32 length) override;
@@ -390,6 +394,11 @@ protected:
 		uint32_t m_codepage_any;                    // nonzero if any page bit is set (UML-readable)
 		uint32_t m_translation_generation;          // bumped whenever the MMU mapping may have changed (UML-readable)
 		uint32_t m_codewatch_ea;                    // effective address of an in-progress store (601 write-watch)
+
+		// fast RAM windows a memory controller maps at run time (UML-readable)
+		uint32_t fastwin_start[PPC_MAX_FASTRAM_WINDOWS];
+		uint32_t fastwin_end[PPC_MAX_FASTRAM_WINDOWS];
+		uint32_t fastwin_offset[PPC_MAX_FASTRAM_WINDOWS];   // window offset minus start, modulo 2^32
 	};
 
 	internal_ppc_state *m_core;
@@ -759,6 +768,8 @@ protected:
 
 	uint32_t              m_fastram_select;
 	fast_ram_info       m_fastram[PPC_MAX_FASTRAM];
+	void *              m_fastwin_base = nullptr;   // RAM the run-time windows point into
+	offs_t              m_fastwin_size = 0;
 
 	// hotspots
 	// hotspot info
