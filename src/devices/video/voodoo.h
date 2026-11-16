@@ -673,11 +673,14 @@ protected:
 	void gpu_sync_down(int buffer, u32 first_row = 0, u32 last_row = 1023);
 	void gpu_mark_rows(int buffer, s32 first_row, s32 last_row);
 	void gpu_sync_up();
+	void gpu_target_lost();
 	void gpu_latch(char const *reason);
 	void gpu_configure();
 	bool gpu_present(bitmap_rgb32 &bitmap, rectangle const &cliprect, rgb_t const *pens);
 	std::unique_ptr<voodoo::gpu_renderer> m_gpu;
 	std::vector<u32> m_gpu_image;            // front buffer as read back, rgb32
+	std::vector<u32> m_gpu_sync_image;       // gpu_sync_down(): rows of a buffer as read back, rgb32 at the native resolution
+	std::vector<std::pair<u32, u32>> m_gpu_sync_ranges;   // gpu_sync_down(): the rows it reads (first, count)
 	bool m_gpu_shadow_dirty[GPU_SLOTS] = { };        // the GPU drew into the buffer since m_fbram was last updated from it
 	bool m_gpu_dirty_row[GPU_SLOTS][1024] = { };     // per row of each buffer, in 16-row groups checked together
 	u32 m_gpu_slot_offs[GPU_SLOTS] = { ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U, ~0U };  // shared-memory models: RAM offset of the buffer in each slot
@@ -700,7 +703,8 @@ protected:
 		bool same_picture(gpu_direct_copy const &o) const { return serial == o.serial && front == o.front && pen_generation == o.pen_generation && pens == o.pens && width == o.width && height == o.height && epoch == o.epoch; }
 	};
 	gpu_direct_copy m_gpu_direct[2];
-	u32 m_gpu_epoch = 0;                     // changes when the GPU contents are replaced (state load)
+	u32 m_gpu_epoch = 0;                     // changes when the GPU contents are replaced (state load, refused flush)
+	bool m_gpu_recovering = false;           // gpu_target_lost() is running
 	u32 m_pen_generation = 0;                // changes whenever m_pen is recomputed
 	std::vector<u32> m_gpu_out;              // the finished picture (scaled to the output, through the pens), by bitmap row
 	std::vector<u8> m_gpu_out_valid;         // per bitmap row: m_gpu_out holds the finished row

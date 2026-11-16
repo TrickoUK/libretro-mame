@@ -1022,6 +1022,10 @@ void voodoo_1_device::device_start()
 			m_gpu = std::make_unique<voodoo::gpu_renderer>(machine(), engine);
 			if (!m_gpu->init(tmumem[0], tmusize[0] * 1024 * 1024, BIT(m_chipmask, 2) ? tmumem[1] : nullptr, BIT(m_chipmask, 2) ? tmusize[1] * 1024 * 1024 : 0))
 				m_gpu.reset();
+			else
+			{
+				m_gpu->set_target_lost([this] () { gpu_target_lost(); });
+			}
 			m_gpu_compare = getenv("MAME_VOODOO_GPU_CMP") != nullptr;
 			m_gpu_parallel = true;
 		}
@@ -3194,16 +3198,15 @@ void voodoo_1_device::gpu_sync_down(int buffer, u32 first_row, u32 last_row)
 {
 	if (!m_gpu || !m_gpu->usable() || buffer < 0 || !m_gpu_shadow_dirty[buffer])
 		return;
-	int const scale = m_gpu->scale();
 	u32 const rowpixels = m_gpu->rowpixels();
 	u32 const rows = m_gpu->rows();
-	u32 const stride = rowpixels * scale;
-	u32 const area = scale * scale;
 	u16 *dest = gpu_slot_buffer(buffer);
 	last_row = std::min(last_row, rows - 1);
 
-	// read back each 16-row group in the range that holds a stale row
+	// read back, in one frame, each 16-row group in the range that holds a stale row (neighbouring groups as one
+	// rectangle), averaged to the native resolution on the GPU
 	bool any_left = false;
+	m_gpu_sync_ranges.clear();
 	for (u32 group = 0; group < rows; group += 16)
 	{
 		u32 const group_end = std::min(group + 16, rows);
@@ -3217,29 +3220,30 @@ void voodoo_1_device::gpu_sync_down(int buffer, u32 first_row, u32 last_row)
 			any_left = true;
 			continue;
 		}
-
-		std::vector<u32> image(size_t(stride) * (group_end - group) * scale);
+		if (!m_gpu_sync_ranges.empty() && m_gpu_sync_ranges.back().first + m_gpu_sync_ranges.back().second == group)
+			m_gpu_sync_ranges.back().second += group_end - group;
+		else
+			m_gpu_sync_ranges.emplace_back(group, group_end - group);
+	}
+	if (!m_gpu_sync_ranges.empty())
+	{
+		m_gpu_sync_image.resize(size_t(rowpixels) * rows);
 		m_gpu->why("sync down");
-		if (!m_gpu->flush(buffer, image.data(), group, group_end - group))
+		if (!m_gpu->flush_rows(buffer, m_gpu_sync_image.data(), m_gpu_sync_ranges.data(), m_gpu_sync_ranges.size()))
 			return;
-		for (u32 y = group; y < group_end; y++)
+		// packed to RGB565 without dither
+		for (auto const &range : m_gpu_sync_ranges)
 		{
-			for (u32 x = 0; x < rowpixels; x++)
+			for (u32 y = range.first; y < range.first + range.second; y++)
 			{
-				u32 r = 0, g = 0, b = 0;
-				for (int sy = 0; sy < scale; sy++)
+				u32 const *const src = &m_gpu_sync_image[size_t(y) * rowpixels];
+				for (u32 x = 0; x < rowpixels; x++)
 				{
-					u32 const *src = &image[size_t((y - group) * scale + sy) * stride + x * scale];
-					for (int sx = 0; sx < scale; sx++)
-					{
-						r += (src[sx] >> 16) & 0xff;
-						g += (src[sx] >> 8) & 0xff;
-						b += src[sx] & 0xff;
-					}
+					u32 const p = src[x];
+					dest[y * rowpixels + x] = ((p >> 19 & 0x1f) << 11) | ((p >> 10 & 0x3f) << 5) | (p >> 3 & 0x1f);
 				}
-				dest[y * rowpixels + x] = ((r / area) >> 3 << 11) | ((g / area) >> 2 << 5) | ((b / area) >> 3);
+				m_gpu_dirty_row[buffer][y] = false;
 			}
-			m_gpu_dirty_row[buffer][y] = false;
 		}
 	}
 	m_gpu_shadow_dirty[buffer] = any_left;
@@ -3276,6 +3280,38 @@ void voodoo_1_device::gpu_sync_up()
 		m_gpu_shadow_dirty[buffer] = false;
 		std::fill(std::begin(m_gpu_dirty_row[buffer]), std::end(m_gpu_dirty_row[buffer]), false);
 	}
+}
+
+
+//-------------------------------------------------
+//  gpu_target_lost - the engine refused a flush,
+//  so the target lacks that batch: m_fbram is
+//  brought up to date from the target as it
+//  stands, then the target is cleared and the
+//  colour buffers are drawn into it again
+//-------------------------------------------------
+
+void voodoo_1_device::gpu_target_lost()
+{
+	// a read-back below that is refused as well comes back here
+	if (m_gpu_recovering)
+		return;
+	m_gpu_recovering = true;
+	// while the software renderer still draws alongside, m_fbram is already complete
+	if (!m_gpu_parallel && m_gpu->rows() != 0)
+	{
+		for (int buffer = 0; buffer < GPU_SLOTS; buffer++)
+		{
+			if (gpu_slot_offset(buffer) == ~0U)
+				continue;
+			gpu_mark_rows(buffer, 0, m_gpu->rows() - 1);
+			gpu_sync_down(buffer);
+		}
+	}
+	m_gpu->new_generation();
+	gpu_sync_up();
+	m_gpu_epoch++;
+	m_gpu_recovering = false;
 }
 
 

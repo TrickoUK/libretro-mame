@@ -149,6 +149,8 @@ u32 gpu_batch::add_state(poly_data const &poly, u32 flags, int buffer)
 	s[S_CLIP_TB] = poly.cliptop | (u32(poly.clipbottom) << 16);
 	s[S_BUFFER] = buffer;
 	s[S_FLAGS] = flags;
+	s[S_BUFROW] = buffer * m_stage_rows;
+	s[S_SCALE] = m_scale;
 	return index;
 }
 
@@ -299,14 +301,22 @@ void gpu_batch::add_fastfill(poly_data const &poly, int buffer, bool y_origin, s
 
 
 //-------------------------------------------------
-//  set_geometry - size of one colour buffer
+//  set_geometry - size of one colour buffer and
+//  the render scale
 //-------------------------------------------------
 
-void gpu_batch::set_geometry(u32 rowpixels, u32 rows)
+void gpu_batch::set_geometry(u32 rowpixels, u32 rows, int scale)
 {
 	close_stamp();
 	m_stage_rowpixels = rowpixels;
 	m_stage_rows = rows;
+	m_scale = scale;
+	// records captured before the geometry was known are drawn with it
+	for (size_t p = 0; p < m_state.size(); p += STATE_WORDS)
+	{
+		m_state[p + S_BUFROW] = m_state[p + S_BUFFER] * rows;
+		m_state[p + S_SCALE] = scale;
+	}
 	m_stage.assign(size_t(rowpixels) * rows, 0);
 	m_stage_z.clear();
 	m_stage_has_z = false;
@@ -397,6 +407,8 @@ void gpu_batch::close_stamp()
 	u32 *const st = &m_state[prim * STATE_WORDS];
 	st[S_BUFFER] = s.buffer;
 	st[S_FLAGS] = 2;
+	st[S_BUFROW] = s.buffer * m_stage_rows;
+	st[S_SCALE] = m_scale;
 	st[S_CLIP_LR] = u32(s.x) | (u32(s.x + s.w) << 16);
 	st[S_CLIP_TB] = u32(s.y) | (u32(s.y + s.h) << 16);
 	m_commands.push_back({ gpu_command::type::STAMP, u32(m_stamps.size() - 1), prim });
@@ -534,7 +546,7 @@ void gpu_renderer::configure(u32 rowpixels, u32 rows, int buffers)
 	// the whole stack fit the largest texture size
 	while (m_scale > 1 && (int(rowpixels) * m_scale > limit || int(rows) * buffers * m_scale > limit))
 		m_scale--;
-	m_batch.set_geometry(rowpixels, rows);
+	m_batch.set_geometry(rowpixels, rows, m_scale);
 	m_generation++;
 }
 
@@ -648,6 +660,59 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 {
 	if (!usable() || m_rowpixels == 0)
 		return false;
+	if (read_buffer < 0 || !out)
+		return submit_batch(-1, nullptr, 0, false);
+	osd::gpu_readback_rect readback;
+	if (row_count == 0)
+		row_count = m_rows;
+	readback.x = 0;
+	readback.y = (read_buffer * m_rows + first_row) * m_scale;
+	readback.w = (col_count ? col_count : m_rowpixels) * m_scale;
+	readback.h = row_count * m_scale;
+	readback.out = out;
+	readback.stride = out_stride ? out_stride : readback.w / downsample;
+	readback.downsample = downsample;
+	readback.opaque = opaque;
+	readback.channel_lut = channel_lut;
+	return submit_batch(read_buffer, &readback, 1, read_first);
+}
+
+
+//-------------------------------------------------
+//  flush_rows - submit the batch and read row
+//  ranges of a colour buffer back at the native
+//  resolution (each native pixel the average of
+//  its block at the render scale)
+//-------------------------------------------------
+
+bool gpu_renderer::flush_rows(int buffer, u32 *out, std::pair<u32, u32> const *ranges, int count)
+{
+	if (!usable() || m_rowpixels == 0)
+		return false;
+	m_row_readbacks.clear();
+	for (int i = 0; i < count; i++)
+	{
+		osd::gpu_readback_rect &r = m_row_readbacks.emplace_back();
+		r.x = 0;
+		r.y = (buffer * m_rows + ranges[i].first) * m_scale;
+		r.w = m_rowpixels * m_scale;
+		r.h = ranges[i].second * m_scale;
+		r.out = out + size_t(ranges[i].first) * m_rowpixels;
+		r.stride = m_rowpixels;
+		r.downsample = m_scale;
+	}
+	return submit_batch(buffer, m_row_readbacks.data(), count, false);
+}
+
+
+//-------------------------------------------------
+//  submit_batch - build one engine frame from the
+//  batch, with the given read-backs at its end
+//  (or one read-back first, see flush())
+//-------------------------------------------------
+
+bool gpu_renderer::submit_batch(int read_buffer, osd::gpu_readback_rect const *readbacks, int readback_count, bool read_first)
+{
 	bool const prof = profiling();
 	auto const t_start = std::chrono::steady_clock::now();
 	auto const ms_since = [] (std::chrono::steady_clock::time_point from) { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - from).count(); };
@@ -674,7 +739,10 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 	int const scale = m_scale;
 
 	// texture RAM and table updates
-	std::vector<osd::gpu_texture_update> updates;
+	std::vector<osd::gpu_texture_update> &updates = m_updates;
+	updates.clear();
+	int taken[2][4] = {};
+	bool took[2] = { false, false };
 	for (int i = 0; i < 2; i++)
 	{
 		int x, y, w, h;
@@ -682,6 +750,11 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 			continue;
 		if (m_ram[i] && m_dirty[i]->take(x, y, w, h))
 		{
+			took[i] = true;
+			taken[i][0] = x;
+			taken[i][1] = y;
+			taken[i][2] = w;
+			taken[i][3] = h;
 			osd::gpu_texture_update &u = updates.emplace_back();
 			u.texture = m_tmu_tex[i];
 			u.x = 0;
@@ -708,16 +781,18 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 		u.data = m_batch.fog();
 	}
 
-	// vertices and state; fast fills become two triangles
-	std::vector<u32> state(m_batch.state());
-	std::vector<gpu_vertex> verts;
+	// vertices and state (the batch fills in each record's buffer row and scale); fast fills become two triangles
+	std::vector<u32> const &state = m_batch.state();
+	std::vector<gpu_vertex> &verts = m_verts;
+	verts.clear();
 	verts.reserve(m_batch.vertices().size() + 6 * m_batch.fastfill_count());
-	std::vector<osd::gpu_command> commands;
-	for (u32 p = 0; p < state.size() / STATE_WORDS; p++)
+	std::vector<osd::gpu_command> &commands = m_commands;
+	commands.clear();
+	if (read_first && readback_count == 1)
 	{
-		u32 *s = &state[p * STATE_WORDS];
-		s[S_BUFROW] = s[S_BUFFER] * m_rows;
-		s[S_SCALE] = scale;
+		// the picture is complete before this batch starts, so it is read before the draws and the
+		// emulation thread does not wait for them
+		commands.push_back(osd::gpu_command::make_readback(readbacks[0]));
 	}
 	osd::gpu_command run;
 	bool have_run = false;
@@ -879,33 +954,10 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 	frame.state_stride = STATE_WORDS;
 	frame.commands = commands.data();
 	frame.command_count = commands.size();
-	osd::gpu_readback_rect readback;
-	if (read_buffer >= 0 && out)
+	if (!(read_first && readback_count == 1))
 	{
-		readback.x = 0;
-		if (row_count == 0)
-			row_count = m_rows;
-		readback.y = (read_buffer * m_rows + first_row) * scale;
-		readback.w = (col_count ? col_count : m_rowpixels) * scale;
-		readback.h = row_count * scale;
-		readback.out = out;
-		readback.stride = out_stride ? out_stride : readback.w / downsample;
-		readback.downsample = downsample;
-		readback.opaque = opaque;
-		readback.channel_lut = channel_lut;
-		if (read_first)
-		{
-			// the picture is complete before this batch starts, so it is read before the draws and the
-			// emulation thread does not wait for them
-			commands.insert(commands.begin(), osd::gpu_command::make_readback(readback));
-			frame.commands = commands.data();
-			frame.command_count = commands.size();
-		}
-		else
-		{
-			frame.readbacks = &readback;
-			frame.readback_count = 1;
-		}
+		frame.readbacks = readbacks;
+		frame.readback_count = readback_count;
 	}
 	double const build_ms = prof ? ms_since(t_start) : 0.0;
 	auto const t_submit = std::chrono::steady_clock::now();
@@ -925,6 +977,18 @@ bool gpu_renderer::flush(int read_buffer, u32 *out, u32 first_row, u32 row_count
 	}
 	m_serial++;
 	m_batch.reset();
+	if (!ok)
+	{
+		// The target lacks this batch: the texture rows it carried go up with the next frame, and the device
+		// replaces the target's contents (see set_target_lost()).
+		for (int i = 0; i < 2; i++)
+			if (took[i])
+				m_dirty[i]->mark(taken[i][0], taken[i][1], taken[i][2], taken[i][3]);
+		if (m_target_lost)
+			m_target_lost();
+		else
+			m_generation++;
+	}
 	return ok;
 }
 

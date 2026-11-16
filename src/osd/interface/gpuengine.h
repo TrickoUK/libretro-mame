@@ -37,9 +37,11 @@
       and collect_frame() and releases it before returning, so it never stays
       current across separately scheduled emulator calls. A frame with
       read-backs (at the end, or READBACK commands) returns with their pixels
-      written; a frame without any, or with defer_readback, returns once its
-      commands are issued and the GPU executes them while emulation runs.
-      Later work on the same engine is ordered after it. The pixels of a
+      written. The commands after the last READBACK command are only waited
+      for when the frame also has read-backs at the end without
+      defer_readback; otherwise the GPU executes them while emulation runs. A
+      frame without read-backs, or with defer_readback, returns once its
+      commands are issued. Later work on the same engine is ordered after it. The pixels of a
       deferred read-back are written by collect_frame(), in the same emulated
       frame as the submit; the buffers they go to must stay alive until then.
 
@@ -256,7 +258,7 @@ enum class gpu_command_type : uint8_t
 	COPY_RECT,      // copy (x, y, w, h) to (dx, dy) inside the target, ignoring the clip
 	UPDATE_TEXTURE, // replace a texture rectangle at this point of the frame
 	CLEAR,          // clear the whole target, ignoring the clip
-	READBACK        // read a target rectangle back at this point of the frame (waits for the commands before it)
+	READBACK        // read a target rectangle back at this point of the frame (waits for the commands before it, not for those after it)
 };
 
 // Variant bits 24-27 carry log2 of the anisotropic tap limit (0 = off); a module sees the limit as the
@@ -371,7 +373,8 @@ struct gpu_frame
 
 	// With defer_readback the read-backs of readbacks[] are started but not waited for: submit_frame()
 	// returns once the commands are issued, and collect_frame() later waits and writes the pixels.
-	// READBACK commands inside the command list are always completed before submit_frame() returns.
+	// READBACK commands inside the command list are always completed before submit_frame() returns;
+	// the commands after the last of them are not waited for unless readbacks[] is (see the file header).
 	bool defer_readback = false;
 
 	// regions read back after the last command (target pixels, row 0 = top).

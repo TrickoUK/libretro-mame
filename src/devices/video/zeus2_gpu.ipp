@@ -84,8 +84,10 @@ constexpr uint32_t GPU_FRAME_WORDS_MASK = 0xfffff;
 // the chip's own depth range for a frame buffer word
 constexpr float GPU_DEPTH_SCALE = 16777216.0f;
 
-// consecutive commands above this count are sent without a read-back, so the queue stays short
+// a queue above this many commands or vertices is sent without a read-back, so it stays short (merged frame-buffer writes add
+// vertices without adding commands)
 constexpr size_t GPU_FLUSH_COMMANDS = 32768;
+constexpr size_t GPU_FLUSH_VERTICES = 1 << 20;
 
 } // anonymous namespace
 
@@ -342,14 +344,39 @@ void zeus2_renderer::gpu_add_rect(int x0, int x1, int y0, int y1, uint32_t colou
 	const uint32_t first = m_gpu_vertices.size();
 	m_gpu_vertices.insert(m_gpu_vertices.end(), { a, b, c, a, c, d });
 
-	osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, first, 6);
-	draw.variant = osd::gpu_aniso_variant(m_gpu_aniso);
-	draw.bindings[0] = m_gpu_tex_ram;
-	draw.bindings[1] = m_gpu_tex_pal;
-	draw.depth_func = osd::gpu_depth_func::ALWAYS;
-	draw.depth_write = write_depth;
-	draw.color_write = write_colour;
-	m_gpu_commands.push_back(draw);
+	// consecutive fills and frame-buffer writes with the same write flags, and nothing between them, share one draw
+	const uint32_t variant = osd::gpu_aniso_variant(m_gpu_aniso);
+	bool merged = false;
+	if (!m_gpu_commands.empty())
+	{
+		osd::gpu_command &last = m_gpu_commands.back();
+		if (last.type == osd::gpu_command_type::DRAW && last.module == m_gpu_module && last.first_vertex + last.vertex_count == first
+				&& last.variant == variant && last.depth_func == osd::gpu_depth_func::ALWAYS && last.depth_write == write_depth
+				&& last.color_write == write_colour && last.blend == osd::gpu_blend_state())
+		{
+			last.vertex_count += 6;
+			merged = true;
+		}
+	}
+	if (!merged)
+	{
+		osd::gpu_command draw = osd::gpu_command::make_draw(m_gpu_module, first, 6);
+		draw.variant = variant;
+		draw.bindings[0] = m_gpu_tex_ram;
+		draw.bindings[1] = m_gpu_tex_pal;
+		draw.depth_func = osd::gpu_depth_func::ALWAYS;
+		draw.depth_write = write_depth;
+		draw.color_write = write_colour;
+		m_gpu_commands.push_back(draw);
+	}
+	gpu_check_flush();
+}
+
+// Sends the queue without a read-back once it is long, so it stays short.
+void zeus2_renderer::gpu_check_flush()
+{
+	if ((m_gpu_commands.size() > GPU_FLUSH_COMMANDS || m_gpu_vertices.size() > GPU_FLUSH_VERTICES) && !gpu_submit(nullptr, true))
+		gpu_latch_off("the engine refused a frame");
 }
 
 // A fill of the frame buffer words [first, last) of the flat array, as the fast clear writes them. The words are split into a head
@@ -378,7 +405,6 @@ void zeus2_renderer::gpu_fill_words(uint32_t first, uint32_t last, uint32_t colo
 			pos += x1 - col;
 		}
 	}
-	m_gpu_clip_valid = false;
 }
 
 // The fast clear of code 8: the words from the address, the count of them, wrapping at 1M words.
@@ -424,7 +450,6 @@ void zeus2_renderer::gpu_write_pixel(uint32_t word, bool write_colour, uint32_t 
 	const int row = int(word / GPU_TARGET_WIDTH);
 	const int col = int(word % GPU_TARGET_WIDTH);
 	gpu_add_rect(col, col + 1, row, row + 1, colour, depth, write_colour, write_depth);
-	m_gpu_clip_valid = false;
 }
 
 // Adds one polygon from zeus2_render_poly(): the clipped screen-space vertices as a fan of triangles, and the state record of the quad.
@@ -540,6 +565,7 @@ bool zeus2_renderer::gpu_add_polygon(const zeus2_poly_extra_data &state, const v
 				&& last.depth_write == depth_write && last.color_write && last.blend == blend_state)
 		{
 			last.vertex_count += count;
+			gpu_check_flush();
 			return true;
 		}
 	}
@@ -551,9 +577,7 @@ bool zeus2_renderer::gpu_add_polygon(const zeus2_poly_extra_data &state, const v
 	draw.depth_write = depth_write;
 	draw.blend = blend_state;
 	m_gpu_commands.push_back(draw);
-
-	if (m_gpu_commands.size() > GPU_FLUSH_COMMANDS && !gpu_submit(nullptr, true))
-		gpu_latch_off("the engine refused a frame");
+	gpu_check_flush();
 	return true;
 }
 
