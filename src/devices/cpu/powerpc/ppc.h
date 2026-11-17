@@ -693,10 +693,10 @@ protected:
 	// Instruction cache flash invalidate (HID0[ICFI], every OEA part except the
 	// 601): code can be replaced by writers the DRC never sees (DMA, another
 	// CPU), and software then invalidates the whole icache instead of issuing
-	// icbi.  Keep a copy of every writable physical page code was compiled from
-	// (pages that can't be written can't change), with the effective pages the
-	// code was compiled at, so an ICFI only discards code from pages whose bytes
-	// changed, rather than flushing the entire cache each time.  Snapshots are
+	// icbi.  Keep a copy of every physical page code was compiled from, with the
+	// effective pages the code was compiled at, so an ICFI only discards code
+	// from pages whose bytes changed, rather than flushing the entire cache each
+	// time.  A page that can't be read directly is always discarded.  Snapshots are
 	// per physical page, so code compiled under an earlier mapping of an
 	// effective page stays covered after the page is remapped.  If a page's
 	// memory no longer matches its snapshot when more code is compiled from it,

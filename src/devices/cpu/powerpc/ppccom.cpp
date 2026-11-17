@@ -1900,15 +1900,16 @@ bool ppc_device::has_icache_flash_invalidate() const
 
 /*-------------------------------------------------
     code_page_memory - host memory backing a whole
-    writable physical code page, or nullptr if the
-    page is read-only, handler-backed or not one
-    contiguous block of host memory
+    physical code page, or nullptr if reads of the
+    page aren't one contiguous block of host memory
 -------------------------------------------------*/
 
 const uint8_t *ppc_device::code_page_memory(offs_t physbase) const
 {
-	if (!m_program->get_write_ptr(physbase))
-		return nullptr;
+	// A missing write pointer doesn't make a page read-only: a write tap (the
+	// BeBox's MPC105 snoop, a Lua tap, a watchpoint) or a write handler leaves
+	// RAM without one.  Compare what reads return instead; ROM simply never
+	// changes.
 
 	// The pointers address the bus-width unit holding the address, so compare
 	// against the start of the page's last 64-bit unit.
@@ -1929,7 +1930,7 @@ const uint8_t *ppc_device::code_page_memory(offs_t physbase) const
 bool ppc_device::code_snapshot_matches(uint32_t physpage, const code_page_snapshot &snap) const
 {
 	const uint8_t *const mem = code_page_memory(offs_t(physpage) << MMU_PAGE_SHIFT);
-	return mem && std::equal(mem, mem + MMU_PAGE_BYTES, snap.bytes.get());
+	return mem && snap.bytes && std::equal(mem, mem + MMU_PAGE_BYTES, snap.bytes.get());
 }
 
 
@@ -1942,26 +1943,30 @@ bool ppc_device::code_snapshot_matches(uint32_t physpage, const code_page_snapsh
 
 void ppc_device::snapshot_code_page(uint32_t page, offs_t physbase)
 {
-	// Read-only and handler-backed pages can't be rewritten, so they need no
-	// snapshot.  A writable page that isn't one contiguous block of host memory
-	// has none either and relies on the compiled code's checksum alone.
+	// A page that can't be read as one block of host memory can't be compared,
+	// so it gets an entry without bytes, marked dirty: every ICFI discards its
+	// code, as it did before snapshots.
 	const uint8_t *const mem = code_page_memory(physbase);
-	if (!mem)
-		return;
 
 	uint32_t const physpage = physbase >> MMU_PAGE_SHIFT;
 	auto const [it, inserted] = m_code_snapshots.try_emplace(physpage);
 	code_page_snapshot &snap = it->second;
-	if (inserted)
-	{
-		snap.bytes = std::make_unique<uint8_t []>(MMU_PAGE_BYTES);
-		std::copy_n(mem, MMU_PAGE_BYTES, snap.bytes.get());
-		snap.logical.push_back(page);
-		return;
-	}
-
 	if (std::find(snap.logical.begin(), snap.logical.end(), page) == snap.logical.end())
 		snap.logical.push_back(page);
+
+	if (inserted)
+	{
+		if (mem)
+		{
+			snap.bytes = std::make_unique<uint8_t []>(MMU_PAGE_BYTES);
+			std::copy_n(mem, MMU_PAGE_BYTES, snap.bytes.get());
+		}
+		else
+		{
+			snap.dirty = true;
+		}
+		return;
+	}
 
 	// Blocks compiled from this page earlier used the snapshot's bytes, and the
 	// code being compiled uses what memory holds now.  If the two differ, the
