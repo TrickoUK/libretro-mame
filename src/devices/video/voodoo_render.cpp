@@ -1850,7 +1850,7 @@ inline bool ATTR_FORCE_INLINE voodoo_renderer::alpha_test(thread_stats_block &th
 //  be checked by the caller
 //-------------------------------------------------
 
-inline bool ATTR_FORCE_INLINE voodoo_renderer::chroma_key_test(thread_stats_block &threadstats, rgbaint_t const &colorin, rgb_t chromakey, reg_chroma_range chromarange)
+inline bool ATTR_FORCE_INLINE voodoo_renderer::chroma_key_test(thread_stats_block &threadstats, rgbaint_t const &colorin, rgb_t chromakey, reg_chroma_range const chromarange)
 {
 	rgb_t color = colorin.to_rgba();
 

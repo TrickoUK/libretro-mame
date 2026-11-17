@@ -3749,7 +3749,7 @@ s32 voodoo_1_device::triangle()
 		auto const prof_start = voodoo::gpu_renderer::profiling() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
 		float const x[3] = { vert[0].x, vert[1].x, vert[2].x };
 		float const y[3] = { vert[0].y, vert[1].y, vert[2].y };
-		voodoo::gpu_batch::globals g = { m_reg.chroma_range().raw(), m_renderer->fogblend(), m_renderer->fogdelta(), m_renderer->fogdelta_mask(), m_renderer->bilinear_mask(), m_shared->argb1555, m_shared->argb4444 };
+		voodoo::gpu_batch::globals g = { m_renderer->fogblend(), m_renderer->fogdelta(), m_renderer->fogdelta_mask(), m_renderer->bilinear_mask(), m_shared->argb1555, m_shared->argb4444 };
 		m_gpu->batch().add_triangle(slot, gpu_buffer, slot.raster.fbzmode().y_origin(), m_renderer->yorigin(), x, y, g);
 		if (!m_gpu_parallel)
 		{

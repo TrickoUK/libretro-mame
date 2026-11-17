@@ -124,7 +124,6 @@ public:
 	// register state that is not part of poly_data
 	struct globals
 	{
-		u32 chroma_range;
 		u8 const *fogblend;
 		u8 const *fogdelta;
 		u8 fogdelta_mask;

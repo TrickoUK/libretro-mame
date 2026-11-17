@@ -196,7 +196,7 @@ void gpu_batch::add_triangle(poly_data const &poly, int buffer, bool y_origin, s
 
 	u32 const prim = add_state(poly, 0, buffer);
 	u32 *const s = &m_state[prim * STATE_WORDS];
-	s[S_CHROMARANGE] = g.chroma_range;
+	s[S_CHROMARANGE] = poly.chromarange;
 	s[S_FOGMASK] = g.fogdelta_mask;
 	s[S_BILINMASK] = g.bilinear_mask;
 	s[S_FOGROW] = 0;
