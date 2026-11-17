@@ -286,6 +286,12 @@ distrobox enter mame-dev -- retroarch -v -L /var/home/bazzite/Projects/libretro/
   `~/.config/retroarch/config/MAME/MAME.opt` (`key = "value"` lines; safe to hand-edit between runs). Core options
   are defined in `src/osd/libretro/libretro-internal/libretro_core_options.h`.
 - `-v` gives verbose frontend logging.
+- **End runs with a clean quit, never `kill -9` first.** NVRAM (EEPROM, flash, RTC) is written only when the core
+  exits cleanly: `pkill -x retroarch` (SIGTERM) does that, SIGKILL loses it. Games with a long first-boot init (Seibu
+  SPI sound-flash "NOW UPDATING", G-NET reflash and similar) then redo it on every boot. Use SIGTERM, wait for the
+  process to go, and use `-9` only as a fallback (the `my-docs/tools` runners do this). A SIGTERM during a first-boot
+  update saves a half-written image: delete that game's `~/.config/retroarch/saves/MAME/mame/nvram/<rom>` and redo the
+  update boot to completion.
 - **Run test and comparison runs in fast-forward by default** (`profile_run.py --ff -1`, `snap_run.sh FF=all`, or the
   fast-forward hotkey), and stop the run as soon as the frames you need are captured. Run at 1x speed only when
   fast-forward would change the result (timing-, audio- or input-dependent checks, real-time speed measurements).
