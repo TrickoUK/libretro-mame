@@ -831,7 +831,7 @@ private:
 	required_ioport_array<8> m_io_ports;
 	required_ioport_array<4> m_analog_input;
 	required_ioport_array<4> m_gun_input;
-	u16 gun_r(int which);
+	uint16_t gun_r(int which);
 	optional_ioport m_steering_config;
 	gamepad_steering m_gamepad_steering;
 
@@ -1901,25 +1901,23 @@ void viper_state::wheel_motor_update()
 	m_wheel_motor_pos = std::clamp(m_wheel_motor_pos, -255.0, 255.0);
 }
 
-// GUN0-3 are P1 X, P1 Y, P2 X, P2 Y. For the optical gun games (jpark3, p911, wcombat) only the
-// low 11 (X) or 9 (Y) bits are position; the base ports define all 16 bits as active-low unused,
-// which made X read 0xf800|x and Y 0xfe00|y. jpark3 keeps X & 0xfff and Y & 0x3ff, and with bit 11
-// of X / bit 9 of Y set it treats every shot as off-screen (a reload): the screen flashes but the
-// ammo never goes down. So return only the position bits, and set those two bits when the gun sits
-// at the edge of its range, which is how an off-screen aim reaches MAME.
-u16 viper_state::gun_r(int which)
+// GUN0-3 are P1 X, P1 Y, P2 X and P2 Y. A gun that sees no screen pulse is assumed to read as zero,
+// which the games take as an off-screen shot (a reload).
+uint16_t viper_state::gun_r(int which)
 {
-	const u16 data = m_gun_input[which]->read();
+	const uint16_t data = m_gun_input[which]->read();
 	ioport_field *const xf = m_gun_input[which & ~1]->field(0x0001);
 	ioport_field *const yf = m_gun_input[which | 1]->field(0x0001);
 	if (!xf || !yf || xf->type() != IPT_LIGHTGUN_X || yf->type() != IPT_LIGHTGUN_Y || xf->mask() == 0xffff)
 		return data;
 
-	const u16 x = m_gun_input[which & ~1]->read() & xf->mask();
-	const u16 y = m_gun_input[which | 1]->read() & yf->mask();
-	const bool offscreen = x <= xf->minval() || x >= xf->maxval() || y <= yf->minval() || y >= yf->maxval();
+	const uint16_t x = m_gun_input[which & ~1]->read() & xf->mask();
+	const uint16_t y = m_gun_input[which | 1]->read() & yf->mask();
+	if (x <= xf->minval() || x >= xf->maxval() || y <= yf->minval() || y >= yf->maxval())
+		return 0;
+
 	const ioport_field *const f = (which & 1) ? yf : xf;
-	return (data & f->mask()) | (offscreen ? ((f->mask() + 1) & 0xffff) : 0);
+	return data & f->mask();
 }
 
 void viper_state::viper_map(address_map &map)
