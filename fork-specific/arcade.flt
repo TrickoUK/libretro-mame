@@ -106,6 +106,7 @@ apple/valkyrie.cpp  // [HELPER]
 apple/vasp.cpp  // [HELPER]
 apple/ymca.cpp  // [HELPER]
 astrocorp/astro_cpucode.cpp  // [HELPER]
+astrocorp/astro_v102px.cpp  // [HELPER]
 astrocorp/astropc.cpp
 atari/a2600.cpp  // [MIXED]
 atari/akkaarrh.cpp
