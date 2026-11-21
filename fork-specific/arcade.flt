@@ -633,6 +633,7 @@ ice/lethalj.cpp
 ice/skimaxx.cpp
 ice/vp101.cpp
 ice/vp50.cpp
+igs/igs003.cpp  // [HELPER]
 igs/igs011.cpp
 igs/igs011_video.cpp  // [HELPER]
 igs/igs012.cpp  // [HELPER]
@@ -1517,6 +1518,7 @@ sega/mapledev.cpp  // [HELPER]
 sega/megacd.cpp  // [HELPER]
 sega/megadriv.cpp  // [HELPER]
 sega/megadriv_acbl.cpp
+sega/megadriv_firecore_vdp.cpp  // [HELPER]
 sega/megadriv_sunmix.cpp
 sega/megadriv_ybox.cpp
 sega/megaplay.cpp  // [HELPER]
@@ -2354,8 +2356,14 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -cjddzsp122cn
 -cjddzsp126cn
 -cjddzsp127cn
+-cjdh2
+-cjdh2a
+-cjdh2b
+-cjdh2c
+-cjdh2d
 -cjffruit
 -cjgdy
+-cjjl
 -cjplus
 -cjsxp
 -club90s
@@ -2608,6 +2616,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -goldnpkh
 -goldnpki
 -goldnpkr
+-goldpnew
 -goldpyr
 -goldpyru
 -goldpyrua
@@ -2905,6 +2914,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -lhtb
 -lhzb3
 -lhzb3106c5m
+-lhzb3in1
 -lhzb3p
 -lhzb3sjb
 -livegal
@@ -3089,6 +3099,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -mjreach1a
 -mjreacha
 -mjreachbl
+-mjreachbl2
 -mjreachp2
 -mjrking
 -mjrkingl

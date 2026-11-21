@@ -1756,16 +1756,10 @@ cjddzp206cn
 cjddzps
 cjddzs
 cjddzsa
-cjdh2
-cjdh2a
-cjdh2b
-cjdh2c
-cjdh2d
 cjdh6th
 cjdh6tha
 cjdlz
 cjdn
-cjjl
 cjlddz
 cjsjh
 cjslh
@@ -2750,6 +2744,7 @@ dleaguej
 dleuro
 dleuroalt
 dlital
+dlzc
 dmndrby
 dmndrbya
 dmnfrnt
@@ -5694,6 +5689,7 @@ ladymstr
 ladymstra
 lagirl
 lagunar
+laiziddz
 lamachin
 landbrk
 landbrka
@@ -5823,7 +5819,6 @@ lgpalt
 lgtnfght
 lgtnfghta
 lgtnfghtu
-lhzb3in1
 lhzb4
 lhzb4dhb
 lhzbgqb
@@ -8315,6 +8310,7 @@ qixb
 qixo
 qofd3
 qofdtbk
+qqddz
 quaak
 quake
 quantum
@@ -10364,7 +10360,6 @@ ssideki4
 ssingles
 sslam
 sslama
-sslamb
 ssmissin
 ssoldier
 ssonicbr
