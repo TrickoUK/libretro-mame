@@ -21797,6 +21797,7 @@ fl7_500_gs09
 fl7_500_gs10
 fl7_500_gs11
 fl7_500_gs12
+fl7_500_gs13
 fl7_1000
 fl7_2000
 fl7_2k16
@@ -44305,6 +44306,9 @@ fs3216
 @source:skeleton/ft68m.cpp
 ft68m
 
+@source:skeleton/futsala.cpp
+futsala
+
 @source:skeleton/galpro.cpp
 galpro
 
@@ -45451,6 +45455,7 @@ ikari3
 ikari3j
 ikari3k
 ikari3u
+ikari3ua
 ikari3w
 pow
 powa
