@@ -388,7 +388,7 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 
 	i82371eb_isa_device &isa(I82371EB_ISA(config, "pci:07.0", m_maincpu, true));
 	isa.boot_state_hook().set([](u8 data) { /* printf("%02x\n", data); */ });
-	isa.smi().set_inputline("maincpu", INPUT_LINE_SMI);
+	isa.apmc().set("pci:07.3", FUNC(i82371eb_acpi_device::apmc_w));
 	isa.a20m().set_inputline("maincpu", INPUT_LINE_A20);
 
 	i82371eb_ide_device &ide(I82371EB_IDE(config, "pci:07.1", m_maincpu));
@@ -397,7 +397,8 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 
 	I82371EB_USB (config, "pci:07.2");
 	I82371EB_ACPI(config, "pci:07.3");
-	ACPI_PIIX4   (config, "pci:07.3:acpi");
+	acpi_piix4_device &pm(ACPI_PIIX4(config, "pci:07.3:acpi"));
+	pm.smi().set_inputline("maincpu", INPUT_LINE_SMI);
 	SMBUS        (config, "pci:07.3:smbus", 0);
 
 	// FIXME: determine ISA bus clock

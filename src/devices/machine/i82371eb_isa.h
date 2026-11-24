@@ -28,6 +28,8 @@ public:
 	}
 
 	auto a20m() { return m_a20m_callback.bind(); }
+	// APM Control port writes, which the power management function turns into SMIs
+	auto apmc() { return m_apmc_callback.bind(); }
 	void a20gate_w(int state);
 
 	i82371eb_isa_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
@@ -45,6 +47,9 @@ protected:
 private:
 	required_device<ds12885ext_device> m_rtc;
 	devcb_write_line m_a20m_callback;
+	devcb_write8 m_apmc_callback;
+
+	u8 m_apmc, m_apms;
 
 	u8 m_serirqc;
 	u8 m_pdmacfg[2], m_pdma_ch[8];
