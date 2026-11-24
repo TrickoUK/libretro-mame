@@ -30,12 +30,14 @@
 
 void i386_device::x87_set_stack_top(int top)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->x87_sw &= ~(X87_SW_TOP_MASK << X87_SW_TOP_SHIFT);
 	m_core->x87_sw |= (top << X87_SW_TOP_SHIFT);
 }
 
 void i386_device::x87_set_tag(int reg, int tag)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int shift = X87_TW_FIELD_SHIFT(reg);
 
 	m_core->x87_tw &= ~(X87_TW_MASK << shift);
@@ -44,6 +46,7 @@ void i386_device::x87_set_tag(int reg, int tag)
 
 void i386_device::x87_write_stack(int i, extFloat80_t value, bool update_tag)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	ST(i) = value;
 
 	if (update_tag)
@@ -69,17 +72,20 @@ void i386_device::x87_write_stack(int i, extFloat80_t value, bool update_tag)
 
 void i386_device::x87_set_stack_underflow()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->x87_sw &= ~X87_SW_C1;
 	m_core->x87_sw |= X87_SW_IE | X87_SW_SF;
 }
 
 void i386_device::x87_set_stack_overflow()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->x87_sw |= X87_SW_C1 | X87_SW_IE | X87_SW_SF;
 }
 
 int i386_device::x87_inc_stack()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int ret = 1;
 
 	// Check for stack underflow
@@ -100,6 +106,7 @@ int i386_device::x87_inc_stack()
 
 int i386_device::x87_dec_stack()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int ret = 1;
 
 	// Check for stack overflow
@@ -119,6 +126,7 @@ int i386_device::x87_dec_stack()
 
 int i386_device::x87_ck_over_stack()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int ret = 1;
 
 	// Check for stack overflow
@@ -143,6 +151,7 @@ int i386_device::x87_ck_over_stack()
 
 int i386_device::x87_mf_fault()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ((m_core->x87_sw & X87_SW_ES) && (m_core->cr[0] & CR0_NE)) // FIXME: 486 and up only
 	{
 		m_core->ext = 1;
@@ -154,6 +163,7 @@ int i386_device::x87_mf_fault()
 
 uint32_t i386_device::Getx87EA(uint8_t modrm, int rwn)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t segment;
 	uint32_t ea;
 	modrm_to_EA(modrm, &ea, &segment);
@@ -169,6 +179,7 @@ uint32_t i386_device::Getx87EA(uint8_t modrm, int rwn)
 
 int i386_device::x87_check_exceptions(bool store)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->x87_cs = m_core->sreg[CS].selector;
 	if (PROTECTED_MODE && !V8086_MODE)
 		m_core->x87_inst_ptr = m_core->prev_eip;
@@ -219,6 +230,7 @@ int i386_device::x87_check_exceptions(bool store)
 
 void i386_device::x87_write_cw(uint16_t cw)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->x87_cw = cw;
 
 	/* Update the SoftFloat rounding mode */
@@ -227,6 +239,7 @@ void i386_device::x87_write_cw(uint16_t cw)
 
 void i386_device::x87_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	x87_write_cw(0x0037f);
 
 	m_core->x87_sw = 0;
@@ -248,6 +261,7 @@ void i386_device::x87_reset()
 
 extFloat80_t i386_device::x87_add(extFloat80_t a, extFloat80_t b)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result = { 0 };
 
 	switch ((m_core->x87_cw >> X87_CW_PC_SHIFT) & X87_CW_PC_MASK)
@@ -278,6 +292,7 @@ extFloat80_t i386_device::x87_add(extFloat80_t a, extFloat80_t b)
 
 extFloat80_t i386_device::x87_sub(extFloat80_t a, extFloat80_t b)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result = { 0 };
 
 	switch ((m_core->x87_cw >> X87_CW_PC_SHIFT) & X87_CW_PC_MASK)
@@ -308,6 +323,7 @@ extFloat80_t i386_device::x87_sub(extFloat80_t a, extFloat80_t b)
 
 extFloat80_t i386_device::x87_mul(extFloat80_t a, extFloat80_t b)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t val = { 0 };
 
 	switch ((m_core->x87_cw >> X87_CW_PC_SHIFT) & X87_CW_PC_MASK)
@@ -339,6 +355,7 @@ extFloat80_t i386_device::x87_mul(extFloat80_t a, extFloat80_t b)
 
 extFloat80_t i386_device::x87_div(extFloat80_t a, extFloat80_t b)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t val = { 0 };
 
 	switch ((m_core->x87_cw >> X87_CW_PC_SHIFT) & X87_CW_PC_MASK)
@@ -381,6 +398,7 @@ extFloat80_t i386_device::x87_div(extFloat80_t a, extFloat80_t b)
 
 void i386_device::x87_fadd_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -418,6 +436,7 @@ void i386_device::x87_fadd_m32real(uint8_t modrm)
 
 void i386_device::x87_fadd_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -455,6 +474,7 @@ void i386_device::x87_fadd_m64real(uint8_t modrm)
 
 void i386_device::x87_fadd_st_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -493,6 +513,7 @@ void i386_device::x87_fadd_st_sti(uint8_t modrm)
 
 void i386_device::x87_fadd_sti_st(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -531,6 +552,7 @@ void i386_device::x87_fadd_sti_st(uint8_t modrm)
 
 void i386_device::x87_faddp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -572,6 +594,7 @@ void i386_device::x87_faddp(uint8_t modrm)
 
 void i386_device::x87_fiadd_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -609,6 +632,7 @@ void i386_device::x87_fiadd_m32int(uint8_t modrm)
 
 void i386_device::x87_fiadd_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -653,6 +677,7 @@ void i386_device::x87_fiadd_m16int(uint8_t modrm)
 
 void i386_device::x87_fsub_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -690,6 +715,7 @@ void i386_device::x87_fsub_m32real(uint8_t modrm)
 
 void i386_device::x87_fsub_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -727,6 +753,7 @@ void i386_device::x87_fsub_m64real(uint8_t modrm)
 
 void i386_device::x87_fsub_st_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -765,6 +792,7 @@ void i386_device::x87_fsub_st_sti(uint8_t modrm)
 
 void i386_device::x87_fsub_sti_st(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -803,6 +831,7 @@ void i386_device::x87_fsub_sti_st(uint8_t modrm)
 
 void i386_device::x87_fsubp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -844,6 +873,7 @@ void i386_device::x87_fsubp(uint8_t modrm)
 
 void i386_device::x87_fisub_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -881,6 +911,7 @@ void i386_device::x87_fisub_m32int(uint8_t modrm)
 
 void i386_device::x87_fisub_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -925,6 +956,7 @@ void i386_device::x87_fisub_m16int(uint8_t modrm)
 
 void i386_device::x87_fsubr_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -962,6 +994,7 @@ void i386_device::x87_fsubr_m32real(uint8_t modrm)
 
 void i386_device::x87_fsubr_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -999,6 +1032,7 @@ void i386_device::x87_fsubr_m64real(uint8_t modrm)
 
 void i386_device::x87_fsubr_st_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -1037,6 +1071,7 @@ void i386_device::x87_fsubr_st_sti(uint8_t modrm)
 
 void i386_device::x87_fsubr_sti_st(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -1075,6 +1110,7 @@ void i386_device::x87_fsubr_sti_st(uint8_t modrm)
 
 void i386_device::x87_fsubrp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -1116,6 +1152,7 @@ void i386_device::x87_fsubrp(uint8_t modrm)
 
 void i386_device::x87_fisubr_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1153,6 +1190,7 @@ void i386_device::x87_fisubr_m32int(uint8_t modrm)
 
 void i386_device::x87_fisubr_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1197,6 +1235,7 @@ void i386_device::x87_fisubr_m16int(uint8_t modrm)
 
 void i386_device::x87_fdiv_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1234,6 +1273,7 @@ void i386_device::x87_fdiv_m32real(uint8_t modrm)
 
 void i386_device::x87_fdiv_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1271,6 +1311,7 @@ void i386_device::x87_fdiv_m64real(uint8_t modrm)
 
 void i386_device::x87_fdiv_st_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 	extFloat80_t result;
 
@@ -1311,6 +1352,7 @@ void i386_device::x87_fdiv_st_sti(uint8_t modrm)
 
 void i386_device::x87_fdiv_sti_st(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 	extFloat80_t result;
 
@@ -1351,6 +1393,7 @@ void i386_device::x87_fdiv_sti_st(uint8_t modrm)
 
 void i386_device::x87_fdivp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 	extFloat80_t result;
 
@@ -1392,6 +1435,7 @@ void i386_device::x87_fdivp(uint8_t modrm)
 
 void i386_device::x87_fidiv_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1429,6 +1473,7 @@ void i386_device::x87_fidiv_m32int(uint8_t modrm)
 
 void i386_device::x87_fidiv_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1473,6 +1518,7 @@ void i386_device::x87_fidiv_m16int(uint8_t modrm)
 
 void i386_device::x87_fdivr_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1510,6 +1556,7 @@ void i386_device::x87_fdivr_m32real(uint8_t modrm)
 
 void i386_device::x87_fdivr_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1547,6 +1594,7 @@ void i386_device::x87_fdivr_m64real(uint8_t modrm)
 
 void i386_device::x87_fdivr_st_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 	extFloat80_t result;
 
@@ -1587,6 +1635,7 @@ void i386_device::x87_fdivr_st_sti(uint8_t modrm)
 
 void i386_device::x87_fdivr_sti_st(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 	extFloat80_t result;
 
@@ -1627,6 +1676,7 @@ void i386_device::x87_fdivr_sti_st(uint8_t modrm)
 
 void i386_device::x87_fdivrp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 	extFloat80_t result;
 
@@ -1669,6 +1719,7 @@ void i386_device::x87_fdivrp(uint8_t modrm)
 
 void i386_device::x87_fidivr_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1706,6 +1757,7 @@ void i386_device::x87_fidivr_m32int(uint8_t modrm)
 
 void i386_device::x87_fidivr_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1750,6 +1802,7 @@ void i386_device::x87_fidivr_m16int(uint8_t modrm)
 
 void i386_device::x87_fmul_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1786,6 +1839,7 @@ void i386_device::x87_fmul_m32real(uint8_t modrm)
 
 void i386_device::x87_fmul_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1822,6 +1876,7 @@ void i386_device::x87_fmul_m64real(uint8_t modrm)
 
 void i386_device::x87_fmul_st_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -1859,6 +1914,7 @@ void i386_device::x87_fmul_st_sti(uint8_t modrm)
 
 void i386_device::x87_fmul_sti_st(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -1896,6 +1952,7 @@ void i386_device::x87_fmul_sti_st(uint8_t modrm)
 
 void i386_device::x87_fmulp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -1936,6 +1993,7 @@ void i386_device::x87_fmulp(uint8_t modrm)
 
 void i386_device::x87_fimul_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -1972,6 +2030,7 @@ void i386_device::x87_fimul_m32int(uint8_t modrm)
 
 void i386_device::x87_fimul_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -2014,6 +2073,7 @@ void i386_device::x87_fimul_m16int(uint8_t modrm)
 
 void i386_device::x87_fcmovb_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -2043,6 +2103,7 @@ void i386_device::x87_fcmovb_sti(uint8_t modrm)
 
 void i386_device::x87_fcmove_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -2072,6 +2133,7 @@ void i386_device::x87_fcmove_sti(uint8_t modrm)
 
 void i386_device::x87_fcmovbe_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -2101,6 +2163,7 @@ void i386_device::x87_fcmovbe_sti(uint8_t modrm)
 
 void i386_device::x87_fcmovu_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -2130,6 +2193,7 @@ void i386_device::x87_fcmovu_sti(uint8_t modrm)
 
 void i386_device::x87_fcmovnb_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -2159,6 +2223,7 @@ void i386_device::x87_fcmovnb_sti(uint8_t modrm)
 
 void i386_device::x87_fcmovne_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -2188,6 +2253,7 @@ void i386_device::x87_fcmovne_sti(uint8_t modrm)
 
 void i386_device::x87_fcmovnbe_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -2217,6 +2283,7 @@ void i386_device::x87_fcmovnbe_sti(uint8_t modrm)
 
 void i386_device::x87_fcmovnu_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 	int i = modrm & 7;
 
@@ -2252,6 +2319,7 @@ void i386_device::x87_fcmovnu_sti(uint8_t modrm)
 /* D9 F8 */
 void i386_device::x87_fprem(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -2292,6 +2360,7 @@ void i386_device::x87_fprem(uint8_t modrm)
 
 void i386_device::x87_fprem1(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -2332,6 +2401,7 @@ void i386_device::x87_fprem1(uint8_t modrm)
 
 void i386_device::x87_fsqrt(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -2374,6 +2444,7 @@ void i386_device::x87_fsqrt(uint8_t modrm)
 
 void i386_device::x87_f2xm1(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -2400,6 +2471,7 @@ void i386_device::x87_f2xm1(uint8_t modrm)
 
 void i386_device::x87_fyl2x(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -2438,6 +2510,7 @@ void i386_device::x87_fyl2x(uint8_t modrm)
 
 void i386_device::x87_fyl2xp1(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -2466,6 +2539,7 @@ void i386_device::x87_fyl2xp1(uint8_t modrm)
 /* D9 F2 if 8087   0 < angle < pi/4 */
 void i386_device::x87_fptan(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result1, result2;
 
 	if (x87_mf_fault())
@@ -2516,6 +2590,7 @@ void i386_device::x87_fptan(uint8_t modrm)
 /* D9 F3 */
 void i386_device::x87_fpatan(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -2544,6 +2619,7 @@ void i386_device::x87_fpatan(uint8_t modrm)
 /* D9 FE  387 only */
 void i386_device::x87_fsin(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -2583,6 +2659,7 @@ void i386_device::x87_fsin(uint8_t modrm)
 /* D9 FF 387 only */
 void i386_device::x87_fcos(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -2621,6 +2698,7 @@ void i386_device::x87_fcos(uint8_t modrm)
 /* D9 FB  387 only */
 void i386_device::x87_fsincos(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t s_result, c_result;
 
 	if (x87_mf_fault())
@@ -2679,6 +2757,7 @@ void i386_device::x87_fsincos(uint8_t modrm)
 
 void i386_device::x87_fld_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -2714,6 +2793,7 @@ void i386_device::x87_fld_m32real(uint8_t modrm)
 
 void i386_device::x87_fld_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -2749,6 +2829,7 @@ void i386_device::x87_fld_m64real(uint8_t modrm)
 
 void i386_device::x87_fld_m80real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -2775,6 +2856,7 @@ void i386_device::x87_fld_m80real(uint8_t modrm)
 
 void i386_device::x87_fld_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -2800,6 +2882,7 @@ void i386_device::x87_fld_sti(uint8_t modrm)
 
 void i386_device::x87_fild_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -2828,6 +2911,7 @@ void i386_device::x87_fild_m16int(uint8_t modrm)
 
 void i386_device::x87_fild_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -2856,6 +2940,7 @@ void i386_device::x87_fild_m32int(uint8_t modrm)
 
 void i386_device::x87_fild_m64int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -2884,6 +2969,7 @@ void i386_device::x87_fild_m64int(uint8_t modrm)
 
 void i386_device::x87_fbld(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -2934,6 +3020,7 @@ void i386_device::x87_fbld(uint8_t modrm)
 
 void i386_device::x87_fst_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -2959,6 +3046,7 @@ void i386_device::x87_fst_m32real(uint8_t modrm)
 
 void i386_device::x87_fst_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -2984,6 +3072,7 @@ void i386_device::x87_fst_m64real(uint8_t modrm)
 
 void i386_device::x87_fst_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 	extFloat80_t value;
 
@@ -3011,6 +3100,7 @@ void i386_device::x87_fst_sti(uint8_t modrm)
 
 void i386_device::x87_fstp_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -3039,6 +3129,7 @@ void i386_device::x87_fstp_m32real(uint8_t modrm)
 
 void i386_device::x87_fstp_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -3068,6 +3159,7 @@ void i386_device::x87_fstp_m64real(uint8_t modrm)
 
 void i386_device::x87_fstp_m80real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -3095,6 +3187,7 @@ void i386_device::x87_fstp_m80real(uint8_t modrm)
 
 void i386_device::x87_fstp_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 	extFloat80_t value;
 
@@ -3125,6 +3218,7 @@ void i386_device::x87_fstp_sti(uint8_t modrm)
 
 void i386_device::x87_fist_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t m16int;
 
 	if (x87_mf_fault())
@@ -3163,6 +3257,7 @@ void i386_device::x87_fist_m16int(uint8_t modrm)
 
 void i386_device::x87_fist_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int32_t m32int;
 
 	if (x87_mf_fault())
@@ -3201,6 +3296,7 @@ void i386_device::x87_fist_m32int(uint8_t modrm)
 
 void i386_device::x87_fistp_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t m16int;
 
 	if (x87_mf_fault())
@@ -3240,6 +3336,7 @@ void i386_device::x87_fistp_m16int(uint8_t modrm)
 
 void i386_device::x87_fistp_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int32_t m32int;
 
 	if (x87_mf_fault())
@@ -3279,6 +3376,7 @@ void i386_device::x87_fistp_m32int(uint8_t modrm)
 
 void i386_device::x87_fistp_m64int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int64_t m64int;
 
 	if (x87_mf_fault())
@@ -3318,6 +3416,7 @@ void i386_device::x87_fistp_m64int(uint8_t modrm)
 
 void i386_device::x87_fbstp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t result;
 
 	if (x87_mf_fault())
@@ -3362,6 +3461,7 @@ void i386_device::x87_fbstp(uint8_t modrm)
 
 void i386_device::x87_fld1(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 	int tag;
 
@@ -3393,6 +3493,7 @@ void i386_device::x87_fld1(uint8_t modrm)
 
 void i386_device::x87_fldl2t(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 	int tag;
 
@@ -3430,6 +3531,7 @@ void i386_device::x87_fldl2t(uint8_t modrm)
 
 void i386_device::x87_fldl2e(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 	int tag;
 
@@ -3468,6 +3570,7 @@ void i386_device::x87_fldl2e(uint8_t modrm)
 
 void i386_device::x87_fldpi(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 	int tag;
 
@@ -3506,6 +3609,7 @@ void i386_device::x87_fldpi(uint8_t modrm)
 
 void i386_device::x87_fldlg2(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 	int tag;
 
@@ -3544,6 +3648,7 @@ void i386_device::x87_fldlg2(uint8_t modrm)
 
 void i386_device::x87_fldln2(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 	int tag;
 
@@ -3582,6 +3687,7 @@ void i386_device::x87_fldln2(uint8_t modrm)
 
 void i386_device::x87_fldz(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 	int tag;
 
@@ -3620,12 +3726,14 @@ void i386_device::x87_fldz(uint8_t modrm)
 
 void i386_device::x87_fnop(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	x87_mf_fault();
 	CYCLES(3);
 }
 
 void i386_device::x87_fchs(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -3654,6 +3762,7 @@ void i386_device::x87_fchs(uint8_t modrm)
 
 void i386_device::x87_fabs(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -3682,6 +3791,7 @@ void i386_device::x87_fabs(uint8_t modrm)
 
 void i386_device::x87_fscale(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -3708,6 +3818,7 @@ void i386_device::x87_fscale(uint8_t modrm)
 
 void i386_device::x87_frndint(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
 	if (x87_mf_fault())
@@ -3735,6 +3846,7 @@ void i386_device::x87_frndint(uint8_t modrm)
 
 void i386_device::x87_fxtract(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t sig80, exp80;
 
 	if (x87_mf_fault())
@@ -3793,6 +3905,7 @@ void i386_device::x87_fxtract(uint8_t modrm)
 
 void i386_device::x87_ftst(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	if (X87_IS_ST_EMPTY(0))
@@ -3829,6 +3942,7 @@ void i386_device::x87_ftst(uint8_t modrm)
 
 void i386_device::x87_fxam(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value = ST(0);
 
 	if (x87_mf_fault())
@@ -3865,6 +3979,7 @@ void i386_device::x87_fxam(uint8_t modrm)
 
 void i386_device::x87_ficom_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
@@ -3904,6 +4019,7 @@ void i386_device::x87_ficom_m16int(uint8_t modrm)
 
 void i386_device::x87_ficom_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
@@ -3943,6 +4059,7 @@ void i386_device::x87_ficom_m32int(uint8_t modrm)
 
 void i386_device::x87_ficomp_m16int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
@@ -3983,6 +4100,7 @@ void i386_device::x87_ficomp_m16int(uint8_t modrm)
 
 void i386_device::x87_ficomp_m32int(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
@@ -4024,6 +4142,7 @@ void i386_device::x87_ficomp_m32int(uint8_t modrm)
 
 void i386_device::x87_fcom_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
@@ -4063,6 +4182,7 @@ void i386_device::x87_fcom_m32real(uint8_t modrm)
 
 void i386_device::x87_fcom_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
@@ -4102,6 +4222,7 @@ void i386_device::x87_fcom_m64real(uint8_t modrm)
 
 void i386_device::x87_fcom_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 
 	if (x87_mf_fault())
@@ -4143,6 +4264,7 @@ void i386_device::x87_fcom_sti(uint8_t modrm)
 
 void i386_device::x87_fcomp_m32real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
@@ -4183,6 +4305,7 @@ void i386_device::x87_fcomp_m32real(uint8_t modrm)
 
 void i386_device::x87_fcomp_m64real(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
@@ -4223,6 +4346,7 @@ void i386_device::x87_fcomp_m64real(uint8_t modrm)
 
 void i386_device::x87_fcomp_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 
 	if (x87_mf_fault())
@@ -4265,6 +4389,7 @@ void i386_device::x87_fcomp_sti(uint8_t modrm)
 
 void i386_device::x87_fcomi_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 
 	if (x87_mf_fault())
@@ -4314,6 +4439,7 @@ void i386_device::x87_fcomi_sti(uint8_t modrm)
 
 void i386_device::x87_fcomip_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 
 	if (x87_mf_fault())
@@ -4364,6 +4490,7 @@ void i386_device::x87_fcomip_sti(uint8_t modrm)
 
 void i386_device::x87_fucomi_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 
 	if (x87_mf_fault())
@@ -4419,6 +4546,7 @@ void i386_device::x87_fucomi_sti(uint8_t modrm)
 
 void i386_device::x87_fucomip_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 
 	if (x87_mf_fault())
@@ -4475,6 +4603,7 @@ void i386_device::x87_fucomip_sti(uint8_t modrm)
 
 void i386_device::x87_fcompp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	if (X87_IS_ST_EMPTY(0) || X87_IS_ST_EMPTY(1))
@@ -4525,6 +4654,7 @@ void i386_device::x87_fcompp(uint8_t modrm)
 
 void i386_device::x87_fucom_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 
 	if (x87_mf_fault())
@@ -4568,6 +4698,7 @@ void i386_device::x87_fucom_sti(uint8_t modrm)
 
 void i386_device::x87_fucomp_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 
 	if (x87_mf_fault())
@@ -4612,6 +4743,7 @@ void i386_device::x87_fucomp_sti(uint8_t modrm)
 
 void i386_device::x87_fucompp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	if (X87_IS_ST_EMPTY(0) || X87_IS_ST_EMPTY(1))
@@ -4664,6 +4796,7 @@ void i386_device::x87_fucompp(uint8_t modrm)
 
 void i386_device::x87_fdecstp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	m_core->x87_sw &= ~X87_SW_C1;
@@ -4675,6 +4808,7 @@ void i386_device::x87_fdecstp(uint8_t modrm)
 
 void i386_device::x87_fincstp(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	m_core->x87_sw &= ~X87_SW_C1;
@@ -4686,6 +4820,7 @@ void i386_device::x87_fincstp(uint8_t modrm)
 
 void i386_device::x87_fclex(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->x87_sw &= ~0x80ff;
 	m_ferr_handler(0);
 	CYCLES(7);
@@ -4693,6 +4828,7 @@ void i386_device::x87_fclex(uint8_t modrm)
 
 void i386_device::x87_ffree(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	x87_set_tag(ST_TO_PHYS(modrm & 7), X87_TW_EMPTY);
@@ -4702,6 +4838,7 @@ void i386_device::x87_ffree(uint8_t modrm)
 
 void i386_device::x87_finit(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	x87_reset();
 
 	CYCLES(17);
@@ -4709,6 +4846,7 @@ void i386_device::x87_finit(uint8_t modrm)
 
 void i386_device::x87_fldcw(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
@@ -4723,6 +4861,7 @@ void i386_device::x87_fldcw(uint8_t modrm)
 
 void i386_device::x87_fstcw(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea = GetEA(modrm, 1);
 	WRITE16(ea, m_core->x87_cw);
 
@@ -4731,6 +4870,7 @@ void i386_device::x87_fstcw(uint8_t modrm)
 
 void i386_device::x87_fldenv(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
@@ -4796,6 +4936,7 @@ void i386_device::x87_fldenv(uint8_t modrm)
 
 void i386_device::x87_fstenv(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea = GetEA(modrm, 1);
 
 	switch(((PROTECTED_MODE && !V8086_MODE) ? 1 : 0) | (m_core->operand_size & 1)<<1)
@@ -4844,6 +4985,7 @@ void i386_device::x87_fstenv(uint8_t modrm)
 
 void i386_device::x87_fsave(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea = GetEA(modrm, 1);
 
 	switch(((PROTECTED_MODE && !V8086_MODE) ? 1 : 0) | (m_core->operand_size & 1)<<1)
@@ -4899,6 +5041,7 @@ void i386_device::x87_fsave(uint8_t modrm)
 
 void i386_device::x87_frstor(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = GetEA(modrm, 0);
@@ -4965,6 +5108,7 @@ void i386_device::x87_frstor(uint8_t modrm)
 
 void i386_device::x87_fxch(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (x87_mf_fault())
 		return;
 	if (X87_IS_ST_EMPTY(0) || X87_IS_ST_EMPTY(1))
@@ -4987,6 +5131,7 @@ void i386_device::x87_fxch(uint8_t modrm)
 
 void i386_device::x87_fxch_sti(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 
 	if (x87_mf_fault())
@@ -5021,6 +5166,7 @@ void i386_device::x87_fxch_sti(uint8_t modrm)
 
 void i386_device::x87_fstsw_ax(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(AX) = m_core->x87_sw;
 
 	CYCLES(3);
@@ -5028,6 +5174,7 @@ void i386_device::x87_fstsw_ax(uint8_t modrm)
 
 void i386_device::x87_fstsw_m2byte(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea = GetEA(modrm, 1);
 
 	WRITE16(ea, m_core->x87_sw);
@@ -5037,6 +5184,7 @@ void i386_device::x87_fstsw_m2byte(uint8_t modrm)
 
 void i386_device::x87_invalid(uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// TODO
 	report_invalid_opcode();
 	i386_trap(6, 0);
@@ -5052,6 +5200,7 @@ void i386_device::x87_invalid(uint8_t modrm)
 
 void i386_device::i386_x87_group_d8()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
@@ -5063,6 +5212,7 @@ void i386_device::i386_x87_group_d8()
 
 void i386_device::i386_x87_group_d9()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
@@ -5074,6 +5224,7 @@ void i386_device::i386_x87_group_d9()
 
 void i386_device::i386_x87_group_da()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
@@ -5085,6 +5236,7 @@ void i386_device::i386_x87_group_da()
 
 void i386_device::i386_x87_group_db()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
@@ -5096,6 +5248,7 @@ void i386_device::i386_x87_group_db()
 
 void i386_device::i386_x87_group_dc()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
@@ -5107,6 +5260,7 @@ void i386_device::i386_x87_group_dc()
 
 void i386_device::i386_x87_group_dd()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
@@ -5118,6 +5272,7 @@ void i386_device::i386_x87_group_dd()
 
 void i386_device::i386_x87_group_de()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
@@ -5129,6 +5284,7 @@ void i386_device::i386_x87_group_de()
 
 void i386_device::i386_x87_group_df()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
@@ -5147,6 +5303,7 @@ void i386_device::i386_x87_group_df()
 
 void i386_device::build_x87_opcode_table_d8()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int modrm = 0;
 
 	for (modrm = 0; modrm < 0x100; ++modrm)
@@ -5189,6 +5346,7 @@ void i386_device::build_x87_opcode_table_d8()
 
 void i386_device::build_x87_opcode_table_d9()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int modrm = 0;
 
 	for (modrm = 0; modrm < 0x100; ++modrm)
@@ -5268,6 +5426,7 @@ void i386_device::build_x87_opcode_table_d9()
 
 void i386_device::build_x87_opcode_table_da()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int modrm = 0;
 
 	for (modrm = 0; modrm < 0x100; ++modrm)
@@ -5307,6 +5466,7 @@ void i386_device::build_x87_opcode_table_da()
 
 void i386_device::build_x87_opcode_table_db()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int modrm = 0;
 
 	for (modrm = 0; modrm < 0x100; ++modrm)
@@ -5349,6 +5509,7 @@ void i386_device::build_x87_opcode_table_db()
 
 void i386_device::build_x87_opcode_table_dc()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int modrm = 0;
 
 	for (modrm = 0; modrm < 0x100; ++modrm)
@@ -5389,6 +5550,7 @@ void i386_device::build_x87_opcode_table_dc()
 
 void i386_device::build_x87_opcode_table_dd()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int modrm = 0;
 
 	for (modrm = 0; modrm < 0x100; ++modrm)
@@ -5427,6 +5589,7 @@ void i386_device::build_x87_opcode_table_dd()
 
 void i386_device::build_x87_opcode_table_de()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int modrm = 0;
 
 	for (modrm = 0; modrm < 0x100; ++modrm)
@@ -5468,6 +5631,7 @@ void i386_device::build_x87_opcode_table_de()
 
 void i386_device::build_x87_opcode_table_df()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int modrm = 0;
 
 	for (modrm = 0; modrm < 0x100; ++modrm)
@@ -5503,6 +5667,7 @@ void i386_device::build_x87_opcode_table_df()
 
 void i386_device::build_x87_opcode_table()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	build_x87_opcode_table_d8();
 	build_x87_opcode_table_d9();
 	build_x87_opcode_table_da();

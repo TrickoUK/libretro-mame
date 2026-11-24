@@ -2,6 +2,7 @@
 // copyright-holders:Ville Linde, Barry Rodewald, Carl, Philip Bennett
 uint16_t i386_device::i386_shift_rotate16(uint8_t modrm, uint32_t value, uint8_t shift)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src = value & 0xffff;
 	uint16_t dst = value;
 
@@ -142,6 +143,7 @@ uint16_t i386_device::i386_shift_rotate16(uint8_t modrm, uint32_t value, uint8_t
 
 void i386_device::i386_adc_rm16_r16()      // Opcode 0x11
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -162,6 +164,7 @@ void i386_device::i386_adc_rm16_r16()      // Opcode 0x11
 
 void i386_device::i386_adc_r16_rm16()      // Opcode 0x13
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -182,6 +185,7 @@ void i386_device::i386_adc_r16_rm16()      // Opcode 0x13
 
 void i386_device::i386_adc_ax_i16()        // Opcode 0x15
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	src = FETCH16();
 	dst = REG16(AX);
@@ -192,6 +196,7 @@ void i386_device::i386_adc_ax_i16()        // Opcode 0x15
 
 void i386_device::i386_add_rm16_r16()      // Opcode 0x01
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -212,6 +217,7 @@ void i386_device::i386_add_rm16_r16()      // Opcode 0x01
 
 void i386_device::i386_add_r16_rm16()      // Opcode 0x03
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -232,6 +238,7 @@ void i386_device::i386_add_r16_rm16()      // Opcode 0x03
 
 void i386_device::i386_add_ax_i16()        // Opcode 0x05
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	src = FETCH16();
 	dst = REG16(AX);
@@ -242,6 +249,7 @@ void i386_device::i386_add_ax_i16()        // Opcode 0x05
 
 void i386_device::i386_and_rm16_r16()      // Opcode 0x21
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -262,6 +270,7 @@ void i386_device::i386_and_rm16_r16()      // Opcode 0x21
 
 void i386_device::i386_and_r16_rm16()      // Opcode 0x23
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -282,6 +291,7 @@ void i386_device::i386_and_r16_rm16()      // Opcode 0x23
 
 void i386_device::i386_and_ax_i16()        // Opcode 0x25
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	src = FETCH16();
 	dst = REG16(AX);
@@ -292,6 +302,7 @@ void i386_device::i386_and_ax_i16()        // Opcode 0x25
 
 void i386_device::i386_bsf_r16_rm16()      // Opcode 0x0f bc
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst, temp;
 	uint8_t modrm = FETCH();
 
@@ -321,6 +332,7 @@ void i386_device::i386_bsf_r16_rm16()      // Opcode 0x0f bc
 
 void i386_device::i386_bsr_r16_rm16()      // Opcode 0x0f bd
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst, temp;
 	uint8_t modrm = FETCH();
 
@@ -351,6 +363,7 @@ void i386_device::i386_bsr_r16_rm16()      // Opcode 0x0f bd
 
 void i386_device::i386_bt_rm16_r16()       // Opcode 0x0f a3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t dst = LOAD_RM16(modrm);
@@ -382,6 +395,7 @@ void i386_device::i386_bt_rm16_r16()       // Opcode 0x0f a3
 
 void i386_device::i386_btc_rm16_r16()      // Opcode 0x0f bb
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t dst = LOAD_RM16(modrm);
@@ -417,6 +431,7 @@ void i386_device::i386_btc_rm16_r16()      // Opcode 0x0f bb
 
 void i386_device::i386_btr_rm16_r16()      // Opcode 0x0f b3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t dst = LOAD_RM16(modrm);
@@ -452,6 +467,7 @@ void i386_device::i386_btr_rm16_r16()      // Opcode 0x0f b3
 
 void i386_device::i386_bts_rm16_r16()      // Opcode 0x0f ab
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t dst = LOAD_RM16(modrm);
@@ -487,6 +503,7 @@ void i386_device::i386_bts_rm16_r16()      // Opcode 0x0f ab
 
 void i386_device::i386_call_abs16()        // Opcode 0x9a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t offset = FETCH16();
 	uint16_t ptr = FETCH16();
 
@@ -509,6 +526,7 @@ void i386_device::i386_call_abs16()        // Opcode 0x9a
 
 void i386_device::i386_call_rel16()        // Opcode 0xe8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 
 	PUSH16(m_core->eip );
@@ -526,12 +544,14 @@ void i386_device::i386_call_rel16()        // Opcode 0xe8
 
 void i386_device::i386_cbw()               // Opcode 0x98
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(AX) = (int16_t)((int8_t)REG8(AL));
 	CYCLES(CYCLES_CBW);
 }
 
 void i386_device::i386_cmp_rm16_r16()      // Opcode 0x39
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -550,6 +570,7 @@ void i386_device::i386_cmp_rm16_r16()      // Opcode 0x39
 
 void i386_device::i386_cmp_r16_rm16()      // Opcode 0x3b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -568,6 +589,7 @@ void i386_device::i386_cmp_r16_rm16()      // Opcode 0x3b
 
 void i386_device::i386_cmp_ax_i16()        // Opcode 0x3d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	src = FETCH16();
 	dst = REG16(AX);
@@ -577,6 +599,7 @@ void i386_device::i386_cmp_ax_i16()        // Opcode 0x3d
 
 void i386_device::i386_cmpsw()             // Opcode 0xa7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t eas, ead;
 	uint16_t src, dst;
 	if( m_core->segment_prefix ) {
@@ -595,6 +618,7 @@ void i386_device::i386_cmpsw()             // Opcode 0xa7
 
 void i386_device::i386_cwd()               // Opcode 0x99
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if( REG16(AX) & 0x8000 ) {
 		REG16(DX) = 0xffff;
 	} else {
@@ -605,54 +629,63 @@ void i386_device::i386_cwd()               // Opcode 0x99
 
 void i386_device::i386_dec_ax()            // Opcode 0x48
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(AX) = DEC16(REG16(AX) );
 	CYCLES(CYCLES_DEC_REG);
 }
 
 void i386_device::i386_dec_cx()            // Opcode 0x49
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(CX) = DEC16(REG16(CX) );
 	CYCLES(CYCLES_DEC_REG);
 }
 
 void i386_device::i386_dec_dx()            // Opcode 0x4a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(DX) = DEC16(REG16(DX) );
 	CYCLES(CYCLES_DEC_REG);
 }
 
 void i386_device::i386_dec_bx()            // Opcode 0x4b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(BX) = DEC16(REG16(BX) );
 	CYCLES(CYCLES_DEC_REG);
 }
 
 void i386_device::i386_dec_sp()            // Opcode 0x4c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(SP) = DEC16(REG16(SP) );
 	CYCLES(CYCLES_DEC_REG);
 }
 
 void i386_device::i386_dec_bp()            // Opcode 0x4d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(BP) = DEC16(REG16(BP) );
 	CYCLES(CYCLES_DEC_REG);
 }
 
 void i386_device::i386_dec_si()            // Opcode 0x4e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(SI) = DEC16(REG16(SI) );
 	CYCLES(CYCLES_DEC_REG);
 }
 
 void i386_device::i386_dec_di()            // Opcode 0x4f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(DI) = DEC16(REG16(DI) );
 	CYCLES(CYCLES_DEC_REG);
 }
 
 void i386_device::i386_imul_r16_rm16()     // Opcode 0x0f af
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	int32_t result;
 	int32_t src, dst;
@@ -675,6 +708,7 @@ void i386_device::i386_imul_r16_rm16()     // Opcode 0x0f af
 
 void i386_device::i386_imul_r16_rm16_i16() // Opcode 0x69
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	int32_t result;
 	int32_t src, dst;
@@ -697,6 +731,7 @@ void i386_device::i386_imul_r16_rm16_i16() // Opcode 0x69
 
 void i386_device::i386_imul_r16_rm16_i8()  // Opcode 0x6b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	int32_t result;
 	int32_t src, dst;
@@ -719,6 +754,7 @@ void i386_device::i386_imul_r16_rm16_i8()  // Opcode 0x6b
 
 void i386_device::i386_in_ax_i8()          // Opcode 0xe5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t port = FETCH();
 	uint16_t data = READPORT16(port);
 	REG16(AX) = data;
@@ -727,6 +763,7 @@ void i386_device::i386_in_ax_i8()          // Opcode 0xe5
 
 void i386_device::i386_in_ax_dx()          // Opcode 0xed
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t port = REG16(DX);
 	uint16_t data = READPORT16(port);
 	REG16(AX) = data;
@@ -735,54 +772,63 @@ void i386_device::i386_in_ax_dx()          // Opcode 0xed
 
 void i386_device::i386_inc_ax()            // Opcode 0x40
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(AX) = INC16(REG16(AX) );
 	CYCLES(CYCLES_INC_REG);
 }
 
 void i386_device::i386_inc_cx()            // Opcode 0x41
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(CX) = INC16(REG16(CX) );
 	CYCLES(CYCLES_INC_REG);
 }
 
 void i386_device::i386_inc_dx()            // Opcode 0x42
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(DX) = INC16(REG16(DX) );
 	CYCLES(CYCLES_INC_REG);
 }
 
 void i386_device::i386_inc_bx()            // Opcode 0x43
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(BX) = INC16(REG16(BX) );
 	CYCLES(CYCLES_INC_REG);
 }
 
 void i386_device::i386_inc_sp()            // Opcode 0x44
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(SP) = INC16(REG16(SP) );
 	CYCLES(CYCLES_INC_REG);
 }
 
 void i386_device::i386_inc_bp()            // Opcode 0x45
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(BP) = INC16(REG16(BP) );
 	CYCLES(CYCLES_INC_REG);
 }
 
 void i386_device::i386_inc_si()            // Opcode 0x46
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(SI) = INC16(REG16(SI) );
 	CYCLES(CYCLES_INC_REG);
 }
 
 void i386_device::i386_inc_di()            // Opcode 0x47
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(DI) = INC16(REG16(DI) );
 	CYCLES(CYCLES_INC_REG);
 }
 
 void i386_device::i386_iret16()            // Opcode 0xcf
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if( PROTECTED_MODE )
 	{
 		i386_protected_mode_iret(0);
@@ -803,6 +849,7 @@ void i386_device::i386_iret16()            // Opcode 0xcf
 
 void i386_device::i386_ja_rel16()          // Opcode 0x0f 87
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->CF == 0 && m_core->ZF == 0 ) {
 		if (m_core->sreg[CS].d)
@@ -822,6 +869,7 @@ void i386_device::i386_ja_rel16()          // Opcode 0x0f 87
 
 void i386_device::i386_jbe_rel16()         // Opcode 0x0f 86
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->CF != 0 || m_core->ZF != 0 ) {
 		if (m_core->sreg[CS].d)
@@ -841,6 +889,7 @@ void i386_device::i386_jbe_rel16()         // Opcode 0x0f 86
 
 void i386_device::i386_jc_rel16()          // Opcode 0x0f 82
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->CF != 0 ) {
 		if (m_core->sreg[CS].d)
@@ -860,6 +909,7 @@ void i386_device::i386_jc_rel16()          // Opcode 0x0f 82
 
 void i386_device::i386_jg_rel16()          // Opcode 0x0f 8f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->ZF == 0 && (m_core->SF == m_core->OF) ) {
 		if (m_core->sreg[CS].d)
@@ -879,6 +929,7 @@ void i386_device::i386_jg_rel16()          // Opcode 0x0f 8f
 
 void i386_device::i386_jge_rel16()         // Opcode 0x0f 8d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if(m_core->SF == m_core->OF) {
 		if (m_core->sreg[CS].d)
@@ -898,6 +949,7 @@ void i386_device::i386_jge_rel16()         // Opcode 0x0f 8d
 
 void i386_device::i386_jl_rel16()          // Opcode 0x0f 8c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( (m_core->SF != m_core->OF) ) {
 		if (m_core->sreg[CS].d)
@@ -917,6 +969,7 @@ void i386_device::i386_jl_rel16()          // Opcode 0x0f 8c
 
 void i386_device::i386_jle_rel16()         // Opcode 0x0f 8e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->ZF != 0 || (m_core->SF != m_core->OF) ) {
 		if (m_core->sreg[CS].d)
@@ -936,6 +989,7 @@ void i386_device::i386_jle_rel16()         // Opcode 0x0f 8e
 
 void i386_device::i386_jnc_rel16()         // Opcode 0x0f 83
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->CF == 0 ) {
 		if (m_core->sreg[CS].d)
@@ -955,6 +1009,7 @@ void i386_device::i386_jnc_rel16()         // Opcode 0x0f 83
 
 void i386_device::i386_jno_rel16()         // Opcode 0x0f 81
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->OF == 0 ) {
 		if (m_core->sreg[CS].d)
@@ -974,6 +1029,7 @@ void i386_device::i386_jno_rel16()         // Opcode 0x0f 81
 
 void i386_device::i386_jnp_rel16()         // Opcode 0x0f 8b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->PF == 0 ) {
 		if (m_core->sreg[CS].d)
@@ -993,6 +1049,7 @@ void i386_device::i386_jnp_rel16()         // Opcode 0x0f 8b
 
 void i386_device::i386_jns_rel16()         // Opcode 0x0f 89
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->SF == 0 ) {
 		if (m_core->sreg[CS].d)
@@ -1012,6 +1069,7 @@ void i386_device::i386_jns_rel16()         // Opcode 0x0f 89
 
 void i386_device::i386_jnz_rel16()         // Opcode 0x0f 85
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->ZF == 0 ) {
 		if (m_core->sreg[CS].d)
@@ -1031,6 +1089,7 @@ void i386_device::i386_jnz_rel16()         // Opcode 0x0f 85
 
 void i386_device::i386_jo_rel16()          // Opcode 0x0f 80
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->OF != 0 ) {
 		if (m_core->sreg[CS].d)
@@ -1050,6 +1109,7 @@ void i386_device::i386_jo_rel16()          // Opcode 0x0f 80
 
 void i386_device::i386_jp_rel16()          // Opcode 0x0f 8a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->PF != 0 ) {
 		if (m_core->sreg[CS].d)
@@ -1069,6 +1129,7 @@ void i386_device::i386_jp_rel16()          // Opcode 0x0f 8a
 
 void i386_device::i386_js_rel16()          // Opcode 0x0f 88
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->SF != 0 ) {
 		if (m_core->sreg[CS].d)
@@ -1088,6 +1149,7 @@ void i386_device::i386_js_rel16()          // Opcode 0x0f 88
 
 void i386_device::i386_jz_rel16()          // Opcode 0x0f 84
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	if( m_core->ZF != 0 ) {
 		if (m_core->sreg[CS].d)
@@ -1107,6 +1169,7 @@ void i386_device::i386_jz_rel16()          // Opcode 0x0f 84
 
 void i386_device::i386_jcxz16()            // Opcode 0xe3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	int val = (m_core->address_size)?(REG32(ECX) == 0):(REG16(CX) == 0);
 	if( val ) {
@@ -1127,6 +1190,7 @@ void i386_device::i386_jcxz16()            // Opcode 0xe3
 
 void i386_device::i386_jmp_rel16()         // Opcode 0xe9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 
 	if (m_core->sreg[CS].d)
@@ -1143,6 +1207,7 @@ void i386_device::i386_jmp_rel16()         // Opcode 0xe9
 
 void i386_device::i386_jmp_abs16()         // Opcode 0xea
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t address = FETCH16();
 	uint16_t segment = FETCH16();
 
@@ -1163,6 +1228,7 @@ void i386_device::i386_jmp_abs16()         // Opcode 0xea
 
 void i386_device::i386_lea16()             // Opcode 0x8d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint32_t ea = GetNonTranslatedEA(modrm,nullptr);
 	STORE_REG16(modrm, ea);
@@ -1171,6 +1237,7 @@ void i386_device::i386_lea16()             // Opcode 0x8d
 
 void i386_device::i386_enter16()           // Opcode 0xc8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t framesize = FETCH16();
 	uint8_t level = FETCH() % 32;
 	uint8_t x;
@@ -1211,6 +1278,7 @@ void i386_device::i386_enter16()           // Opcode 0xc8
 
 void i386_device::i386_leave16()           // Opcode 0xc9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(!STACK_32BIT)
 		REG16(SP) = REG16(BP);
 	else
@@ -1221,6 +1289,7 @@ void i386_device::i386_leave16()           // Opcode 0xc9
 
 void i386_device::i386_lodsw()             // Opcode 0xad
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t eas;
 	if( m_core->segment_prefix ) {
 		eas = i386_translate(m_core->segment_override, m_core->address_size ? REG32(ESI) : REG16(SI), 0, 2);
@@ -1234,6 +1303,7 @@ void i386_device::i386_lodsw()             // Opcode 0xad
 
 void i386_device::i386_loop16()            // Opcode 0xe2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	int32_t val = (m_core->address_size)?(--REG32(ECX)):(--REG16(CX));
 	if( val != 0 ) {
@@ -1252,6 +1322,7 @@ void i386_device::i386_loop16()            // Opcode 0xe2
 
 void i386_device::i386_loopne16()          // Opcode 0xe0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	int32_t val = (m_core->address_size)?(--REG32(ECX)):(--REG16(CX));
 	if( val != 0 && m_core->ZF == 0 ) {
@@ -1270,6 +1341,7 @@ void i386_device::i386_loopne16()          // Opcode 0xe0
 
 void i386_device::i386_loopz16()           // Opcode 0xe1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	int32_t val = (m_core->address_size)?(--REG32(ECX)):(--REG16(CX));
 	if( val != 0 && m_core->ZF != 0 ) {
@@ -1288,6 +1360,7 @@ void i386_device::i386_loopz16()           // Opcode 0xe1
 
 void i386_device::i386_mov_rm16_r16()      // Opcode 0x89
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1304,6 +1377,7 @@ void i386_device::i386_mov_rm16_r16()      // Opcode 0x89
 
 void i386_device::i386_mov_r16_rm16()      // Opcode 0x8b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1320,6 +1394,7 @@ void i386_device::i386_mov_r16_rm16()      // Opcode 0x8b
 
 void i386_device::i386_mov_rm16_i16()      // Opcode 0xc7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t value = FETCH16();
@@ -1335,6 +1410,7 @@ void i386_device::i386_mov_rm16_i16()      // Opcode 0xc7
 
 void i386_device::i386_mov_ax_m16()        // Opcode 0xa1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset, ea;
 	if( m_core->address_size ) {
 		offset = FETCH32();
@@ -1353,6 +1429,7 @@ void i386_device::i386_mov_ax_m16()        // Opcode 0xa1
 
 void i386_device::i386_mov_m16_ax()        // Opcode 0xa3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset, ea;
 	if( m_core->address_size ) {
 		offset = FETCH32();
@@ -1371,54 +1448,63 @@ void i386_device::i386_mov_m16_ax()        // Opcode 0xa3
 
 void i386_device::i386_mov_ax_i16()        // Opcode 0xb8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(AX) = FETCH16();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_cx_i16()        // Opcode 0xb9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(CX) = FETCH16();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_dx_i16()        // Opcode 0xba
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(DX) = FETCH16();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_bx_i16()        // Opcode 0xbb
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(BX) = FETCH16();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_sp_i16()        // Opcode 0xbc
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(SP) = FETCH16();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_bp_i16()        // Opcode 0xbd
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(BP) = FETCH16();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_si_i16()        // Opcode 0xbe
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(SI) = FETCH16();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_di_i16()        // Opcode 0xbf
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG16(DI) = FETCH16();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_movsw()             // Opcode 0xa5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t eas, ead;
 	uint16_t v;
 	if( m_core->segment_prefix ) {
@@ -1436,6 +1522,7 @@ void i386_device::i386_movsw()             // Opcode 0xa5
 
 void i386_device::i386_movsx_r16_rm8()     // Opcode 0x0f be
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		int16_t src = (int8_t)LOAD_RM8(modrm);
@@ -1451,6 +1538,7 @@ void i386_device::i386_movsx_r16_rm8()     // Opcode 0x0f be
 
 void i386_device::i386_movzx_r16_rm8()     // Opcode 0x0f b6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t src = (uint8_t)LOAD_RM8(modrm);
@@ -1466,6 +1554,7 @@ void i386_device::i386_movzx_r16_rm8()     // Opcode 0x0f b6
 
 void i386_device::i386_or_rm16_r16()       // Opcode 0x09
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1486,6 +1575,7 @@ void i386_device::i386_or_rm16_r16()       // Opcode 0x09
 
 void i386_device::i386_or_r16_rm16()       // Opcode 0x0b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1506,6 +1596,7 @@ void i386_device::i386_or_r16_rm16()       // Opcode 0x0b
 
 void i386_device::i386_or_ax_i16()         // Opcode 0x0d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	src = FETCH16();
 	dst = REG16(AX);
@@ -1516,6 +1607,7 @@ void i386_device::i386_or_ax_i16()         // Opcode 0x0d
 
 void i386_device::i386_out_ax_i8()         // Opcode 0xe7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t port = FETCH();
 	uint16_t data = REG16(AX);
 	WRITEPORT16(port, data);
@@ -1524,6 +1616,7 @@ void i386_device::i386_out_ax_i8()         // Opcode 0xe7
 
 void i386_device::i386_out_ax_dx()         // Opcode 0xef
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t port = REG16(DX);
 	uint16_t data = REG16(AX);
 	WRITEPORT16(port, data);
@@ -1532,6 +1625,7 @@ void i386_device::i386_out_ax_dx()         // Opcode 0xef
 
 void i386_device::i386_pop_ax()            // Opcode 0x58
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 	if(i386_limit_check(SS,offset+1) == 0)
 		REG16(AX) = POP16();
@@ -1542,6 +1636,7 @@ void i386_device::i386_pop_ax()            // Opcode 0x58
 
 void i386_device::i386_pop_cx()            // Opcode 0x59
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 	if(i386_limit_check(SS,offset+1) == 0)
 		REG16(CX) = POP16();
@@ -1552,6 +1647,7 @@ void i386_device::i386_pop_cx()            // Opcode 0x59
 
 void i386_device::i386_pop_dx()            // Opcode 0x5a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 	if(i386_limit_check(SS,offset+1) == 0)
 		REG16(DX) = POP16();
@@ -1562,6 +1658,7 @@ void i386_device::i386_pop_dx()            // Opcode 0x5a
 
 void i386_device::i386_pop_bx()            // Opcode 0x5b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 	if(i386_limit_check(SS,offset+1) == 0)
 		REG16(BX) = POP16();
@@ -1572,6 +1669,7 @@ void i386_device::i386_pop_bx()            // Opcode 0x5b
 
 void i386_device::i386_pop_sp()            // Opcode 0x5c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 	if(i386_limit_check(SS,offset+1) == 0)
 		REG16(SP) = POP16();
@@ -1582,6 +1680,7 @@ void i386_device::i386_pop_sp()            // Opcode 0x5c
 
 void i386_device::i386_pop_bp()            // Opcode 0x5d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 	if(i386_limit_check(SS,offset+1) == 0)
 		REG16(BP) = POP16();
@@ -1592,6 +1691,7 @@ void i386_device::i386_pop_bp()            // Opcode 0x5d
 
 void i386_device::i386_pop_si()            // Opcode 0x5e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 	if(i386_limit_check(SS,offset+1) == 0)
 		REG16(SI) = POP16();
@@ -1602,6 +1702,7 @@ void i386_device::i386_pop_si()            // Opcode 0x5e
 
 void i386_device::i386_pop_di()            // Opcode 0x5f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 	if(i386_limit_check(SS,offset+1) == 0)
 		REG16(DI) = POP16();
@@ -1612,6 +1713,7 @@ void i386_device::i386_pop_di()            // Opcode 0x5f
 
 bool i386_device::i386_pop_seg16(int segment)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea, offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 	uint16_t value;
 	bool fault;
@@ -1638,26 +1740,31 @@ bool i386_device::i386_pop_seg16(int segment)
 
 void i386_device::i386_pop_ds16()          // Opcode 0x1f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_pop_seg16(DS);
 }
 
 void i386_device::i386_pop_es16()          // Opcode 0x07
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_pop_seg16(ES);
 }
 
 void i386_device::i386_pop_fs16()          // Opcode 0x0f a1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_pop_seg16(FS);
 }
 
 void i386_device::i386_pop_gs16()          // Opcode 0x0f a9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_pop_seg16(GS);
 }
 
 void i386_device::i386_pop_ss16()          // Opcode 0x17
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(!i386_pop_seg16(SS)) return;
 	if(m_core->IF != 0) // if external interrupts are enabled
 	{
@@ -1668,6 +1775,7 @@ void i386_device::i386_pop_ss16()          // Opcode 0x17
 
 void i386_device::i386_pop_rm16()          // Opcode 0x8f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint16_t value;
 	uint32_t ea, offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
@@ -1699,6 +1807,7 @@ void i386_device::i386_pop_rm16()          // Opcode 0x8f
 
 void i386_device::i386_popa()              // Opcode 0x61
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 
 	if(i386_limit_check(SS,offset+15) == 0)
@@ -1719,6 +1828,7 @@ void i386_device::i386_popa()              // Opcode 0x61
 
 void i386_device::i386_popf()              // Opcode 0x9d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t value;
 	uint32_t current = get_flags();
 	uint8_t IOPL = (current >> 12) & 0x03;
@@ -1757,6 +1867,7 @@ void i386_device::i386_popf()              // Opcode 0x9d
 
 void i386_device::i386_push_ax()           // Opcode 0x50
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1771,6 +1882,7 @@ void i386_device::i386_push_ax()           // Opcode 0x50
 
 void i386_device::i386_push_cx()           // Opcode 0x51
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1785,6 +1897,7 @@ void i386_device::i386_push_cx()           // Opcode 0x51
 
 void i386_device::i386_push_dx()           // Opcode 0x52
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1799,6 +1912,7 @@ void i386_device::i386_push_dx()           // Opcode 0x52
 
 void i386_device::i386_push_bx()           // Opcode 0x53
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1813,6 +1927,7 @@ void i386_device::i386_push_bx()           // Opcode 0x53
 
 void i386_device::i386_push_sp()           // Opcode 0x54
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1827,6 +1942,7 @@ void i386_device::i386_push_sp()           // Opcode 0x54
 
 void i386_device::i386_push_bp()           // Opcode 0x55
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1841,6 +1957,7 @@ void i386_device::i386_push_bp()           // Opcode 0x55
 
 void i386_device::i386_push_si()           // Opcode 0x56
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1855,6 +1972,7 @@ void i386_device::i386_push_si()           // Opcode 0x56
 
 void i386_device::i386_push_di()           // Opcode 0x57
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1869,6 +1987,7 @@ void i386_device::i386_push_di()           // Opcode 0x57
 
 void i386_device::i386_push_cs16()         // Opcode 0x0e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1883,6 +2002,7 @@ void i386_device::i386_push_cs16()         // Opcode 0x0e
 
 void i386_device::i386_push_ds16()         // Opcode 0x1e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1897,6 +2017,7 @@ void i386_device::i386_push_ds16()         // Opcode 0x1e
 
 void i386_device::i386_push_es16()         // Opcode 0x06
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1911,6 +2032,7 @@ void i386_device::i386_push_es16()         // Opcode 0x06
 
 void i386_device::i386_push_fs16()         // Opcode 0x0f a0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1925,6 +2047,7 @@ void i386_device::i386_push_fs16()         // Opcode 0x0f a0
 
 void i386_device::i386_push_gs16()         // Opcode 0x0f a8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1939,6 +2062,7 @@ void i386_device::i386_push_gs16()         // Opcode 0x0f a8
 
 void i386_device::i386_push_ss16()         // Opcode 0x16
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -1953,6 +2077,7 @@ void i386_device::i386_push_ss16()         // Opcode 0x16
 
 void i386_device::i386_push_i16()          // Opcode 0x68
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t value = FETCH16();
 	uint32_t offset;
 	if(STACK_32BIT)
@@ -1968,6 +2093,7 @@ void i386_device::i386_push_i16()          // Opcode 0x68
 
 void i386_device::i386_pusha()             // Opcode 0x60
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t temp = REG16(SP);
 	uint32_t offset;
 	if(STACK_32BIT)
@@ -1992,6 +2118,7 @@ void i386_device::i386_pusha()             // Opcode 0x60
 
 void i386_device::i386_pushf()             // Opcode 0x9c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset;
 	if(STACK_32BIT)
 		offset = REG32(ESP) - 2;
@@ -2006,6 +2133,7 @@ void i386_device::i386_pushf()             // Opcode 0x9c
 
 void i386_device::i386_ret_near16_i16()    // Opcode 0xc2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int16_t disp = FETCH16();
 	m_core->eip = POP16();
 	REG16(SP) += disp;
@@ -2015,6 +2143,7 @@ void i386_device::i386_ret_near16_i16()    // Opcode 0xc2
 
 void i386_device::i386_ret_near16()        // Opcode 0xc3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->eip = POP16();
 	CHANGE_PC(m_core->eip);
 	CYCLES(CYCLES_RET);        /* TODO: Timing = 10 + m */
@@ -2022,6 +2151,7 @@ void i386_device::i386_ret_near16()        // Opcode 0xc3
 
 void i386_device::i386_sbb_rm16_r16()      // Opcode 0x19
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2042,6 +2172,7 @@ void i386_device::i386_sbb_rm16_r16()      // Opcode 0x19
 
 void i386_device::i386_sbb_r16_rm16()      // Opcode 0x1b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2062,6 +2193,7 @@ void i386_device::i386_sbb_r16_rm16()      // Opcode 0x1b
 
 void i386_device::i386_sbb_ax_i16()        // Opcode 0x1d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	src = FETCH16();
 	dst = REG16(AX);
@@ -2072,6 +2204,7 @@ void i386_device::i386_sbb_ax_i16()        // Opcode 0x1d
 
 void i386_device::i386_scasw()             // Opcode 0xaf
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t eas;
 	uint16_t src, dst;
 	eas = i386_translate(ES, m_core->address_size ? REG32(EDI) : REG16(DI), 0 );
@@ -2084,6 +2217,7 @@ void i386_device::i386_scasw()             // Opcode 0xaf
 
 void i386_device::i386_shld16_i8()         // Opcode 0x0f a4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t dst = LOAD_RM16(modrm);
@@ -2130,6 +2264,7 @@ void i386_device::i386_shld16_i8()         // Opcode 0x0f a4
 
 void i386_device::i386_shld16_cl()         // Opcode 0x0f a5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t dst = LOAD_RM16(modrm);
@@ -2175,6 +2310,7 @@ void i386_device::i386_shld16_cl()         // Opcode 0x0f a5
 
 void i386_device::i386_shrd16_i8()         // Opcode 0x0f ac
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t dst = LOAD_RM16(modrm);
@@ -2220,6 +2356,7 @@ void i386_device::i386_shrd16_i8()         // Opcode 0x0f ac
 
 void i386_device::i386_shrd16_cl()         // Opcode 0x0f ad
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t dst = LOAD_RM16(modrm);
@@ -2265,6 +2402,7 @@ void i386_device::i386_shrd16_cl()         // Opcode 0x0f ad
 
 void i386_device::i386_stosw()             // Opcode 0xab
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ead;
 	ead = i386_translate(ES, m_core->address_size ? REG32(EDI) : REG16(DI), 1 );
 	WRITE16(ead, REG16(AX));
@@ -2274,6 +2412,7 @@ void i386_device::i386_stosw()             // Opcode 0xab
 
 void i386_device::i386_sub_rm16_r16()      // Opcode 0x29
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2294,6 +2433,7 @@ void i386_device::i386_sub_rm16_r16()      // Opcode 0x29
 
 void i386_device::i386_sub_r16_rm16()      // Opcode 0x2b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2314,6 +2454,7 @@ void i386_device::i386_sub_r16_rm16()      // Opcode 0x2b
 
 void i386_device::i386_sub_ax_i16()        // Opcode 0x2d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	src = FETCH16();
 	dst = REG16(AX);
@@ -2324,6 +2465,7 @@ void i386_device::i386_sub_ax_i16()        // Opcode 0x2d
 
 void i386_device::i386_test_ax_i16()       // Opcode 0xa9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src = FETCH16();
 	uint16_t dst = REG16(AX);
 	dst = src & dst;
@@ -2335,6 +2477,7 @@ void i386_device::i386_test_ax_i16()       // Opcode 0xa9
 
 void i386_device::i386_test_rm16_r16()     // Opcode 0x85
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2359,6 +2502,7 @@ void i386_device::i386_test_rm16_r16()     // Opcode 0x85
 
 void i386_device::i386_xchg_ax_cx()        // Opcode 0x91
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t temp;
 	temp = REG16(AX);
 	REG16(AX) = REG16(CX);
@@ -2368,6 +2512,7 @@ void i386_device::i386_xchg_ax_cx()        // Opcode 0x91
 
 void i386_device::i386_xchg_ax_dx()        // Opcode 0x92
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t temp;
 	temp = REG16(AX);
 	REG16(AX) = REG16(DX);
@@ -2377,6 +2522,7 @@ void i386_device::i386_xchg_ax_dx()        // Opcode 0x92
 
 void i386_device::i386_xchg_ax_bx()        // Opcode 0x93
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t temp;
 	temp = REG16(AX);
 	REG16(AX) = REG16(BX);
@@ -2386,6 +2532,7 @@ void i386_device::i386_xchg_ax_bx()        // Opcode 0x93
 
 void i386_device::i386_xchg_ax_sp()        // Opcode 0x94
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t temp;
 	temp = REG16(AX);
 	REG16(AX) = REG16(SP);
@@ -2395,6 +2542,7 @@ void i386_device::i386_xchg_ax_sp()        // Opcode 0x94
 
 void i386_device::i386_xchg_ax_bp()        // Opcode 0x95
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t temp;
 	temp = REG16(AX);
 	REG16(AX) = REG16(BP);
@@ -2404,6 +2552,7 @@ void i386_device::i386_xchg_ax_bp()        // Opcode 0x95
 
 void i386_device::i386_xchg_ax_si()        // Opcode 0x96
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t temp;
 	temp = REG16(AX);
 	REG16(AX) = REG16(SI);
@@ -2413,6 +2562,7 @@ void i386_device::i386_xchg_ax_si()        // Opcode 0x96
 
 void i386_device::i386_xchg_ax_di()        // Opcode 0x97
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t temp;
 	temp = REG16(AX);
 	REG16(AX) = REG16(DI);
@@ -2422,6 +2572,7 @@ void i386_device::i386_xchg_ax_di()        // Opcode 0x97
 
 void i386_device::i386_xchg_r16_rm16()     // Opcode 0x87
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t src = LOAD_RM16(modrm);
@@ -2441,6 +2592,7 @@ void i386_device::i386_xchg_r16_rm16()     // Opcode 0x87
 
 void i386_device::i386_xor_rm16_r16()      // Opcode 0x31
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2461,6 +2613,7 @@ void i386_device::i386_xor_rm16_r16()      // Opcode 0x31
 
 void i386_device::i386_xor_r16_rm16()      // Opcode 0x33
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2481,6 +2634,7 @@ void i386_device::i386_xor_r16_rm16()      // Opcode 0x33
 
 void i386_device::i386_xor_ax_i16()        // Opcode 0x35
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	src = FETCH16();
 	dst = REG16(AX);
@@ -2493,6 +2647,7 @@ void i386_device::i386_xor_ax_i16()        // Opcode 0x35
 
 void i386_device::i386_group81_16()        // Opcode 0x81
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
@@ -2630,6 +2785,7 @@ void i386_device::i386_group81_16()        // Opcode 0x81
 
 void i386_device::i386_group83_16()        // Opcode 0x83
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
@@ -2767,6 +2923,7 @@ void i386_device::i386_group83_16()        // Opcode 0x83
 
 void i386_device::i386_groupC1_16()        // Opcode 0xc1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t dst;
 	uint8_t modrm = FETCH();
 	uint8_t shift;
@@ -2787,6 +2944,7 @@ void i386_device::i386_groupC1_16()        // Opcode 0xc1
 
 void i386_device::i386_groupD1_16()        // Opcode 0xd1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t dst;
 	uint8_t modrm = FETCH();
 
@@ -2804,6 +2962,7 @@ void i386_device::i386_groupD1_16()        // Opcode 0xd1
 
 void i386_device::i386_groupD3_16()        // Opcode 0xd3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t dst;
 	uint8_t modrm = FETCH();
 
@@ -2821,6 +2980,7 @@ void i386_device::i386_groupD3_16()        // Opcode 0xd3
 
 void i386_device::i386_groupF7_16()        // Opcode 0xf7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 
 	switch( (modrm >> 3) & 0x7 )
@@ -2983,6 +3143,7 @@ void i386_device::i386_groupF7_16()        // Opcode 0xf7
 
 void i386_device::i386_groupFF_16()        // Opcode 0xff
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 
 	switch( (modrm >> 3) & 0x7 )
@@ -3127,6 +3288,7 @@ void i386_device::i386_groupFF_16()        // Opcode 0xff
 
 void i386_device::i386_group0F00_16()          // Opcode 0x0f 00
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t address, ea;
 	uint8_t modrm = FETCH();
 	I386_SREG seg;
@@ -3329,6 +3491,7 @@ void i386_device::i386_group0F00_16()          // Opcode 0x0f 00
 
 void i386_device::i386_group0F01_16()      // Opcode 0x0f 01
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint16_t address;
 	uint32_t ea;
@@ -3433,6 +3596,7 @@ void i386_device::i386_group0F01_16()      // Opcode 0x0f 01
 
 void i386_device::i386_group0FBA_16()      // Opcode 0x0f ba
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 
 	switch( (modrm >> 3) & 0x7 )
@@ -3553,6 +3717,7 @@ void i386_device::i386_group0FBA_16()      // Opcode 0x0f ba
 
 void i386_device::i386_lar_r16_rm16()  // Opcode 0x0f 0x02
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	I386_SREG seg;
 	uint8_t type;
@@ -3620,6 +3785,7 @@ void i386_device::i386_lar_r16_rm16()  // Opcode 0x0f 0x02
 
 void i386_device::i386_lsl_r16_rm16()  // Opcode 0x0f 0x03
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint32_t limit;
 	I386_SREG seg;
@@ -3683,6 +3849,7 @@ void i386_device::i386_lsl_r16_rm16()  // Opcode 0x0f 0x03
 
 void i386_device::i386_bound_r16_m16_m16() // Opcode 0x62
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm;
 	int16_t val, low, high;
 
@@ -3713,6 +3880,7 @@ void i386_device::i386_bound_r16_m16_m16() // Opcode 0x62
 
 void i386_device::i386_retf16()            // Opcode 0xcb
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE && !V8086_MODE)
 	{
 		i386_protected_mode_retf(0,0);
@@ -3730,6 +3898,7 @@ void i386_device::i386_retf16()            // Opcode 0xcb
 
 void i386_device::i386_retf_i16()          // Opcode 0xca
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t count = FETCH16();
 
 	if(PROTECTED_MODE && !V8086_MODE)
@@ -3750,6 +3919,7 @@ void i386_device::i386_retf_i16()          // Opcode 0xca
 
 bool i386_device::i386_load_far_pointer16(int s)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint16_t selector;
 	bool fault = false;
@@ -3771,30 +3941,35 @@ bool i386_device::i386_load_far_pointer16(int s)
 
 void i386_device::i386_lds16()             // Opcode 0xc5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(i386_load_far_pointer16(DS))
 		CYCLES(CYCLES_LDS);
 }
 
 void i386_device::i386_lss16()             // Opcode 0x0f 0xb2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(i386_load_far_pointer16(SS))
 		CYCLES(CYCLES_LSS);
 }
 
 void i386_device::i386_les16()             // Opcode 0xc4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(i386_load_far_pointer16(ES))
 		CYCLES(CYCLES_LES);
 }
 
 void i386_device::i386_lfs16()             // Opcode 0x0f 0xb4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(i386_load_far_pointer16(FS))
 		CYCLES(CYCLES_LFS);
 }
 
 void i386_device::i386_lgs16()             // Opcode 0x0f 0xb5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(i386_load_far_pointer16(GS))
 		CYCLES(CYCLES_LGS);
 }

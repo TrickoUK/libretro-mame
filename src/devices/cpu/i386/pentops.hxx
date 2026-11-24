@@ -4,6 +4,7 @@
 
 bool i386_device::MMXPROLOG()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & CR0_TS)
 	{
 		i386_trap(FAULT_NM, 0);
@@ -16,6 +17,7 @@ bool i386_device::MMXPROLOG()
 
 bool i386_device::SSEPROLOG()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & CR0_TS)
 	{
 		i386_trap(FAULT_NM, 0);
@@ -26,48 +28,57 @@ bool i386_device::SSEPROLOG()
 
 void i386_device::READMMX(uint32_t ea,MMX_REG &r)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	r.q=READ64(ea);
 }
 
 void i386_device::WRITEMMX(uint32_t ea,MMX_REG &r)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	WRITE64(ea, r.q);
 }
 
 void i386_device::READXMM(uint32_t ea,XMM_REG &r)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	r.q[0]=READ64(ea);
 	r.q[1]=READ64(ea+8);
 }
 
 void i386_device::WRITEXMM(uint32_t ea,i386_device::XMM_REG &r)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	WRITE64(ea, r.q[0]);
 	WRITE64(ea+8, r.q[1]);
 }
 
 void i386_device::READXMM_LO64(uint32_t ea,i386_device::XMM_REG &r)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	r.q[0]=READ64(ea);
 }
 
 void i386_device::WRITEXMM_LO64(uint32_t ea,i386_device::XMM_REG &r)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	WRITE64(ea, r.q[0]);
 }
 
 void i386_device::READXMM_HI64(uint32_t ea,i386_device::XMM_REG &r)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	r.q[1]=READ64(ea);
 }
 
 void i386_device::WRITEXMM_HI64(uint32_t ea,i386_device::XMM_REG &r)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	WRITE64(ea, r.q[1]);
 }
 
 void i386_device::pentium_rdmsr()          // Opcode 0x0f 32
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint64_t data;
 	bool valid_msr = false;
 
@@ -86,6 +97,7 @@ void i386_device::pentium_rdmsr()          // Opcode 0x0f 32
 
 void i386_device::pentium_wrmsr()          // Opcode 0x0f 30
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint64_t data;
 	bool valid_msr = false;
 
@@ -103,6 +115,7 @@ void i386_device::pentium_wrmsr()          // Opcode 0x0f 30
 
 void i386_device::pentium_rdtsc()          // Opcode 0x0f 31
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint64_t ts = current_tsc();
 	REG32(EAX) = (uint32_t)(ts);
 	REG32(EDX) = (uint32_t)(ts >> 32);
@@ -112,11 +125,13 @@ void i386_device::pentium_rdtsc()          // Opcode 0x0f 31
 
 void i386_device::pentium_ud2()    // Opcode 0x0f 0b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_trap(6, 0);
 }
 
 void i386_device::pentium_rsm()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(!m_core->smm)
 	{
 		LOGMASKED(LOG_INVALID_OPCODE, "i386: Invalid RSM outside SMM at %08X\n", m_core->pc - 1);
@@ -139,6 +154,7 @@ void i386_device::pentium_rsm()
 
 void i386_device::pentium_prefetch_m8()    // Opcode 0x0f 18
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint32_t ea = GetEA(modrm,0);
 	// TODO: manage the cache if present
@@ -147,6 +163,7 @@ void i386_device::pentium_prefetch_m8()    // Opcode 0x0f 18
 
 void i386_device::pentium_cmovo_r16_rm16()    // Opcode 0x0f 40
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -173,6 +190,7 @@ void i386_device::pentium_cmovo_r16_rm16()    // Opcode 0x0f 40
 
 void i386_device::pentium_cmovo_r32_rm32()    // Opcode 0x0f 40
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -199,6 +217,7 @@ void i386_device::pentium_cmovo_r32_rm32()    // Opcode 0x0f 40
 
 void i386_device::pentium_cmovno_r16_rm16()    // Opcode 0x0f 41
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -225,6 +244,7 @@ void i386_device::pentium_cmovno_r16_rm16()    // Opcode 0x0f 41
 
 void i386_device::pentium_cmovno_r32_rm32()    // Opcode 0x0f 41
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -251,6 +271,7 @@ void i386_device::pentium_cmovno_r32_rm32()    // Opcode 0x0f 41
 
 void i386_device::pentium_cmovb_r16_rm16()    // Opcode 0x0f 42
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -277,6 +298,7 @@ void i386_device::pentium_cmovb_r16_rm16()    // Opcode 0x0f 42
 
 void i386_device::pentium_cmovb_r32_rm32()    // Opcode 0x0f 42
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -303,6 +325,7 @@ void i386_device::pentium_cmovb_r32_rm32()    // Opcode 0x0f 42
 
 void i386_device::pentium_cmovae_r16_rm16()    // Opcode 0x0f 43
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -329,6 +352,7 @@ void i386_device::pentium_cmovae_r16_rm16()    // Opcode 0x0f 43
 
 void i386_device::pentium_cmovae_r32_rm32()    // Opcode 0x0f 43
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -355,6 +379,7 @@ void i386_device::pentium_cmovae_r32_rm32()    // Opcode 0x0f 43
 
 void i386_device::pentium_cmove_r16_rm16()    // Opcode 0x0f 44
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -381,6 +406,7 @@ void i386_device::pentium_cmove_r16_rm16()    // Opcode 0x0f 44
 
 void i386_device::pentium_cmove_r32_rm32()    // Opcode 0x0f 44
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -407,6 +433,7 @@ void i386_device::pentium_cmove_r32_rm32()    // Opcode 0x0f 44
 
 void i386_device::pentium_cmovne_r16_rm16()    // Opcode 0x0f 45
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -433,6 +460,7 @@ void i386_device::pentium_cmovne_r16_rm16()    // Opcode 0x0f 45
 
 void i386_device::pentium_cmovne_r32_rm32()    // Opcode 0x0f 45
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -459,6 +487,7 @@ void i386_device::pentium_cmovne_r32_rm32()    // Opcode 0x0f 45
 
 void i386_device::pentium_cmovbe_r16_rm16()    // Opcode 0x0f 46
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -485,6 +514,7 @@ void i386_device::pentium_cmovbe_r16_rm16()    // Opcode 0x0f 46
 
 void i386_device::pentium_cmovbe_r32_rm32()    // Opcode 0x0f 46
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -511,6 +541,7 @@ void i386_device::pentium_cmovbe_r32_rm32()    // Opcode 0x0f 46
 
 void i386_device::pentium_cmova_r16_rm16()    // Opcode 0x0f 47
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -537,6 +568,7 @@ void i386_device::pentium_cmova_r16_rm16()    // Opcode 0x0f 47
 
 void i386_device::pentium_cmova_r32_rm32()    // Opcode 0x0f 47
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -563,6 +595,7 @@ void i386_device::pentium_cmova_r32_rm32()    // Opcode 0x0f 47
 
 void i386_device::pentium_cmovs_r16_rm16()    // Opcode 0x0f 48
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -589,6 +622,7 @@ void i386_device::pentium_cmovs_r16_rm16()    // Opcode 0x0f 48
 
 void i386_device::pentium_cmovs_r32_rm32()    // Opcode 0x0f 48
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -615,6 +649,7 @@ void i386_device::pentium_cmovs_r32_rm32()    // Opcode 0x0f 48
 
 void i386_device::pentium_cmovns_r16_rm16()    // Opcode 0x0f 49
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -641,6 +676,7 @@ void i386_device::pentium_cmovns_r16_rm16()    // Opcode 0x0f 49
 
 void i386_device::pentium_cmovns_r32_rm32()    // Opcode 0x0f 49
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -667,6 +703,7 @@ void i386_device::pentium_cmovns_r32_rm32()    // Opcode 0x0f 49
 
 void i386_device::pentium_cmovp_r16_rm16()    // Opcode 0x0f 4a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -693,6 +730,7 @@ void i386_device::pentium_cmovp_r16_rm16()    // Opcode 0x0f 4a
 
 void i386_device::pentium_cmovp_r32_rm32()    // Opcode 0x0f 4a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -719,6 +757,7 @@ void i386_device::pentium_cmovp_r32_rm32()    // Opcode 0x0f 4a
 
 void i386_device::pentium_cmovnp_r16_rm16()    // Opcode 0x0f 4b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -745,6 +784,7 @@ void i386_device::pentium_cmovnp_r16_rm16()    // Opcode 0x0f 4b
 
 void i386_device::pentium_cmovnp_r32_rm32()    // Opcode 0x0f 4b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -771,6 +811,7 @@ void i386_device::pentium_cmovnp_r32_rm32()    // Opcode 0x0f 4b
 
 void i386_device::pentium_cmovl_r16_rm16()    // Opcode 0x0f 4c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -797,6 +838,7 @@ void i386_device::pentium_cmovl_r16_rm16()    // Opcode 0x0f 4c
 
 void i386_device::pentium_cmovl_r32_rm32()    // Opcode 0x0f 4c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -823,6 +865,7 @@ void i386_device::pentium_cmovl_r32_rm32()    // Opcode 0x0f 4c
 
 void i386_device::pentium_cmovge_r16_rm16()    // Opcode 0x0f 4d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -849,6 +892,7 @@ void i386_device::pentium_cmovge_r16_rm16()    // Opcode 0x0f 4d
 
 void i386_device::pentium_cmovge_r32_rm32()    // Opcode 0x0f 4d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -875,6 +919,7 @@ void i386_device::pentium_cmovge_r32_rm32()    // Opcode 0x0f 4d
 
 void i386_device::pentium_cmovle_r16_rm16()    // Opcode 0x0f 4e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -901,6 +946,7 @@ void i386_device::pentium_cmovle_r16_rm16()    // Opcode 0x0f 4e
 
 void i386_device::pentium_cmovle_r32_rm32()    // Opcode 0x0f 4e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -927,6 +973,7 @@ void i386_device::pentium_cmovle_r32_rm32()    // Opcode 0x0f 4e
 
 void i386_device::pentium_cmovg_r16_rm16()    // Opcode 0x0f 4f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 
@@ -953,6 +1000,7 @@ void i386_device::pentium_cmovg_r16_rm16()    // Opcode 0x0f 4f
 
 void i386_device::pentium_cmovg_r32_rm32()    // Opcode 0x0f 4f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 
@@ -979,6 +1027,7 @@ void i386_device::pentium_cmovg_r32_rm32()    // Opcode 0x0f 4f
 
 void i386_device::pentium_movnti_m16_r16() // Opcode 0f c3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		// unsupported by cpu
@@ -993,6 +1042,7 @@ void i386_device::pentium_movnti_m16_r16() // Opcode 0f c3
 
 void i386_device::pentium_movnti_m32_r32() // Opcode 0f c3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		// unsupported by cpu
@@ -1007,6 +1057,7 @@ void i386_device::pentium_movnti_m32_r32() // Opcode 0f c3
 
 void i386_device::pentium_cmpxchg8b_m64()  // Opcode 0x0f c7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modm = FETCH();
 	if( modm >= 0xc0 ) {
 		report_invalid_modrm("cmpxchg8b_m64", modm);
@@ -1031,6 +1082,7 @@ void i386_device::pentium_cmpxchg8b_m64()  // Opcode 0x0f c7
 
 void i386_device::pentium_movntq_m64_r64() // Opcode 0f e7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1045,6 +1097,7 @@ void i386_device::pentium_movntq_m64_r64() // Opcode 0f e7
 
 void i386_device::pentium_maskmovq_r64_r64()  // Opcode 0f f7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int s,m,n;
 	uint8_t modm = FETCH();
 	uint32_t ea = GetEA(7, 0); // ds:di/edi/rdi register
@@ -1058,6 +1111,7 @@ void i386_device::pentium_maskmovq_r64_r64()  // Opcode 0f f7
 
 void i386_device::sse_maskmovdqu_r128_r128()  // Opcode 66 0f f7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int s,m,n;
 	uint8_t modm = FETCH();
 	if(SSEPROLOG()) return;
@@ -1071,6 +1125,7 @@ void i386_device::sse_maskmovdqu_r128_r128()  // Opcode 66 0f f7
 
 void i386_device::pentium_popcnt_r16_rm16()    // Opcode f3 0f b8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src;
 	uint8_t modrm = FETCH();
 	int n,count;
@@ -1092,6 +1147,7 @@ void i386_device::pentium_popcnt_r16_rm16()    // Opcode f3 0f b8
 
 void i386_device::pentium_popcnt_r32_rm32()    // Opcode f3 0f b8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src;
 	uint8_t modrm = FETCH();
 	int n,count;
@@ -1113,6 +1169,7 @@ void i386_device::pentium_popcnt_r32_rm32()    // Opcode f3 0f b8
 
 void i386_device::pentium_tzcnt_r16_rm16()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// for CPUs that don't support TZCNT, fall back to BSF
 	i386_bsf_r16_rm16();
 	// TODO: actually implement TZCNT
@@ -1120,6 +1177,7 @@ void i386_device::pentium_tzcnt_r16_rm16()
 
 void i386_device::pentium_tzcnt_r32_rm32()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// for CPUs that don't support TZCNT, fall back to BSF
 	i386_bsf_r32_rm32();
 	// TODO: actually implement TZCNT
@@ -1163,6 +1221,7 @@ static inline uint16_t SaturatedSignedDwordToUnsignedWord(int32_t dword)
 
 void i386_device::mmx_group_0f71()  // Opcode 0f 71
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modm = FETCH();
 	uint8_t imm8 = FETCH();
 	if(MMXPROLOG()) return;
@@ -1195,6 +1254,7 @@ void i386_device::mmx_group_0f71()  // Opcode 0f 71
 
 void i386_device::sse_group_660f71()  // Opcode 66 0f 71
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modm = FETCH();
 	uint8_t imm8 = FETCH();
 	if(SSEPROLOG()) return;
@@ -1221,6 +1281,7 @@ void i386_device::sse_group_660f71()  // Opcode 66 0f 71
 
 void i386_device::mmx_group_0f72()  // Opcode 0f 72
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modm = FETCH();
 	uint8_t imm8 = FETCH();
 	if(MMXPROLOG()) return;
@@ -1247,6 +1308,7 @@ void i386_device::mmx_group_0f72()  // Opcode 0f 72
 
 void i386_device::sse_group_660f72()  // Opcode 66 0f 72
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modm = FETCH();
 	uint8_t imm8 = FETCH();
 	if(SSEPROLOG()) return;
@@ -1273,6 +1335,7 @@ void i386_device::sse_group_660f72()  // Opcode 66 0f 72
 
 void i386_device::mmx_group_0f73()  // Opcode 0f 73
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modm = FETCH();
 	uint8_t imm8 = FETCH();
 	if(MMXPROLOG()) return;
@@ -1293,6 +1356,7 @@ void i386_device::mmx_group_0f73()  // Opcode 0f 73
 
 void i386_device::sse_group_660f73()  // Opcode 66 0f 73
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint64_t t0;
 	uint8_t modm = FETCH();
 	uint8_t imm8 = FETCH();
@@ -1355,6 +1419,7 @@ void i386_device::sse_group_660f73()  // Opcode 66 0f 73
 
 void i386_device::mmx_psrlw_r64_rm64()  // Opcode 0f d1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1378,6 +1443,7 @@ void i386_device::mmx_psrlw_r64_rm64()  // Opcode 0f d1
 
 void i386_device::mmx_psrld_r64_rm64()  // Opcode 0f d2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1397,6 +1463,7 @@ void i386_device::mmx_psrld_r64_rm64()  // Opcode 0f d2
 
 void i386_device::mmx_psrlq_r64_rm64()  // Opcode 0f d3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1414,6 +1481,7 @@ void i386_device::mmx_psrlq_r64_rm64()  // Opcode 0f d3
 
 void i386_device::mmx_paddq_r64_rm64()  // Opcode 0f d4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1429,6 +1497,7 @@ void i386_device::mmx_paddq_r64_rm64()  // Opcode 0f d4
 
 void i386_device::mmx_pmullw_r64_rm64()  // Opcode 0f d5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1450,6 +1519,7 @@ void i386_device::mmx_pmullw_r64_rm64()  // Opcode 0f d5
 
 void i386_device::mmx_psubusb_r64_rm64()  // Opcode 0f d8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1468,6 +1538,7 @@ void i386_device::mmx_psubusb_r64_rm64()  // Opcode 0f d8
 
 void i386_device::mmx_psubusw_r64_rm64()  // Opcode 0f d9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1486,6 +1557,7 @@ void i386_device::mmx_psubusw_r64_rm64()  // Opcode 0f d9
 
 void i386_device::mmx_pand_r64_rm64()  // Opcode 0f db
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1501,6 +1573,7 @@ void i386_device::mmx_pand_r64_rm64()  // Opcode 0f db
 
 void i386_device::mmx_paddusb_r64_rm64()  // Opcode 0f dc
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1519,6 +1592,7 @@ void i386_device::mmx_paddusb_r64_rm64()  // Opcode 0f dc
 
 void i386_device::mmx_paddusw_r64_rm64()  // Opcode 0f dd
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1537,6 +1611,7 @@ void i386_device::mmx_paddusw_r64_rm64()  // Opcode 0f dd
 
 void i386_device::mmx_pandn_r64_rm64()  // Opcode 0f df
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1552,6 +1627,7 @@ void i386_device::mmx_pandn_r64_rm64()  // Opcode 0f df
 
 void i386_device::mmx_psraw_r64_rm64()  // Opcode 0f e1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1575,6 +1651,7 @@ void i386_device::mmx_psraw_r64_rm64()  // Opcode 0f e1
 
 void i386_device::mmx_psrad_r64_rm64()  // Opcode 0f e2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1594,6 +1671,7 @@ void i386_device::mmx_psrad_r64_rm64()  // Opcode 0f e2
 
 void i386_device::mmx_pmulhw_r64_rm64()  // Opcode 0f e5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1615,6 +1693,7 @@ void i386_device::mmx_pmulhw_r64_rm64()  // Opcode 0f e5
 
 void i386_device::mmx_psubsb_r64_rm64()  // Opcode 0f e8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1633,6 +1712,7 @@ void i386_device::mmx_psubsb_r64_rm64()  // Opcode 0f e8
 
 void i386_device::mmx_psubsw_r64_rm64()  // Opcode 0f e9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1651,6 +1731,7 @@ void i386_device::mmx_psubsw_r64_rm64()  // Opcode 0f e9
 
 void i386_device::mmx_por_r64_rm64()  // Opcode 0f eb
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1666,6 +1747,7 @@ void i386_device::mmx_por_r64_rm64()  // Opcode 0f eb
 
 void i386_device::mmx_paddsb_r64_rm64()  // Opcode 0f ec
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1684,6 +1766,7 @@ void i386_device::mmx_paddsb_r64_rm64()  // Opcode 0f ec
 
 void i386_device::mmx_paddsw_r64_rm64()  // Opcode 0f ed
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1702,6 +1785,7 @@ void i386_device::mmx_paddsw_r64_rm64()  // Opcode 0f ed
 
 void i386_device::mmx_pxor_r64_rm64()  // Opcode 0f ef
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1717,6 +1801,7 @@ void i386_device::mmx_pxor_r64_rm64()  // Opcode 0f ef
 
 void i386_device::mmx_psllw_r64_rm64()  // Opcode 0f f1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1740,6 +1825,7 @@ void i386_device::mmx_psllw_r64_rm64()  // Opcode 0f f1
 
 void i386_device::mmx_pslld_r64_rm64()  // Opcode 0f f2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1759,6 +1845,7 @@ void i386_device::mmx_pslld_r64_rm64()  // Opcode 0f f2
 
 void i386_device::mmx_psllq_r64_rm64()  // Opcode 0f f3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1776,6 +1863,7 @@ void i386_device::mmx_psllq_r64_rm64()  // Opcode 0f f3
 
 void i386_device::mmx_pmaddwd_r64_rm64()  // Opcode 0f f5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1797,6 +1885,7 @@ void i386_device::mmx_pmaddwd_r64_rm64()  // Opcode 0f f5
 
 void i386_device::mmx_psubb_r64_rm64()  // Opcode 0f f8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1815,6 +1904,7 @@ void i386_device::mmx_psubb_r64_rm64()  // Opcode 0f f8
 
 void i386_device::mmx_psubw_r64_rm64()  // Opcode 0f f9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1833,6 +1923,7 @@ void i386_device::mmx_psubw_r64_rm64()  // Opcode 0f f9
 
 void i386_device::mmx_psubd_r64_rm64()  // Opcode 0f fa
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1851,6 +1942,7 @@ void i386_device::mmx_psubd_r64_rm64()  // Opcode 0f fa
 
 void i386_device::mmx_paddb_r64_rm64()  // Opcode 0f fc
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1869,6 +1961,7 @@ void i386_device::mmx_paddb_r64_rm64()  // Opcode 0f fc
 
 void i386_device::mmx_paddw_r64_rm64()  // Opcode 0f fd
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1887,6 +1980,7 @@ void i386_device::mmx_paddw_r64_rm64()  // Opcode 0f fd
 
 void i386_device::mmx_paddd_r64_rm64()  // Opcode 0f fe
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -1905,6 +1999,7 @@ void i386_device::mmx_paddd_r64_rm64()  // Opcode 0f fe
 
 void i386_device::mmx_emms() // Opcode 0f 77
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->cr[0] & CR0_TS)
 	{
 		i386_trap(FAULT_NM, 0);
@@ -1921,6 +2016,7 @@ void i386_device::mmx_emms() // Opcode 0f 77
 
 void i386_device::i386_cyrix_special()     // Opcode 0x0f 3a-3d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	/*
 	0f 3a       BB0_RESET (set BB0 pointer = base)
 	0f 3b       BB1_RESET (set BB1 pointer = base)
@@ -1933,6 +2029,7 @@ void i386_device::i386_cyrix_special()     // Opcode 0x0f 3a-3d
 
 void i386_device::i386_cyrix_unknown()     // Opcode 0x0f 74
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	LOGMASKED(LOG_UNEMULATED, "Unemulated 0x0f 0x74 opcode called\n");
 
 	CYCLES(1);
@@ -1940,6 +2037,7 @@ void i386_device::i386_cyrix_unknown()     // Opcode 0x0f 74
 
 void i386_device::i386_cyrix_svdc() // Opcode 0f 78
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 
 	if( modrm < 0xc0 ) {
@@ -2004,6 +2102,7 @@ void i386_device::i386_cyrix_svdc() // Opcode 0f 78
 
 void i386_device::i386_cyrix_rsdc() // Opcode 0f 79
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 
 	if( modrm < 0xc0 ) {
@@ -2071,6 +2170,7 @@ void i386_device::i386_cyrix_rsdc() // Opcode 0f 79
 
 void i386_device::i386_cyrix_svldt() // Opcode 0f 7a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ( PROTECTED_MODE && !V8086_MODE )
 	{
 		uint8_t modrm = FETCH();
@@ -2100,6 +2200,7 @@ void i386_device::i386_cyrix_svldt() // Opcode 0f 7a
 
 void i386_device::i386_cyrix_rsldt() // Opcode 0f 7b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ( PROTECTED_MODE && !V8086_MODE )
 	{
 		if(m_core->CPL)
@@ -2136,6 +2237,7 @@ void i386_device::i386_cyrix_rsldt() // Opcode 0f 7b
 
 void i386_device::i386_cyrix_svts() // Opcode 0f 7c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ( PROTECTED_MODE )
 	{
 		uint8_t modrm = FETCH();
@@ -2164,6 +2266,7 @@ void i386_device::i386_cyrix_svts() // Opcode 0f 7c
 
 void i386_device::i386_cyrix_rsts() // Opcode 0f 7d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ( PROTECTED_MODE )
 	{
 		if(m_core->CPL)
@@ -2196,6 +2299,7 @@ void i386_device::i386_cyrix_rsts() // Opcode 0f 7d
 
 void i386_device::mmx_movd_r64_rm32() // Opcode 0f 6e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2210,6 +2314,7 @@ void i386_device::mmx_movd_r64_rm32() // Opcode 0f 6e
 
 void i386_device::mmx_movq_r64_rm64() // Opcode 0f 6f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2223,6 +2328,7 @@ void i386_device::mmx_movq_r64_rm64() // Opcode 0f 6f
 
 void i386_device::mmx_movd_rm32_r64() // Opcode 0f 7e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2236,6 +2342,7 @@ void i386_device::mmx_movd_rm32_r64() // Opcode 0f 7e
 
 void i386_device::mmx_movq_rm64_r64() // Opcode 0f 7f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2249,6 +2356,7 @@ void i386_device::mmx_movq_rm64_r64() // Opcode 0f 7f
 
 void i386_device::mmx_pcmpeqb_r64_rm64() // Opcode 0f 74
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int c;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -2271,6 +2379,7 @@ void i386_device::mmx_pcmpeqb_r64_rm64() // Opcode 0f 74
 
 void i386_device::mmx_pcmpeqw_r64_rm64() // Opcode 0f 75
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2296,6 +2405,7 @@ void i386_device::mmx_pcmpeqw_r64_rm64() // Opcode 0f 75
 
 void i386_device::mmx_pcmpeqd_r64_rm64() // Opcode 0f 76
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2317,6 +2427,7 @@ void i386_device::mmx_pcmpeqd_r64_rm64() // Opcode 0f 76
 
 void i386_device::mmx_pshufw_r64_rm64_i8() // Opcode 0f 70
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2346,6 +2457,7 @@ void i386_device::mmx_pshufw_r64_rm64_i8() // Opcode 0f 70
 
 void i386_device::sse_punpcklbw_r128_rm128() // Opcode 66 0f 60
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -2388,6 +2500,7 @@ void i386_device::sse_punpcklbw_r128_rm128() // Opcode 66 0f 60
 
 void i386_device::sse_punpcklwd_r128_rm128()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -2418,6 +2531,7 @@ void i386_device::sse_punpcklwd_r128_rm128()
 
 void i386_device::sse_punpckldq_r128_rm128()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -2448,6 +2562,7 @@ void i386_device::sse_punpckldq_r128_rm128()
 
 void i386_device::sse_punpcklqdq_r128_rm128()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -2474,6 +2589,7 @@ void i386_device::sse_punpcklqdq_r128_rm128()
 
 void i386_device::mmx_punpcklbw_r64_r64m32() // Opcode 0f 60
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2507,6 +2623,7 @@ void i386_device::mmx_punpcklbw_r64_r64m32() // Opcode 0f 60
 
 void i386_device::mmx_punpcklwd_r64_r64m32() // Opcode 0f 61
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2532,6 +2649,7 @@ void i386_device::mmx_punpcklwd_r64_r64m32() // Opcode 0f 61
 
 void i386_device::mmx_punpckldq_r64_r64m32() // Opcode 0f 62
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2553,6 +2671,7 @@ void i386_device::mmx_punpckldq_r64_r64m32() // Opcode 0f 62
 
 void i386_device::mmx_packsswb_r64_rm64() // Opcode 0f 63
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2590,6 +2709,7 @@ void i386_device::mmx_packsswb_r64_rm64() // Opcode 0f 63
 
 void i386_device::mmx_pcmpgtb_r64_rm64() // Opcode 0f 64
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int c;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -2612,6 +2732,7 @@ void i386_device::mmx_pcmpgtb_r64_rm64() // Opcode 0f 64
 
 void i386_device::mmx_pcmpgtw_r64_rm64() // Opcode 0f 65
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int c;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -2634,6 +2755,7 @@ void i386_device::mmx_pcmpgtw_r64_rm64() // Opcode 0f 65
 
 void i386_device::mmx_pcmpgtd_r64_rm64() // Opcode 0f 66
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int c;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -2656,6 +2778,7 @@ void i386_device::mmx_pcmpgtd_r64_rm64() // Opcode 0f 66
 
 void i386_device::mmx_packuswb_r64_rm64() // Opcode 0f 67
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2693,6 +2816,7 @@ void i386_device::mmx_packuswb_r64_rm64() // Opcode 0f 67
 
 void i386_device::mmx_punpckhbw_r64_rm64() // Opcode 0f 68
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2726,6 +2850,7 @@ void i386_device::mmx_punpckhbw_r64_rm64() // Opcode 0f 68
 
 void i386_device::mmx_punpckhwd_r64_rm64() // Opcode 0f 69
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2751,6 +2876,7 @@ void i386_device::mmx_punpckhwd_r64_rm64() // Opcode 0f 69
 
 void i386_device::mmx_punpckhdq_r64_rm64() // Opcode 0f 6a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2772,6 +2898,7 @@ void i386_device::mmx_punpckhdq_r64_rm64() // Opcode 0f 6a
 
 void i386_device::mmx_packssdw_r64_rm64() // Opcode 0f 6b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -2806,6 +2933,7 @@ void i386_device::mmx_packssdw_r64_rm64() // Opcode 0f 6b
 
 void i386_device::sse_group_0fae()  // Opcode 0f ae
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modm = FETCH();
 	if( modm == 0xf8 ) {
 		LOGMASKED(LOG_UNEMULATED, "Unemulated SFENCE opcode called\n");
@@ -2903,6 +3031,7 @@ void i386_device::sse_group_0fae()  // Opcode 0f ae
 
 void i386_device::sse_cvttps2dq_r128_rm128() // Opcode f3 0f 5b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -2924,6 +3053,7 @@ void i386_device::sse_cvttps2dq_r128_rm128() // Opcode f3 0f 5b
 
 void i386_device::sse_cvtss2sd_r128_r128m32() // Opcode f3 0f 5a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -2939,6 +3069,7 @@ void i386_device::sse_cvtss2sd_r128_r128m32() // Opcode f3 0f 5a
 
 void i386_device::sse_cvttss2si_r32_r128m32() // Opcode f3 0f 2c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int32_t src;
 	uint8_t modrm = FETCH(); // get mordm byte
 	if(SSEPROLOG()) return;
@@ -2956,6 +3087,7 @@ void i386_device::sse_cvttss2si_r32_r128m32() // Opcode f3 0f 2c
 
 void i386_device::sse_cvtss2si_r32_r128m32() // Opcode f3 0f 2d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int32_t src;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
@@ -2973,6 +3105,7 @@ void i386_device::sse_cvtss2si_r32_r128m32() // Opcode f3 0f 2d
 
 void i386_device::sse_cvtsi2ss_r128_rm32() // Opcode f3 0f 2a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -2986,6 +3119,7 @@ void i386_device::sse_cvtsi2ss_r128_rm32() // Opcode f3 0f 2a
 
 void i386_device::sse_cvtpi2ps_r128_rm64() // Opcode 0f 2a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(MMXPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3003,6 +3137,7 @@ void i386_device::sse_cvtpi2ps_r128_rm64() // Opcode 0f 2a
 
 void i386_device::sse_cvttps2pi_r64_r128m64() // Opcode 0f 2c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(MMXPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3020,6 +3155,7 @@ void i386_device::sse_cvttps2pi_r64_r128m64() // Opcode 0f 2c
 
 void i386_device::sse_cvtps2pi_r64_r128m64() // Opcode 0f 2d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(MMXPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3037,6 +3173,7 @@ void i386_device::sse_cvtps2pi_r64_r128m64() // Opcode 0f 2d
 
 void i386_device::sse_cvtps2pd_r128_r128m64() // Opcode 0f 5a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3054,6 +3191,7 @@ void i386_device::sse_cvtps2pd_r128_r128m64() // Opcode 0f 5a
 
 void i386_device::sse_cvtdq2ps_r128_rm128() // Opcode 0f 5b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3075,6 +3213,7 @@ void i386_device::sse_cvtdq2ps_r128_rm128() // Opcode 0f 5b
 
 void i386_device::sse_cvtdq2pd_r128_r128m64() // Opcode f3 0f e6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3092,6 +3231,7 @@ void i386_device::sse_cvtdq2pd_r128_r128m64() // Opcode f3 0f e6
 
 void i386_device::sse_movss_r128_rm128() // Opcode f3 0f 10
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3105,6 +3245,7 @@ void i386_device::sse_movss_r128_rm128() // Opcode f3 0f 10
 
 void i386_device::sse_movss_rm128_r128() // Opcode f3 0f 11
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3118,6 +3259,7 @@ void i386_device::sse_movss_rm128_r128() // Opcode f3 0f 11
 
 void i386_device::sse_movsldup_r128_rm128() // Opcode f3 0f 12
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3139,6 +3281,7 @@ void i386_device::sse_movsldup_r128_rm128() // Opcode f3 0f 12
 
 void i386_device::sse_movshdup_r128_rm128() // Opcode f3 0f 16
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3160,6 +3303,7 @@ void i386_device::sse_movshdup_r128_rm128() // Opcode f3 0f 16
 
 void i386_device::sse_movaps_r128_rm128() // Opcode 0f 28
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3173,6 +3317,7 @@ void i386_device::sse_movaps_r128_rm128() // Opcode 0f 28
 
 void i386_device::sse_movaps_rm128_r128() // Opcode 0f 29
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3186,6 +3331,7 @@ void i386_device::sse_movaps_rm128_r128() // Opcode 0f 29
 
 void i386_device::sse_movups_r128_rm128() // Opcode 0f 10
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3199,6 +3345,7 @@ void i386_device::sse_movups_r128_rm128() // Opcode 0f 10
 
 void i386_device::sse_movupd_r128_rm128() // Opcode 66 0f 10
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3212,6 +3359,7 @@ void i386_device::sse_movupd_r128_rm128() // Opcode 66 0f 10
 
 void i386_device::sse_movups_rm128_r128() // Opcode 0f 11
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3225,6 +3373,7 @@ void i386_device::sse_movups_rm128_r128() // Opcode 0f 11
 
 void i386_device::sse_movupd_rm128_r128() // Opcode 66 0f 11
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3238,6 +3387,7 @@ void i386_device::sse_movupd_rm128_r128() // Opcode 66 0f 11
 
 void i386_device::sse_movlps_r128_m64() // Opcode 0f 12
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3254,6 +3404,7 @@ void i386_device::sse_movlps_r128_m64() // Opcode 0f 12
 
 void i386_device::sse_movlpd_r128_m64() // Opcode 66 0f 12
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3268,6 +3419,7 @@ void i386_device::sse_movlpd_r128_m64() // Opcode 66 0f 12
 
 void i386_device::sse_movlps_m64_r128() // Opcode 0f 13
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3282,6 +3434,7 @@ void i386_device::sse_movlps_m64_r128() // Opcode 0f 13
 
 void i386_device::sse_movlpd_m64_r128() // Opcode 66 0f 13
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3296,6 +3449,7 @@ void i386_device::sse_movlpd_m64_r128() // Opcode 66 0f 13
 
 void i386_device::sse_movhps_r128_m64() // Opcode 0f 16
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3312,6 +3466,7 @@ void i386_device::sse_movhps_r128_m64() // Opcode 0f 16
 
 void i386_device::sse_movhpd_r128_m64() // Opcode 66 0f 16
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3327,6 +3482,7 @@ void i386_device::sse_movhpd_r128_m64() // Opcode 66 0f 16
 
 void i386_device::sse_movhps_m64_r128() // Opcode 0f 17
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3341,6 +3497,7 @@ void i386_device::sse_movhps_m64_r128() // Opcode 0f 17
 
 void i386_device::sse_movhpd_m64_r128() // Opcode 66 0f 17
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3355,6 +3512,7 @@ void i386_device::sse_movhpd_m64_r128() // Opcode 66 0f 17
 
 void i386_device::sse_movntps_m128_r128() // Opcode 0f 2b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3370,6 +3528,7 @@ void i386_device::sse_movntps_m128_r128() // Opcode 0f 2b
 
 void i386_device::sse_movmskps_r16_r128() // Opcode 0f 50
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3385,6 +3544,7 @@ void i386_device::sse_movmskps_r16_r128() // Opcode 0f 50
 
 void i386_device::sse_movmskps_r32_r128() // Opcode 0f 50
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3400,6 +3560,7 @@ void i386_device::sse_movmskps_r32_r128() // Opcode 0f 50
 
 void i386_device::sse_movmskpd_r32_r128() // Opcode 66 0f 50
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3413,6 +3574,7 @@ void i386_device::sse_movmskpd_r32_r128() // Opcode 66 0f 50
 
 void i386_device::sse_movq2dq_r128_r64() // Opcode f3 0f d6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(MMXPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3424,6 +3586,7 @@ void i386_device::sse_movq2dq_r128_r64() // Opcode f3 0f d6
 
 void i386_device::sse_movdqu_r128_rm128() // Opcode f3 0f 6f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3438,6 +3601,7 @@ void i386_device::sse_movdqu_r128_rm128() // Opcode f3 0f 6f
 
 void i386_device::sse_movdqu_rm128_r128() // Opcode f3 0f 7f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3452,6 +3616,7 @@ void i386_device::sse_movdqu_rm128_r128() // Opcode f3 0f 7f
 
 void i386_device::sse_movd_m128_rm32() // Opcode 66 0f 6e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -3468,6 +3633,7 @@ void i386_device::sse_movd_m128_rm32() // Opcode 66 0f 6e
 
 void i386_device::sse_movdqa_m128_rm128() // Opcode 66 0f 6f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -3483,6 +3649,7 @@ void i386_device::sse_movdqa_m128_rm128() // Opcode 66 0f 6f
 
 void i386_device::sse_movq_r128_r128m64() // Opcode f3 0f 7e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3498,6 +3665,7 @@ void i386_device::sse_movq_r128_r128m64() // Opcode f3 0f 7e
 
 void i386_device::sse_movd_rm32_r128() // Opcode 66 0f 7e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -3512,6 +3680,7 @@ void i386_device::sse_movd_rm32_r128() // Opcode 66 0f 7e
 
 void i386_device::sse_movdqa_rm128_r128() // Opcode 66 0f 7f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -3527,6 +3696,7 @@ void i386_device::sse_movdqa_rm128_r128() // Opcode 66 0f 7f
 
 void i386_device::sse_pmovmskb_r16_r64() // Opcode 0f d7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -3546,6 +3716,7 @@ void i386_device::sse_pmovmskb_r16_r64() // Opcode 0f d7
 
 void i386_device::sse_pmovmskb_r32_r64() // Opcode 0f d7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(MMXPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3565,6 +3736,7 @@ void i386_device::sse_pmovmskb_r32_r64() // Opcode 0f d7
 
 void i386_device::sse_pmovmskb_r32_r128() // Opcode 66 0f d7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3592,6 +3764,7 @@ void i386_device::sse_pmovmskb_r32_r128() // Opcode 66 0f d7
 
 void i386_device::sse_xorps() // Opcode 0f 57
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3613,6 +3786,7 @@ void i386_device::sse_xorps() // Opcode 0f 57
 
 void i386_device::sse_xorpd_r128_rm128() // Opcode 66 0f 57
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3630,6 +3804,7 @@ void i386_device::sse_xorpd_r128_rm128() // Opcode 66 0f 57
 
 void i386_device::sse_addps() // Opcode 0f 58
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3651,6 +3826,7 @@ void i386_device::sse_addps() // Opcode 0f 58
 
 void i386_device::sse_sqrtps_r128_rm128() // Opcode 0f 51
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3672,6 +3848,7 @@ void i386_device::sse_sqrtps_r128_rm128() // Opcode 0f 51
 
 void i386_device::sse_rsqrtps_r128_rm128() // Opcode 0f 52
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3693,6 +3870,7 @@ void i386_device::sse_rsqrtps_r128_rm128() // Opcode 0f 52
 
 void i386_device::sse_rcpps_r128_rm128() // Opcode 0f 53
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3714,6 +3892,7 @@ void i386_device::sse_rcpps_r128_rm128() // Opcode 0f 53
 
 void i386_device::sse_andps_r128_rm128() // Opcode 0f 54
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3731,6 +3910,7 @@ void i386_device::sse_andps_r128_rm128() // Opcode 0f 54
 
 void i386_device::sse_andpd_r128_rm128() // Opcode 66 0f 54
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3748,6 +3928,7 @@ void i386_device::sse_andpd_r128_rm128() // Opcode 66 0f 54
 
 void i386_device::sse_andnps_r128_rm128() // Opcode 0f 55
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3765,6 +3946,7 @@ void i386_device::sse_andnps_r128_rm128() // Opcode 0f 55
 
 void i386_device::sse_andnpd_r128_rm128() // Opcode 66 0f 55
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3782,6 +3964,7 @@ void i386_device::sse_andnpd_r128_rm128() // Opcode 66 0f 55
 
 void i386_device::sse_orps_r128_rm128() // Opcode 0f 56
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3799,6 +3982,7 @@ void i386_device::sse_orps_r128_rm128() // Opcode 0f 56
 
 void i386_device::sse_orpd_r128_rm128() // Opcode 66 0f 56
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3816,6 +4000,7 @@ void i386_device::sse_orpd_r128_rm128() // Opcode 66 0f 56
 
 void i386_device::sse_mulps() // Opcode 0f 59 ????
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3837,6 +4022,7 @@ void i386_device::sse_mulps() // Opcode 0f 59 ????
 
 void i386_device::sse_subps() // Opcode 0f 5c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3884,6 +4070,7 @@ static inline double sse_min_double(double src1, double src2)
 
 void i386_device::sse_minps() // Opcode 0f 5d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3905,6 +4092,7 @@ void i386_device::sse_minps() // Opcode 0f 5d
 
 void i386_device::sse_divps() // Opcode 0f 5e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3952,6 +4140,7 @@ static inline double sse_max_double(double src1, double src2)
 
 void i386_device::sse_maxps() // Opcode 0f 5f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3973,6 +4162,7 @@ void i386_device::sse_maxps() // Opcode 0f 5f
 
 void i386_device::sse_maxss_r128_r128m32() // Opcode f3 0f 5f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -3988,6 +4178,7 @@ void i386_device::sse_maxss_r128_r128m32() // Opcode f3 0f 5f
 
 void i386_device::sse_addss() // Opcode f3 0f 58
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4003,6 +4194,7 @@ void i386_device::sse_addss() // Opcode f3 0f 58
 
 void i386_device::sse_subss() // Opcode f3 0f 5c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4018,6 +4210,7 @@ void i386_device::sse_subss() // Opcode f3 0f 5c
 
 void i386_device::sse_mulss() // Opcode f3 0f 5e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4033,6 +4226,7 @@ void i386_device::sse_mulss() // Opcode f3 0f 5e
 
 void i386_device::sse_divss() // Opcode 0f 59
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4048,6 +4242,7 @@ void i386_device::sse_divss() // Opcode 0f 59
 
 void i386_device::sse_rcpss_r128_r128m32() // Opcode f3 0f 53
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4063,6 +4258,7 @@ void i386_device::sse_rcpss_r128_r128m32() // Opcode f3 0f 53
 
 void i386_device::sse_sqrtss_r128_r128m32() // Opcode f3 0f 51
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4078,6 +4274,7 @@ void i386_device::sse_sqrtss_r128_r128m32() // Opcode f3 0f 51
 
 void i386_device::sse_rsqrtss_r128_r128m32() // Opcode f3 0f 52
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4093,6 +4290,7 @@ void i386_device::sse_rsqrtss_r128_r128m32() // Opcode f3 0f 52
 
 void i386_device::sse_minss_r128_r128m32() // Opcode f3 0f 5d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4108,6 +4306,7 @@ void i386_device::sse_minss_r128_r128m32() // Opcode f3 0f 5d
 
 void i386_device::sse_comiss_r128_r128m32() // Opcode 0f 2f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	float32_t a,b;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
@@ -4146,6 +4345,7 @@ void i386_device::sse_comiss_r128_r128m32() // Opcode 0f 2f
 
 void i386_device::sse_comisd_r128_r128m64() // Opcode 66 0f 2f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	float64_t a,b;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
@@ -4184,6 +4384,7 @@ void i386_device::sse_comisd_r128_r128m64() // Opcode 66 0f 2f
 
 void i386_device::sse_ucomiss_r128_r128m32() // Opcode 0f 2e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	float32_t a,b;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
@@ -4222,6 +4423,7 @@ void i386_device::sse_ucomiss_r128_r128m32() // Opcode 0f 2e
 
 void i386_device::sse_ucomisd_r128_r128m64() // Opcode 66 0f 2e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	float64_t a,b;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
@@ -4260,6 +4462,7 @@ void i386_device::sse_ucomisd_r128_r128m64() // Opcode 66 0f 2e
 
 void i386_device::sse_shufps() // Opcode 0f c6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t sel = FETCH();
 	if(SSEPROLOG()) return;
@@ -4298,6 +4501,7 @@ void i386_device::sse_shufps() // Opcode 0f c6
 
 void i386_device::sse_shufpd_r128_rm128_i8() // Opcode 66 0f c6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t sel = FETCH();
 	if(SSEPROLOG()) return;
@@ -4327,6 +4531,7 @@ void i386_device::sse_shufpd_r128_rm128_i8() // Opcode 66 0f c6
 
 void i386_device::sse_unpcklps_r128_rm128() // Opcode 0f 14
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	int s,d;
@@ -4356,6 +4561,7 @@ void i386_device::sse_unpcklps_r128_rm128() // Opcode 0f 14
 
 void i386_device::sse_unpcklpd_r128_rm128() // Opcode 66 0f 14
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	int s,d;
@@ -4376,6 +4582,7 @@ void i386_device::sse_unpcklpd_r128_rm128() // Opcode 66 0f 14
 
 void i386_device::sse_unpckhps_r128_rm128() // Opcode 0f 15
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	int s,d;
@@ -4407,6 +4614,7 @@ void i386_device::sse_unpckhps_r128_rm128() // Opcode 0f 15
 
 void i386_device::sse_unpckhpd_r128_rm128() // Opcode 66 0f 15
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	int s,d;
@@ -4451,6 +4659,7 @@ static inline bool sse_isdoubleunordered(double op1, double op2)
 
 void i386_device::sse_predicate_compare_single(uint8_t imm8, XMM_REG d, XMM_REG s)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	switch (imm8 & 7)
 	{
 	case 0:
@@ -4506,6 +4715,7 @@ void i386_device::sse_predicate_compare_single(uint8_t imm8, XMM_REG d, XMM_REG 
 
 void i386_device::sse_predicate_compare_double(uint8_t imm8, XMM_REG d, XMM_REG s)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	switch (imm8 & 7)
 	{
 	case 0:
@@ -4545,6 +4755,7 @@ void i386_device::sse_predicate_compare_double(uint8_t imm8, XMM_REG d, XMM_REG 
 
 void i386_device::sse_predicate_compare_single_scalar(uint8_t imm8, XMM_REG d, XMM_REG s)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	switch (imm8 & 7)
 	{
 	case 0:
@@ -4576,6 +4787,7 @@ void i386_device::sse_predicate_compare_single_scalar(uint8_t imm8, XMM_REG d, X
 
 void i386_device::sse_predicate_compare_double_scalar(uint8_t imm8, XMM_REG d, XMM_REG s)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	switch (imm8 & 7)
 	{
 	case 0:
@@ -4607,6 +4819,7 @@ void i386_device::sse_predicate_compare_double_scalar(uint8_t imm8, XMM_REG d, X
 
 void i386_device::sse_cmpps_r128_rm128_i8() // Opcode 0f c2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4629,6 +4842,7 @@ void i386_device::sse_cmpps_r128_rm128_i8() // Opcode 0f c2
 
 void i386_device::sse_cmppd_r128_rm128_i8() // Opcode 66 0f c2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4651,6 +4865,7 @@ void i386_device::sse_cmppd_r128_rm128_i8() // Opcode 66 0f c2
 
 void i386_device::sse_cmpss_r128_r128m32_i8() // Opcode f3 0f c2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4673,6 +4888,7 @@ void i386_device::sse_cmpss_r128_r128m32_i8() // Opcode f3 0f c2
 
 void i386_device::sse_pinsrw_r64_r16m16_i8() // Opcode 0f c4, 16bit register
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint8_t imm8 = FETCH();
@@ -4703,6 +4919,7 @@ void i386_device::sse_pinsrw_r64_r16m16_i8() // Opcode 0f c4, 16bit register
 
 void i386_device::sse_pinsrw_r64_r32m16_i8() // Opcode 0f c4, 32bit register
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -4720,6 +4937,7 @@ void i386_device::sse_pinsrw_r64_r32m16_i8() // Opcode 0f c4, 32bit register
 
 void i386_device::sse_pinsrw_r128_r32m16_i8() // Opcode 66 0f c4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -4738,6 +4956,7 @@ void i386_device::sse_pinsrw_r128_r32m16_i8() // Opcode 66 0f c4
 
 void i386_device::sse_pextrw_r16_r64_i8() // Opcode 0f c5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint8_t imm8 = FETCH();
@@ -4757,6 +4976,7 @@ void i386_device::sse_pextrw_r16_r64_i8() // Opcode 0f c5
 
 void i386_device::sse_pextrw_r32_r64_i8() // Opcode 0f c5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(MMXPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4770,6 +4990,7 @@ void i386_device::sse_pextrw_r32_r64_i8() // Opcode 0f c5
 
 void i386_device::sse_pextrw_reg_r128_i8() // Opcode 66 0f c5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -4784,6 +5005,7 @@ void i386_device::sse_pextrw_reg_r128_i8() // Opcode 66 0f c5
 
 void i386_device::sse_pminub_r64_rm64() // Opcode 0f da
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -4802,6 +5024,7 @@ void i386_device::sse_pminub_r64_rm64() // Opcode 0f da
 
 void i386_device::sse_pminub_r128_rm128() // Opcode 66 0f da
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4819,6 +5042,7 @@ void i386_device::sse_pminub_r128_rm128() // Opcode 66 0f da
 
 void i386_device::sse_pmaxub_r64_rm64() // Opcode 0f de
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -4837,6 +5061,7 @@ void i386_device::sse_pmaxub_r64_rm64() // Opcode 0f de
 
 void i386_device::sse_pavgb_r64_rm64() // Opcode 0f e0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -4855,6 +5080,7 @@ void i386_device::sse_pavgb_r64_rm64() // Opcode 0f e0
 
 void i386_device::sse_pavgw_r64_rm64() // Opcode 0f e3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -4873,6 +5099,7 @@ void i386_device::sse_pavgw_r64_rm64() // Opcode 0f e3
 
 void i386_device::sse_pmulhuw_r64_rm64()  // Opcode 0f e4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -4894,6 +5121,7 @@ void i386_device::sse_pmulhuw_r64_rm64()  // Opcode 0f e4
 
 void i386_device::sse_pminsw_r64_rm64() // Opcode 0f ea
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -4912,6 +5140,7 @@ void i386_device::sse_pminsw_r64_rm64() // Opcode 0f ea
 
 void i386_device::sse_pmaxsw_r64_rm64() // Opcode 0f ee
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
@@ -4930,6 +5159,7 @@ void i386_device::sse_pmaxsw_r64_rm64() // Opcode 0f ee
 
 void i386_device::sse_pmuludq_r64_rm64() // Opcode 0f f4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -4945,6 +5175,7 @@ void i386_device::sse_pmuludq_r64_rm64() // Opcode 0f f4
 
 void i386_device::sse_pmuludq_r128_rm128() // Opcode 66 0f f4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -4962,6 +5193,7 @@ void i386_device::sse_pmuludq_r128_rm128() // Opcode 66 0f f4
 
 void i386_device::sse_psadbw_r64_rm64() // Opcode 0f f6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int n;
 	int32_t temp;
 	if(MMXPROLOG()) return;
@@ -4985,6 +5217,7 @@ void i386_device::sse_psadbw_r64_rm64() // Opcode 0f f6
 
 void i386_device::sse_psubq_r64_rm64()  // Opcode 0f fb
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(MMXPROLOG()) return;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -5000,6 +5233,7 @@ void i386_device::sse_psubq_r64_rm64()  // Opcode 0f fb
 
 void i386_device::sse_psubq_r128_rm128()  // Opcode 66 0f fb
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5017,6 +5251,7 @@ void i386_device::sse_psubq_r128_rm128()  // Opcode 66 0f fb
 
 void i386_device::sse_pshufd_r128_rm128_i8() // Opcode 66 0f 70
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5047,6 +5282,7 @@ void i386_device::sse_pshufd_r128_rm128_i8() // Opcode 66 0f 70
 
 void i386_device::sse_pshuflw_r128_rm128_i8() // Opcode f2 0f 70
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5078,6 +5314,7 @@ void i386_device::sse_pshuflw_r128_rm128_i8() // Opcode f2 0f 70
 
 void i386_device::sse_pshufhw_r128_rm128_i8() // Opcode f3 0f 70
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5109,6 +5346,7 @@ void i386_device::sse_pshufhw_r128_rm128_i8() // Opcode f3 0f 70
 
 void i386_device::sse_packsswb_r128_rm128() // Opcode 66 0f 63
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -5138,6 +5376,7 @@ void i386_device::sse_packsswb_r128_rm128() // Opcode 66 0f 63
 
 void i386_device::sse_packssdw_r128_rm128() // Opcode 66 0f 6b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if (modrm >= 0xc0) {
@@ -5175,6 +5414,7 @@ void i386_device::sse_packssdw_r128_rm128() // Opcode 66 0f 6b
 
 void i386_device::sse_pcmpgtb_r128_rm128() // Opcode 66 0f 64
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5196,6 +5436,7 @@ void i386_device::sse_pcmpgtb_r128_rm128() // Opcode 66 0f 64
 
 void i386_device::sse_pcmpgtw_r128_rm128() // Opcode 66 0f 65
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5217,6 +5458,7 @@ void i386_device::sse_pcmpgtw_r128_rm128() // Opcode 66 0f 65
 
 void i386_device::sse_pcmpgtd_r128_rm128() // Opcode 66 0f 66
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5238,6 +5480,7 @@ void i386_device::sse_pcmpgtd_r128_rm128() // Opcode 66 0f 66
 
 void i386_device::sse_packuswb_r128_rm128() // Opcode 66 0f 67
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5266,6 +5509,7 @@ void i386_device::sse_packuswb_r128_rm128() // Opcode 66 0f 67
 
 void i386_device::sse_punpckhbw_r128_rm128() // Opcode 66 0f 68
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5293,6 +5537,7 @@ void i386_device::sse_punpckhbw_r128_rm128() // Opcode 66 0f 68
 
 void i386_device::sse_punpckhwd_r128_rm128() // Opcode 66 0f 69
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5320,6 +5565,7 @@ void i386_device::sse_punpckhwd_r128_rm128() // Opcode 66 0f 69
 
 void i386_device::sse_unpckhdq_r128_rm128() // Opcode 66 0f 6a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5347,6 +5593,7 @@ void i386_device::sse_unpckhdq_r128_rm128() // Opcode 66 0f 6a
 
 void i386_device::sse_punpckhqdq_r128_rm128() // Opcode 66 0f 6d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5370,6 +5617,7 @@ void i386_device::sse_punpckhqdq_r128_rm128() // Opcode 66 0f 6d
 
 void i386_device::sse_pcmpeqb_r128_rm128() // Opcode 66 0f 74
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5391,6 +5639,7 @@ void i386_device::sse_pcmpeqb_r128_rm128() // Opcode 66 0f 74
 
 void i386_device::sse_pcmpeqw_r128_rm128() // Opcode 66 0f 75
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5412,6 +5661,7 @@ void i386_device::sse_pcmpeqw_r128_rm128() // Opcode 66 0f 75
 
 void i386_device::sse_pcmpeqd_r128_rm128() // Opcode 66 0f 76
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5433,6 +5683,7 @@ void i386_device::sse_pcmpeqd_r128_rm128() // Opcode 66 0f 76
 
 void i386_device::sse_paddq_r128_rm128()  // Opcode 66 0f d4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5454,6 +5705,7 @@ void i386_device::sse_paddq_r128_rm128()  // Opcode 66 0f d4
 
 void i386_device::sse_pmullw_r128_rm128()  // Opcode 66 0f d5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5476,6 +5728,7 @@ void i386_device::sse_pmullw_r128_rm128()  // Opcode 66 0f d5
 
 void i386_device::sse_paddb_r128_rm128()  // Opcode 66 0f fc
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5493,6 +5746,7 @@ void i386_device::sse_paddb_r128_rm128()  // Opcode 66 0f fc
 
 void i386_device::sse_paddw_r128_rm128()  // Opcode 66 0f fd
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5510,6 +5764,7 @@ void i386_device::sse_paddw_r128_rm128()  // Opcode 66 0f fd
 
 void i386_device::sse_paddd_r128_rm128()  // Opcode 66 0f fe
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5527,6 +5782,7 @@ void i386_device::sse_paddd_r128_rm128()  // Opcode 66 0f fe
 
 void i386_device::sse_psubusb_r128_rm128()  // Opcode 66 0f d8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5544,6 +5800,7 @@ void i386_device::sse_psubusb_r128_rm128()  // Opcode 66 0f d8
 
 void i386_device::sse_psubusw_r128_rm128()  // Opcode 66 0f d9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5561,6 +5818,7 @@ void i386_device::sse_psubusw_r128_rm128()  // Opcode 66 0f d9
 
 void i386_device::sse_pand_r128_rm128()  // Opcode 66 0f db
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5578,6 +5836,7 @@ void i386_device::sse_pand_r128_rm128()  // Opcode 66 0f db
 
 void i386_device::sse_pandn_r128_rm128()  // Opcode 66 0f df
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5595,6 +5854,7 @@ void i386_device::sse_pandn_r128_rm128()  // Opcode 66 0f df
 
 void i386_device::sse_paddusb_r128_rm128()  // Opcode 66 0f dc
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5612,6 +5872,7 @@ void i386_device::sse_paddusb_r128_rm128()  // Opcode 66 0f dc
 
 void i386_device::sse_paddusw_r128_rm128()  // Opcode 66 0f dd
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5629,6 +5890,7 @@ void i386_device::sse_paddusw_r128_rm128()  // Opcode 66 0f dd
 
 void i386_device::sse_pmaxub_r128_rm128() // Opcode 66 0f de
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5646,6 +5908,7 @@ void i386_device::sse_pmaxub_r128_rm128() // Opcode 66 0f de
 
 void i386_device::sse_pmulhuw_r128_rm128()  // Opcode 66 0f e4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5663,6 +5926,7 @@ void i386_device::sse_pmulhuw_r128_rm128()  // Opcode 66 0f e4
 
 void i386_device::sse_pmulhw_r128_rm128()  // Opcode 66 0f e5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5680,6 +5944,7 @@ void i386_device::sse_pmulhw_r128_rm128()  // Opcode 66 0f e5
 
 void i386_device::sse_psubsb_r128_rm128()  // Opcode 66 0f e8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5697,6 +5962,7 @@ void i386_device::sse_psubsb_r128_rm128()  // Opcode 66 0f e8
 
 void i386_device::sse_psubsw_r128_rm128()  // Opcode 66 0f e9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5714,6 +5980,7 @@ void i386_device::sse_psubsw_r128_rm128()  // Opcode 66 0f e9
 
 void i386_device::sse_pminsw_r128_rm128() // Opcode 66 0f ea
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5731,6 +5998,7 @@ void i386_device::sse_pminsw_r128_rm128() // Opcode 66 0f ea
 
 void i386_device::sse_pmaxsw_r128_rm128() // Opcode 66 0f ee
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5748,6 +6016,7 @@ void i386_device::sse_pmaxsw_r128_rm128() // Opcode 66 0f ee
 
 void i386_device::sse_paddsb_r128_rm128()  // Opcode 66 0f ec
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5765,6 +6034,7 @@ void i386_device::sse_paddsb_r128_rm128()  // Opcode 66 0f ec
 
 void i386_device::sse_paddsw_r128_rm128()  // Opcode 66 0f ed
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5782,6 +6052,7 @@ void i386_device::sse_paddsw_r128_rm128()  // Opcode 66 0f ed
 
 void i386_device::sse_por_r128_rm128()  // Opcode 66 0f eb
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5799,6 +6070,7 @@ void i386_device::sse_por_r128_rm128()  // Opcode 66 0f eb
 
 void i386_device::sse_pxor_r128_rm128()  // Opcode 66 0f ef
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5816,6 +6088,7 @@ void i386_device::sse_pxor_r128_rm128()  // Opcode 66 0f ef
 
 void i386_device::sse_pmaddwd_r128_rm128()  // Opcode 66 0f f5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5837,6 +6110,7 @@ void i386_device::sse_pmaddwd_r128_rm128()  // Opcode 66 0f f5
 
 void i386_device::sse_psubb_r128_rm128()  // Opcode 66 0f f8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5854,6 +6128,7 @@ void i386_device::sse_psubb_r128_rm128()  // Opcode 66 0f f8
 
 void i386_device::sse_psubw_r128_rm128()  // Opcode 66 0f f9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5871,6 +6146,7 @@ void i386_device::sse_psubw_r128_rm128()  // Opcode 66 0f f9
 
 void i386_device::sse_psubd_r128_rm128()  // Opcode 66 0f fa
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5888,6 +6164,7 @@ void i386_device::sse_psubd_r128_rm128()  // Opcode 66 0f fa
 
 void i386_device::sse_psadbw_r128_rm128() // Opcode 66 0f f6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int32_t temp;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
@@ -5918,6 +6195,7 @@ void i386_device::sse_psadbw_r128_rm128() // Opcode 66 0f f6
 
 void i386_device::sse_pavgb_r128_rm128() // Opcode 66 0f e0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5935,6 +6213,7 @@ void i386_device::sse_pavgb_r128_rm128() // Opcode 66 0f e0
 
 void i386_device::sse_pavgw_r128_rm128() // Opcode 66 0f e3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5952,6 +6231,7 @@ void i386_device::sse_pavgw_r128_rm128() // Opcode 66 0f e3
 
 void i386_device::sse_psrlw_r128_rm128()  // Opcode 66 0f d1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5971,6 +6251,7 @@ void i386_device::sse_psrlw_r128_rm128()  // Opcode 66 0f d1
 
 void i386_device::sse_psrld_r128_rm128()  // Opcode 66 0f d2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -5994,6 +6275,7 @@ void i386_device::sse_psrld_r128_rm128()  // Opcode 66 0f d2
 
 void i386_device::sse_psrlq_r128_rm128()  // Opcode 66 0f d3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6013,6 +6295,7 @@ void i386_device::sse_psrlq_r128_rm128()  // Opcode 66 0f d3
 
 void i386_device::sse_psllw_r128_rm128()  // Opcode 66 0f f1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6032,6 +6315,7 @@ void i386_device::sse_psllw_r128_rm128()  // Opcode 66 0f f1
 
 void i386_device::sse_pslld_r128_rm128()  // Opcode 66 0f f2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6055,6 +6339,7 @@ void i386_device::sse_pslld_r128_rm128()  // Opcode 66 0f f2
 
 void i386_device::sse_psllq_r128_rm128()  // Opcode 66 0f f3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6074,6 +6359,7 @@ void i386_device::sse_psllq_r128_rm128()  // Opcode 66 0f f3
 
 void i386_device::sse_psraw_r128_rm128()  // Opcode 66 0f e1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6093,6 +6379,7 @@ void i386_device::sse_psraw_r128_rm128()  // Opcode 66 0f e1
 
 void i386_device::sse_psrad_r128_rm128()  // Opcode 66 0f e2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6116,6 +6403,7 @@ void i386_device::sse_psrad_r128_rm128()  // Opcode 66 0f e2
 
 void i386_device::sse_movntdq_m128_r128()  // Opcode 66 0f e7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6130,6 +6418,7 @@ void i386_device::sse_movntdq_m128_r128()  // Opcode 66 0f e7
 
 void i386_device::sse_cvttpd2dq_r128_rm128()  // Opcode 66 0f e6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6149,6 +6438,7 @@ void i386_device::sse_cvttpd2dq_r128_rm128()  // Opcode 66 0f e6
 
 void i386_device::sse_movq_r128m64_r128()  // Opcode 66 0f d6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6163,6 +6453,7 @@ void i386_device::sse_movq_r128m64_r128()  // Opcode 66 0f d6
 
 void i386_device::sse_addsubpd_r128_rm128()  // Opcode 66 0f d0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6185,6 +6476,7 @@ void i386_device::sse_addsubpd_r128_rm128()  // Opcode 66 0f d0
 
 void i386_device::sse_haddpd_r128_rm128()  // Opcode 66 0f 7c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6210,6 +6502,7 @@ void i386_device::sse_haddpd_r128_rm128()  // Opcode 66 0f 7c
 
 void i386_device::sse_hsubpd_r128_rm128()  // Opcode 66 0f 7d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6235,6 +6528,7 @@ void i386_device::sse_hsubpd_r128_rm128()  // Opcode 66 0f 7d
 
 void i386_device::sse_sqrtpd_r128_rm128()  // Opcode 66 0f 51
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6257,6 +6551,7 @@ void i386_device::sse_sqrtpd_r128_rm128()  // Opcode 66 0f 51
 
 void i386_device::sse_cvtpi2pd_r128_rm64()  // Opcode 66 0f 2a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		if(MMXPROLOG()) return; // only when using mmx register operands
@@ -6275,6 +6570,7 @@ void i386_device::sse_cvtpi2pd_r128_rm64()  // Opcode 66 0f 2a
 
 void i386_device::sse_cvttpd2pi_r64_rm128()  // Opcode 66 0f 2c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(MMXPROLOG()) return;
 	// TODO: manage inexact conversion to integer
@@ -6293,6 +6589,7 @@ void i386_device::sse_cvttpd2pi_r64_rm128()  // Opcode 66 0f 2c
 
 void i386_device::sse_cvtpd2pi_r64_rm128()  // Opcode 66 0f 2d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(MMXPROLOG()) return;
 	// TODO: manage inexact conversion to integer
@@ -6311,6 +6608,7 @@ void i386_device::sse_cvtpd2pi_r64_rm128()  // Opcode 66 0f 2d
 
 void i386_device::sse_cvtpd2ps_r128_rm128()  // Opcode 66 0f 5a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6330,6 +6628,7 @@ void i386_device::sse_cvtpd2ps_r128_rm128()  // Opcode 66 0f 5a
 
 void i386_device::sse_cvtps2dq_r128_rm128()  // Opcode 66 0f 5b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6351,6 +6650,7 @@ void i386_device::sse_cvtps2dq_r128_rm128()  // Opcode 66 0f 5b
 
 void i386_device::sse_addpd_r128_rm128()  // Opcode 66 0f 58
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6368,6 +6668,7 @@ void i386_device::sse_addpd_r128_rm128()  // Opcode 66 0f 58
 
 void i386_device::sse_mulpd_r128_rm128()  // Opcode 66 0f 59
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6385,6 +6686,7 @@ void i386_device::sse_mulpd_r128_rm128()  // Opcode 66 0f 59
 
 void i386_device::sse_subpd_r128_rm128()  // Opcode 66 0f 5c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6402,6 +6704,7 @@ void i386_device::sse_subpd_r128_rm128()  // Opcode 66 0f 5c
 
 void i386_device::sse_minpd_r128_rm128()  // Opcode 66 0f 5d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6419,6 +6722,7 @@ void i386_device::sse_minpd_r128_rm128()  // Opcode 66 0f 5d
 
 void i386_device::sse_divpd_r128_rm128()  // Opcode 66 0f 5e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6436,6 +6740,7 @@ void i386_device::sse_divpd_r128_rm128()  // Opcode 66 0f 5e
 
 void i386_device::sse_maxpd_r128_rm128()  // Opcode 66 0f 5f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6453,6 +6758,7 @@ void i386_device::sse_maxpd_r128_rm128()  // Opcode 66 0f 5f
 
 void i386_device::sse_movntpd_m128_r128()  // Opcode 66 0f 2b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6468,6 +6774,7 @@ void i386_device::sse_movntpd_m128_r128()  // Opcode 66 0f 2b
 
 void i386_device::sse_movapd_r128_rm128()  // Opcode 66 0f 28
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6481,6 +6788,7 @@ void i386_device::sse_movapd_r128_rm128()  // Opcode 66 0f 28
 
 void i386_device::sse_movapd_rm128_r128()  // Opcode 66 0f 29
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6494,6 +6802,7 @@ void i386_device::sse_movapd_rm128_r128()  // Opcode 66 0f 29
 
 void i386_device::sse_movsd_r128_r128m64() // Opcode f2 0f 10
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6508,6 +6817,7 @@ void i386_device::sse_movsd_r128_r128m64() // Opcode f2 0f 10
 
 void i386_device::sse_movsd_r128m64_r128() // Opcode f2 0f 11
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6521,6 +6831,7 @@ void i386_device::sse_movsd_r128m64_r128() // Opcode f2 0f 11
 
 void i386_device::sse_movddup_r128_r128m64() // Opcode f2 0f 12
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6536,6 +6847,7 @@ void i386_device::sse_movddup_r128_r128m64() // Opcode f2 0f 12
 
 void i386_device::sse_cvtsi2sd_r128_rm32() // Opcode f2 0f 2a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6549,6 +6861,7 @@ void i386_device::sse_cvtsi2sd_r128_rm32() // Opcode f2 0f 2a
 
 void i386_device::sse_cvttsd2si_r32_r128m64() // Opcode f2 0f 2c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int32_t src;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
@@ -6566,6 +6879,7 @@ void i386_device::sse_cvttsd2si_r32_r128m64() // Opcode f2 0f 2c
 
 void i386_device::sse_cvtsd2si_r32_r128m64() // Opcode f2 0f 2d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int32_t src;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
@@ -6583,6 +6897,7 @@ void i386_device::sse_cvtsd2si_r32_r128m64() // Opcode f2 0f 2d
 
 void i386_device::sse_sqrtsd_r128_r128m64() // Opcode f2 0f 51
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6603,6 +6918,7 @@ void i386_device::sse_sqrtsd_r128_r128m64() // Opcode f2 0f 51
 
 void i386_device::sse_addsd_r128_r128m64() // Opcode f2 0f 58
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6618,6 +6934,7 @@ void i386_device::sse_addsd_r128_r128m64() // Opcode f2 0f 58
 
 void i386_device::sse_mulsd_r128_r128m64() // Opcode f2 0f 59
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6633,6 +6950,7 @@ void i386_device::sse_mulsd_r128_r128m64() // Opcode f2 0f 59
 
 void i386_device::sse_cvtsd2ss_r128_r128m64() // Opcode f2 0f 5a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6648,6 +6966,7 @@ void i386_device::sse_cvtsd2ss_r128_r128m64() // Opcode f2 0f 5a
 
 void i386_device::sse_subsd_r128_r128m64() // Opcode f2 0f 5c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6663,6 +6982,7 @@ void i386_device::sse_subsd_r128_r128m64() // Opcode f2 0f 5c
 
 void i386_device::sse_minsd_r128_r128m64() // Opcode f2 0f 5d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6678,6 +6998,7 @@ void i386_device::sse_minsd_r128_r128m64() // Opcode f2 0f 5d
 
 void i386_device::sse_divsd_r128_r128m64() // Opcode f2 0f 5e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6693,6 +7014,7 @@ void i386_device::sse_divsd_r128_r128m64() // Opcode f2 0f 5e
 
 void i386_device::sse_maxsd_r128_r128m64() // Opcode f2 0f 5f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6708,6 +7030,7 @@ void i386_device::sse_maxsd_r128_r128m64() // Opcode f2 0f 5f
 
 void i386_device::sse_haddps_r128_rm128() // Opcode f2 0f 7c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6742,6 +7065,7 @@ void i386_device::sse_haddps_r128_rm128() // Opcode f2 0f 7c
 
 void i386_device::sse_hsubps_r128_rm128() // Opcode f2 0f 7d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6776,6 +7100,7 @@ void i386_device::sse_hsubps_r128_rm128() // Opcode f2 0f 7d
 
 void i386_device::sse_cmpsd_r128_r128m64_i8() // Opcode f2 0f c2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6798,6 +7123,7 @@ void i386_device::sse_cmpsd_r128_r128m64_i8() // Opcode f2 0f c2
 
 void i386_device::sse_addsubps_r128_rm128() // Opcode f2 0f d0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6819,6 +7145,7 @@ void i386_device::sse_addsubps_r128_rm128() // Opcode f2 0f d0
 
 void i386_device::sse_movdq2q_r64_r128() // Opcode f2 0f d6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(MMXPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6832,6 +7159,7 @@ void i386_device::sse_movdq2q_r64_r128() // Opcode f2 0f d6
 
 void i386_device::sse_cvtpd2dq_r128_rm128() // Opcode f2 0f e6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {
@@ -6851,6 +7179,7 @@ void i386_device::sse_cvtpd2dq_r128_rm128() // Opcode f2 0f e6
 
 void i386_device::sse_lddqu_r128_m128() // Opcode f2 0f f0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if(SSEPROLOG()) return;
 	if( modrm >= 0xc0 ) {

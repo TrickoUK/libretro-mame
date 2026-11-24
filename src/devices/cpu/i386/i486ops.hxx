@@ -4,6 +4,7 @@
 
 void i386_device::i486_cpuid()             // Opcode 0x0F A2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_cpuid_id0 == 0)
 	{
 		// this 486 doesn't support the CPUID instruction
@@ -45,6 +46,7 @@ void i386_device::i486_cpuid()             // Opcode 0x0F A2
 
 void i386_device::i486_invd()              // Opcode 0x0f 08
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// TODO: manage the cache if present
 	opcode_invd();
 	CYCLES(CYCLES_INVD);
@@ -52,12 +54,14 @@ void i386_device::i486_invd()              // Opcode 0x0f 08
 
 void i386_device::i486_wbinvd()            // Opcode 0x0f 09
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// TODO: manage the cache if present
 	opcode_wbinvd();
 }
 
 void i386_device::i486_cmpxchg_rm8_r8()    // Opcode 0x0f b0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint8_t dst = LOAD_RM8(modrm);
@@ -92,6 +96,7 @@ void i386_device::i486_cmpxchg_rm8_r8()    // Opcode 0x0f b0
 
 void i386_device::i486_cmpxchg_rm16_r16()  // Opcode 0x0f b1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t dst = LOAD_RM16(modrm);
@@ -125,6 +130,7 @@ void i386_device::i486_cmpxchg_rm16_r16()  // Opcode 0x0f b1
 
 void i386_device::i486_cmpxchg_rm32_r32()  // Opcode 0x0f b1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint32_t dst = LOAD_RM32(modrm);
@@ -158,6 +164,7 @@ void i386_device::i486_cmpxchg_rm32_r32()  // Opcode 0x0f b1
 
 void i386_device::i486_xadd_rm8_r8()   // Opcode 0x0f c0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint8_t dst = LOAD_RM8(modrm);
@@ -179,6 +186,7 @@ void i386_device::i486_xadd_rm8_r8()   // Opcode 0x0f c0
 
 void i386_device::i486_xadd_rm16_r16() // Opcode 0x0f c1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint16_t dst = LOAD_RM16(modrm);
@@ -200,6 +208,7 @@ void i386_device::i486_xadd_rm16_r16() // Opcode 0x0f c1
 
 void i386_device::i486_xadd_rm32_r32() // Opcode 0x0f c1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint32_t dst = LOAD_RM32(modrm);
@@ -221,6 +230,7 @@ void i386_device::i486_xadd_rm32_r32() // Opcode 0x0f c1
 
 void i386_device::i486_group0F01_16()      // Opcode 0x0f 01
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint16_t address;
 	uint32_t ea;
@@ -341,6 +351,7 @@ void i386_device::i486_group0F01_16()      // Opcode 0x0f 01
 
 void i386_device::i486_group0F01_32()      // Opcode 0x0f 01
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint32_t address, ea;
 
@@ -459,54 +470,63 @@ void i386_device::i486_group0F01_32()      // Opcode 0x0f 01
 
 void i386_device::i486_bswap_eax()     // Opcode 0x0f 38
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG32(EAX) = swapendian_int32(REG32(EAX));
 	CYCLES(1);     // TODO
 }
 
 void i386_device::i486_bswap_ecx()     // Opcode 0x0f 39
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG32(ECX) = swapendian_int32(REG32(ECX));
 	CYCLES(1);     // TODO
 }
 
 void i386_device::i486_bswap_edx()     // Opcode 0x0f 3A
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG32(EDX) = swapendian_int32(REG32(EDX));
 	CYCLES(1);     // TODO
 }
 
 void i386_device::i486_bswap_ebx()     // Opcode 0x0f 3B
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG32(EBX) = swapendian_int32(REG32(EBX));
 	CYCLES(1);     // TODO
 }
 
 void i386_device::i486_bswap_esp()     // Opcode 0x0f 3C
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG32(ESP) = swapendian_int32(REG32(ESP));
 	CYCLES(1);     // TODO
 }
 
 void i386_device::i486_bswap_ebp()     // Opcode 0x0f 3D
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG32(EBP) = swapendian_int32(REG32(EBP));
 	CYCLES(1);     // TODO
 }
 
 void i386_device::i486_bswap_esi()     // Opcode 0x0f 3E
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG32(ESI) = swapendian_int32(REG32(ESI));
 	CYCLES(1);     // TODO
 }
 
 void i386_device::i486_bswap_edi()     // Opcode 0x0f 3F
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG32(EDI) = swapendian_int32(REG32(EDI));
 	CYCLES(1);     // TODO
 }
 
 void i386_device::i486_mov_cr_r32()        // Opcode 0x0f 22
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE && m_core->CPL)
 		FAULT(FAULT_GP, 0);
 	uint8_t modrm = FETCH();
@@ -537,6 +557,7 @@ void i386_device::i486_mov_cr_r32()        // Opcode 0x0f 22
 
 void i386_device::i486_wait()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ((m_core->cr[0] & (CR0_TS | CR0_MP)) == (CR0_TS | CR0_MP))
 	{
 		i386_trap(FAULT_NM, 0);

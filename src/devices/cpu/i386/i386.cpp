@@ -177,6 +177,7 @@ pentium4_device::pentium4_device(const machine_config &mconfig, const char *tag,
 
 device_memory_interface::space_config_vector i386_device::memory_space_config() const
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	return space_config_vector {
 		std::make_pair(AS_PROGRAM, &m_program_config),
 		std::make_pair(AS_IO,      &m_io_config)
@@ -190,6 +191,7 @@ MODRM_TABLE i386_MODRM_table[256];
 
 uint32_t i386_device::i386_translate(int segment, uint32_t ip, int rwn, int size)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// TODO: segment limit access size, execution permission, handle exception thrown from exception handler
 	if (PROTECTED_MODE && !V8086_MODE && (rwn != -1))
 	{
@@ -207,6 +209,7 @@ uint32_t i386_device::i386_translate(int segment, uint32_t ip, int rwn, int size
 
 device_vtlb_interface::vtlb_entry i386_device::get_permissions(uint32_t pte, int wp)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	vtlb_entry ret = READ_ALLOWED | ((pte & 4) ? USER_READ_ALLOWED : 0);
 	if (!wp)
 		ret |= WRITE_ALLOWED;
@@ -217,6 +220,7 @@ device_vtlb_interface::vtlb_entry i386_device::get_permissions(uint32_t pte, int
 
 bool i386_device::i386_translate_address(int intention, bool debug, offs_t *address, vtlb_entry *entry)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	offs_t a = *address;
 	offs_t pdbr = m_core->cr[3] & 0xfffff000;
 	offs_t directory = (a >> 22) & 0x3ff;
@@ -306,6 +310,7 @@ bool i386_device::i386_translate_address(int intention, bool debug, offs_t *addr
 
 bool i386_device::translate_address(int pl, int type, offs_t *address, uint32_t *error)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (!(m_core->cr[0] & CR0_PG)) // Some (very few) old OS's won't work with this
 		return true;
 
@@ -350,11 +355,13 @@ bool i386_device::translate_address(int pl, int type, offs_t *address, uint32_t 
 
 void i386_device::CHANGE_PC(uint32_t pc)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->pc = i386_translate(CS, pc, -1 );
 }
 
 void i386_device::NEAR_BRANCH(int32_t offs)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	/* TODO: limit */
 	m_core->eip += offs;
 	m_core->pc += offs;
@@ -362,6 +369,7 @@ void i386_device::NEAR_BRANCH(int32_t offs)
 
 uint8_t i386_device::FETCH()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t value;
 	offs_t address = m_core->pc;
 	uint32_t error;
@@ -380,6 +388,7 @@ uint8_t i386_device::FETCH()
 }
 uint16_t i386_device::FETCH16()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t value;
 	offs_t address = m_core->pc;
 	uint32_t error;
@@ -399,6 +408,7 @@ uint16_t i386_device::FETCH16()
 }
 uint32_t i386_device::FETCH32()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t value;
 	offs_t address = m_core->pc;
 	uint32_t error;
@@ -422,6 +432,7 @@ uint32_t i386_device::FETCH32()
 
 uint8_t i386_device::READ8PL(uint32_t ea, uint8_t privilege)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	offs_t address = ea;
 	uint32_t error;
 
@@ -434,6 +445,7 @@ uint8_t i386_device::READ8PL(uint32_t ea, uint8_t privilege)
 
 uint16_t i386_device::READ16PL(uint32_t ea, uint8_t privilege)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t value;
 	offs_t address = ea;
 	uint32_t error;
@@ -469,6 +481,7 @@ uint16_t i386_device::READ16PL(uint32_t ea, uint8_t privilege)
 
 uint32_t i386_device::READ32PL(uint32_t ea, uint8_t privilege)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t value;
 	offs_t address = ea;
 	uint32_t error;
@@ -515,6 +528,7 @@ uint32_t i386_device::READ32PL(uint32_t ea, uint8_t privilege)
 
 uint64_t i386_device::READ64PL(uint32_t ea, uint8_t privilege)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint64_t value;
 	offs_t address = ea;
 	uint32_t error;
@@ -561,6 +575,7 @@ uint64_t i386_device::READ64PL(uint32_t ea, uint8_t privilege)
 
 uint16_t i386sx_device::READ16PL(uint32_t ea, uint8_t privilege)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t value;
 	offs_t address = ea;
 	uint32_t error;
@@ -584,6 +599,7 @@ uint16_t i386sx_device::READ16PL(uint32_t ea, uint8_t privilege)
 
 uint32_t i386sx_device::READ32PL(uint32_t ea, uint8_t privilege)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t value;
 
 	if (WORD_ALIGNED(ea))
@@ -603,6 +619,7 @@ uint32_t i386sx_device::READ32PL(uint32_t ea, uint8_t privilege)
 
 uint64_t i386sx_device::READ64PL(uint32_t ea, uint8_t privilege)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint64_t value;
 
 	if (WORD_ALIGNED(ea))
@@ -626,6 +643,7 @@ uint64_t i386sx_device::READ64PL(uint32_t ea, uint8_t privilege)
 
 void i386_device::WRITE_TEST(uint32_t ea)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	offs_t address = ea;
 	uint32_t error;
 
@@ -635,6 +653,7 @@ void i386_device::WRITE_TEST(uint32_t ea)
 
 void i386_device::WRITE8PL(uint32_t ea, uint8_t privilege, uint8_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	offs_t address = ea;
 	uint32_t error;
 
@@ -647,6 +666,7 @@ void i386_device::WRITE8PL(uint32_t ea, uint8_t privilege, uint8_t value)
 
 void i386_device::WRITE16PL(uint32_t ea, uint8_t privilege, uint16_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	offs_t address = ea;
 	uint32_t error;
 
@@ -678,6 +698,7 @@ void i386_device::WRITE16PL(uint32_t ea, uint8_t privilege, uint16_t value)
 
 void i386_device::WRITE32PL(uint32_t ea, uint8_t privilege, uint32_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	offs_t address = ea;
 	uint32_t error;
 
@@ -720,6 +741,7 @@ void i386_device::WRITE32PL(uint32_t ea, uint8_t privilege, uint32_t value)
 
 void i386_device::WRITE64PL(uint32_t ea, uint8_t privilege, uint64_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	offs_t address = ea;
 	uint32_t error;
 
@@ -762,6 +784,7 @@ void i386_device::WRITE64PL(uint32_t ea, uint8_t privilege, uint64_t value)
 
 void i386sx_device::WRITE16PL(uint32_t ea, uint8_t privilege, uint16_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	offs_t address = ea;
 	uint32_t error;
 
@@ -782,6 +805,7 @@ void i386sx_device::WRITE16PL(uint32_t ea, uint8_t privilege, uint16_t value)
 
 void i386sx_device::WRITE32PL(uint32_t ea, uint8_t privilege, uint32_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (WORD_ALIGNED(ea))
 	{
 		WRITE16PL(ea, privilege, value & 0xffff);
@@ -797,6 +821,7 @@ void i386sx_device::WRITE32PL(uint32_t ea, uint8_t privilege, uint32_t value)
 
 void i386sx_device::WRITE64PL(uint32_t ea, uint8_t privilege, uint64_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (WORD_ALIGNED(ea))
 	{
 		WRITE16PL(ea, privilege, value & 0xffff);
@@ -818,6 +843,7 @@ void i386sx_device::WRITE64PL(uint32_t ea, uint8_t privilege, uint64_t value)
 
 uint8_t i386_device::OR8(uint8_t dst, uint8_t src)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t res = dst | src;
 	m_core->CF = m_core->OF = 0;
 	SetSZPF8(res);
@@ -825,6 +851,7 @@ uint8_t i386_device::OR8(uint8_t dst, uint8_t src)
 }
 uint16_t i386_device::OR16(uint16_t dst, uint16_t src)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t res = dst | src;
 	m_core->CF = m_core->OF = 0;
 	SetSZPF16(res);
@@ -832,6 +859,7 @@ uint16_t i386_device::OR16(uint16_t dst, uint16_t src)
 }
 uint32_t i386_device::OR32(uint32_t dst, uint32_t src)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t res = dst | src;
 	m_core->CF = m_core->OF = 0;
 	SetSZPF32(res);
@@ -840,6 +868,7 @@ uint32_t i386_device::OR32(uint32_t dst, uint32_t src)
 
 uint8_t i386_device::AND8(uint8_t dst, uint8_t src)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t res = dst & src;
 	m_core->CF = m_core->OF = 0;
 	SetSZPF8(res);
@@ -847,6 +876,7 @@ uint8_t i386_device::AND8(uint8_t dst, uint8_t src)
 }
 uint16_t i386_device::AND16(uint16_t dst, uint16_t src)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t res = dst & src;
 	m_core->CF = m_core->OF = 0;
 	SetSZPF16(res);
@@ -854,6 +884,7 @@ uint16_t i386_device::AND16(uint16_t dst, uint16_t src)
 }
 uint32_t i386_device::AND32(uint32_t dst, uint32_t src)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t res = dst & src;
 	m_core->CF = m_core->OF = 0;
 	SetSZPF32(res);
@@ -862,6 +893,7 @@ uint32_t i386_device::AND32(uint32_t dst, uint32_t src)
 
 uint8_t i386_device::XOR8(uint8_t dst, uint8_t src)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t res = dst ^ src;
 	m_core->CF = m_core->OF = 0;
 	SetSZPF8(res);
@@ -869,6 +901,7 @@ uint8_t i386_device::XOR8(uint8_t dst, uint8_t src)
 }
 uint16_t i386_device::XOR16(uint16_t dst, uint16_t src)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t res = dst ^ src;
 	m_core->CF = m_core->OF = 0;
 	SetSZPF16(res);
@@ -876,6 +909,7 @@ uint16_t i386_device::XOR16(uint16_t dst, uint16_t src)
 }
 uint32_t i386_device::XOR32(uint32_t dst, uint32_t src)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t res = dst ^ src;
 	m_core->CF = m_core->OF = 0;
 	SetSZPF32(res);
@@ -885,6 +919,7 @@ uint32_t i386_device::XOR32(uint32_t dst, uint32_t src)
 #define SUB8(dst, src) SBB8(dst, src, 0)
 uint8_t i386_device::SBB8(uint8_t dst, uint8_t src, uint8_t b)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t res = (uint16_t)dst - (uint16_t)src - (uint8_t)b;
 	SetCF8(res);
 	SetOF_Sub8(res,src,dst);
@@ -896,6 +931,7 @@ uint8_t i386_device::SBB8(uint8_t dst, uint8_t src, uint8_t b)
 #define SUB16(dst, src) SBB16(dst, src, 0)
 uint16_t i386_device::SBB16(uint16_t dst, uint16_t src, uint16_t b)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t res = (uint32_t)dst - (uint32_t)src - (uint32_t)b;
 	SetCF16(res);
 	SetOF_Sub16(res,src,dst);
@@ -907,6 +943,7 @@ uint16_t i386_device::SBB16(uint16_t dst, uint16_t src, uint16_t b)
 #define SUB32(dst, src) SBB32(dst, src, 0)
 uint32_t i386_device::SBB32(uint32_t dst, uint32_t src, uint32_t b)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint64_t res = (uint64_t)dst - (uint64_t)src - (uint64_t) b;
 	SetCF32(res);
 	SetOF_Sub32(res,src,dst);
@@ -918,6 +955,7 @@ uint32_t i386_device::SBB32(uint32_t dst, uint32_t src, uint32_t b)
 #define ADD8(dst, src) ADC8(dst, src, 0)
 uint8_t i386_device::ADC8(uint8_t dst, uint8_t src, uint8_t c)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t res = (uint16_t)dst + (uint16_t)src + (uint16_t)c;
 	SetCF8(res);
 	SetOF_Add8(res,src,dst);
@@ -929,6 +967,7 @@ uint8_t i386_device::ADC8(uint8_t dst, uint8_t src, uint8_t c)
 #define ADD16(dst, src) ADC16(dst, src, 0)
 uint16_t i386_device::ADC16(uint16_t dst, uint16_t src, uint8_t c)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t res = (uint32_t)dst + (uint32_t)src + (uint32_t)c;
 	SetCF16(res);
 	SetOF_Add16(res,src,dst);
@@ -940,6 +979,7 @@ uint16_t i386_device::ADC16(uint16_t dst, uint16_t src, uint8_t c)
 #define ADD32(dst, src) ADC32(dst, src, 0)
 uint32_t i386_device::ADC32(uint32_t dst, uint32_t src, uint32_t c)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint64_t res = (uint64_t)dst + (uint64_t)src + (uint64_t) c;
 	SetCF32(res);
 	SetOF_Add32(res,src,dst);
@@ -950,6 +990,7 @@ uint32_t i386_device::ADC32(uint32_t dst, uint32_t src, uint32_t c)
 
 uint8_t i386_device::INC8(uint8_t dst)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t res = (uint16_t)dst + 1;
 	SetOF_Add8(res,1,dst);
 	SetAF(res,1,dst);
@@ -958,6 +999,7 @@ uint8_t i386_device::INC8(uint8_t dst)
 }
 uint16_t i386_device::INC16(uint16_t dst)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t res = (uint32_t)dst + 1;
 	SetOF_Add16(res,1,dst);
 	SetAF(res,1,dst);
@@ -966,6 +1008,7 @@ uint16_t i386_device::INC16(uint16_t dst)
 }
 uint32_t i386_device::INC32(uint32_t dst)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint64_t res = (uint64_t)dst + 1;
 	SetOF_Add32(res,1,dst);
 	SetAF(res,1,dst);
@@ -975,6 +1018,7 @@ uint32_t i386_device::INC32(uint32_t dst)
 
 uint8_t i386_device::DEC8(uint8_t dst)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t res = (uint16_t)dst - 1;
 	SetOF_Sub8(res,1,dst);
 	SetAF(res,1,dst);
@@ -983,6 +1027,7 @@ uint8_t i386_device::DEC8(uint8_t dst)
 }
 uint16_t i386_device::DEC16(uint16_t dst)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t res = (uint32_t)dst - 1;
 	SetOF_Sub16(res,1,dst);
 	SetAF(res,1,dst);
@@ -991,6 +1036,7 @@ uint16_t i386_device::DEC16(uint16_t dst)
 }
 uint32_t i386_device::DEC32(uint32_t dst)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint64_t res = (uint64_t)dst - 1;
 	SetOF_Sub32(res,1,dst);
 	SetAF(res,1,dst);
@@ -1002,6 +1048,7 @@ uint32_t i386_device::DEC32(uint32_t dst)
 
 void i386_device::PUSH16(uint16_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea, new_esp;
 	if( STACK_32BIT ) {
 		new_esp = REG32(ESP) - 2;
@@ -1017,6 +1064,7 @@ void i386_device::PUSH16(uint16_t value)
 }
 void i386_device::PUSH32(uint32_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea, new_esp;
 	if( STACK_32BIT ) {
 		new_esp = REG32(ESP) - 4;
@@ -1033,6 +1081,7 @@ void i386_device::PUSH32(uint32_t value)
 
 void i386_device::PUSH32SEG(uint32_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea, new_esp;
 	if( STACK_32BIT ) {
 		new_esp = REG32(ESP) - 4;
@@ -1049,6 +1098,7 @@ void i386_device::PUSH32SEG(uint32_t value)
 
 void i386_device::PUSH8(uint8_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if( m_core->operand_size ) {
 		PUSH32((int32_t)(int8_t)value);
 	} else {
@@ -1058,6 +1108,7 @@ void i386_device::PUSH8(uint8_t value)
 
 uint8_t i386_device::POP8()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t value;
 	uint32_t ea, new_esp;
 	if( STACK_32BIT ) {
@@ -1075,6 +1126,7 @@ uint8_t i386_device::POP8()
 }
 uint16_t i386_device::POP16()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t value;
 	uint32_t ea, new_esp;
 	if( STACK_32BIT ) {
@@ -1092,6 +1144,7 @@ uint16_t i386_device::POP16()
 }
 uint32_t i386_device::POP32()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t value;
 	uint32_t ea, new_esp;
 	if( STACK_32BIT ) {
@@ -1110,6 +1163,7 @@ uint32_t i386_device::POP32()
 
 void i386_device::BUMP_SI(int adjustment)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ( m_core->address_size )
 		REG32(ESI) += ((m_core->DF) ? -adjustment : +adjustment);
 	else
@@ -1118,6 +1172,7 @@ void i386_device::BUMP_SI(int adjustment)
 
 void i386_device::BUMP_DI(int adjustment)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ( m_core->address_size )
 		REG32(EDI) += ((m_core->DF) ? -adjustment : +adjustment);
 	else
@@ -1126,6 +1181,7 @@ void i386_device::BUMP_DI(int adjustment)
 
 void i386_device::CYCLES(int x)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (PROTECTED_MODE)
 	{
 		m_core->cycles -= m_cycle_table_pm[x];
@@ -1138,6 +1194,7 @@ void i386_device::CYCLES(int x)
 
 void i386_device::CYCLES_RM(int modrm, int r, int m)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (modrm >= 0xc0)
 	{
 		if (PROTECTED_MODE)
@@ -1166,6 +1223,7 @@ void i386_device::CYCLES_RM(int modrm, int r, int m)
 
 void i386_device::check_ioperm(offs_t port, uint8_t mask)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t IOPL, map;
 	uint16_t IOPB;
 	uint32_t address;
@@ -1193,18 +1251,21 @@ void i386_device::check_ioperm(offs_t port, uint8_t mask)
 
 uint8_t i386_device::READPORT8(offs_t port)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	check_ioperm(port, 1);
 	return m_io->read_byte(port);
 }
 
 void i386_device::WRITEPORT8(offs_t port, uint8_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	check_ioperm(port, 1);
 	m_io->write_byte(port, value);
 }
 
 uint16_t i386_device::READPORT16(offs_t port)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t value;
 
 	switch (port & 3)
@@ -1232,6 +1293,7 @@ uint16_t i386_device::READPORT16(offs_t port)
 
 void i386_device::WRITEPORT16(offs_t port, uint16_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	switch (port & 3)
 	{
 	case 0:
@@ -1254,6 +1316,7 @@ void i386_device::WRITEPORT16(offs_t port, uint16_t value)
 
 uint32_t i386_device::READPORT32(offs_t port)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t value;
 
 	switch (port & 3)
@@ -1287,6 +1350,7 @@ uint32_t i386_device::READPORT32(offs_t port)
 
 void i386_device::WRITEPORT32(offs_t port, uint32_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	switch (port & 3)
 	{
 	case 0:
@@ -1315,6 +1379,7 @@ void i386_device::WRITEPORT32(offs_t port, uint32_t value)
 
 uint16_t i386sx_device::READPORT16(offs_t port)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (port & 1)
 	{
 		uint16_t value = READPORT8(port);
@@ -1330,6 +1395,7 @@ uint16_t i386sx_device::READPORT16(offs_t port)
 
 void i386sx_device::WRITEPORT16(offs_t port, uint16_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (port & 1)
 	{
 		WRITEPORT8(port, value & 0xff);
@@ -1344,6 +1410,7 @@ void i386sx_device::WRITEPORT16(offs_t port, uint16_t value)
 
 uint32_t i386sx_device::READPORT32(offs_t port)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (port & 1)
 	{
 		uint32_t value = READPORT8(port);
@@ -1361,6 +1428,7 @@ uint32_t i386sx_device::READPORT32(offs_t port)
 
 void i386sx_device::WRITEPORT32(offs_t port, uint32_t value)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (port & 1)
 	{
 		WRITEPORT8(port, value & 0xff);
@@ -1378,6 +1446,9 @@ void i386sx_device::WRITEPORT32(offs_t port, uint32_t value)
 
 uint32_t i386_device::get_flags() const
 {
+	// The flag bytes must be current whenever C++ code reads them; a pending lazy-flag record would make them stale.
+	assert(m_core->lf_kind == 0);
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t f = 0x2;
 	f |= m_core->CF;
 	f |= m_core->PF << 2;
@@ -1402,6 +1473,7 @@ uint32_t i386_device::get_flags() const
 
 void i386_device::set_flags(uint32_t f )
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	f &= m_eflags_mask;
 	m_core->CF = (f & 0x1) ? 1 : 0;
 	m_core->PF = (f & 0x4) ? 1 : 0;
@@ -1426,6 +1498,7 @@ void i386_device::set_flags(uint32_t f )
 
 void i386_device::sib_byte(uint8_t mod, uint32_t* out_ea, uint8_t* out_segment)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea = 0;
 	uint8_t segment = 0;
 	uint8_t scale, i, base;
@@ -1473,6 +1546,7 @@ void i386_device::sib_byte(uint8_t mod, uint32_t* out_ea, uint8_t* out_segment)
 
 void i386_device::modrm_to_EA(uint8_t mod_rm, uint32_t* out_ea, uint8_t* out_segment)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp8;
 	int16_t disp16;
 	int32_t disp32;
@@ -1555,6 +1629,7 @@ void i386_device::modrm_to_EA(uint8_t mod_rm, uint32_t* out_ea, uint8_t* out_seg
 
 uint32_t i386_device::GetNonTranslatedEA(uint8_t modrm,uint8_t *seg)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t segment;
 	uint32_t ea;
 	modrm_to_EA(modrm, &ea, &segment );
@@ -1564,6 +1639,7 @@ uint32_t i386_device::GetNonTranslatedEA(uint8_t modrm,uint8_t *seg)
 
 uint32_t i386_device::GetEA(uint8_t modrm, int rwn, int size)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t segment;
 	uint32_t ea;
 	modrm_to_EA(modrm, &ea, &segment );
@@ -1572,6 +1648,7 @@ uint32_t i386_device::GetEA(uint8_t modrm, int rwn, int size)
 
 void i386_device::i386_check_irq_line()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(!m_core->smm && m_core->smi)
 	{
 		enter_smm();
@@ -1588,6 +1665,7 @@ void i386_device::i386_check_irq_line()
 
 void i386_device::build_cycle_table()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i, j;
 	for (j=0; j < X86_NUM_CPUS; j++)
 	{
@@ -1605,6 +1683,7 @@ void i386_device::build_cycle_table()
 
 void i386_device::report_invalid_opcode()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 #ifndef DEBUG_MISSING_OPCODE
 	LOGMASKED(LOG_INVALID_OPCODE, "i386: Invalid opcode %02X at %08X %s\n", m_opcode, m_core->pc - 1, m_core->lock ? "with lock" : "");
 #else
@@ -1620,6 +1699,7 @@ void i386_device::report_invalid_opcode()
 
 void i386_device::report_invalid_modrm(const char* opcode, uint8_t modrm)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 #ifndef DEBUG_MISSING_OPCODE
 	LOGMASKED(LOG_INVALID_OPCODE, "i386: Invalid %s modrm %01X at %08X\n", opcode, modrm, m_core->pc - 2);
 #else
@@ -1647,6 +1727,7 @@ void i386_device::report_invalid_modrm(const char* opcode, uint8_t modrm)
 
 void i386_device::i386_decode_opcode()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 
 	if(m_core->lock && !m_lock_table[0][m_opcode])
@@ -1661,6 +1742,7 @@ void i386_device::i386_decode_opcode()
 /* Two-byte opcode 0f xx */
 void i386_device::i386_decode_two_byte()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 
 	if(m_core->lock && !m_lock_table[1][m_opcode])
@@ -1675,6 +1757,7 @@ void i386_device::i386_decode_two_byte()
 /* Three-byte opcode 0f 38 xx */
 void i386_device::i386_decode_three_byte38()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 
 	if (m_core->operand_size)
@@ -1686,6 +1769,7 @@ void i386_device::i386_decode_three_byte38()
 /* Three-byte opcode 0f 3a xx */
 void i386_device::i386_decode_three_byte3a()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 
 	if (m_core->operand_size)
@@ -1697,6 +1781,7 @@ void i386_device::i386_decode_three_byte3a()
 /* Three-byte opcode prefix 66 0f xx */
 void i386_device::i386_decode_three_byte66()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 	if( m_core->operand_size )
 		(this->*m_opcode_table366_32[m_opcode])();
@@ -1707,6 +1792,7 @@ void i386_device::i386_decode_three_byte66()
 /* Three-byte opcode prefix f2 0f xx */
 void i386_device::i386_decode_three_bytef2()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 	if( m_core->operand_size )
 		(this->*m_opcode_table3f2_32[m_opcode])();
@@ -1717,6 +1803,7 @@ void i386_device::i386_decode_three_bytef2()
 /* Three-byte opcode prefix f3 0f */
 void i386_device::i386_decode_three_bytef3()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 	if( m_core->operand_size )
 		(this->*m_opcode_table3f3_32[m_opcode])();
@@ -1727,6 +1814,7 @@ void i386_device::i386_decode_three_bytef3()
 /* Four-byte opcode prefix 66 0f 38 xx */
 void i386_device::i386_decode_four_byte3866()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 	if (m_core->operand_size)
 		(this->*m_opcode_table46638_32[m_opcode])();
@@ -1737,6 +1825,7 @@ void i386_device::i386_decode_four_byte3866()
 /* Four-byte opcode prefix 66 0f 3a xx */
 void i386_device::i386_decode_four_byte3a66()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 	if (m_core->operand_size)
 		(this->*m_opcode_table4663a_32[m_opcode])();
@@ -1747,6 +1836,7 @@ void i386_device::i386_decode_four_byte3a66()
 /* Four-byte opcode prefix f2 0f 38 xx */
 void i386_device::i386_decode_four_byte38f2()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 	if (m_core->operand_size)
 		(this->*m_opcode_table4f238_32[m_opcode])();
@@ -1757,6 +1847,7 @@ void i386_device::i386_decode_four_byte38f2()
 /* Four-byte opcode prefix f2 0f 3a xx */
 void i386_device::i386_decode_four_byte3af2()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 	if (m_core->operand_size)
 		(this->*m_opcode_table4f23a_32[m_opcode])();
@@ -1767,6 +1858,7 @@ void i386_device::i386_decode_four_byte3af2()
 /* Four-byte opcode prefix f3 0f 38 xx */
 void i386_device::i386_decode_four_byte38f3()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_opcode = FETCH();
 	if (m_core->operand_size)
 		(this->*m_opcode_table4f338_32[m_opcode])();
@@ -1779,6 +1871,7 @@ void i386_device::i386_decode_four_byte38f3()
 
 uint8_t i386_device::read8_debug(uint32_t ea, uint8_t *data)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	offs_t address = ea;
 
 	if(!i386_translate_address(TR_READ, true, &address, nullptr))
@@ -1791,6 +1884,7 @@ uint8_t i386_device::read8_debug(uint32_t ea, uint8_t *data)
 
 uint32_t i386_device::i386_get_debug_desc(I386_SREG *seg)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t base, limit, address;
 	union { uint8_t b[8]; uint32_t w[2]; } data;
 	uint8_t ret;
@@ -1837,6 +1931,7 @@ uint32_t i386_device::i386_get_debug_desc(I386_SREG *seg)
 
 uint64_t i386_device::debug_segbase(int params, const uint64_t *param)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t result;
 	I386_SREG seg;
 
@@ -1860,6 +1955,7 @@ uint64_t i386_device::debug_segbase(int params, const uint64_t *param)
 
 uint64_t i386_device::debug_seglimit(int params, const uint64_t *param)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t result = 0;
 	I386_SREG seg;
 
@@ -1876,6 +1972,7 @@ uint64_t i386_device::debug_seglimit(int params, const uint64_t *param)
 
 uint64_t i386_device::debug_segofftovirt(int params, const uint64_t *param)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t result;
 	I386_SREG seg;
 
@@ -1914,6 +2011,7 @@ uint64_t i386_device::debug_segofftovirt(int params, const uint64_t *param)
 
 uint64_t i386_device::debug_virttophys(int params, const uint64_t *param)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	offs_t result = param[0];
 
 	if(!i386_translate_address(TR_READ, true, &result, nullptr))
@@ -1923,6 +2021,7 @@ uint64_t i386_device::debug_virttophys(int params, const uint64_t *param)
 
 uint64_t i386_device::debug_cacheflush(int params, const uint64_t *param)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t option;
 	bool invalidate;
 	bool clean;
@@ -1943,6 +2042,7 @@ uint64_t i386_device::debug_cacheflush(int params, const uint64_t *param)
 
 void i386_device::device_debug_setup()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	using namespace std::placeholders;
 	debug()->symtable().add("segbase", 1, 1, std::bind(&i386_device::debug_segbase, this, _1, _2));
 	debug()->symtable().add("seglimit", 1, 1, std::bind(&i386_device::debug_seglimit, this, _1, _2));
@@ -1955,6 +2055,7 @@ void i386_device::device_debug_setup()
 
 void i386_device::i386_postload()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i;
 	for (i = 0; i < 6; i++)
 		i386_load_segment_descriptor(i);
@@ -1963,6 +2064,7 @@ void i386_device::i386_postload()
 
 void i386_device::i386_common_init()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i, j;
 	static const int regs8[8] = {AL,CL,DL,BL,AH,CH,DH,BH};
 	static const int regs16[8] = {AX,CX,DX,BX,SP,BP,SI,DI};
@@ -2090,6 +2192,7 @@ void i386_device::i386_common_init()
 
 void i386_device::device_start()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 
 	build_opcode_table(OP_I386 | (m_x87_present ? OP_FPU : 0));
@@ -2109,6 +2212,7 @@ void i386_device::device_start()
 
 void i386_device::register_state_i386()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	state_add( I386_PC,         "PC", m_core->pc).formatstr("%08X");
 	state_add( I386_EIP,        "EIP", m_core->eip).callimport().formatstr("%08X");
 	state_add( I386_AL,         "~AL", REG8(AL)).formatstr("%02X");
@@ -2197,6 +2301,7 @@ void i386_device::register_state_i386()
 
 void i386_device::register_state_i386_x87()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	register_state_i386();
 
 	state_add(X87_CTRL,  "x87_CW", m_core->x87_cw).formatstr("%04X");
@@ -2214,6 +2319,7 @@ void i386_device::register_state_i386_x87()
 
 void i386_device::register_state_i386_x87_xmm()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	register_state_i386_x87();
 
 	state_add( SSE_XMM0, "XMM0", m_debugger_temp ).formatstr("%32s");
@@ -2229,6 +2335,7 @@ void i386_device::register_state_i386_x87_xmm()
 
 void i386_device::state_import(const device_state_entry &entry)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	switch (entry.index())
 	{
 		case I386_EIP:
@@ -2261,6 +2368,7 @@ void i386_device::state_import(const device_state_entry &entry)
 
 void i386_device::state_export(const device_state_entry &entry)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	switch (entry.index())
 	{
 		case I386_IP:
@@ -2295,6 +2403,7 @@ void i386_device::state_export(const device_state_entry &entry)
 
 void i386_device::state_string_export(const device_state_entry &entry, std::string &str) const
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	switch (entry.index())
 	{
 		case STATE_GENFLAGS:
@@ -2367,6 +2476,7 @@ void i386_device::state_string_export(const device_state_entry &entry, std::stri
 
 void i386_device::build_opcode_table(uint32_t features)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i;
 	for (i=0; i < 256; i++)
 	{
@@ -2468,6 +2578,7 @@ void i386_device::alloc_core_state()
 
 void i386_device::zero_state()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	memset( &m_core->reg, 0, sizeof(m_core->reg) );
 	memset( m_core->sreg, 0, sizeof(m_core->sreg) );
 	m_core->eip = 0;
@@ -2564,6 +2675,7 @@ void i386_device::zero_state()
 
 void i386_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	zero_state();
 
 	m_core->sreg[CS].selector = 0xf000;
@@ -2614,6 +2726,7 @@ void i386_device::device_reset()
 
 void i386_device::enter_smm()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t smram_state = m_smbase + 0xfe00;
 	uint32_t old_cr0 = m_core->cr[0];
 	uint32_t old_flags = get_flags();
@@ -2703,6 +2816,7 @@ void i386_device::enter_smm()
 
 void i386_device::leave_smm()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t smram_state = m_smbase + 0xfe00;
 
 	// load state, no sanity checks anywhere
@@ -2781,6 +2895,7 @@ void i386_device::leave_smm()
 
 void i386_device::execute_set_input(int irqline, int state)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ( irqline == INPUT_LINE_A20 )
 	{
 		i386_set_a20_line( state );
@@ -2818,6 +2933,7 @@ void i386_device::execute_set_input(int irqline, int state)
 
 void pentium_device::execute_set_input(int irqline, int state)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ( irqline == INPUT_LINE_SMI )
 	{
 		if ( !m_core->smi && state && m_core->smm )
@@ -2834,6 +2950,7 @@ void pentium_device::execute_set_input(int irqline, int state)
 
 void i386_device::i386_set_a20_line(int state)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (state)
 	{
 		m_core->a20_mask = ~offs_t(0);
@@ -2848,6 +2965,7 @@ void i386_device::i386_set_a20_line(int state)
 
 void i386_device::execute_run()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int cycles = m_core->cycles;
 	m_base_cycles = cycles;
 	CHANGE_PC(m_core->eip);
@@ -2953,6 +3071,7 @@ void i386_device::execute_run()
 
 bool i386_device::memory_translate(int spacenum, int intention, offs_t &address, address_space *&target_space)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	target_space = &space(spacenum);
 	bool ret = true;
 	if(spacenum == AS_PROGRAM)
@@ -2963,21 +3082,25 @@ bool i386_device::memory_translate(int spacenum, int intention, offs_t &address,
 
 int i386_device::get_mode() const
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	return m_core->sreg[CS].d ? 32 : 16;
 }
 
 std::unique_ptr<util::disasm_interface> i386_device::create_disassembler()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	return std::make_unique<i386_disassembler>(this);
 }
 
 void i386_device::opcode_cpuid()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	LOGMASKED(LOG_MSR, "CPUID called with unsupported EAX=%08x at %08x!\n", REG32(EAX), m_core->eip);
 }
 
 uint64_t i386_device::opcode_rdmsr(bool &valid_msr)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	valid_msr = false;
 	LOGMASKED(LOG_MSR, "RDMSR called with unsupported ECX=%08x at %08x!\n", REG32(ECX), m_core->eip);
 	return -1;
@@ -2985,6 +3108,7 @@ uint64_t i386_device::opcode_rdmsr(bool &valid_msr)
 
 void i386_device::opcode_wrmsr(uint64_t data, bool &valid_msr)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	valid_msr = false;
 	LOGMASKED(LOG_MSR, "WRMSR called with unsupported ECX=%08x (%08x%08x) at %08x!\n", REG32(ECX), (uint32_t)(data >> 32), (uint32_t)data, m_core->eip);
 }
@@ -2995,6 +3119,7 @@ void i386_device::opcode_wrmsr(uint64_t data, bool &valid_msr)
 
 void i486_device::device_start()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 
 	build_opcode_table(OP_I386 | (m_x87_present ? OP_FPU : 0) | OP_I486);
@@ -3007,6 +3132,7 @@ void i486_device::device_start()
 
 void i486_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	zero_state();
 
 	m_core->sreg[CS].selector = 0xf000;
@@ -3049,6 +3175,7 @@ void i486_device::device_reset()
 // A 487SX in the I487SX_SLOT upgrade socket provides the x87.
 void i486sx_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i486_device::device_reset();
 
 	// Family 4 (486), Model 2 (SX), Stepping 7 (cC0)
@@ -3058,6 +3185,7 @@ void i486sx_device::device_reset()
 
 void i486dx4_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i486_device::device_reset();
 	m_cpuid_id0 = 0x756e6547;   // Genu
 	m_cpuid_id1 = 0x49656e69;   // ineI
@@ -3073,6 +3201,7 @@ void i486dx4_device::device_reset()
 
 void pentium_device::device_start()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3084,6 +3213,7 @@ void pentium_device::device_start()
 
 void pentium_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	zero_state();
 
 	m_core->sreg[CS].selector = 0xf000;
@@ -3145,6 +3275,7 @@ void pentium_device::device_reset()
 
 void mediagx_device::device_start()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3156,6 +3287,7 @@ void mediagx_device::device_start()
 
 void mediagx_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	zero_state();
 
 	m_core->sreg[CS].selector = 0xf000;
@@ -3208,6 +3340,7 @@ void mediagx_device::device_reset()
 
 void mediagxm_device::device_start()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3219,6 +3352,7 @@ void mediagxm_device::device_start()
 
 void mediagxm_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	mediagx_device::device_reset();
 
 	// Family 5, Model 4 (MediaGX MMX-Enhanced databook, table 9-18), stepping unknown
@@ -3239,6 +3373,7 @@ void mediagxm_device::device_reset()
 
 void pentium_pro_device::device_start()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3250,6 +3385,7 @@ void pentium_pro_device::device_start()
 
 void pentium_pro_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	zero_state();
 
 	m_core->sreg[CS].selector = 0xf000;
@@ -3312,6 +3448,7 @@ void pentium_pro_device::device_reset()
 
 void pentium_mmx_device::device_start()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3323,6 +3460,7 @@ void pentium_mmx_device::device_start()
 
 void pentium_mmx_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	zero_state();
 
 	m_core->sreg[CS].selector = 0xf000;
@@ -3383,6 +3521,7 @@ void pentium_mmx_device::device_reset()
 
 void pentium2_device::device_start()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3394,6 +3533,7 @@ void pentium2_device::device_start()
 
 void pentium2_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	zero_state();
 
 	m_core->sreg[CS].selector = 0xf000;
@@ -3463,6 +3603,7 @@ void pentium2_device::device_reset()
 
 void pentium3_device::device_start()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87_xmm();
 
@@ -3474,6 +3615,7 @@ void pentium3_device::device_start()
 
 void pentium3_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	zero_state();
 
 	m_core->sreg[CS].selector = 0xf000;
@@ -3531,6 +3673,7 @@ void pentium3_device::device_reset()
 
 void pentium3_device::opcode_cpuid()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	switch (REG32(EAX))
 	{
 		case 0x00000003:
@@ -3557,6 +3700,7 @@ void pentium3_device::opcode_cpuid()
 
 void pentium4_device::device_start()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87_xmm();
 
@@ -3568,6 +3712,7 @@ void pentium4_device::device_start()
 
 void pentium4_device::device_reset()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	zero_state();
 
 	m_core->sreg[CS].selector = 0xf000;

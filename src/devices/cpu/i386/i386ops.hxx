@@ -2,6 +2,7 @@
 // copyright-holders:Ville Linde, Barry Rodewald, Carl, Philip Bennett
 uint8_t i386_device::i386_shift_rotate8(uint8_t modrm, uint32_t value, uint8_t shift)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src = value & 0xff;
 	uint8_t dst = value;
 
@@ -145,6 +146,7 @@ uint8_t i386_device::i386_shift_rotate8(uint8_t modrm, uint32_t value, uint8_t s
 
 void i386_device::i386_adc_rm8_r8()        // Opcode 0x10
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -165,6 +167,7 @@ void i386_device::i386_adc_rm8_r8()        // Opcode 0x10
 
 void i386_device::i386_adc_r8_rm8()        // Opcode 0x12
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -185,6 +188,7 @@ void i386_device::i386_adc_r8_rm8()        // Opcode 0x12
 
 void i386_device::i386_adc_al_i8()     // Opcode 0x14
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	src = FETCH();
 	dst = REG8(AL);
@@ -195,6 +199,7 @@ void i386_device::i386_adc_al_i8()     // Opcode 0x14
 
 void i386_device::i386_add_rm8_r8()        // Opcode 0x00
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -215,6 +220,7 @@ void i386_device::i386_add_rm8_r8()        // Opcode 0x00
 
 void i386_device::i386_add_r8_rm8()        // Opcode 0x02
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -235,6 +241,7 @@ void i386_device::i386_add_r8_rm8()        // Opcode 0x02
 
 void i386_device::i386_add_al_i8()     // Opcode 0x04
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	src = FETCH();
 	dst = REG8(AL);
@@ -245,6 +252,7 @@ void i386_device::i386_add_al_i8()     // Opcode 0x04
 
 void i386_device::i386_and_rm8_r8()        // Opcode 0x20
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -265,6 +273,7 @@ void i386_device::i386_and_rm8_r8()        // Opcode 0x20
 
 void i386_device::i386_and_r8_rm8()        // Opcode 0x22
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -285,6 +294,7 @@ void i386_device::i386_and_r8_rm8()        // Opcode 0x22
 
 void i386_device::i386_and_al_i8()         // Opcode 0x24
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	src = FETCH();
 	dst = REG8(AL);
@@ -295,18 +305,21 @@ void i386_device::i386_and_al_i8()         // Opcode 0x24
 
 void i386_device::i386_clc()               // Opcode 0xf8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->CF = 0;
 	CYCLES(CYCLES_CLC);
 }
 
 void i386_device::i386_cld()               // Opcode 0xfc
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->DF = 0;
 	CYCLES(CYCLES_CLD);
 }
 
 void i386_device::i386_cli()               // Opcode 0xfa
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE)
 	{
 		uint8_t IOPL = m_core->IOP1 | (m_core->IOP2 << 1);
@@ -319,12 +332,14 @@ void i386_device::i386_cli()               // Opcode 0xfa
 
 void i386_device::i386_cmc()               // Opcode 0xf5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->CF ^= 1;
 	CYCLES(CYCLES_CMC);
 }
 
 void i386_device::i386_cmp_rm8_r8()        // Opcode 0x38
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -343,6 +358,7 @@ void i386_device::i386_cmp_rm8_r8()        // Opcode 0x38
 
 void i386_device::i386_cmp_r8_rm8()        // Opcode 0x3a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -361,6 +377,7 @@ void i386_device::i386_cmp_r8_rm8()        // Opcode 0x3a
 
 void i386_device::i386_cmp_al_i8()         // Opcode 0x3c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	src = FETCH();
 	dst = REG8(AL);
@@ -370,6 +387,7 @@ void i386_device::i386_cmp_al_i8()         // Opcode 0x3c
 
 void i386_device::i386_cmpsb()             // Opcode 0xa6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t eas, ead;
 	uint8_t src, dst;
 	if( m_core->segment_prefix ) {
@@ -388,6 +406,7 @@ void i386_device::i386_cmpsb()             // Opcode 0xa6
 
 void i386_device::i386_in_al_i8()          // Opcode 0xe4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t port = FETCH();
 	uint8_t data = READPORT8(port);
 	REG8(AL) = data;
@@ -396,6 +415,7 @@ void i386_device::i386_in_al_i8()          // Opcode 0xe4
 
 void i386_device::i386_in_al_dx()          // Opcode 0xec
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t port = REG16(DX);
 	uint8_t data = READPORT8(port);
 	REG8(AL) = data;
@@ -404,6 +424,7 @@ void i386_device::i386_in_al_dx()          // Opcode 0xec
 
 void i386_device::i386_ja_rel8()           // Opcode 0x77
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->CF == 0 && m_core->ZF == 0 ) {
 		NEAR_BRANCH(disp);
@@ -415,6 +436,7 @@ void i386_device::i386_ja_rel8()           // Opcode 0x77
 
 void i386_device::i386_jbe_rel8()          // Opcode 0x76
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->CF != 0 || m_core->ZF != 0 ) {
 		NEAR_BRANCH(disp);
@@ -426,6 +448,7 @@ void i386_device::i386_jbe_rel8()          // Opcode 0x76
 
 void i386_device::i386_jc_rel8()           // Opcode 0x72
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->CF != 0 ) {
 		NEAR_BRANCH(disp);
@@ -437,6 +460,7 @@ void i386_device::i386_jc_rel8()           // Opcode 0x72
 
 void i386_device::i386_jg_rel8()           // Opcode 0x7f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->ZF == 0 && (m_core->SF == m_core->OF) ) {
 		NEAR_BRANCH(disp);
@@ -448,6 +472,7 @@ void i386_device::i386_jg_rel8()           // Opcode 0x7f
 
 void i386_device::i386_jge_rel8()          // Opcode 0x7d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if(m_core->SF == m_core->OF) {
 		NEAR_BRANCH(disp);
@@ -459,6 +484,7 @@ void i386_device::i386_jge_rel8()          // Opcode 0x7d
 
 void i386_device::i386_jl_rel8()           // Opcode 0x7c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( (m_core->SF != m_core->OF) ) {
 		NEAR_BRANCH(disp);
@@ -470,6 +496,7 @@ void i386_device::i386_jl_rel8()           // Opcode 0x7c
 
 void i386_device::i386_jle_rel8()      // Opcode 0x7e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->ZF != 0 || (m_core->SF != m_core->OF) ) {
 		NEAR_BRANCH(disp);
@@ -481,6 +508,7 @@ void i386_device::i386_jle_rel8()      // Opcode 0x7e
 
 void i386_device::i386_jnc_rel8()          // Opcode 0x73
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->CF == 0 ) {
 		NEAR_BRANCH(disp);
@@ -492,6 +520,7 @@ void i386_device::i386_jnc_rel8()          // Opcode 0x73
 
 void i386_device::i386_jno_rel8()          // Opcode 0x71
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->OF == 0 ) {
 		NEAR_BRANCH(disp);
@@ -503,6 +532,7 @@ void i386_device::i386_jno_rel8()          // Opcode 0x71
 
 void i386_device::i386_jnp_rel8()          // Opcode 0x7b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->PF == 0 ) {
 		NEAR_BRANCH(disp);
@@ -514,6 +544,7 @@ void i386_device::i386_jnp_rel8()          // Opcode 0x7b
 
 void i386_device::i386_jns_rel8()          // Opcode 0x79
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->SF == 0 ) {
 		NEAR_BRANCH(disp);
@@ -525,6 +556,7 @@ void i386_device::i386_jns_rel8()          // Opcode 0x79
 
 void i386_device::i386_jnz_rel8()          // Opcode 0x75
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->ZF == 0 ) {
 		NEAR_BRANCH(disp);
@@ -536,6 +568,7 @@ void i386_device::i386_jnz_rel8()          // Opcode 0x75
 
 void i386_device::i386_jo_rel8()           // Opcode 0x70
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->OF != 0 ) {
 		NEAR_BRANCH(disp);
@@ -547,6 +580,7 @@ void i386_device::i386_jo_rel8()           // Opcode 0x70
 
 void i386_device::i386_jp_rel8()           // Opcode 0x7a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->PF != 0 ) {
 		NEAR_BRANCH(disp);
@@ -558,6 +592,7 @@ void i386_device::i386_jp_rel8()           // Opcode 0x7a
 
 void i386_device::i386_js_rel8()           // Opcode 0x78
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->SF != 0 ) {
 		NEAR_BRANCH(disp);
@@ -569,6 +604,7 @@ void i386_device::i386_js_rel8()           // Opcode 0x78
 
 void i386_device::i386_jz_rel8()           // Opcode 0x74
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	if( m_core->ZF != 0 ) {
 		NEAR_BRANCH(disp);
@@ -580,6 +616,7 @@ void i386_device::i386_jz_rel8()           // Opcode 0x74
 
 void i386_device::i386_jmp_rel8()          // Opcode 0xeb
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int8_t disp = FETCH();
 	NEAR_BRANCH(disp);
 	CYCLES(CYCLES_JMP_SHORT);      /* TODO: Timing = 7 + m */
@@ -587,12 +624,14 @@ void i386_device::i386_jmp_rel8()          // Opcode 0xeb
 
 void i386_device::i386_lahf()              // Opcode 0x9f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG8(AH) = get_flags() & 0xd7;
 	CYCLES(CYCLES_LAHF);
 }
 
 void i386_device::i386_lodsb()             // Opcode 0xac
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t eas;
 	if( m_core->segment_prefix ) {
 		eas = i386_translate(m_core->segment_override, m_core->address_size ? REG32(ESI) : REG16(SI), 0 );
@@ -606,6 +645,7 @@ void i386_device::i386_lodsb()             // Opcode 0xac
 
 void i386_device::i386_mov_rm8_r8()        // Opcode 0x88
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -622,6 +662,7 @@ void i386_device::i386_mov_rm8_r8()        // Opcode 0x88
 
 void i386_device::i386_mov_r8_rm8()        // Opcode 0x8a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -638,6 +679,7 @@ void i386_device::i386_mov_r8_rm8()        // Opcode 0x8a
 
 void i386_device::i386_mov_rm8_i8()        // Opcode 0xc6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint8_t value = FETCH();
@@ -653,6 +695,7 @@ void i386_device::i386_mov_rm8_i8()        // Opcode 0xc6
 
 void i386_device::i386_mov_r32_cr()        // Opcode 0x0f 20
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE && m_core->CPL)
 		FAULT(FAULT_GP, 0);
 	uint8_t modrm = FETCH();
@@ -664,6 +707,7 @@ void i386_device::i386_mov_r32_cr()        // Opcode 0x0f 20
 
 void i386_device::i386_mov_r32_dr()        // Opcode 0x0f 21
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE && m_core->CPL)
 		FAULT(FAULT_GP, 0);
 	uint8_t modrm = FETCH();
@@ -687,6 +731,7 @@ void i386_device::i386_mov_r32_dr()        // Opcode 0x0f 21
 
 void i386_device::i386_mov_cr_r32()        // Opcode 0x0f 22
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE && m_core->CPL)
 		FAULT(FAULT_GP, 0);
 	uint8_t modrm = FETCH();
@@ -715,6 +760,7 @@ void i386_device::i386_mov_cr_r32()        // Opcode 0x0f 22
 
 void i386_device::i386_mov_dr_r32()        // Opcode 0x0f 23
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE && m_core->CPL)
 		FAULT(FAULT_GP, 0);
 	uint8_t modrm = FETCH();
@@ -750,6 +796,7 @@ void i386_device::i386_mov_dr_r32()        // Opcode 0x0f 23
 
 void i386_device::i386_mov_al_m8()         // Opcode 0xa0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset, ea;
 	if( m_core->address_size ) {
 		offset = FETCH32();
@@ -768,6 +815,7 @@ void i386_device::i386_mov_al_m8()         // Opcode 0xa0
 
 void i386_device::i386_mov_m8_al()         // Opcode 0xa2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset, ea;
 	if( m_core->address_size ) {
 		offset = FETCH32();
@@ -786,6 +834,7 @@ void i386_device::i386_mov_m8_al()         // Opcode 0xa2
 
 void i386_device::i386_mov_rm16_sreg()     // Opcode 0x8c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	int s = (modrm >> 3) & 0x7;
 
@@ -804,6 +853,7 @@ void i386_device::i386_mov_rm16_sreg()     // Opcode 0x8c
 
 void i386_device::i386_mov_sreg_rm16()     // Opcode 0x8e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t selector;
 	uint8_t modrm = FETCH();
 	bool fault;
@@ -831,54 +881,63 @@ void i386_device::i386_mov_sreg_rm16()     // Opcode 0x8e
 
 void i386_device::i386_mov_al_i8()         // Opcode 0xb0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG8(AL) = FETCH();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_cl_i8()         // Opcode 0xb1
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG8(CL) = FETCH();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_dl_i8()         // Opcode 0xb2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG8(DL) = FETCH();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_bl_i8()         // Opcode 0xb3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG8(BL) = FETCH();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_ah_i8()         // Opcode 0xb4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG8(AH) = FETCH();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_ch_i8()         // Opcode 0xb5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG8(CH) = FETCH();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_dh_i8()         // Opcode 0xb6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG8(DH) = FETCH();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_mov_bh_i8()         // Opcode 0xb7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	REG8(BH) = FETCH();
 	CYCLES(CYCLES_MOV_IMM_REG);
 }
 
 void i386_device::i386_movsb()             // Opcode 0xa4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t eas, ead;
 	uint8_t v;
 	if( m_core->segment_prefix ) {
@@ -896,6 +955,7 @@ void i386_device::i386_movsb()             // Opcode 0xa4
 
 void i386_device::i386_or_rm8_r8()         // Opcode 0x08
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -916,6 +976,7 @@ void i386_device::i386_or_rm8_r8()         // Opcode 0x08
 
 void i386_device::i386_or_r8_rm8()         // Opcode 0x0a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -936,6 +997,7 @@ void i386_device::i386_or_r8_rm8()         // Opcode 0x0a
 
 void i386_device::i386_or_al_i8()          // Opcode 0x0c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	src = FETCH();
 	dst = REG8(AL);
@@ -946,6 +1008,7 @@ void i386_device::i386_or_al_i8()          // Opcode 0x0c
 
 void i386_device::i386_out_al_i8()         // Opcode 0xe6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t port = FETCH();
 	uint8_t data = REG8(AL);
 	WRITEPORT8(port, data);
@@ -954,6 +1017,7 @@ void i386_device::i386_out_al_i8()         // Opcode 0xe6
 
 void i386_device::i386_out_al_dx()         // Opcode 0xee
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t port = REG16(DX);
 	uint8_t data = REG8(AL);
 	WRITEPORT8(port, data);
@@ -963,6 +1027,7 @@ void i386_device::i386_out_al_dx()         // Opcode 0xee
 
 void i386_device::i386_arpl()           // Opcode 0x63
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t src, dst;
 	uint8_t modrm = FETCH();
 	uint8_t flag = 0;
@@ -995,6 +1060,7 @@ void i386_device::i386_arpl()           // Opcode 0x63
 
 void i386_device::i386_push_i8()           // Opcode 0x6a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t value = FETCH();
 	PUSH8(value);
 	CYCLES(CYCLES_PUSH_IMM);
@@ -1002,6 +1068,7 @@ void i386_device::i386_push_i8()           // Opcode 0x6a
 
 void i386_device::i386_ins_generic(int size)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ead;
 	uint8_t vb;
 	uint16_t vw;
@@ -1033,21 +1100,25 @@ void i386_device::i386_ins_generic(int size)
 
 void i386_device::i386_insb()              // Opcode 0x6c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_ins_generic(1);
 }
 
 void i386_device::i386_insw()              // Opcode 0x6d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_ins_generic(2);
 }
 
 void i386_device::i386_insd()              // Opcode 0x6d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_ins_generic(4);
 }
 
 void i386_device::i386_outs_generic(int size)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t eas;
 	uint8_t vb;
 	uint16_t vw;
@@ -1083,21 +1154,25 @@ void i386_device::i386_outs_generic(int size)
 
 void i386_device::i386_outsb()             // Opcode 0x6e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_outs_generic(1);
 }
 
 void i386_device::i386_outsw()             // Opcode 0x6f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_outs_generic(2);
 }
 
 void i386_device::i386_outsd()             // Opcode 0x6f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_outs_generic(4);
 }
 
 void i386_device::i386_repeat(int invert_flag)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t repeated_eip = m_core->eip;
 	uint32_t repeated_pc = m_core->pc;
 	uint8_t opcode; // = FETCH();
@@ -1304,22 +1379,26 @@ outofcycles:
 
 void i386_device::i386_rep()               // Opcode 0xf3
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_repeat(0);
 }
 
 void i386_device::i386_repne()             // Opcode 0xf2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_repeat(1);
 }
 
 void i386_device::i386_sahf()              // Opcode 0x9e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	set_flags((get_flags() & 0xffffff00) | (REG8(AH) & 0xd7) );
 	CYCLES(CYCLES_SAHF);
 }
 
 void i386_device::i386_sbb_rm8_r8()        // Opcode 0x18
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1340,6 +1419,7 @@ void i386_device::i386_sbb_rm8_r8()        // Opcode 0x18
 
 void i386_device::i386_sbb_r8_rm8()        // Opcode 0x1a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1360,6 +1440,7 @@ void i386_device::i386_sbb_r8_rm8()        // Opcode 0x1a
 
 void i386_device::i386_sbb_al_i8()         // Opcode 0x1c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	src = FETCH();
 	dst = REG8(AL);
@@ -1370,6 +1451,7 @@ void i386_device::i386_sbb_al_i8()         // Opcode 0x1c
 
 void i386_device::i386_scasb()             // Opcode 0xae
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t eas;
 	uint8_t src, dst;
 	eas = i386_translate(ES, m_core->address_size ? REG32(EDI) : REG16(DI), 0 );
@@ -1382,6 +1464,7 @@ void i386_device::i386_scasb()             // Opcode 0xae
 
 void i386_device::i386_setalc()            // Opcode 0xd6 (undocumented)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if( m_core->CF ) {
 		REG8(AL) = 0xff;
 	} else {
@@ -1392,6 +1475,7 @@ void i386_device::i386_setalc()            // Opcode 0xd6 (undocumented)
 
 void i386_device::i386_seta_rm8()          // Opcode 0x0f 97
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->CF == 0 && m_core->ZF == 0 ) {
@@ -1409,6 +1493,7 @@ void i386_device::i386_seta_rm8()          // Opcode 0x0f 97
 
 void i386_device::i386_setbe_rm8()         // Opcode 0x0f 96
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->CF != 0 || m_core->ZF != 0 ) {
@@ -1426,6 +1511,7 @@ void i386_device::i386_setbe_rm8()         // Opcode 0x0f 96
 
 void i386_device::i386_setc_rm8()          // Opcode 0x0f 92
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->CF != 0 ) {
@@ -1443,6 +1529,7 @@ void i386_device::i386_setc_rm8()          // Opcode 0x0f 92
 
 void i386_device::i386_setg_rm8()          // Opcode 0x0f 9f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->ZF == 0 && (m_core->SF == m_core->OF) ) {
@@ -1460,6 +1547,7 @@ void i386_device::i386_setg_rm8()          // Opcode 0x0f 9f
 
 void i386_device::i386_setge_rm8()         // Opcode 0x0f 9d
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if(m_core->SF == m_core->OF) {
@@ -1477,6 +1565,7 @@ void i386_device::i386_setge_rm8()         // Opcode 0x0f 9d
 
 void i386_device::i386_setl_rm8()          // Opcode 0x0f 9c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->SF != m_core->OF ) {
@@ -1494,6 +1583,7 @@ void i386_device::i386_setl_rm8()          // Opcode 0x0f 9c
 
 void i386_device::i386_setle_rm8()         // Opcode 0x0f 9e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->ZF != 0 || (m_core->SF != m_core->OF) ) {
@@ -1511,6 +1601,7 @@ void i386_device::i386_setle_rm8()         // Opcode 0x0f 9e
 
 void i386_device::i386_setnc_rm8()         // Opcode 0x0f 93
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->CF == 0 ) {
@@ -1528,6 +1619,7 @@ void i386_device::i386_setnc_rm8()         // Opcode 0x0f 93
 
 void i386_device::i386_setno_rm8()         // Opcode 0x0f 91
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->OF == 0 ) {
@@ -1545,6 +1637,7 @@ void i386_device::i386_setno_rm8()         // Opcode 0x0f 91
 
 void i386_device::i386_setnp_rm8()         // Opcode 0x0f 9b
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->PF == 0 ) {
@@ -1562,6 +1655,7 @@ void i386_device::i386_setnp_rm8()         // Opcode 0x0f 9b
 
 void i386_device::i386_setns_rm8()         // Opcode 0x0f 99
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->SF == 0 ) {
@@ -1579,6 +1673,7 @@ void i386_device::i386_setns_rm8()         // Opcode 0x0f 99
 
 void i386_device::i386_setnz_rm8()         // Opcode 0x0f 95
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->ZF == 0 ) {
@@ -1596,6 +1691,7 @@ void i386_device::i386_setnz_rm8()         // Opcode 0x0f 95
 
 void i386_device::i386_seto_rm8()          // Opcode 0x0f 90
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->OF != 0 ) {
@@ -1613,6 +1709,7 @@ void i386_device::i386_seto_rm8()          // Opcode 0x0f 90
 
 void i386_device::i386_setp_rm8()          // Opcode 0x0f 9a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->PF != 0 ) {
@@ -1630,6 +1727,7 @@ void i386_device::i386_setp_rm8()          // Opcode 0x0f 9a
 
 void i386_device::i386_sets_rm8()          // Opcode 0x0f 98
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->SF != 0 ) {
@@ -1647,6 +1745,7 @@ void i386_device::i386_sets_rm8()          // Opcode 0x0f 98
 
 void i386_device::i386_setz_rm8()          // Opcode 0x0f 94
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	uint8_t value = 0;
 	if( m_core->ZF != 0 ) {
@@ -1664,18 +1763,21 @@ void i386_device::i386_setz_rm8()          // Opcode 0x0f 94
 
 void i386_device::i386_stc()               // Opcode 0xf9
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->CF = 1;
 	CYCLES(CYCLES_STC);
 }
 
 void i386_device::i386_std()               // Opcode 0xfd
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->DF = 1;
 	CYCLES(CYCLES_STD);
 }
 
 void i386_device::i386_sti()               // Opcode 0xfb
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE)
 	{
 		uint8_t IOPL = m_core->IOP1 | (m_core->IOP2 << 1);
@@ -1688,6 +1790,7 @@ void i386_device::i386_sti()               // Opcode 0xfb
 
 void i386_device::i386_stosb()             // Opcode 0xaa
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ead;
 	ead = i386_translate(ES, m_core->address_size ? REG32(EDI) : REG16(DI), 1 );
 	WRITE8(ead, REG8(AL));
@@ -1697,6 +1800,7 @@ void i386_device::i386_stosb()             // Opcode 0xaa
 
 void i386_device::i386_sub_rm8_r8()        // Opcode 0x28
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1717,6 +1821,7 @@ void i386_device::i386_sub_rm8_r8()        // Opcode 0x28
 
 void i386_device::i386_sub_r8_rm8()        // Opcode 0x2a
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1737,6 +1842,7 @@ void i386_device::i386_sub_r8_rm8()        // Opcode 0x2a
 
 void i386_device::i386_sub_al_i8()         // Opcode 0x2c
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	src = FETCH();
 	dst = REG8(EAX);
@@ -1747,6 +1853,7 @@ void i386_device::i386_sub_al_i8()         // Opcode 0x2c
 
 void i386_device::i386_test_al_i8()        // Opcode 0xa8
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src = FETCH();
 	uint8_t dst = REG8(AL);
 	dst = src & dst;
@@ -1758,6 +1865,7 @@ void i386_device::i386_test_al_i8()        // Opcode 0xa8
 
 void i386_device::i386_test_rm8_r8()       // Opcode 0x84
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1782,6 +1890,7 @@ void i386_device::i386_test_rm8_r8()       // Opcode 0x84
 
 void i386_device::i386_xchg_r8_rm8()       // Opcode 0x86
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint8_t src = LOAD_RM8(modrm);
@@ -1801,6 +1910,7 @@ void i386_device::i386_xchg_r8_rm8()       // Opcode 0x86
 
 void i386_device::i386_xor_rm8_r8()        // Opcode 0x30
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1821,6 +1931,7 @@ void i386_device::i386_xor_rm8_r8()        // Opcode 0x30
 
 void i386_device::i386_xor_r8_rm8()        // Opcode 0x32
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t src, dst;
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
@@ -1841,6 +1952,7 @@ void i386_device::i386_xor_r8_rm8()        // Opcode 0x32
 
 void i386_device::i386_xor_al_i8()         // Opcode 0x34
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t src, dst;
 	src = FETCH();
 	dst = REG8(AL);
@@ -1853,6 +1965,7 @@ void i386_device::i386_xor_al_i8()         // Opcode 0x34
 
 void i386_device::i386_group80_8()         // Opcode 0x80
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea;
 	uint8_t src, dst;
 	uint8_t modrm = FETCH();
@@ -1990,6 +2103,7 @@ void i386_device::i386_group80_8()         // Opcode 0x80
 
 void i386_device::i386_groupC0_8()         // Opcode 0xc0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t dst;
 	uint8_t modrm = FETCH();
 	uint8_t shift;
@@ -2010,6 +2124,7 @@ void i386_device::i386_groupC0_8()         // Opcode 0xc0
 
 void i386_device::i386_groupD0_8()         // Opcode 0xd0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t dst;
 	uint8_t modrm = FETCH();
 
@@ -2027,6 +2142,7 @@ void i386_device::i386_groupD0_8()         // Opcode 0xd0
 
 void i386_device::i386_groupD2_8()         // Opcode 0xd2
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t dst;
 	uint8_t modrm = FETCH();
 
@@ -2044,6 +2160,7 @@ void i386_device::i386_groupD2_8()         // Opcode 0xd2
 
 void i386_device::i386_groupF6_8()         // Opcode 0xf6
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 
 	switch( (modrm >> 3) & 0x7 )
@@ -2204,6 +2321,7 @@ void i386_device::i386_groupF6_8()         // Opcode 0xf6
 
 void i386_device::i386_groupFE_8()         // Opcode 0xfe
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t modrm = FETCH();
 
 	switch( (modrm >> 3) & 0x7 )
@@ -2263,6 +2381,7 @@ void i386_device::i386_groupFE_8()         // Opcode 0xfe
 
 void i386_device::i386_segment_CS()        // Opcode 0x2e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->segment_prefix = 1;
 	m_core->segment_override = CS;
 
@@ -2271,6 +2390,7 @@ void i386_device::i386_segment_CS()        // Opcode 0x2e
 
 void i386_device::i386_segment_DS()        // Opcode 0x3e
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->segment_prefix = 1;
 	m_core->segment_override = DS;
 	CYCLES(0); // TODO: Specify cycle count
@@ -2279,6 +2399,7 @@ void i386_device::i386_segment_DS()        // Opcode 0x3e
 
 void i386_device::i386_segment_ES()        // Opcode 0x26
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->segment_prefix = 1;
 	m_core->segment_override = ES;
 	CYCLES(0); // TODO: Specify cycle count
@@ -2287,6 +2408,7 @@ void i386_device::i386_segment_ES()        // Opcode 0x26
 
 void i386_device::i386_segment_FS()        // Opcode 0x64
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->segment_prefix = 1;
 	m_core->segment_override = FS;
 	CYCLES(1); // TODO: Specify cycle count
@@ -2295,6 +2417,7 @@ void i386_device::i386_segment_FS()        // Opcode 0x64
 
 void i386_device::i386_segment_GS()        // Opcode 0x65
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->segment_prefix = 1;
 	m_core->segment_override = GS;
 	CYCLES(1); // TODO: Specify cycle count
@@ -2303,6 +2426,7 @@ void i386_device::i386_segment_GS()        // Opcode 0x65
 
 void i386_device::i386_segment_SS()        // Opcode 0x36
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->segment_prefix = 1;
 	m_core->segment_override = SS;
 	CYCLES(0); // TODO: Specify cycle count
@@ -2311,6 +2435,7 @@ void i386_device::i386_segment_SS()        // Opcode 0x36
 
 void i386_device::i386_operand_size()      // Opcode prefix 0x66
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(m_core->operand_prefix == 0)
 	{
 		m_core->operand_size ^= 1;
@@ -2331,6 +2456,7 @@ void i386_device::i386_operand_size()      // Opcode prefix 0x66
 
 void i386_device::i386_address_size()      // Opcode 0x67
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(m_core->address_prefix == 0)
 	{
 		m_core->address_size ^= 1;
@@ -2341,11 +2467,13 @@ void i386_device::i386_address_size()      // Opcode 0x67
 
 void i386_device::i386_nop()               // Opcode 0x90
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	CYCLES(CYCLES_NOP);
 }
 
 void i386_device::i386_int3()              // Opcode 0xcc
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	CYCLES(CYCLES_INT3);
 	m_core->ext = 0; // not an external interrupt
 	i386_trap(3, 1);
@@ -2354,6 +2482,7 @@ void i386_device::i386_int3()              // Opcode 0xcc
 
 void i386_device::i386_int()               // Opcode 0xcd
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int interrupt = FETCH();
 	CYCLES(CYCLES_INT);
 	m_core->ext = 0; // not an external interrupt
@@ -2363,6 +2492,7 @@ void i386_device::i386_int()               // Opcode 0xcd
 
 void i386_device::i386_into()              // Opcode 0xce
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if( m_core->OF ) {
 		m_core->ext = 0;
 		i386_trap(4, 1);
@@ -2378,6 +2508,7 @@ void i386_device::i386_into()              // Opcode 0xce
 static uint32_t i386_escape_ea;   // hack around GCC 4.6 error because we need the side effects of GetEA()
 void i386_device::i386_escape()            // Opcodes 0xd8 - 0xdf
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// with no coprocessor, TS or EM set traps
 	if (m_core->cr[0] & (CR0_TS | CR0_EM))
 	{
@@ -2395,6 +2526,7 @@ void i386_device::i386_escape()            // Opcodes 0xd8 - 0xdf
 
 void i386_device::i386_hlt()               // Opcode 0xf4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE && m_core->CPL != 0)
 		FAULT(FAULT_GP,0);
 	m_core->halted = 1;
@@ -2405,6 +2537,7 @@ void i386_device::i386_hlt()               // Opcode 0xf4
 
 void i386_device::i386_decimal_adjust(int direction)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t tmpAL = REG8(AL);
 	uint8_t tmpCF = m_core->CF;
 
@@ -2430,18 +2563,21 @@ void i386_device::i386_decimal_adjust(int direction)
 
 void i386_device::i386_daa()               // Opcode 0x27
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_decimal_adjust(+1);
 	CYCLES(CYCLES_DAA);
 }
 
 void i386_device::i386_das()               // Opcode 0x2f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_decimal_adjust(-1);
 	CYCLES(CYCLES_DAS);
 }
 
 void i386_device::i386_aaa()               // Opcode 0x37
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if( ( (REG8(AL) & 0x0f) > 9) || (m_core->AF != 0) ) {
 		REG16(AX) = REG16(AX) + 6;
 		REG8(AH) = REG8(AH) + 1;
@@ -2457,6 +2593,7 @@ void i386_device::i386_aaa()               // Opcode 0x37
 
 void i386_device::i386_aas()               // Opcode 0x3f
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (m_core->AF || ((REG8(AL) & 0xf) > 9))
 	{
 		REG16(AX) -= 6;
@@ -2475,6 +2612,7 @@ void i386_device::i386_aas()               // Opcode 0x3f
 
 void i386_device::i386_aad()               // Opcode 0xd5
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t tempAL = REG8(AL);
 	uint8_t tempAH = REG8(AH);
 	uint8_t i = FETCH();
@@ -2487,6 +2625,7 @@ void i386_device::i386_aad()               // Opcode 0xd5
 
 void i386_device::i386_aam()               // Opcode 0xd4
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint8_t tempAL = REG8(AL);
 	uint8_t i = FETCH();
 
@@ -2503,6 +2642,7 @@ void i386_device::i386_aam()               // Opcode 0xd4
 
 void i386_device::i386_clts()              // Opcode 0x0f 0x06
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// Privileged instruction, CPL must be zero.  Can be used in real or v86 mode.
 	if(PROTECTED_MODE && m_core->CPL != 0)
 		FAULT(FAULT_GP,0)
@@ -2512,6 +2652,7 @@ void i386_device::i386_clts()              // Opcode 0x0f 0x06
 
 void i386_device::i386_wait()              // Opcode 0x9B
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if ((m_core->cr[0] & (CR0_TS | CR0_MP)) == (CR0_TS | CR0_MP))
 	{
 		i386_trap(FAULT_NM, 0);
@@ -2522,6 +2663,7 @@ void i386_device::i386_wait()              // Opcode 0x9B
 
 void i386_device::i386_lock()              // Opcode 0xf0
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// lock doesn't depend on iopl on 386
 	m_core->lock = true;
 	CYCLES(CYCLES_LOCK);       // TODO: Determine correct cycle count
@@ -2530,18 +2672,21 @@ void i386_device::i386_lock()              // Opcode 0xf0
 
 void i386_device::i386_mov_r32_tr()        // Opcode 0x0f 24
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	FETCH();
 	CYCLES(1);     // TODO: correct cycle count
 }
 
 void i386_device::i386_mov_tr_r32()        // Opcode 0x0f 26
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	FETCH();
 	CYCLES(1);     // TODO: correct cycle count
 }
 
 void i386_device::i386_loadall()       // Opcode 0x0f 0x07 (0x0f 0x05 on 80286), undocumented
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE && (m_core->CPL != 0))
 		FAULT(FAULT_GP,0)
 	uint32_t ea = i386_translate(ES, REG32(EDI), 0);
@@ -2609,12 +2754,14 @@ void i386_device::i386_loadall()       // Opcode 0x0f 0x07 (0x0f 0x05 on 80286),
 
 void i386_device::i386_invalid()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	report_invalid_opcode();
 	i386_trap(6, 0);
 }
 
 void i386_device::i386_xlat()          // Opcode 0xd7
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ea;
 	if( m_core->segment_prefix ) {
 		if(!m_core->address_size)

@@ -354,6 +354,8 @@ protected:
 		void *code_page_table;  // per-page code generation marks (heap allocated)
 	};
 
+	// Byte-wide stores to the flags may alias this pointer, so each member function that touches the state copies it into a
+	// local of the same name first, which lets the compiler keep it in a register across those stores.
 	core_state *m_core;
 	std::unique_ptr<core_state> m_core_storage;
 	uint32_t m_eflags_mask;

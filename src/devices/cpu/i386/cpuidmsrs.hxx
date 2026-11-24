@@ -3,6 +3,7 @@
 
 uint64_t pentium_device::opcode_rdmsr(bool &valid_msr)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = REG32(ECX);
 
 	switch (offset)
@@ -48,6 +49,7 @@ uint64_t pentium_device::opcode_rdmsr(bool &valid_msr)
 
 void pentium_device::opcode_wrmsr(uint64_t data, bool &valid_msr)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = REG32(ECX);
 
 	switch (offset)
@@ -95,6 +97,7 @@ void pentium_device::opcode_wrmsr(uint64_t data, bool &valid_msr)
 
 uint64_t pentium_pro_device::opcode_rdmsr(bool &valid_msr)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = REG32(ECX);
 
 	switch (offset)
@@ -130,6 +133,7 @@ uint64_t pentium_pro_device::opcode_rdmsr(bool &valid_msr)
 
 void pentium_pro_device::opcode_wrmsr(uint64_t data, bool &valid_msr)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t offset = REG32(ECX);
 
 	switch (offset)
@@ -158,6 +162,7 @@ void pentium_pro_device::opcode_wrmsr(uint64_t data, bool &valid_msr)
 
 uint64_t pentium4_device::opcode_rdmsr(bool &valid_msr)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	LOGMASKED(LOG_MSR, "RDMSR: unimplemented register called %08x at %08x\n", REG32(ECX), m_core->pc - 2);
 	valid_msr = true;
 	return 0;
@@ -165,6 +170,7 @@ uint64_t pentium4_device::opcode_rdmsr(bool &valid_msr)
 
 void pentium4_device::opcode_wrmsr(uint64_t data, bool &valid_msr)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	LOGMASKED(LOG_MSR, "WRMSR: unimplemented register called %08x (%08x%08x) at %08x\n", REG32(ECX), (uint32_t)(data >> 32), (uint32_t)data, m_core->pc - 2);
 	valid_msr = true;
 }

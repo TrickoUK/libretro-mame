@@ -3,6 +3,7 @@
 
 uint32_t i386_device::i386_load_protected_mode_segment(I386_SREG *seg, uint64_t *desc )
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t v1,v2;
 	uint32_t base, limit;
 	int entry;
@@ -48,6 +49,7 @@ uint32_t i386_device::i386_load_protected_mode_segment(I386_SREG *seg, uint64_t 
 
 void i386_device::i386_load_call_gate(I386_CALL_GATE *gate)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t v1,v2;
 	uint32_t base,limit;
 	int entry;
@@ -79,6 +81,7 @@ void i386_device::i386_load_call_gate(I386_CALL_GATE *gate)
 
 void i386_device::i386_set_descriptor_accessed(uint16_t selector)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// assume the selector is valid, we don't need to check it again
 	offs_t base, addr;
 	uint8_t rights;
@@ -99,6 +102,7 @@ void i386_device::i386_set_descriptor_accessed(uint16_t selector)
 
 void i386_device::i386_load_segment_descriptor(int segment )
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (PROTECTED_MODE)
 	{
 		uint16_t old_flags = m_core->sreg[segment].flags;
@@ -141,6 +145,7 @@ void i386_device::i386_load_segment_descriptor(int segment )
 /* Retrieves the stack selector located in the current TSS */
 uint32_t i386_device::i386_get_stack_segment(uint8_t privilege)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ret;
 	if(privilege >= 3)
 		return 0;
@@ -156,6 +161,7 @@ uint32_t i386_device::i386_get_stack_segment(uint8_t privilege)
 /* Retrieves the stack pointer located in the current TSS */
 uint32_t i386_device::i386_get_stack_ptr(uint8_t privilege)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t ret;
 	if(privilege >= 3)
 		return 0;
@@ -171,6 +177,7 @@ uint32_t i386_device::i386_get_stack_ptr(uint8_t privilege)
 /* Check segment register for validity when changing privilege level after an RETF */
 void i386_device::i386_check_sreg_validity(int reg)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint16_t selector = m_core->sreg[reg].selector;
 	uint8_t CPL = m_core->CPL;
 	uint8_t DPL,RPL;
@@ -218,6 +225,7 @@ void i386_device::i386_check_sreg_validity(int reg)
 
 int i386_device::i386_limit_check(int seg, uint32_t offset, int size)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE && !V8086_MODE)
 	{
 		// Include every byte of the access without wrapping a 32-bit offset.
@@ -246,6 +254,7 @@ int i386_device::i386_limit_check(int seg, uint32_t offset, int size)
 
 void i386_device::i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	// Checks done when MOV changes a segment register in protected mode
 	uint8_t CPL,RPL,DPL;
 
@@ -376,6 +385,7 @@ void i386_device::i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault)
 
 void i386_device::i386_trap(int irq, int irq_gate)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	/*  I386 Interrupts/Traps/Faults:
 	 *
 	 *  0x00    Divide by zero
@@ -768,6 +778,7 @@ void i386_device::i386_trap(int irq, int irq_gate)
 
 void i386_device::i386_trap_with_error(int irq, int irq_gate, int trap_level, uint32_t error)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	try
 	{
 		i386_trap(irq,irq_gate);
@@ -818,6 +829,7 @@ void i386_device::i386_trap_with_error(int irq, int irq_gate, int trap_level, ui
 
 void i386_device::i286_task_switch(uint16_t selector, uint8_t nested)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t tss;
 	I386_SREG seg;
 	uint16_t old_task;
@@ -927,6 +939,7 @@ void i386_device::i286_task_switch(uint16_t selector, uint8_t nested)
 
 void i386_device::i386_task_switch(uint16_t selector, uint8_t nested)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t tss;
 	I386_SREG seg;
 	uint16_t old_task;
@@ -1052,6 +1065,7 @@ void i386_device::i386_task_switch(uint16_t selector, uint8_t nested)
 
 void i386_device::i386_protected_mode_jump(uint16_t seg, uint32_t off, int indirect, int operand32)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	I386_SREG desc;
 	I386_CALL_GATE call_gate;
 	uint8_t CPL,DPL,RPL;
@@ -1324,6 +1338,7 @@ void i386_device::i386_protected_mode_jump(uint16_t seg, uint32_t off, int indir
 
 void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indirect, int operand32)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	I386_SREG desc;
 	I386_CALL_GATE gate;
 	uint8_t SetRPL;
@@ -1780,6 +1795,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 
 void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t newCS, newEIP;
 	I386_SREG desc;
 	uint8_t CPL, RPL, DPL;
@@ -2051,6 +2067,7 @@ void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
 
 void i386_device::i386_protected_mode_iret(int operand32)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t newCS, newEIP;
 	uint32_t newSS, newESP;  // when changing privilege
 	I386_SREG desc,stack;
@@ -2488,6 +2505,7 @@ void i386_device::i386_protected_mode_iret(int operand32)
 
 inline void i386_device::dri_changed()
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int dr;
 
 	if(m_dri_changed_active)
@@ -2567,6 +2585,7 @@ inline void i386_device::dri_changed()
 
 inline void i386_device::dr7_changed(uint32_t old_val, uint32_t new_val)
 {
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	//Check that none of the breakpoint types or lengths have changed.
 	int old_breakpoint_info = old_val >> 16;
 	int new_breakpoint_info = new_val >> 16;
