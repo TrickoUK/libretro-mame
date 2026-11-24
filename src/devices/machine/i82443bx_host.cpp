@@ -57,7 +57,17 @@ void i82443bx_host_device::config_map(address_map &map)
 
 	map(0x34, 0x34).r(FUNC(i82443bx_host_device::capptr_r));
 
-//  map(0x50, 0x53).lr32(NAME([this] () { return machine().rand(); }));
+	// NBXCFG bits 31-8 (bits 7-0 are handled as the 82439HX PCON register)
+	// bits 13-12 are the host frequency strap: 00 = 100 MHz, 10 = 66 MHz
+	map(0x51, 0x53).lrw8(
+		NAME([this] (offs_t offset) -> u8 {
+			if (offset == 0)
+				return (m_nbxcfg[0] & 0xcf) | (m_host_66mhz ? 0x20 : 0x00);
+			return m_nbxcfg[offset];
+		}),
+		NAME([this] (offs_t offset, u8 data) {
+			m_nbxcfg[offset] = data;
+		}));
 	// TODO: no DRT, moved as DRTC / DWTC in dword format to $e0/$e8
 	map(0x68, 0x68).rw(FUNC(i82443bx_host_device::fdhc_r), FUNC(i82443bx_host_device::fdhc_w));
 
@@ -80,6 +90,7 @@ void i82443bx_host_device::device_start()
 	add_map(8*1024*1024, M_MEM, FUNC(i82443bx_host_device::apbase_map));
 
 	save_item(NAME(m_fdhc));
+	save_item(NAME(m_nbxcfg));
 	save_pointer(NAME(m_bspad), 8);
 }
 
@@ -88,6 +99,7 @@ void i82443bx_host_device::device_reset()
 	i82439hx_host_device::device_reset();
 
 	m_fdhc = 0;
+	std::fill(std::begin(m_nbxcfg), std::end(m_nbxcfg), 0);
 	for (int i = 0; i < 8; i++)
 		m_bspad[i] = 0;
 }
