@@ -351,7 +351,9 @@ protected:
 	uint32_t m_cpu_version;
 	uint32_t m_brand_id;
 	uint32_t m_feature_flags;
-	uint64_t m_tsc;
+	uint64_t m_tsc; // time stamp counter, as an offset from the total number of cycles executed
+	uint64_t current_tsc() const { return m_tsc + total_cycles(); }
+	void set_tsc(uint64_t value) { m_tsc = value - total_cycles(); }
 	uint64_t m_perfctr[2];
 
 	// FPU
