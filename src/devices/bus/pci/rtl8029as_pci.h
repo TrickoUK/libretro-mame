@@ -8,12 +8,13 @@
 
 #include "pci_slot.h"
 
+#include "machine/dp8390.h"
+
 class rtl8029as_pci_device : public pci_card_device
 {
 public:
 	rtl8029as_pci_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-	static constexpr feature_type unemulated_features() { return feature::LAN; }
 
 protected:
 	rtl8029as_pci_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
@@ -30,7 +31,15 @@ protected:
 	virtual void config_map(address_map &map) override ATTR_COLD;
 
 private:
-	// ...
+	required_device<dp8390d_device> m_dp8390;
+
+	u8 m_prom[16];
+	u8 m_board_ram[32 * 1024];
+
+	void map(address_map &map) ATTR_COLD;
+
+	u8 mem_read(offs_t offset);
+	void mem_write(offs_t offset, u8 data);
 };
 
 DECLARE_DEVICE_TYPE(RTL8029AS_PCI, rtl8029as_pci_device)

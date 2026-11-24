@@ -425,6 +425,8 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 	// "pci:0d.0" J4D2
 	// "pci:0e.0" J4D1
 	PCI_SLOT(config, "pci:1", pci_cards, 14, 0, 1, 2, 3, "virge");
+	// SMC EZ Card 10 (RTL8029 NE2000 clone), the game's network settings expect it at I/O $1020
+	PCI_SLOT(config, "pci:2", pci_cards, 13, 1, 2, 3, 0, "rtl8029as");
 }
 
 // Graphite runs on incompatible HW, consider splitting if things starts to get hairy ...
