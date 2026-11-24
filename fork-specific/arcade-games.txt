@@ -41,6 +41,7 @@
 1945kiiio
 1945kiiipt
 19in1
+19in1u
 19xx
 19xxa
 19xxar1
@@ -106,6 +107,7 @@
 500gp
 600
 60in1
+60in1u
 64street
 64streetj
 64streetja
@@ -146,6 +148,7 @@ aafbc
 aafbd2p
 aafootb
 abacus
+abaozang
 abaseb
 abaseb2
 abattle
@@ -1745,6 +1748,7 @@ citycona
 cjddz
 cjddz213cn
 cjddz215cn
+cjddz216cn
 cjddz217cn
 cjddzlf
 cjddzp
@@ -1752,16 +1756,10 @@ cjddzp206cn
 cjddzps
 cjddzs
 cjddzsa
-cjdh2
-cjdh2a
-cjdh2b
-cjdh2c
-cjdh2d
 cjdh6th
 cjdh6tha
 cjdlz
 cjdn
-cjjl
 cjlddz
 cjsjh
 cjslh
@@ -2746,6 +2744,7 @@ dleaguej
 dleuro
 dleuroalt
 dlital
+dlzc
 dmndrby
 dmndrbya
 dmnfrnt
@@ -3193,6 +3192,7 @@ europass
 europl01
 evilngt
 evilston
+evolution
 evosocc
 excelsr
 excelsra
@@ -3231,7 +3231,6 @@ exsafarb
 exsafarc
 extdwnhl
 exterm
-extradrw
 extrmatn
 extrmatnj
 extrmatnu
@@ -4989,6 +4988,7 @@ ikari3
 ikari3j
 ikari3k
 ikari3u
+ikari3ua
 ikari3w
 ikaria
 ikaria2
@@ -5142,7 +5142,6 @@ jackler
 jackrabt
 jackrabt2
 jackrabts
-jackvent
 jailbrek
 jailbrekb
 jajamaru
@@ -5692,6 +5691,7 @@ ladymstr
 ladymstra
 lagirl
 lagunar
+laiziddz
 lamachin
 landbrk
 landbrka
@@ -5821,10 +5821,8 @@ lgpalt
 lgtnfght
 lgtnfghta
 lgtnfghtu
-lhzb3in1
 lhzb4
 lhzb4dhb
-lhzbgqb
 liberate
 liberateb
 liberatr
@@ -7729,7 +7727,6 @@ pengojpm
 pengomc1
 pengomc2
 pengopac
-pengprty
 penky
 penkyi
 penta
@@ -8314,6 +8311,7 @@ qixb
 qixo
 qofd3
 qofdtbk
+qqddz
 quaak
 quake
 quantum
@@ -10363,7 +10361,6 @@ ssideki4
 ssingles
 sslam
 sslama
-sslamb
 ssmissin
 ssoldier
 ssonicbr
@@ -10426,6 +10423,7 @@ stakwin
 stakwin2
 stakwindev
 stankatk
+staratk
 staraudi
 starblad
 starbladj
@@ -12059,6 +12057,7 @@ wcbowl16
 wcbowl161
 wcbowl165
 wcbowldx
+wcbowldx200
 wccf116
 wccf1dup
 wccf212e
@@ -12405,10 +12404,8 @@ xybots0
 xybots1
 xybotsf
 xybotsg
-xycs
 xyonix
 xypdk
-xyxcxysj
 yachtmn
 yamagchi
 yamato
@@ -12459,6 +12456,7 @@ zaxxon3
 zaxxonb
 zaxxonj
 zdrum
+zduoxing
 zedblade
 zektor
 zelos

@@ -279,6 +279,7 @@ private:
 		osd::gpu_vertex tri[3];
 		bool textured = false;
 		bool filterable = true;
+		bool prim_start = true;     // TRIANGLE: the first queued triangle of its primitive (a quad queues two)
 		osd::gpu_blend_mode blend = osd::gpu_blend_mode::NONE;
 		int tex_tx = 0, tex_ty = 0, tex_tp = 0, tex_clutx = 0, tex_cluty = 0;
 		int tw_and_u = 255, tw_and_v = 255, tw_off_u = 0, tw_off_v = 0;

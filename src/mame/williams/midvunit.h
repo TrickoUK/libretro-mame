@@ -29,7 +29,7 @@
 #include "emupal.h"
 #include "screen.h"
 
-#include <deque>
+#include <utility>
 #include <vector>
 
 
@@ -83,6 +83,7 @@ private:
 
 	bool gpu_init();
 	void gpu_flush_updates();
+	uint8_t *gpu_arena_alloc(size_t bytes);
 	void gpu_add_quad(const vertex_t *vert, uint8_t nudge_x, uint8_t nudge_y, uint16_t pixdata, bool textured, uint16_t flags, uint16_t texpage);
 	bool gpu_row_span(const vertex_t *vert, int32_t row, const rectangle &clip, int32_t &x0, int32_t &x1, float (&param)[2], float (&dpdx)[2]) const;
 	bool gpu_needs_rows(const vertex_t *vert) const;
@@ -103,13 +104,16 @@ private:
 	int m_gpu_msaa = 0;                             // samples per target pixel (mame_3d_msaa), 0 for a single sample
 	bool m_gpu_texfilter = false;                   // bilinear filtering after the palette lookup (mame_3d_texfilter)
 	bool m_gpu_palette_full = false;
+	int m_gpu_palette_row_lo = 0;                   // palette rows (256 entries each) changed since the last upload, [lo, hi), empty when lo == hi
+	int m_gpu_palette_row_hi = 0;
 	uint32_t m_gpu_texture_lo = 0;                  // dirty byte range of the texture RAM, [lo, hi), empty when lo == hi
 	uint32_t m_gpu_texture_hi = 0;
 	int m_gpu_clip_page = -1;                       // page the last SET_CLIP covers, -1 at the start of a frame
 	std::vector<osd::gpu_command> m_gpu_commands;
 	std::vector<gpu_vertex> m_gpu_vertices;
 	std::vector<uint32_t> m_gpu_state;
-	std::deque<std::vector<uint32_t>> m_gpu_blobs;  // copies the command list points at, kept until the frame is submitted
+	std::vector<uint8_t> m_gpu_arena;               // copies of the data the update commands upload, at offsets aligned to four bytes
+	std::vector<std::pair<size_t, size_t> > m_gpu_patches;  // (command index, arena offset) of each update, set when the frame is sent
 };
 
 class midvunit_base_state : public driver_device

@@ -30,9 +30,11 @@
 
 #include "interface/gpuengine.h"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 
@@ -82,8 +84,8 @@ enum : int
 	S_FOGROW,                   // row of the fog table
 	S_FOGMASK,                  // fog delta mask
 	S_BILINMASK,                // texture bilinear fraction mask
-	S_BUFROW,                   // first target row of the buffer, native pixels (set at submit)
-	S_SCALE,                    // render scale (set at submit)
+	S_BUFROW,                   // first target row of the buffer, native pixels
+	S_SCALE,                    // render scale
 	S_TMU0 = 24,
 	S_TMU1 = 48,
 	STATE_WORDS = 72
@@ -122,7 +124,6 @@ public:
 	// register state that is not part of poly_data
 	struct globals
 	{
-		u32 chroma_range;
 		u8 const *fogblend;
 		u8 const *fogdelta;
 		u8 fogdelta_mask;
@@ -145,7 +146,7 @@ public:
 		std::vector<u32> pixels;    // w * h, zero where nothing was written
 		std::vector<u32> depth;     // w * h, bit 16 set plus the 16-bit depth where written; empty if none
 	};
-	void set_geometry(u32 rowpixels, u32 rows);
+	void set_geometry(u32 rowpixels, u32 rows, int scale);
 	void add_lfb_pixel(int buffer, int x, int y, u32 argb);
 	void add_lfb_depth(int buffer, int x, int y, u16 depth);
 	std::vector<stamp> const &stamps() const { return m_stamps; }
@@ -186,6 +187,7 @@ private:
 	std::vector<u32> m_stage_z;             // depth of the open stamp, allocated on the first depth write
 	bool m_stage_has_z = false;
 	u32 m_stage_rowpixels = 0, m_stage_rows = 0;
+	int m_scale = 1;
 	int m_stage_buffer = -1;
 	int m_stage_x0 = 0, m_stage_y0 = 0, m_stage_x1 = -1, m_stage_y1 = -1;
 	std::vector<u32> m_lut = std::vector<u32>(LUT_ROWS * 256);
@@ -230,6 +232,12 @@ public:
 	void texture_write(int tmu, u32 offs, u32 bytes);
 	void invalidate();
 
+	// called when the engine refused a flush, after the batch is dropped: the device brings video RAM up to date
+	// from the target, starts a new generation (which clears the target) and queues its colour buffers into the
+	// new batch. Without a callback a refused flush only starts a new generation.
+	void set_target_lost(std::function<void ()> callback) { m_target_lost = std::move(callback); }
+	void new_generation() { m_generation++; }
+
 	// submit the batch; with a buffer and output it also reads rows of that
 	// buffer back as rgb32 (row_count 0 = all rows). read_first reads before the
 	// batch is drawn, which is only right when the batch does not write that buffer;
@@ -238,6 +246,10 @@ public:
 	// out_stride (pixels, 0 = tightly packed, in output pixels), opaque, channel_lut and downsample (see gpu_readback_rect) run a final pass on the GPU
 	bool flush(int read_buffer = -1, u32 *out = nullptr, u32 first_row = 0, u32 row_count = 0, bool read_first = false,
 			u32 out_stride = 0, bool opaque = false, u8 const *channel_lut = nullptr, int downsample = 1, u32 col_count = 0);
+
+	// submit the batch and read row ranges (first row, row count) of a buffer back in one frame, at the native
+	// resolution: out holds the whole buffer as rgb32, rowpixels per row, and only the given rows are written
+	bool flush_rows(int buffer, u32 *out, std::pair<u32, u32> const *ranges, int count);
 
 	// true if any command of the batch can change the colour of the buffer slot
 	bool batch_writes_buffer(int buffer) const;
@@ -258,6 +270,8 @@ private:
 		std::map<std::string, u32> reasons;
 		u32 presents = 0;
 	};
+	bool submit_batch(int read_buffer, osd::gpu_readback_rect const *readbacks, int readback_count, bool read_first);
+
 	char const *m_why = nullptr;
 	profile_data m_prof;
 	running_machine &m_machine;
@@ -280,6 +294,12 @@ private:
 	int m_scale = 1;
 	u32 m_generation = 1;
 	u32 m_serial = 0;
+	std::function<void ()> m_target_lost;
+	// the engine frame of the last flush, kept so their storage is reused
+	std::vector<osd::gpu_texture_update> m_updates;
+	std::vector<gpu_vertex> m_verts;
+	std::vector<osd::gpu_command> m_commands;
+	std::vector<osd::gpu_readback_rect> m_row_readbacks;
 };
 
 } // namespace voodoo

@@ -1693,6 +1693,7 @@ void psxgpu_device::gpu_queue_triangle_pair( const osd::gpu_vertex &v0, const os
 		cmd2.tri[ 0 ] = v1; cmd2.tri[ 1 ] = v2; cmd2.tri[ 2 ] = v3;
 		cmd2.textured = textured;
 		cmd2.filterable = filterable;
+		cmd2.prim_start = ( cull_mask & 1 ) != 0;
 		cmd2.blend = blend;
 		m_gpu_queue.push_back( std::move( cmd2 ) );
 	}
@@ -2510,7 +2511,11 @@ osd::gpu_blend_state gpu_blend_state_for( osd::gpu_blend_mode mode )
 // texture, clip or copy command, so overlapping primitives keep their
 // submission order across those. A semi-transparent textured run is drawn
 // twice: the texels with the STP bit set with the run's blend mode, then
-// the others opaque, because texels with STP clear are never blended.
+// the others opaque, because texels with STP clear are never blended. Each
+// primitive's two texel sets are disjoint, but across primitives the opaque
+// pass would cover a later primitive's blended texels, so such a run also
+// ends before a primitive whose bounds overlap an earlier primitive of the
+// run.
 void psxgpu_device::gpu_build_frame()
 {
 	m_gpu_frame_vertices.clear();
@@ -2537,8 +2542,22 @@ void psxgpu_device::gpu_build_frame()
 	bool run_filterable = true;
 	osd::gpu_blend_mode run_blend = osd::gpu_blend_mode::NONE;
 
-	auto flush_run = [ this, &run_first, &run_vertices, &run_textured, &run_blend ]()
+	// The pixels each primitive of a two-pass run can touch, as boxes in target pixels: whole pixels from the floor of
+	// the smallest to the ceiling of the largest coordinate (exclusive), which also holds every multisample position.
+	// Primitives that only meet at a pixel boundary do not overlap. The union gives a quick answer for most primitives.
+	struct pixel_box { int x1, y1, x2, y2; };
+	static constexpr int RUN_BOXES = 32;
+	pixel_box run_boxes[ RUN_BOXES ];
+	int run_box_count = 0;
+	pixel_box run_union = { 0, 0, 0, 0 };
+	auto overlaps = []( const pixel_box &a, const pixel_box &b )
 	{
+		return a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
+	};
+
+	auto flush_run = [ this, &run_first, &run_vertices, &run_textured, &run_blend, &run_box_count ]()
+	{
+		run_box_count = 0;
 		if( run_vertices == 0 )
 		{
 			return;
@@ -2563,8 +2582,9 @@ void psxgpu_device::gpu_build_frame()
 		run_vertices = 0;
 	};
 
-	for( auto &cmd : m_gpu_queue )
+	for( size_t index = 0; index < m_gpu_queue.size(); index++ )
 	{
+		const gpu_queued_cmd &cmd = m_gpu_queue[ index ];
 		switch( cmd.kind )
 		{
 		case gpu_queued_cmd::kind_t::TRIANGLE:
@@ -2573,10 +2593,55 @@ void psxgpu_device::gpu_build_frame()
 			{
 				flush_run();
 			}
+			if( cmd.prim_start && cmd.textured && cmd.blend != osd::gpu_blend_mode::NONE )
+			{
+				// the bounds of the whole primitive: this triangle and the second one of a quad
+				float x1 = cmd.tri[ 0 ].x, y1 = cmd.tri[ 0 ].y, x2 = x1, y2 = y1;
+				for( size_t t = index; t < m_gpu_queue.size() && ( t == index || ( m_gpu_queue[ t ].kind == gpu_queued_cmd::kind_t::TRIANGLE && !m_gpu_queue[ t ].prim_start ) ); t++ )
+				{
+					for( const osd::gpu_vertex &v : m_gpu_queue[ t ].tri )
+					{
+						x1 = std::min( x1, v.x );
+						y1 = std::min( y1, v.y );
+						x2 = std::max( x2, v.x );
+						y2 = std::max( y2, v.y );
+					}
+				}
+				const pixel_box box = { (int)std::floor( x1 ), (int)std::floor( y1 ), (int)std::ceil( x2 ), (int)std::ceil( y2 ) };
+				if( run_box_count > 0 && overlaps( box, run_union ) )
+				{
+					bool hit = run_box_count == RUN_BOXES;
+					for( int b = 0; b < run_box_count && !hit; b++ )
+					{
+						hit = overlaps( box, run_boxes[ b ] );
+					}
+					if( hit )
+					{
+						flush_run();
+					}
+				}
+				else if( run_box_count == RUN_BOXES )
+				{
+					flush_run();
+				}
+				if( run_box_count == 0 )
+				{
+					run_union = box;
+				}
+				else
+				{
+					run_union = { std::min( run_union.x1, box.x1 ), std::min( run_union.y1, box.y1 ), std::max( run_union.x2, box.x2 ), std::max( run_union.y2, box.y2 ) };
+				}
+				run_boxes[ run_box_count++ ] = box;
+			}
 			run_textured = cmd.textured;
 			run_filterable = cmd.filterable;
 			run_blend = cmd.blend;
 
+			// the texel rectangle filtered taps are clamped to is the same at every vertex of a primitive
+			const float uv_clamp[ 4 ] = { cmd.tri[ 0 ].u_min, cmd.tri[ 0 ].v_min, cmd.tri[ 0 ].u_max, cmd.tri[ 0 ].v_max };
+			uint32_t uv_clamp_bits[ 4 ];
+			std::memcpy( uv_clamp_bits, uv_clamp, sizeof( uv_clamp ) );
 			const uint32_t prim = (uint32_t)( m_gpu_frame_state.size() / PSXGPU_SHADER_STATE_WORDS );
 			const uint32_t state[ PSXGPU_SHADER_STATE_WORDS ] = {
 				cmd.textured ? 1u : 0u,
@@ -2585,14 +2650,15 @@ void psxgpu_device::gpu_build_frame()
 				// the identity window leaves addressing alone, so filtered taps one texel past 255 are not wrapped
 				( rs.tw_and_u == 255 && rs.tw_and_v == 255 && rs.tw_off_u == 0 && rs.tw_off_v == 0 ) ? 0u : 1u,
 				(uint32_t)rs.tw_and_u, (uint32_t)rs.tw_and_v, (uint32_t)rs.tw_off_u, (uint32_t)rs.tw_off_v,
-				(uint32_t)rs.interleave };
+				(uint32_t)rs.interleave,
+				uv_clamp_bits[ 0 ], uv_clamp_bits[ 1 ], uv_clamp_bits[ 2 ], uv_clamp_bits[ 3 ] };
 			m_gpu_frame_state.insert( m_gpu_frame_state.end(), std::begin( state ), std::end( state ) );
 
 			for( const osd::gpu_vertex &v : cmd.tri )
 			{
 				const float f[ 5 + PSXGPU_SHADER_VARYINGS ] = {
 					v.x, v.y, 0.0f, v.w, 0.0f,
-					v.r, v.g, v.b, v.a, v.u, v.v, v.u_min, v.v_min, v.u_max, v.v_max };
+					v.r, v.g, v.b, v.a, v.u, v.v };
 				const size_t at = m_gpu_frame_vertices.size();
 				m_gpu_frame_vertices.insert( m_gpu_frame_vertices.end(), std::begin( f ), std::end( f ) );
 				std::memcpy( &m_gpu_frame_vertices[ at + 4 ], &prim, sizeof( prim ) );

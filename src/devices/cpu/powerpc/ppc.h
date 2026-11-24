@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 
 /***************************************************************************
@@ -30,6 +31,7 @@
 
 // general constants
 #define PPC_MAX_FASTRAM         4
+#define PPC_MAX_FASTRAM_WINDOWS 4
 #define PPC_MAX_HOTSPOTS        16
 
 
@@ -244,6 +246,9 @@ public:
 	void ppcdrc_set_options(uint32_t options);
 	void bus_error() noexcept { m_bus_error = true; }
 	void ppcdrc_add_fastram(offs_t start, offs_t end, uint8_t readonly, void *base);
+	void ppcdrc_set_fastram_window_base(void *base, offs_t size);
+	void ppcdrc_clear_fastram_windows();
+	bool ppcdrc_map_fastram_window(offs_t start, offs_t end, offs_t offset);
 	void ppcdrc_add_hotspot(offs_t pc, uint32_t opcode, uint32_t cycles);
 
 	virtual void signal_external_write(offs_t physical_address, u32 length) override;
@@ -260,7 +265,6 @@ public:
 	void ppc_cfunc_unimplemented();
 	void ppc_cfunc_ppccom_mismatch();
 	void ppccom_tlb_fill();
-	void compile_time_tlb_fill(offs_t pc);
 	int  ppccom_fetch_intention() const;
 	void ppccom_update_fprf();
 	void ppccom_dcstore_callback();
@@ -297,6 +301,7 @@ protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
 	virtual void device_stop() override ATTR_COLD;
+	virtual void device_pre_save() override ATTR_COLD;
 	virtual void device_post_load() override ATTR_COLD;
 
 	// device_execute_interface overrides
@@ -387,9 +392,17 @@ protected:
 		// FP save values
 		double fpscr_op[2];
 
+		// bit pattern of a finite result whose FPRF is not yet in fpscr, or FPRF_RESULT_NONE
+		uint64_t fprf_result;
+
 		uint32_t m_codepage_any;                    // nonzero if any page bit is set (UML-readable)
 		uint32_t m_translation_generation;          // bumped whenever the MMU mapping may have changed (UML-readable)
 		uint32_t m_codewatch_ea;                    // effective address of an in-progress store (601 write-watch)
+
+		// fast RAM windows a memory controller maps at run time (UML-readable)
+		uint32_t fastwin_start[PPC_MAX_FASTRAM_WINDOWS];
+		uint32_t fastwin_end[PPC_MAX_FASTRAM_WINDOWS];
+		uint32_t fastwin_offset[PPC_MAX_FASTRAM_WINDOWS];   // window offset minus start, modulo 2^32
 	};
 
 	internal_ppc_state *m_core;
@@ -670,22 +683,42 @@ protected:
 	// is cleared at the end of code_compile_block, so this applies to one recompile.
 	void note_code_page(uint32_t page) { if (page != m_codewrite_skip_page) { m_codepage_bits[page >> 3] |= 1 << (page & 7); m_core->m_codepage_any = 1; } }
 	bool code_page_has_code(offs_t addr) const { uint32_t const page = (addr >> 12) & 0xfffff; return BIT(m_codepage_bits[page >> 3], page & 7); }
+	void invalidate_code_page(uint32_t page);
 	bool invalidate_code_range(offs_t start, offs_t end);
 	void note_physical_code(const opcode_desc *desclist);
+	void note_sequence_pages(const opcode_desc *first, const opcode_desc *last);
+	void compile_time_tlb_fill(offs_t pc);
+	void tlb_fill_translated(offs_t pc, offs_t address, int intent);
 
-	// 603-family instruction cache flash invalidate (HID0[ICFI]): code can be
-	// replaced by writers the DRC never sees (DMA, another CPU), and software
-	// then invalidates the whole icache instead of issuing icbi.  Keep a copy of
-	// every compiled code page so an ICFI only discards pages whose bytes
-	// actually changed, rather than flushing the entire cache each time.
+	// Instruction cache flash invalidate (HID0[ICFI], every OEA part except the
+	// 601): code can be replaced by writers the DRC never sees (DMA, another
+	// CPU), and software then invalidates the whole icache instead of issuing
+	// icbi.  Keep a copy of every physical page code was compiled from, with the
+	// effective pages the code was compiled at, so an ICFI only discards code
+	// from pages whose bytes changed, rather than flushing the entire cache each
+	// time.  A page that can't be read directly is always discarded.  Snapshots are
+	// per physical page, so code compiled under an earlier mapping of an
+	// effective page stays covered after the page is remapped.  If a page's
+	// memory no longer matches its snapshot when more code is compiled from it,
+	// the page holds blocks from two versions of its bytes, so the snapshot is
+	// marked dirty and the next ICFI discards the page regardless.  Snapshots
+	// stay across icbi and other invalidations; only an ICFI that discards the
+	// page or a full cache flush removes them.  Each snapshot is keyed by its
+	// physical page number, which gives its address.
 	struct code_page_snapshot
 	{
-		uint32_t physbase;
-		bool raw;                           // words hold the page's host memory bytes, not fetched values
-		std::unique_ptr<uint32_t []> words;
+		bool dirty = false;                 // code was compiled from bytes that differ from these
+		std::unique_ptr<uint8_t []> bytes;  // the page's host memory contents
+		std::vector<uint32_t> logical;      // effective pages code was compiled from this page at
 	};
-	std::unordered_map<uint32_t, code_page_snapshot> m_code_snapshots;    // keyed by effective page number
-	void snapshot_code_page(uint32_t page, uint32_t physbase);
+	std::unordered_map<uint32_t, code_page_snapshot> m_code_snapshots;    // keyed by physical page number
+	bool has_icache_flash_invalidate() const;
+	bool has_thermal_assist() const;
+	uint32_t get_thrm(uint32_t spr) const;
+	const uint8_t *code_page_memory(offs_t physbase) const;
+	bool code_snapshot_matches(uint32_t physpage, const code_page_snapshot &snap) const;
+	void snapshot_code_page(uint32_t page, offs_t physbase);
+	void snapshot_sequence_pages(const opcode_desc *first, const opcode_desc *last);
 	bool icache_flash_invalidate();
 
 	// reservation granularity
@@ -727,6 +760,8 @@ protected:
 	uml::code_handle *   m_exception[EXCEPTION_COUNT]; // array of exception handlers
 	uml::code_handle *   m_exception_norecover[EXCEPTION_COUNT];   // array of exception handlers
 	uml::code_handle *   m_fpscr_finish;
+	uml::code_handle *   m_fpscr_sync;
+	uml::code_handle *   m_fpscr_summary;
 	uml::code_handle *   m_code_write_reset;           // 601: recompile after a write to compiled code
 
 	// fast RAM
@@ -741,6 +776,8 @@ protected:
 
 	uint32_t              m_fastram_select;
 	fast_ram_info       m_fastram[PPC_MAX_FASTRAM];
+	void *              m_fastwin_base = nullptr;   // RAM the run-time windows point into
+	offs_t              m_fastwin_size = 0;
 
 	// hotspots
 	// hotspot info
@@ -819,6 +856,9 @@ protected:
 	void generate_compute_flags(drcuml_block &block, const opcode_desc *desc, int updatecr, uint32_t xermask, int invertcarry);
 	void generate_shift_flags(drcuml_block &block, const opcode_desc *desc, uint32_t op);
 	void generate_fp_flags(drcuml_block &block, const opcode_desc *desc);
+	void fpscr_sync();
+	enum : unsigned { FPOP_A = 1, FPOP_B = 2, FPOP_C = 4 };    // floating-point operands an instruction reads
+	template <typename Op, typename Check> void generate_fp_arith(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, unsigned operands, Op &&op, Check &&check);
 	void generate_branch(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, int source, uint8_t link);
 	void generate_branch_bo(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc, uint32_t bo, uint32_t bi, int source, int link);
 	bool generate_opcode(drcuml_block &block, compiler_state *compiler, const opcode_desc *desc);

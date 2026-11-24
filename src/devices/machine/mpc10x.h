@@ -15,6 +15,8 @@
 
 #include <vector>
 
+class ppc_device;
+
 class mpc10x_host_device : public pci_host_device
 {
 public:
@@ -51,6 +53,7 @@ protected:
 	virtual void install_config_access_map(address_space &space) = 0;
 	void update_config_access();
 	virtual void install_ram();
+	void unmap_ram(offs_t end);
 	void install_memory_banks(bool skip_ff, bool wrap_banks);
 	virtual void memory_start_w(offs_t offset, u32 data, u32 mem_mask);
 	virtual void memory_end_w(offs_t offset, u32 data, u32 mem_mask);
@@ -93,6 +96,7 @@ private:
 	optional_device<device_memory_interface> m_secondary_cpu;
 	optional_memory_region m_rom;
 	u8 *m_ram;
+	ppc_device *m_drc_cpu;      // gets RAM banks as DRC fast RAM windows; null with more than one CPU
 	std::vector<device_execute_interface *> m_bus_cpus;     // same order as m_cpu_spaces
 	std::vector<memory_passthrough_handler> m_snoop_taps;
 };

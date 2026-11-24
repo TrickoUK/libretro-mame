@@ -392,7 +392,6 @@ public:
 		m_value(value) { }
 
 	constexpr u32 raw() const             { return m_value; }
-
 	constexpr u32 blue() const            { return BIT(m_value, 0, 8); }
 	constexpr u32 green() const           { return BIT(m_value, 8, 8); }
 	constexpr u32 red() const             { return BIT(m_value, 16, 8); }

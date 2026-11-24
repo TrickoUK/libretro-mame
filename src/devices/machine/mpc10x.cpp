@@ -13,6 +13,8 @@
 #include "emu.h"
 #include "mpc10x.h"
 
+#include "cpu/powerpc/ppc.h"
+
 #include <algorithm>
 
 #define LOG_RAM     (1U << 1)
@@ -36,6 +38,7 @@ mpc10x_host_device::mpc10x_host_device(const machine_config &mconfig, device_typ
 	, m_secondary_cpu(*this, finder_base::DUMMY_TAG)
 	, m_rom(*this, finder_base::DUMMY_TAG)
 	, m_ram(nullptr)
+	, m_drc_cpu(nullptr)
 {
 }
 
@@ -52,6 +55,13 @@ void mpc10x_host_device::set_ram_info(u8 *ram_ptr, int ram_size)
 {
 	m_ram = ram_ptr;
 	m_ram_size = ram_size;
+
+	// A second CPU has to snoop every RAM write, so RAM stays behind the address space then.
+	m_drc_cpu = m_secondary_cpu ? nullptr : dynamic_cast<ppc_device *>(&m_cpu->device());
+	if (m_drc_cpu)
+	{
+		m_drc_cpu->ppcdrc_set_fastram_window_base(m_ram, m_ram_size);
+	}
 }
 
 void mpc10x_host_device::set_rom_tag(const char *tag)
@@ -313,12 +323,20 @@ void mpc10x_host_device::memory_enable_w(u8 data)
 
 void mpc10x_host_device::install_ram()
 {
-	// unmap all RAM
+	unmap_ram(0x0fff'ffff);
+	install_memory_banks(true, true);
+}
+
+void mpc10x_host_device::unmap_ram(offs_t end)
+{
 	for (address_space *space : m_cpu_spaces)
 	{
-		space->unmap_readwrite(0x0000'0000, 0x0fff'ffff);
+		space->unmap_readwrite(0x0000'0000, end);
 	}
-	install_memory_banks(true, true);
+	if (m_drc_cpu)
+	{
+		m_drc_cpu->ppcdrc_clear_fastram_windows();
+	}
 }
 
 void mpc10x_host_device::install_memory_banks(bool skip_ff, bool wrap_banks)
@@ -363,6 +381,13 @@ void mpc10x_host_device::install_memory_banks(bool skip_ff, bool wrap_banks)
 					{
 						m_cpu_spaces[i]->install_ram(start, start + chunk - 1, &m_ram[ptr]);
 						install_snoop_tap(i, start, start + chunk - 1);
+					}
+					if (m_drc_cpu)
+					{
+						if (!m_drc_cpu->ppcdrc_map_fastram_window(start, start + chunk - 1, ptr))
+						{
+							LOGMASKED(LOG_RAM, "%08x-%08x left to the address space, no DRC fast RAM window\n", start, u32(start + chunk - 1));
+						}
 					}
 					start += chunk;
 					remaining -= chunk;

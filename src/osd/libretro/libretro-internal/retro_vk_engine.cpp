@@ -35,6 +35,9 @@ constexpr uint64_t GPU_WAIT_TIMEOUT_NS = 5ULL * 1000 * 1000 * 1000;
 
 // frames that need under a quarter of the staging buffer, in a row, before the buffer is released to the size they need
 constexpr uint32_t STAGING_SHRINK_FRAMES = 300;
+// the pipeline cache is saved once this many submits of an engine have created no pipeline, so a session that ends
+// without a clean exit keeps them; a frame that created pipelines never saves
+constexpr uint32_t PIPELINE_CACHE_SAVE_SUBMITS = 300;
 
 double elapsed_ms(clock_type::time_point from)
 {
@@ -349,7 +352,7 @@ retro_vk_engine::retro_vk_engine(retro_vk::vk_device &device, const char *name)
 			m_timestamp_period = limits.timestampPeriod;
 			VkQueryPoolCreateInfo query_info = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
 			query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
-			query_info.queryCount = 2;
+			query_info.queryCount = 4;
 			m_timers = m_device.fn.create_query_pool(m_device.device(), &query_info, nullptr, &m_query_pool) == VK_SUCCESS;
 		}
 	}
@@ -412,9 +415,11 @@ bool retro_vk_engine::note_result(bool ok, int &streak, const char *what)
 	return false;
 }
 
+// zero for a handle that names no texture (the profile counts the updates of a refused frame too)
 int retro_vk_engine::texel_bytes(osd::gpu_handle texture) const
 {
-	return get_format_info(m_textures.find(texture)->second.desc.format).bytes;
+	const auto it = m_textures.find(texture);
+	return (it != m_textures.end()) ? get_format_info(it->second.desc.format).bytes : 0;
 }
 
 
@@ -654,14 +659,14 @@ void retro_vk_engine::destroy_shader_module(osd::gpu_handle handle)
 //**************************************************************************
 
 // Allocates the target when its size or depth mode changes, and reports whether
-// the target must be cleared before this frame's commands.
+// the target must be cleared before this frame's commands. The clear of a new
+// target or generation stays pending (m_clear_pending) until a frame that
+// records it has been submitted, so a frame refused after this call leaves it
+// to the next frame.
 bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &clear_color, bool &clear_depth)
 {
 	const bool realloc = !m_target_valid || target.width != m_target.width || target.height != m_target.height
 			|| target.depth != m_target.depth || target.msaa_samples != m_target.msaa_samples;
-
-	clear_color = !target.persistent;
-	clear_depth = target.depth == osd::gpu_depth_mode::ORDER || !target.persistent;
 
 	if (realloc)
 	{
@@ -671,9 +676,7 @@ bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &cl
 		const int samples = std::max(target.msaa_samples, 1);
 		const VkImageUsageFlags color_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 		bool ok = create_image(m_color, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT, samples)
-				&& create_image(m_scratch, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT, samples)
-				&& transition_to_general(m_color)
-				&& transition_to_general(m_scratch);
+				&& transition_to_general(m_color);
 		if (ok && target.msaa_samples > 0)
 			ok = create_image(m_resolve, VK_FORMAT_B8G8R8A8_UNORM, target.width, target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT)
 					&& transition_to_general(m_resolve);
@@ -699,17 +702,40 @@ bool retro_vk_engine::ensure_target(const osd::gpu_target_desc &target, bool &cl
 			fprintf(stderr, "[retro_vk_engine] target %dx%d, %d samples: colour+depth %.1f MB, resolve %.1f MB\n",
 					target.width, target.height, target.msaa_samples, pixels * samples * (4.0 + depth_bytes) / 1048576.0, pixels * 4.0 / 1048576.0);
 		}
-		clear_color = true;
-		clear_depth = true;
+		m_clear_pending = true;
 	}
 	else if (target.persistent && target.generation != m_target.generation)
 	{
-		clear_color = true;
-		clear_depth = true;
+		m_clear_pending = true;
 	}
 
+	clear_color = m_clear_pending || !target.persistent;
+	clear_depth = m_clear_pending || target.depth == osd::gpu_depth_mode::ORDER || !target.persistent;
 	m_target = target;
 	m_target_valid = true;
+	return true;
+}
+
+// Allocates the copy image that COPY_RECT goes through, at the target's size and sample count, the first time a frame
+// on this target copies. Only systems that copy inside the target pay for it.
+bool retro_vk_engine::ensure_scratch()
+{
+	if (m_scratch.handle != VK_NULL_HANDLE)
+		return true;
+	const int samples = std::max(m_target.msaa_samples, 1);
+	const VkImageUsageFlags color_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	if (!create_image(m_scratch, VK_FORMAT_B8G8R8A8_UNORM, m_target.width, m_target.height, color_usage, VK_IMAGE_ASPECT_COLOR_BIT, samples)
+			|| !transition_to_general(m_scratch))
+	{
+		destroy_image(m_scratch);
+		log_problem("render target", "copy image allocation failed");
+		return false;
+	}
+	if (m_target.msaa_samples > 0)
+	{
+		fprintf(stderr, "[retro_vk_engine] target %dx%d, %d samples: copy image %.1f MB\n",
+				m_target.width, m_target.height, m_target.msaa_samples, double(m_target.width) * m_target.height * samples * 4.0 / 1048576.0);
+	}
 	return true;
 }
 
@@ -736,6 +762,7 @@ bool retro_vk_engine::begin_recording()
 	if (m_device.fn.reset_command_pool(m_device.device(), m_pool, 0) != VK_SUCCESS)
 		return false;
 	m_locations_mode = -1;
+	m_resolved = false;
 	VkCommandBufferBeginInfo begin = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	return m_device.fn.begin_command_buffer(m_cmd, &begin) == VK_SUCCESS;
@@ -789,11 +816,15 @@ bool retro_vk_engine::wait_in_flight()
 
 void retro_vk_engine::read_timer()
 {
-	uint64_t ts[2] = { 0, 0 };
-	if (m_device.fn.get_query_pool_results(m_device.device(), m_query_pool, 0, 2, sizeof(ts), ts, sizeof(uint64_t),
+	// a frame sent in two parts has a pair of timestamps around each part; the time between the parts is not counted
+	uint64_t ts[4] = { 0, 0, 0, 0 };
+	const uint32_t count = m_query_split ? 4 : 2;
+	if (m_device.fn.get_query_pool_results(m_device.device(), m_query_pool, 0, count, sizeof(ts), ts, sizeof(uint64_t),
 			VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) == VK_SUCCESS)
 	{
-		const uint64_t ticks = (ts[1] - ts[0]) & m_timestamp_mask;
+		uint64_t ticks = (ts[1] - ts[0]) & m_timestamp_mask;
+		if (m_query_split)
+			ticks += (ts[3] - ts[2]) & m_timestamp_mask;
 		m_last_gpu_ms = double(ticks) * m_timestamp_period * 1e-6;
 		m_gpu_ms_ready = true;
 	}
@@ -814,6 +845,7 @@ void retro_vk_engine::record_barrier()
 // CLEAR and the target's own clear ignore the clip.
 void retro_vk_engine::record_clear(const float *rgba, bool color, bool depth)
 {
+	m_resolved = false;
 	if (m_target.msaa_samples > 0)
 	{
 		record_clear_multisample(rgba, color, depth);
@@ -898,9 +930,13 @@ void retro_vk_engine::record_clear_multisample(const float *rgba, bool color, bo
 	m_device.fn.cmd_end_rendering(m_cmd);
 }
 
-// Averages the samples of the colour target into the single-sample image the read-backs read.
+// Averages the samples of the colour target into the single-sample image the read-backs read. Read-backs with nothing
+// drawn, copied or cleared between them share one resolve.
 void retro_vk_engine::record_resolve()
 {
+	if (m_resolved)
+		return;
+	m_resolved = true;
 	VkImageResolve region = {};
 	region.srcSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
 	region.dstSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
@@ -914,6 +950,7 @@ void retro_vk_engine::record_resolve()
 // Copies through the scratch image, so the source is the target as it was before the command.
 void retro_vk_engine::record_copy(const osd::gpu_command &c)
 {
+	m_resolved = false;
 	VkImageCopy region = {};
 	region.srcSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
 	region.dstSubresource = layers(VK_IMAGE_ASPECT_COLOR_BIT);
@@ -1114,6 +1151,8 @@ bool retro_vk_engine::ensure_output_pipeline(bool per_sample)
 		log_problem("output pass", "pipeline creation failed");
 		return false;
 	}
+	m_device.set_pipeline_cache_dirty(true);
+	m_submits_since_pipeline = 0;
 	return true;
 }
 
@@ -1231,8 +1270,8 @@ bool retro_vk_engine::sample_count_supported(int samples, bool sampled) const
 }
 
 // Reduces the requested sample count to what the device supports and to the memory budget for the target (colour and
-// depth samples plus the single-sample resolve image). One sample is not
-// multisampling, so it becomes none.
+// depth samples, the copy image's samples once the engine has seen a COPY_RECT, plus the single-sample resolve image).
+// One sample is not multisampling, so it becomes none.
 void retro_vk_engine::fit_msaa(osd::gpu_target_desc &target)
 {
 	const int requested = target.msaa_samples;
@@ -1241,7 +1280,7 @@ void retro_vk_engine::fit_msaa(osd::gpu_target_desc &target)
 		samples /= 2;
 
 	const uint64_t pixels = uint64_t(std::max(target.width, 0)) * std::max(target.height, 0);
-	const uint64_t sample_bytes = (target.depth != osd::gpu_depth_mode::NONE) ? 8 : 4;
+	const uint64_t sample_bytes = ((target.depth != osd::gpu_depth_mode::NONE) ? 8 : 4) + (m_copies_seen ? 4 : 0);
 	while (samples >= 2 && pixels * samples * sample_bytes + pixels * 4 > m_msaa_budget)
 	{
 		samples /= 2;
@@ -1268,10 +1307,18 @@ bool retro_vk_engine::reads_samples(const osd::gpu_readback_rect &r) const
 
 // Overlay triangles drawn without multisampling are moved to pixel centres, so each covers the pixels whose centres it
 // contains rather than a sliver of samples. A triangle whose three vertices all sit on whole pixels (the pixel-aligned
-// rectangles) is left as it is. The vertices are the frame's copy in the staging buffer.
-void retro_vk_engine::snap_triangles(const osd::gpu_frame &frame, uint8_t *vertices) const
+// rectangles) is left as it is, and so is a triangle that a multisampled draw also uses, whose edges must stay where
+// they are for that draw. The vertices are the frame's copy in the staging buffer.
+void retro_vk_engine::snap_triangles(const osd::gpu_frame &frame, uint8_t *vertices)
 {
 	const size_t stride = size_t(5 + frame.varyings_per_vertex) * 4;
+	m_snap_shared.assign(frame.vertex_count, 0);
+	for (int i = 0; i < frame.command_count; i++)
+	{
+		const osd::gpu_command &c = frame.commands[i];
+		if (c.type == osd::gpu_command_type::DRAW && c.multisample)
+			std::fill_n(m_snap_shared.begin() + c.first_vertex, c.vertex_count, 1);
+	}
 	for (int i = 0; i < frame.command_count; i++)
 	{
 		const osd::gpu_command &c = frame.commands[i];
@@ -1279,11 +1326,14 @@ void retro_vk_engine::snap_triangles(const osd::gpu_frame &frame, uint8_t *verti
 			continue;
 		for (uint32_t t = 0; t + 3 <= c.vertex_count; t += 3)
 		{
+			const size_t first = size_t(c.first_vertex) + t;
+			if (m_snap_shared[first] || m_snap_shared[first + 1] || m_snap_shared[first + 2])
+				continue;
 			float *v[3] = {};
 			bool whole = true;
 			for (int k = 0; k < 3; k++)
 			{
-				v[k] = reinterpret_cast<float *>(vertices + (size_t(c.first_vertex) + t + k) * stride);
+				v[k] = reinterpret_cast<float *>(vertices + (first + k) * stride);
 				whole = whole && v[k][0] == std::floor(v[k][0]) && v[k][1] == std::floor(v[k][1]);
 			}
 			if (whole)
@@ -1416,12 +1466,19 @@ bool retro_vk_engine::submit_frame(const osd::gpu_frame &frame)
 {
 	if (failed())
 		return false;
+	bool ok;
 	if (!m_prof_on)
-		return note_result(submit_pending(frame), m_submit_failures, "submit");
-	m_prof_wait_ms = 0.0;
-	const auto start = clock_type::now();
-	const bool ok = note_result(submit_pending(frame), m_submit_failures, "submit");
-	profile_submit(frame, elapsed_ms(start));
+		ok = note_result(submit_pending(frame), m_submit_failures, "submit");
+	else
+	{
+		m_prof_wait_ms = 0.0;
+		const auto start = clock_type::now();
+		ok = note_result(submit_pending(frame), m_submit_failures, "submit");
+		profile_submit(frame, elapsed_ms(start));
+	}
+	// a run of submits without new pipelines: the cache has settled, so it is written out (once per change)
+	if (m_submits_since_pipeline < PIPELINE_CACHE_SAVE_SUBMITS && ++m_submits_since_pipeline == PIPELINE_CACHE_SAVE_SUBMITS)
+		save_pipeline_cache();
 	return ok;
 }
 
@@ -1480,8 +1537,8 @@ bool retro_vk_engine::create_pipeline_objects()
 	return true;
 }
 
-// Frees the pipelines, shader modules, descriptor pools and layouts, saving the pipeline cache first. Nothing is in
-// flight when the engine is destroyed, so the objects can go at once.
+// Frees the pipelines, shader modules, descriptor pools and layouts, saving the pipeline cache first (the cache itself
+// belongs to the device). Nothing is in flight when the engine is destroyed, so the objects can go at once.
 void retro_vk_engine::destroy_pipeline_objects()
 {
 	if (!m_device.valid())
@@ -1501,7 +1558,6 @@ void retro_vk_engine::destroy_pipeline_objects()
 		m_device.fn.destroy_descriptor_pool(dev, pool, nullptr);
 	m_desc_pools.clear();
 	m_desc_pool_next = 0;
-	m_device.fn.destroy_pipeline_cache(dev, m_pipeline_cache, nullptr);
 	for (size_t kind = 0; kind < 2; kind++)
 	{
 		m_device.fn.destroy_pipeline(dev, m_output_pipeline[kind], nullptr);
@@ -1526,6 +1582,10 @@ void retro_vk_engine::destroy_pipeline_objects()
 // and a cache that fails to create is left out: nothing depends on it.
 void retro_vk_engine::load_pipeline_cache()
 {
+	// a second engine on the device uses the cache the first one loaded
+	m_pipeline_cache = m_device.pipeline_cache();
+	if (m_pipeline_cache != VK_NULL_HANDLE)
+		return;
 	std::vector<uint8_t> data;
 	if (!m_cache_dir.empty())
 	{
@@ -1540,12 +1600,13 @@ void retro_vk_engine::load_pipeline_cache()
 	info.pInitialData = data.empty() ? nullptr : data.data();
 	if (m_device.fn.create_pipeline_cache(m_device.device(), &info, nullptr, &m_pipeline_cache) != VK_SUCCESS)
 		m_pipeline_cache = VK_NULL_HANDLE;
+	m_device.set_pipeline_cache(m_pipeline_cache);
 }
 
 // Writes the cache through a temporary file, so the file in place is always complete. A failure keeps the old file.
 void retro_vk_engine::save_pipeline_cache()
 {
-	if (!m_pipeline_cache_dirty || m_pipeline_cache == VK_NULL_HANDLE || m_cache_dir.empty())
+	if (!m_device.pipeline_cache_dirty() || m_pipeline_cache == VK_NULL_HANDLE || m_cache_dir.empty())
 		return;
 	const VkDevice dev = m_device.device();
 	size_t size = 0;
@@ -1570,7 +1631,7 @@ void retro_vk_engine::save_pipeline_cache()
 		}
 	}
 	if (std::rename(temp.c_str(), path.c_str()) == 0)
-		m_pipeline_cache_dirty = false;
+		m_device.set_pipeline_cache_dirty(false);
 	else
 		std::remove(temp.c_str());
 }
@@ -1767,7 +1828,8 @@ VkPipeline retro_vk_engine::get_pipeline(const pipeline_key &key, const program 
 		return VK_NULL_HANDLE;
 	}
 	m_pipelines.emplace(key, pipeline);
-	m_pipeline_cache_dirty = true;
+	m_device.set_pipeline_cache_dirty(true);
+	m_submits_since_pipeline = 0;
 	return pipeline;
 }
 
@@ -1916,6 +1978,7 @@ VkSampler retro_vk_engine::sampler_for(const texture &t) const
 // attachments load what is there, since the clears are recorded before the first draw.
 void retro_vk_engine::begin_rendering(bool use_depth)
 {
+	m_resolved = false;
 	m_recorded = recorded_state();
 	VkRenderingAttachmentInfo color = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
 	color.imageView = m_color.view;
@@ -2126,8 +2189,9 @@ void retro_vk_engine::profile_report()
 	m_prof = profile_window();
 }
 
-// Records one frame: uploads, the command list, then the trailing read-backs. A frame with read-backs is waited for
-// unless it defers them, and a frame with a READBACK command in its list always is. Any other frame stays in flight.
+// Records one frame: uploads, the command list, then the trailing read-backs. A frame with trailing read-backs is waited
+// for unless it defers them. A frame with READBACK commands in its list is waited for up to its last READBACK; the
+// commands after that stay in flight, unless the trailing read-backs are waited for. Any other frame stays in flight.
 bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 {
 	m_stats = osd::gpu_engine_stats();
@@ -2151,11 +2215,17 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 	}
 
 	const auto upload_start = clock_type::now();
+	bool copies = false;
+	for (int i = 0; i < frame.command_count && !copies; i++)
+		copies = frame.commands[i].type == osd::gpu_command_type::COPY_RECT;
+	m_copies_seen = m_copies_seen || copies;
 	osd::gpu_target_desc target = frame.target;
 	fit_msaa(target);
 	bool clear_color = false;
 	bool clear_depth = false;
 	if (!ensure_target(target, clear_color, clear_depth))
+		return false;
+	if (copies && !ensure_scratch())
 		return false;
 
 	// nothing of the previous frame is in flight, so its descriptor sets can all be freed
@@ -2195,6 +2265,7 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 	}
 	std::vector<size_t> command_at(frame.command_count, 0);
 	bool mid_list_readback = false;
+	int last_readback = -1;
 	bool output_pass = false;
 	for (int i = 0; i < frame.command_count; i++)
 	{
@@ -2208,6 +2279,7 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		{
 			command_at[i] = take(readback_bytes(c.readback));
 			mid_list_readback = true;
+			last_readback = i;
 			output_pass |= !c.readback.plain();
 		}
 	}
@@ -2253,35 +2325,64 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		std::memcpy(m_staging.data + vertex_at, frame.vertices, vertex_bytes);
 	if (target.msaa_samples > 0 && !centre_samples(target.msaa_samples))
 		snap_triangles(frame, m_staging.data + vertex_at);
-	std::memset(m_staging.data + state_at, 0, state_bytes);
-	if (frame.prim_state && frame.prim_count > 0 && frame.state_stride > 0)
+	if (frame.prim_state && frame.prim_count > 0 && frame.state_stride > 0 && frame.state_stride % 4 == 0)
 	{
-		for (uint32_t i = 0; i < frame.prim_count; i++)
-			std::memcpy(m_staging.data + state_at + size_t(i) * rec_texels * 16,
-					frame.prim_state + size_t(i) * frame.state_stride, size_t(frame.state_stride) * 4);
+		// a record of whole texels is laid out in the staging buffer as in the frame: one copy, no padding
+		std::memcpy(m_staging.data + state_at, frame.prim_state, size_t(frame.prim_count) * frame.state_stride * 4);
+	}
+	else
+	{
+		// the words of each record, then zeros up to the next whole texel
+		std::memset(m_staging.data + state_at, 0, state_bytes);
+		if (frame.prim_state && frame.prim_count > 0 && frame.state_stride > 0)
+		{
+			for (uint32_t i = 0; i < frame.prim_count; i++)
+				std::memcpy(m_staging.data + state_at + size_t(i) * rec_texels * 16,
+						frame.prim_state + size_t(i) * frame.state_stride, size_t(frame.state_stride) * 4);
+		}
 	}
 	m_stats.uploaded_bytes += vertex_bytes + state_bytes;
 	m_stats.upload_ms = elapsed_ms(upload_start);
 
-	const bool waits = mid_list_readback || (frame.readback_count > 0 && !frame.defer_readback);
+	// When commands follow the last READBACK command and the end of the frame is not waited for anyway, the frame is
+	// sent in two parts: the commands up to and including that READBACK, which is waited for and its pixels written,
+	// then the rest, which stays in flight like a frame without read-backs. Both parts use the same staging buffer and
+	// descriptor pools, which are only reused after the next submit has waited for the second part.
+	const bool end_waits = frame.readback_count > 0 && !frame.defer_readback;
+	const bool split = last_readback >= 0 && last_readback + 1 < frame.command_count && !end_waits;
+	const bool waits = (mid_list_readback && !split) || end_waits;
+	double split_readback_ms = 0.0;
 	const auto draw_start = clock_type::now();
 	if (!begin_recording())
 		return false;
 	m_rendering = false;
 	if (m_timers)
 	{
-		m_device.fn.cmd_reset_query_pool(m_cmd, m_query_pool, 0, 2);
+		m_device.fn.cmd_reset_query_pool(m_cmd, m_query_pool, 0, 4);
 		m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_query_pool, 0);
 	}
 	if (clear_color || clear_depth)
 		record_clear(target.clear_color, clear_color, clear_depth);
 	record_barrier();
 
+	// Copies into different textures need no ordering between them: each texture has its own image and memory, so their
+	// writes never overlap. A copy into a texture that an earlier copy of this group wrote waits for it (the regions may
+	// overlap), and the group as a whole is ordered before the commands by the barrier after it.
+	int group = 0;
 	for (int i = 0; i < frame.update_count; i++)
 	{
+		bool written = false;
+		for (int j = group; j < i && !written; j++)
+			written = frame.updates[j].texture == frame.updates[i].texture;
+		if (written)
+		{
+			record_barrier();
+			group = i;
+		}
 		record_update(frame.updates[i], update_at[i], m_staging);
-		record_barrier();
 	}
+	if (frame.update_count > 0)
+		record_barrier();
 	for (int i = 0; i < frame.command_count; i++)
 	{
 		const osd::gpu_command &c = frame.commands[i];
@@ -2343,6 +2444,28 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 			break;
 		}
 		record_barrier();
+
+		if (split && i == last_readback)
+		{
+			// the first part ends here (no render pass is open after a READBACK); it carries the target's clear
+			if (m_timers)
+				m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_query_pool, 1);
+			if (!end_recording(true))
+				return false;
+			m_clear_pending = false;
+			const auto read_start = clock_type::now();
+			for (int r = 0; r <= last_readback; r++)
+				if (frame.commands[r].type == osd::gpu_command_type::READBACK)
+					unpack_readback(frame.commands[r].readback, m_staging.data + command_at[r] + readback_lut_bytes(frame.commands[r].readback));
+			split_readback_ms = elapsed_ms(read_start);
+
+			// the second part: a new recording, so the sample locations and the render pass state are set again by the
+			// draws that need them (begin_recording() and begin_rendering() forget what was recorded); the clip is kept
+			if (!begin_recording())
+				return false;
+			if (m_timers)
+				m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_query_pool, 2);
+		}
 	}
 	end_rendering();
 
@@ -2354,13 +2477,15 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 	}
 	const double readback_record_ms = frame.readback_count > 0 ? elapsed_ms(readback_start) : 0.0;
 	if (m_timers)
-		m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_query_pool, 1);
+		m_device.fn.cmd_write_timestamp(m_cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_query_pool, split ? 3 : 1);
 	m_query_pending = m_timers;
+	m_query_split = split;
 
 	const bool ok = end_recording(waits);
 	m_stats.draw_ms = elapsed_ms(draw_start);
 	if (!ok)
 		return false;
+	m_clear_pending = false;
 	if (m_gpu_ms_ready)
 	{
 		m_stats.gpu_ms = m_last_gpu_ms;
@@ -2373,11 +2498,14 @@ bool retro_vk_engine::submit_pending(const osd::gpu_frame &frame)
 		m_pending.clear();
 		for (int i = 0; i < frame.readback_count; i++)
 			m_pending.push_back({ frame.readbacks[i], readback_at[i] });
-		m_stats.readback_ms = readback_record_ms;
+		m_stats.readback_ms = readback_record_ms + split_readback_ms;
 		return true;
 	}
 	if (!waits)
+	{
+		m_stats.readback_ms = split_readback_ms;
 		return true;
+	}
 
 	// the read-back time is zero for a frame that reads nothing back
 	const auto read_start = clock_type::now();

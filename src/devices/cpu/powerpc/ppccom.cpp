@@ -46,6 +46,23 @@ static constexpr uint64_t DOUBLE_ZERO = 0;
 
 static constexpr uint32_t CODEPAGE_SIZE = 0x1'0000'0000ULL / 4096 / 8;
 
+// MMU page geometry used for compiled code tracking
+static constexpr uint32_t MMU_PAGE_SHIFT = 12;
+static constexpr offs_t MMU_PAGE_BYTES = offs_t(1) << MMU_PAGE_SHIFT;
+static constexpr offs_t MMU_PAGE_OFFSET_MASK = MMU_PAGE_BYTES - 1;
+
+static constexpr uint32_t SPR60X_HID0_ICFI          = 0x0000'0800;
+
+// 740/750/755/7400/7410 thermal assist unit: THRM1/THRM2 and THRM3 bits
+static constexpr uint32_t SPR7XX_THRM_TIN           = 0x8000'0000;  // threshold exceeded (read-only)
+static constexpr uint32_t SPR7XX_THRM_TIV           = 0x4000'0000;  // comparison valid (read-only)
+static constexpr uint32_t SPR7XX_THRM_THRESHOLD     = 0x3f80'0000;
+static constexpr uint32_t SPR7XX_THRM_TID           = 0x0000'0004;
+static constexpr uint32_t SPR7XX_THRM_TIE           = 0x0000'0002;
+static constexpr uint32_t SPR7XX_THRM_V             = 0x0000'0001;
+static constexpr uint32_t SPR7XX_THRM3_SITV         = 0x0000'3ffe;
+static constexpr uint32_t SPR7XX_THRM3_E            = 0x0000'0001;
+
 /***************************************************************************
     PRIVATE GLOBAL VARIABLES
 ***************************************************************************/
@@ -579,6 +596,7 @@ void ppc_device::device_start()
 	// allocate the core from the near cache
 	m_core = m_drcuml.cache_alloc_near<internal_ppc_state>();
 	memset(m_core, 0, sizeof(internal_ppc_state));
+	m_core->fprf_result = FPRF_RESULT_NONE;
 
 	// init bitmap of which logical pages have compiled code
 	m_codepage_bits.assign(CODEPAGE_SIZE, 0);    // 0x1'0000'0000 / 4096 = 0x10'0000
@@ -615,6 +633,8 @@ void ppc_device::device_start()
 	std::fill(std::begin(m_exception), std::end(m_exception), nullptr);
 	std::fill(std::begin(m_exception_norecover), std::end(m_exception_norecover), nullptr);
 	m_fpscr_finish = nullptr;
+	m_fpscr_sync = nullptr;
+	m_fpscr_summary = nullptr;
 	m_code_write_reset = nullptr;
 
 	/* initialize the implementation state tables */
@@ -724,6 +744,7 @@ void ppc_device::device_start()
 	m_arg1 = 0;
 	m_fastram_select = 0;
 	memset(m_fastram, 0, sizeof(m_fastram));
+	ppcdrc_clear_fastram_windows();
 	m_hotspot_select = 0;
 	memset(m_hotspot, 0, sizeof(m_hotspot));
 
@@ -873,7 +894,7 @@ void ppc_device::device_start()
 
 	for (int regnum = 0; regnum < 32; regnum++)
 		state_add(PPC_F0 + regnum, string_format("F%d", regnum), m_core->f[regnum]).formatstr("%12s");
-	state_add(PPC_FPSCR, "FPSCR", m_core->fpscr).formatstr("%08X");
+	state_add(PPC_FPSCR, "FPSCR", m_core->fpscr).callimport().callexport().formatstr("%08X");
 
 	state_add(STATE_GENPC, "GENPC", m_core->pc).noshow();
 	state_add(STATE_GENPCBASE, "CURPC", m_core->pc).noshow();
@@ -1059,6 +1080,31 @@ void ppc_device::static_generate_memory_handlers()
 	}
 }
 
+/*-------------------------------------------------
+    fpscr_sync - fold a deferred FPRF result into
+    the FPSCR; the result is always finite.  This
+    must classify like the FPRF tail of the DRC's
+    fpscr_finish
+-------------------------------------------------*/
+
+void ppc_device::fpscr_sync()
+{
+	uint64_t const bits = m_core->fprf_result;
+	if (bits == FPRF_RESULT_NONE)
+		return;
+	m_core->fprf_result = FPRF_RESULT_NONE;
+
+	uint64_t const magnitude = bits & 0x7fffffffffffffffULL;
+	bool const negative = BIT(bits, 63);
+	uint32_t fprf;
+	if (magnitude == 0)
+		fprf = negative ? FPRF_NEG_ZERO : FPRF_POS_ZERO;
+	else if (magnitude < 0x0010000000000000ULL)
+		fprf = negative ? FPRF_NEG_DENORM : FPRF_POS_DENORM;
+	else
+		fprf = negative ? FPRF_NEG_NORMAL : FPRF_POS_NORMAL;
+	m_core->fpscr = (m_core->fpscr & ~FPRF_MASK) | fprf;
+}
 
 void ppc_device::state_export(const device_state_entry &entry)
 {
@@ -1083,6 +1129,10 @@ void ppc_device::state_export(const device_state_entry &entry)
 		case PPC_DEC:
 			m_debugger_temp = get_decrementer();
 			break;
+
+		case PPC_FPSCR:
+			fpscr_sync();
+			break;
 	}
 }
 
@@ -1090,6 +1140,10 @@ void ppc_device::state_import(const device_state_entry &entry)
 {
 	switch (entry.index())
 	{
+		case PPC_FPSCR:
+			m_core->fprf_result = FPRF_RESULT_NONE;
+			break;
+
 		case PPC_CR:
 			set_cr(m_debugger_temp);
 			break;
@@ -1258,12 +1312,26 @@ void ppc_device::device_stop()
 
 
 /*-------------------------------------------------
+    device_pre_save - fold any deferred FPRF into
+    the FPSCR, so the state holds its architected
+    value
+-------------------------------------------------*/
+
+void ppc_device::device_pre_save()
+{
+	fpscr_sync();
+}
+
+
+/*-------------------------------------------------
     device_post_load - rebuild the DRC mode,
     which is only updated when the MSR changes
 -------------------------------------------------*/
 
 void ppc_device::device_post_load()
 {
+	m_core->fprf_result = FPRF_RESULT_NONE;
+
 	// same as generate_update_mode()
 	const u32 msr = m_core->msr;
 	u32 mode = (m_flavor == PPC_MODEL_601) ? BIT(m_core->spr[SPR603_HID0], 3) : (msr & MSR_LE);
@@ -1293,6 +1361,7 @@ void ppc_device::device_post_load()
 void ppc_device::device_reset()
 {
 	m_checkstop = false;
+	m_core->fprf_result = FPRF_RESULT_NONE;
 
 	// the memory accessors are generated once, after the driver has added its fast RAM regions
 	if (!m_read8[0])
@@ -1314,6 +1383,12 @@ void ppc_device::device_reset()
 		m_core->spr[SPROEA_SRR1] = 0;
 		if (m_flavor != PPC_MODEL_601)
 			m_core->spr[SPR603_HID0] = 0;
+		if (has_thermal_assist())
+		{
+			m_core->spr[SPR7XX_THRM1] = 0;
+			m_core->spr[SPR7XX_THRM2] = 0;
+			m_core->spr[SPR7XX_THRM3] = 0;
+		}
 
 		// reset the decrementer
 		m_dec_zero_cycles = total_cycles();
@@ -1685,34 +1760,46 @@ void ppc_device::ppccom_tlb_fill()
 			vtlb_flush_address(m_core->param0);
 		return;
 	}
-	vtlb_fill(m_core->param0, address, m_core->param1);
+
+	tlb_fill_translated(m_core->param0, address, m_core->param1);
+}
+
+
+/*-------------------------------------------------
+    tlb_fill_translated - cache a translation,
+    first retiring a stale entry for the same
+    effective page that maps a different physical
+    page
+-------------------------------------------------*/
+
+void ppc_device::tlb_fill_translated(offs_t pc, offs_t address, int intent)
+{
+	// Supervisor BATs and user page tables can map the same effective page
+	// to different physical pages. Retire the cached permissions along with
+	// the old physical address before caching this translation.
+	vtlb_entry const entry = vtlb_table()[pc >> 12];
+	if ((entry & FLAG_VALID) && !(entry & FLAG_FIXED) && ((entry ^ address) & ~uint32_t(POWERPC_MIN_PAGE_MASK)))
+		vtlb_flush_address(pc);
+
+	vtlb_fill(pc, address, intent);
 }
 
 
 /*-------------------------------------------------
     compile_time_tlb_fill - fill the fetch TLB
     entry for a page the recompiler is about to
-    validate, without disturbing the 603 miss
-    registers the translation also writes
+    validate.  The 603 miss fields the translation
+    writes are scratch values that every miss path
+    recomputes just before it uses them, as the
+    frontend's fetch translation already assumes.
 -------------------------------------------------*/
 
 void ppc_device::compile_time_tlb_fill(offs_t pc)
 {
-	uint32_t const cmp = m_core->mmu603_cmp;
-	uint32_t const hash0 = m_core->mmu603_hash[0];
-	uint32_t const hash1 = m_core->mmu603_hash[1];
-	uint32_t const key = m_core->mmu603_key;
-
-	// code is compiled for the current mode, so fill with that mode's fetch permission
-	int const intention = ppccom_fetch_intention();
+	int const intent = ppccom_fetch_intention();
 	offs_t address = pc;
-	if (ppccom_translate_address_internal(intention, false, address) <= 1)
-		vtlb_fill(pc, address, intention);
-
-	m_core->mmu603_cmp = cmp;
-	m_core->mmu603_hash[0] = hash0;
-	m_core->mmu603_hash[1] = hash1;
-	m_core->mmu603_key = key;
+	if (ppccom_translate_address_internal(intent, false, address) <= 1)
+		tlb_fill_translated(pc, address, intent);
 }
 
 
@@ -1753,21 +1840,46 @@ void ppc_device::ppc_check_translation(ppc_entry_check *chk)
 
 
 /*-------------------------------------------------
-    invalidate_code_range - invalidate the hash
-    entries of every code page in an effective
-    address range whose translation changed, so
-    stale blocks are recompiled at next entry
-    instead of flushing the whole cache.  Returns
-    true if anything was invalidated.
+    invalidate_code_page - invalidate the hash
+    entries of every sequence that can share a
+    block with code from one effective page, so
+    those blocks are recompiled at next entry
+-------------------------------------------------*/
+
+void ppc_device::invalidate_code_page(uint32_t page)
+{
+	// A block holds sequences from up to COMPILE_BACKWARDS_BYTES before its
+	// entry point e to COMPILE_FORWARDS_BYTES after it, and branches between
+	// them are local jumps that skip the hash entry's checks.  A block holding
+	// code from address a therefore has e - COMPILE_BACKWARDS_BYTES <= a <=
+	// e + COMPILE_FORWARDS_BYTES, so its sequences start within
+	// COMPILE_BACKWARDS_BYTES + COMPILE_FORWARDS_BYTES of a on either side.
+	// Drop the hash entries of every sequence in that span around the page, not
+	// just those in the page itself.  Neighbouring pages keep their code page
+	// bits, as their contents didn't change.
+	constexpr offs_t BLOCK_REACH = COMPILE_BACKWARDS_BYTES + COMPILE_FORWARDS_BYTES;
+	offs_t const pagestart = offs_t(page) << MMU_PAGE_SHIFT;
+	offs_t const pageend = pagestart | MMU_PAGE_OFFSET_MASK;
+	m_drcuml.hash_invalidate_range(
+			pagestart - std::min<offs_t>(pagestart, BLOCK_REACH),
+			pageend + std::min<offs_t>(~pageend, BLOCK_REACH));
+}
+
+
+/*-------------------------------------------------
+    invalidate_code_range - invalidate the code
+    compiled from every page with compiled code in
+    an effective address range whose contents
+    changed (see invalidate_code_page), instead of
+    flushing the whole cache.  Returns true if
+    anything was invalidated.
 -------------------------------------------------*/
 
 bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 {
-	// A sequence starting on an earlier page can extend into this range, but
-	// invalidate_range() backs the start up by the maximum sequence length to
-	// catch those, so only the pages actually touched need to be considered.
-	uint32_t page = start >> 12;
-	uint32_t const lastpage = end >> 12;
+	// For a large range the widened ranges of adjacent pages simply overlap.
+	uint32_t page = start >> MMU_PAGE_SHIFT;
+	uint32_t const lastpage = end >> MMU_PAGE_SHIFT;
 	bool invalidated = false;
 
 	while (page <= lastpage)
@@ -1781,8 +1893,7 @@ bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 
 		if (BIT(m_codepage_bits[page >> 3], page & 7))
 		{
-			m_drcuml.hash_invalidate_range(page << 12, (page << 12) | 0xfff);
-			m_code_snapshots.erase(page);
+			invalidate_code_page(page);
 			invalidated = true;
 		}
 		page++;
@@ -1792,33 +1903,118 @@ bool ppc_device::invalidate_code_range(offs_t start, offs_t end)
 
 
 /*-------------------------------------------------
-    snapshot_code_page - remember the contents of
-    a page the DRC has just compiled code from
-    (see icache_flash_invalidate)
+    has_icache_flash_invalidate - true if HID0
+    has the ICFI bit, which is the case on every
+    OEA part except the 601
 -------------------------------------------------*/
 
-void ppc_device::snapshot_code_page(uint32_t page, uint32_t physbase)
+bool ppc_device::has_icache_flash_invalidate() const
 {
-	auto const [it, inserted] = m_code_snapshots.try_emplace(page);
-	if (!inserted && it->second.physbase == physbase)
-		return;
+	return (m_cap & PPCCAP_OEA) && (m_flavor != PPC_MODEL_601);
+}
 
+
+/*-------------------------------------------------
+    code_page_memory - host memory backing a whole
+    physical code page, or nullptr if reads of the
+    page aren't one contiguous block of host memory
+-------------------------------------------------*/
+
+const uint8_t *ppc_device::code_page_memory(offs_t physbase) const
+{
+	// A missing write pointer doesn't make a page read-only: a write tap (the
+	// BeBox's MPC105 snoop, a Lua tap, a watchpoint) or a write handler leaves
+	// RAM without one.  Compare what reads return instead; ROM simply never
+	// changes.
+
+	// The pointers address the bus-width unit holding the address, so compare
+	// against the start of the page's last 64-bit unit.
+	constexpr offs_t LAST_UNIT_OFFSET = MMU_PAGE_BYTES - 8;
+	auto const *const base = static_cast<const uint8_t *>(m_program->get_read_ptr(physbase));
+	if (!base || (static_cast<const uint8_t *>(m_program->get_read_ptr(physbase | LAST_UNIT_OFFSET)) != (base + LAST_UNIT_OFFSET)))
+		return nullptr;
+	return base;
+}
+
+
+/*-------------------------------------------------
+    code_snapshot_matches - true if a code page
+    snapshot still holds what its physical page
+    contains
+-------------------------------------------------*/
+
+bool ppc_device::code_snapshot_matches(uint32_t physpage, const code_page_snapshot &snap) const
+{
+	const uint8_t *const mem = code_page_memory(offs_t(physpage) << MMU_PAGE_SHIFT);
+	return mem && snap.bytes && std::equal(mem, mem + MMU_PAGE_BYTES, snap.bytes.get());
+}
+
+
+/*-------------------------------------------------
+    snapshot_code_page - remember the contents of
+    a writable physical page the DRC is compiling
+    code from, and the effective page it is
+    compiling it at (see icache_flash_invalidate)
+-------------------------------------------------*/
+
+void ppc_device::snapshot_code_page(uint32_t page, offs_t physbase)
+{
+	// A page that can't be read as one block of host memory can't be compared,
+	// so it gets an entry without bytes, marked dirty: every ICFI discards its
+	// code, as it did before snapshots.
+	const uint8_t *const mem = code_page_memory(physbase);
+
+	uint32_t const physpage = physbase >> MMU_PAGE_SHIFT;
+	auto const [it, inserted] = m_code_snapshots.try_emplace(physpage);
 	code_page_snapshot &snap = it->second;
-	snap.physbase = physbase;
-	if (!snap.words)
-		snap.words = std::make_unique<uint32_t []>(0x1000 / 4);
+	if (std::find(snap.logical.begin(), snap.logical.end(), page) == snap.logical.end())
+		snap.logical.push_back(page);
 
-	// Copy the page straight out of host memory when it is plain RAM or ROM
-	// (the common case), otherwise fetch it a word at a time.
-	const void *const src = (m_cap & PPCCAP_4XX) ? m_cache32.read_ptr(physbase) : m_cache64.read_ptr(physbase);
-	snap.raw = src != nullptr;
-	if (snap.raw)
+	if (inserted)
 	{
-		memcpy(snap.words.get(), src, 0x1000);
+		if (mem)
+		{
+			snap.bytes = std::make_unique<uint8_t []>(MMU_PAGE_BYTES);
+			std::copy_n(mem, MMU_PAGE_BYTES, snap.bytes.get());
+		}
+		else
+		{
+			snap.dirty = true;
+		}
 		return;
 	}
-	for (int i = 0; i < 0x1000 / 4; i++)
-		snap.words[i] = m_pr32(physbase + i * 4);
+
+	// Blocks compiled from this page earlier used the snapshot's bytes, and the
+	// code being compiled uses what memory holds now.  If the two differ, the
+	// snapshot can no longer vouch for every block compiled from the page, so
+	// the next ICFI has to discard them all.
+	if (!snap.dirty && !code_snapshot_matches(physpage, snap))
+		snap.dirty = true;
+}
+
+
+/*-------------------------------------------------
+    snapshot_sequence_pages - snapshot every page
+    an instruction sequence was compiled from
+-------------------------------------------------*/
+
+void ppc_device::snapshot_sequence_pages(const opcode_desc *first, const opcode_desc *last)
+{
+	if (!has_icache_flash_invalidate())
+		return;
+
+	uint32_t lastpage = ~uint32_t(0);
+	for (const opcode_desc *desc = first; ; desc = desc->next())
+	{
+		// a descriptor that faulted has no valid physical address
+		if (!desc->compiler_page_fault() && ((desc->pc >> MMU_PAGE_SHIFT) != lastpage))
+		{
+			lastpage = desc->pc >> MMU_PAGE_SHIFT;
+			snapshot_code_page(lastpage, desc->physpc & ~MMU_PAGE_OFFSET_MASK);
+		}
+		if (desc == last)
+			break;
+	}
 }
 
 
@@ -1831,30 +2027,26 @@ void ppc_device::snapshot_code_page(uint32_t page, uint32_t physbase)
 
 bool ppc_device::icache_flash_invalidate()
 {
-	std::vector<uint32_t> changed;
-	for (auto const &[page, snap] : m_code_snapshots)
+	bool discarded = false;
+	for (auto it = m_code_snapshots.begin(); it != m_code_snapshots.end(); )
 	{
-		if (snap.raw)
+		code_page_snapshot const &snap = it->second;
+		if (!snap.dirty && code_snapshot_matches(it->first, snap))
 		{
-			const void *const src = (m_cap & PPCCAP_4XX) ? m_cache32.read_ptr(snap.physbase) : m_cache64.read_ptr(snap.physbase);
-			if (!src || memcmp(snap.words.get(), src, 0x1000))
-				changed.push_back(page);
+			++it;
 			continue;
 		}
 
-		for (int i = 0; i < 0x1000 / 4; i++)
-		{
-			if (snap.words[i] != m_pr32(snap.physbase + i * 4))
-			{
-				changed.push_back(page);
-				break;
-			}
-		}
+		// discard the code compiled from this physical page at every effective
+		// page it was compiled at, whatever that page's code page bit says;
+		// invalidate_code_page() leaves the snapshots alone, so the iterator
+		// stays valid across these calls
+		for (uint32_t const page : snap.logical)
+			invalidate_code_page(page);
+		it = m_code_snapshots.erase(it);
+		discarded = true;
 	}
-
-	for (uint32_t page : changed)
-		invalidate_code_range(page << 12, (page << 12) | 0xfff);
-	return !changed.empty();
+	return discarded;
 }
 
 
@@ -2303,6 +2495,32 @@ void ppc_device::ppccom_execute_mfspr()
 		}
 	}
 
+	if (m_flavor == PPC_MODEL_740 || m_flavor == PPC_MODEL_750)
+	{
+		switch (m_core->param0)
+		{
+			/* same as MFTB (see MPC750 family manual, §2.3.5.1) */
+			case SPRVEA_TBL_R:
+				m_core->param1 = get_timebase();
+				return;
+			case SPRVEA_TBU_R:
+				m_core->param1 = get_timebase() >> 32;
+				return;
+		}
+	}
+
+	/* handle the thermal assist unit */
+	if (has_thermal_assist())
+	{
+		switch (m_core->param0)
+		{
+			case SPR7XX_THRM1:
+			case SPR7XX_THRM2:
+				m_core->param1 = get_thrm(m_core->param0);
+				return;
+		}
+	}
+
 	/* default handling */
 	osd_printf_debug("SPR %03X read\n", m_core->param0);
 	m_core->param1 = m_core->spr[m_core->param0];
@@ -2329,6 +2547,20 @@ void ppc_device::ppccom_execute_mtspr()
 			case SPROEA_EAR:
 			case SPROEA_DABR:
 				m_core->spr[m_core->param0] = m_core->param1;
+				return;
+
+			// register that affects the instruction cache
+			case SPR603_HID0:
+				m_core->spr[m_core->param0] = m_core->param1;
+
+				// Setting ICFI invalidates the whole instruction cache on every OEA
+				// part except the 601 (konamim2 relies on it).  Tell the DRC (via
+				// param1) whether compiled code was discarded, so it can leave the
+				// current block like it does after an icbi.  The 601 has no ICFI;
+				// its HID0 holds the little-endian mode bit, which the DRC picks
+				// up itself after the write.
+				if (has_icache_flash_invalidate())
+					m_core->param1 = ((m_core->param1 & SPR60X_HID0_ICFI) && icache_flash_invalidate()) ? 1 : 0;
 				return;
 
 			// registers that affect the memory map
@@ -2455,17 +2687,6 @@ void ppc_device::ppccom_execute_mtspr()
 				return;
 
 			/* write-through no-ops */
-			case SPR603_HID0:
-			{
-				m_core->spr[m_core->param0] = m_core->param1;
-
-				// Setting ICFI invalidates the whole instruction cache.  Tell the
-				// DRC (via param1) whether compiled code was discarded, so it can
-				// leave the current block like it does after an icbi.
-				const bool icfi = m_core->param1 & 0x00000800;
-				m_core->param1 = (icfi && icache_flash_invalidate()) ? 1 : 0;
-				return;
-			}
 			case SPR603_RPA:
 			case SPR603_IABR:
 			case SPR603_HID2:
@@ -2551,9 +2772,72 @@ void ppc_device::ppccom_execute_mtspr()
 		}
 	}
 
+	/* handle the thermal assist unit */
+	if (has_thermal_assist())
+	{
+		switch (m_core->param0)
+		{
+			/* TIN and TIV are set by the comparison */
+			case SPR7XX_THRM1:
+			case SPR7XX_THRM2:
+				m_core->spr[m_core->param0] = m_core->param1 & (SPR7XX_THRM_THRESHOLD | SPR7XX_THRM_TID | SPR7XX_THRM_TIE | SPR7XX_THRM_V);
+				return;
+
+			case SPR7XX_THRM3:
+				m_core->spr[m_core->param0] = m_core->param1 & (SPR7XX_THRM3_SITV | SPR7XX_THRM3_E);
+				return;
+		}
+	}
+
 	/* default handling */
 	osd_printf_debug("SPR %03X write = %08X\n", m_core->param0, m_core->param1);
 	m_core->spr[m_core->param0] = m_core->param1;
+}
+
+
+/*-------------------------------------------------
+    has_thermal_assist - whether this model has
+    the thermal assist unit (THRM1-THRM3)
+-------------------------------------------------*/
+
+bool ppc_device::has_thermal_assist() const
+{
+	switch (m_flavor)
+	{
+		case PPC_MODEL_740:
+		case PPC_MODEL_740P:
+		case PPC_MODEL_755:
+		case PPC_MODEL_7400:
+		case PPC_MODEL_7410:
+			return true;
+
+		default:
+			return false;
+	}
+}
+
+
+/*-------------------------------------------------
+    get_thrm - read THRM1 or THRM2: with the TAU
+    enabled in THRM3 and the register's V bit set,
+    the comparison against the threshold is always
+    complete (TIV) and TIN gives its result
+-------------------------------------------------*/
+
+uint32_t ppc_device::get_thrm(uint32_t spr) const
+{
+	// TODO: the die temperature is fixed; the sample interval (THRM3 SITV) and the thermal
+	// management exception aren't emulated
+	constexpr uint32_t JUNCTION_TEMPERATURE = 40; // degrees Celsius
+
+	uint32_t data = m_core->spr[spr];
+	if ((m_core->spr[SPR7XX_THRM3] & SPR7XX_THRM3_E) && (data & SPR7XX_THRM_V))
+	{
+		const uint32_t threshold = BIT(data, 23, 7);
+		const bool exceeded = (data & SPR7XX_THRM_TID) ? (JUNCTION_TEMPERATURE < threshold) : (JUNCTION_TEMPERATURE > threshold);
+		data |= SPR7XX_THRM_TIV | (exceeded ? SPR7XX_THRM_TIN : 0);
+	}
+	return data;
 }
 
 

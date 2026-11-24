@@ -19,7 +19,8 @@ bool namcos22_renderer::gpu_init()
 	{
 		m_gpu_checked = true;
 		m_gpu_engine = m_state.machine().osd().get_gpu_engine("namcos22");
-		if (m_gpu_engine && m_gpu_engine->caps().max_texture_size >= 4096)
+		// the shader's blend weight is a second fragment output, which needs dual-source blending
+		if (m_gpu_engine && m_gpu_engine->caps().max_texture_size >= 4096 && m_gpu_engine->caps().dual_source_blend)
 		{
 			osd::gpu_shader_module module;
 			module.name = "namcos22";
@@ -55,7 +56,7 @@ bool namcos22_renderer::gpu_init()
 			desc.format = osd::gpu_texture_format::R8UI;
 			m_gpu_tile_attr = m_gpu_engine->create_texture(desc);
 			desc.width = 4096;
-			desc.height = m_state.m_is_ss22 ? (m_state.m_gfxdecode->gfx(2)->elements() * 1024) / 4096 : 1;
+			desc.height = m_state.m_is_ss22 ? (m_state.m_gfxdecode->gfx(2)->elements() * 1024 + 4095) / 4096 : 1;
 			m_gpu_sprite_data = m_gpu_engine->create_texture(desc);
 			desc.format = osd::gpu_texture_format::RGBA8;
 			desc.width = 256;
@@ -74,7 +75,9 @@ bool namcos22_renderer::gpu_init()
 		}
 		else
 		{
-			if (m_gpu_engine)
+			if (m_gpu_engine && !m_gpu_engine->caps().dual_source_blend)
+				osd_printf_verbose("namcos22: host GPU path unavailable, the device has no dual-source blending\n");
+			else if (m_gpu_engine)
 				osd_printf_verbose("namcos22: host GPU path unavailable, the largest texture is %d texels and 4096 are needed\n", m_gpu_engine->caps().max_texture_size);
 			m_gpu_engine = nullptr;
 		}
@@ -356,15 +359,37 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 	if (prim_count > stamp_prims)
 	{
 		// The tile and sprite tables are fixed after video_start(); only the palette changes while running.
-		osd::gpu_texture_update updates[6];
+		osd::gpu_texture_update updates[8];
 		int update_count = 0;
+		// A byte table of 4096-byte rows: the whole rows straight from the source, a partial last row from a copy padded
+		// with zeros, so every row of the texture (created with the rows rounded up) is defined.
+		std::vector<u8> tails[2];
+		auto add_rows = [&updates, &update_count, &tails] (osd::gpu_handle texture, const u8 *source, size_t bytes, int tail)
+		{
+			const int rows = int(bytes / 4096);
+			if (rows > 0)
+			{
+				osd::gpu_texture_update &u = updates[update_count++];
+				u.texture = texture;
+				u.w = 4096;
+				u.h = rows;
+				u.data = source;
+			}
+			if (bytes % 4096)
+			{
+				tails[tail].assign(4096, 0);
+				std::copy_n(source + size_t(rows) * 4096, bytes % 4096, tails[tail].begin());
+				osd::gpu_texture_update &u = updates[update_count++];
+				u.texture = texture;
+				u.y = rows;
+				u.w = 4096;
+				u.h = 1;
+				u.data = tails[tail].data();
+			}
+		};
 		if (m_gpu_full_upload)
 		{
-			osd::gpu_texture_update &data = updates[update_count++];
-			data.texture = m_gpu_tile_data;
-			data.w = 4096;
-			data.h = m_state.m_gfxdecode->gfx(1)->elements() * 256 / 4096;
-			data.data = m_state.m_texture_tiledata;
+			add_rows(m_gpu_tile_data, m_state.m_texture_tiledata, size_t(m_state.m_gfxdecode->gfx(1)->elements()) * 256, 0);
 
 			osd::gpu_texture_update &map = updates[update_count++];
 			map.texture = m_gpu_tile_map;
@@ -382,11 +407,7 @@ bool namcos22_renderer::gpu_render_scene(screen_device &screen, bitmap_rgb32 &bi
 			{
 				gfx_element *const gfx = m_state.m_gfxdecode->gfx(2);
 				gfx->decode_all();
-				osd::gpu_texture_update &sprite = updates[update_count++];
-				sprite.texture = m_gpu_sprite_data;
-				sprite.w = 4096;
-				sprite.h = (gfx->elements() * 1024) / 4096;
-				sprite.data = gfx->get_data(0);
+				add_rows(m_gpu_sprite_data, gfx->get_data(0), size_t(gfx->elements()) * 1024, 1);
 			}
 		}
 		const pen_t *const pens = &m_state.m_palette->pen(0);

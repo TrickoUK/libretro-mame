@@ -259,7 +259,8 @@ void midzeus_renderer::gpu_reset()
 	m_gpu_commands.clear();
 	m_gpu_vertices.clear();
 	m_gpu_state.clear();
-	m_gpu_blobs.clear();
+	m_gpu_arena.clear();
+	m_gpu_patches.clear();
 	if (m_gpu_ready)
 	{
 		std::fill(m_gpu_fb_flags.begin(), m_gpu_fb_flags.end(), uint8_t(GPU_FB_COLOUR | GPU_FB_DEPTH));
@@ -282,7 +283,8 @@ void midzeus_renderer::gpu_latch_off(const char *reason)
 	m_gpu_commands.clear();
 	m_gpu_vertices.clear();
 	m_gpu_state.clear();
-	m_gpu_blobs.clear();
+	m_gpu_arena.clear();
+	m_gpu_patches.clear();
 }
 
 // A CPU write to the 8-byte block of wave RAM 0 at block. The bytes are uploaded before the next polygon.
@@ -343,6 +345,16 @@ int midzeus_renderer::gpu_page_row(const void *block) const
 	return int((uintptr_t(block) - uintptr_t(m_state.m_waveram[1].get())) / GPU_ROW_BYTES);
 }
 
+// Reserves bytes in the arena for the update command pushed next and returns where its copy goes. The command's data pointer is
+// set when the frame is sent, since the arena moves as it grows.
+uint8_t *midzeus_renderer::gpu_arena_alloc(size_t bytes)
+{
+	const size_t offset = (m_gpu_arena.size() + 3) & ~size_t(3);
+	m_gpu_arena.resize(offset + bytes);
+	m_gpu_patches.emplace_back(m_gpu_commands.size(), offset);
+	return m_gpu_arena.data() + offset;
+}
+
 // The texture bytes that changed since the last upload, copied into the command list at this point.
 void midzeus_renderer::gpu_flush_textures()
 {
@@ -350,10 +362,10 @@ void midzeus_renderer::gpu_flush_textures()
 	if (!m_gpu_texture_dirty->take(x, y, w, h))
 		return;
 
-	auto &blob = m_gpu_blobs.emplace_back(size_t(w) * h);
+	uint8_t *const copy = gpu_arena_alloc(size_t(w) * h);
 	const uint8_t *const ram = (const uint8_t *)m_state.m_waveram[0].get();
 	for (int row = 0; row < h; row++)
-		memcpy(&blob[size_t(row) * w], ram + size_t(y + row) * GPU_TEXTURE_WIDTH + x, w);
+		memcpy(&copy[size_t(row) * w], ram + size_t(y + row) * GPU_TEXTURE_WIDTH + x, w);
 
 	osd::gpu_texture_update update;
 	update.texture = m_gpu_texture;
@@ -361,7 +373,6 @@ void midzeus_renderer::gpu_flush_textures()
 	update.y = y;
 	update.w = w;
 	update.h = h;
-	update.data = blob.data();
 	m_gpu_commands.push_back(osd::gpu_command::make_update(update));
 }
 
@@ -386,9 +397,9 @@ void midzeus_renderer::gpu_flush_frame_buffer()
 			const int bx1 = (x1 + 1) / 2;
 			const int w = 4 * (bx1 - bx0);
 			const int h = y1 - y0;
-			auto &blob = m_gpu_blobs.emplace_back(size_t(w) * h * 2);
+			uint8_t *const copy = gpu_arena_alloc(size_t(w) * h * 2);
 			for (int row = 0; row < h; row++)
-				memcpy(&blob[size_t(row) * w * 2], ram + size_t(y0 + row) * GPU_ROW_BYTES + size_t(bx0) * GPU_BLOCK_BYTES, size_t(w) * 2);
+				memcpy(&copy[size_t(row) * w * 2], ram + size_t(y0 + row) * GPU_ROW_BYTES + size_t(bx0) * GPU_BLOCK_BYTES, size_t(w) * 2);
 
 			osd::gpu_texture_update update;
 			update.texture = m_gpu_fb_texture;
@@ -396,7 +407,6 @@ void midzeus_renderer::gpu_flush_frame_buffer()
 			update.y = y0;
 			update.w = w;
 			update.h = h;
-			update.data = blob.data();
 			m_gpu_commands.push_back(osd::gpu_command::make_update(update));
 		});
 
@@ -618,6 +628,10 @@ bool midzeus_renderer::gpu_submit(const osd::gpu_readback_rect *readback, bool f
 {
 	gpu_flush_frame_buffer();
 
+	// the update commands point into the arena, which is complete now
+	for (const auto &patch : m_gpu_patches)
+		m_gpu_commands[patch.first].update.data = m_gpu_arena.data() + patch.second;
+
 	osd::gpu_frame frame;
 	frame.target.width = GPU_TARGET_WIDTH * m_gpu_scale;
 	frame.target.height = GPU_TARGET_ROWS * m_gpu_scale;
@@ -641,7 +655,8 @@ bool midzeus_renderer::gpu_submit(const osd::gpu_readback_rect *readback, bool f
 	m_gpu_commands.clear();
 	m_gpu_vertices.clear();
 	m_gpu_state.clear();
-	m_gpu_blobs.clear();
+	m_gpu_arena.clear();
+	m_gpu_patches.clear();
 	m_gpu_clip_row = -1;
 	return ok;
 }

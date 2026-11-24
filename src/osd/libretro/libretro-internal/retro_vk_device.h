@@ -166,6 +166,13 @@ public:
 	VkSampleCountFlags sample_location_counts() const { return m_sample_location_counts; }
 	const VkPhysicalDeviceProperties &properties() const { return m_props; }
 
+	// The pipeline cache the engines on this device share, so they add to one cache and one file. The first engine
+	// creates it; it is destroyed with the device. dirty: pipelines were added since the cache was last saved.
+	VkPipelineCache pipeline_cache() const { return m_pipeline_cache; }
+	void set_pipeline_cache(VkPipelineCache cache) { m_pipeline_cache = cache; }
+	bool pipeline_cache_dirty() const { return m_pipeline_cache_dirty; }
+	void set_pipeline_cache_dirty(bool dirty) { m_pipeline_cache_dirty = dirty; }
+
 private:
 	bool load_instance_functions(std::string &report);
 
@@ -181,6 +188,8 @@ private:
 	VkSampleCountFlags m_sample_location_counts = 0;
 	VkPhysicalDeviceProperties m_props = {};
 	VkPhysicalDeviceMemoryProperties m_memory = {};
+	VkPipelineCache m_pipeline_cache = VK_NULL_HANDLE;
+	bool m_pipeline_cache_dirty = false;
 	bool m_failed = false;
 };
 
