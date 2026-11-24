@@ -48,9 +48,8 @@ void i82371eb_isa_device::device_add_mconfig(machine_config &config)
 {
 	i82371sb_isa_device::device_add_mconfig(config);
 
-	// TODO: bump to DS12885EXT
-//  DS12885EXT(config, m_rtc, XTAL(32'768));
-	MC146818(config, m_rtc, XTAL(32'768));
+	// 256 bytes of CMOS RAM: the standard bank at $70/$71 and the upper bank at $72/$73
+	DS12885EXT(config, m_rtc, XTAL(32'768));
 	m_rtc->irq().set(m_pic8259_slave, FUNC(pic8259_device::ir0_w));
 	m_rtc->set_century_index(0x32);
 }
@@ -65,6 +64,7 @@ void i82371eb_isa_device::device_start()
 	save_item(NAME(m_ddmabp));
 	save_item(NAME(m_gencfg));
 	save_item(NAME(m_rtccfg));
+	save_item(NAME(m_rtc_index));
 	save_item(NAME(m_ext_gatea20));
 	save_item(NAME(m_fast_gatea20));
 	save_item(NAME(m_port92));
@@ -80,6 +80,7 @@ void i82371eb_isa_device::device_reset()
 	std::fill(std::begin(m_ddmabp), std::end(m_ddmabp), 0);
 	std::fill(std::begin(m_gencfg), std::end(m_gencfg), 0);
 	m_rtccfg = 0x21;
+	m_rtc_index[0] = m_rtc_index[1] = 0;
 	m_fast_gatea20 = 0;
 	m_port92 = 0;
 }
@@ -226,7 +227,7 @@ void i82371eb_isa_device::pdmacfg_w(offs_t offset, u8 data)
 // cfr. Specification Update section 17 "RTC Index Register Read"
 template <unsigned E> u8 i82371eb_isa_device::rtc_index_r(offs_t offset)
 {
-	u8 res = m_rtc_index;
+	u8 res = m_rtc_index[E];
 	if (!E)
 		res |= (m_nmi_enabled << 7);
 	return res;
@@ -234,7 +235,7 @@ template <unsigned E> u8 i82371eb_isa_device::rtc_index_r(offs_t offset)
 
 template <unsigned E> void i82371eb_isa_device::rtc_index_w(offs_t offset, u8 data)
 {
-	m_rtc_index = data & 0x7f;
+	m_rtc_index[E] = data & 0x7f;
 	// TODO: documentation claims reversed meaning compared to any other southbridge
 	// i.e. NMI enable with bit 7 = 0, mistake or really the way it is?
 	if (!E)
@@ -243,13 +244,13 @@ template <unsigned E> void i82371eb_isa_device::rtc_index_w(offs_t offset, u8 da
 
 template <unsigned E> u8 i82371eb_isa_device::rtc_data_r(offs_t offset)
 {
-	const u8 rtc_address = m_rtc_index | (E << 7);
+	const u8 rtc_address = m_rtc_index[E] | (E << 7);
 	return m_rtc->read_direct(rtc_address);
 }
 
 template <unsigned E> void i82371eb_isa_device::rtc_data_w(offs_t offset, u8 data)
 {
-	const u8 rtc_address = m_rtc_index | (E << 7);
+	const u8 rtc_address = m_rtc_index[E] | (E << 7);
 	m_rtc->write_direct(rtc_address, data);
 }
 
@@ -294,17 +295,17 @@ void i82371eb_isa_device::map_extra(
 			);
 		}
 
-		// TODO: as above
+		// U128E: upper 128 bytes at $72/$73, with their own index register
 		if (BIT(m_rtccfg, 2))
 		{
-			//io_space->install_readwrite_handler(0x72, 0x72,
-			//  read8sm_delegate(*this, FUNC(i82371eb_isa_device::rtc_index_r<1>)),
-			//  write8sm_delegate(*this, FUNC(i82371eb_isa_device::rtc_index_w<1>))
-			//);
-			//io_space->install_readwrite_handler(0x73, 0x73,
-			//  read8sm_delegate(*this, FUNC(i82371eb_isa_device::rtc_data_r<1>)),
-			//  write8sm_delegate(*this, FUNC(i82371eb_isa_device::rtc_data_w<1>))
-			//);
+			io_space->install_readwrite_handler(0x72, 0x72,
+				read8sm_delegate(*this, FUNC(i82371eb_isa_device::rtc_index_r<1>)),
+				write8sm_delegate(*this, FUNC(i82371eb_isa_device::rtc_index_w<1>))
+			);
+			io_space->install_readwrite_handler(0x73, 0x73,
+				read8sm_delegate(*this, FUNC(i82371eb_isa_device::rtc_data_r<1>)),
+				write8sm_delegate(*this, FUNC(i82371eb_isa_device::rtc_data_w<1>))
+			);
 		}
 		else if (base_rtc)
 		{
