@@ -336,6 +336,8 @@ private:
 	// optional for debugging ...
 	optional_device<voodoo_2_pci_device> m_voodoo2;
 
+	virtual void machine_reset() override ATTR_COLD;
+
 	void midqslvr_map(address_map &map) ATTR_COLD;
 
 	static void superio_config(device_t *device);
@@ -391,6 +393,14 @@ void midway_quicksilver2_state::superio_config(device_t *device)
 	fdc.nrts2().set(":serport1", FUNC(rs232_port_device::write_rts));
 #endif
 }
+
+void midway_quicksilver2_state::machine_reset()
+{
+	// DRAM from 1 MB to the 15 MB ISA hole is always mapped straight through by the 82443BX
+	auto &host = *subdevice<i82443bx_host_device>("pci:00.0");
+	m_maincpu->set_fastram(0x00100000, 0x00efffff, &host.ram_base()[0x00100000 / 4]);
+}
+
 
 void midway_quicksilver2_state::midqslvr(machine_config &config)
 {

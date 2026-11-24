@@ -30,6 +30,7 @@ public:
 
 	template <typename T> void set_cpu_tag(T &&tag) { cpu.set_tag(std::forward<T>(tag)); }
 	void set_ram_size(int ram_size);
+	u32 *ram_base() { return m_ram; }
 	// take size and memory from a RAM device instead of set_ram_size
 	template <typename T> void set_ram_tag(T &&tag) { m_ram_dev.set_tag(std::forward<T>(tag)); }
 
