@@ -111,7 +111,14 @@ void smbus_device::hst_cnt_w(uint8_t data)
 	hst_cnt = data;
 	logerror("%s: hst_cnt = %02x\n", tag(), hst_cnt);
 
-	if(xmit_slva != 0xa1)
+	if(xmit_slva == 0x9d) {
+		// TMP experiment: thermal sensor receive byte
+		hst_sts = 2;
+		hst_d0 = 40;
+	} else if(xmit_slva == 0xd2) {
+		// TMP experiment: clock generator accepts block writes
+		hst_sts = 2;
+	} else if(xmit_slva != 0xa1)
 		hst_sts = 4;
 	else {
 		// bytes past the end of the supplied data read as erased EEPROM
