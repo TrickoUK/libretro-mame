@@ -143,9 +143,9 @@ int i386_device::x87_ck_over_stack()
 
 int i386_device::x87_mf_fault()
 {
-	if ((m_x87_sw & X87_SW_ES) && (m_cr[0] & CR0_NE)) // FIXME: 486 and up only
+	if ((m_x87_sw & X87_SW_ES) && (m_core.cr[0] & CR0_NE)) // FIXME: 486 and up only
 	{
-		m_ext = 1;
+		m_core.ext = 1;
 		i386_trap(FAULT_MF, 0);
 		return 1;
 	}
@@ -158,7 +158,7 @@ uint32_t i386_device::Getx87EA(uint8_t modrm, int rwn)
 	uint32_t ea;
 	modrm_to_EA(modrm, &ea, &segment);
 	uint32_t ret = i386_translate(segment, ea, rwn);
-	m_x87_ds = m_sreg[segment].selector;
+	m_x87_ds = m_core.sreg[segment].selector;
 	if (PROTECTED_MODE && !V8086_MODE)
 		m_x87_data_ptr = ea;
 	else
@@ -169,11 +169,11 @@ uint32_t i386_device::Getx87EA(uint8_t modrm, int rwn)
 
 int i386_device::x87_check_exceptions(bool store)
 {
-	m_x87_cs = m_sreg[CS].selector;
+	m_x87_cs = m_core.sreg[CS].selector;
 	if (PROTECTED_MODE && !V8086_MODE)
-		m_x87_inst_ptr = m_prev_eip;
+		m_x87_inst_ptr = m_core.prev_eip;
 	else
-		m_x87_inst_ptr = m_prev_eip + (m_x87_cs << 4);
+		m_x87_inst_ptr = m_core.prev_eip + (m_x87_cs << 4);
 
 	/* Update the exceptions from SoftFloat */
 	if (softfloat_exceptionFlags & softfloat_flag_invalid)
@@ -2019,7 +2019,7 @@ void i386_device::x87_fcmovb_sti(uint8_t modrm)
 
 	if (x87_mf_fault())
 		return;
-	if (m_CF == 1)
+	if (m_core.CF == 1)
 	{
 		if (X87_IS_ST_EMPTY(i))
 		{
@@ -2048,7 +2048,7 @@ void i386_device::x87_fcmove_sti(uint8_t modrm)
 
 	if (x87_mf_fault())
 		return;
-	if (m_ZF == 1)
+	if (m_core.ZF == 1)
 	{
 		if (X87_IS_ST_EMPTY(i))
 		{
@@ -2077,7 +2077,7 @@ void i386_device::x87_fcmovbe_sti(uint8_t modrm)
 
 	if (x87_mf_fault())
 		return;
-	if ((m_CF | m_ZF) == 1)
+	if ((m_core.CF | m_core.ZF) == 1)
 	{
 		if (X87_IS_ST_EMPTY(i))
 		{
@@ -2106,7 +2106,7 @@ void i386_device::x87_fcmovu_sti(uint8_t modrm)
 
 	if (x87_mf_fault())
 		return;
-	if (m_PF == 1)
+	if (m_core.PF == 1)
 	{
 		if (X87_IS_ST_EMPTY(i))
 		{
@@ -2135,7 +2135,7 @@ void i386_device::x87_fcmovnb_sti(uint8_t modrm)
 
 	if (x87_mf_fault())
 		return;
-	if (m_CF == 0)
+	if (m_core.CF == 0)
 	{
 		if (X87_IS_ST_EMPTY(i))
 		{
@@ -2164,7 +2164,7 @@ void i386_device::x87_fcmovne_sti(uint8_t modrm)
 
 	if (x87_mf_fault())
 		return;
-	if (m_ZF == 0)
+	if (m_core.ZF == 0)
 	{
 		if (X87_IS_ST_EMPTY(i))
 		{
@@ -2193,7 +2193,7 @@ void i386_device::x87_fcmovnbe_sti(uint8_t modrm)
 
 	if (x87_mf_fault())
 		return;
-	if ((m_CF == 0) && (m_ZF == 0))
+	if ((m_core.CF == 0) && (m_core.ZF == 0))
 	{
 		if (X87_IS_ST_EMPTY(i))
 		{
@@ -2222,7 +2222,7 @@ void i386_device::x87_fcmovnu_sti(uint8_t modrm)
 
 	if (x87_mf_fault())
 		return;
-	if (m_PF == 0)
+	if (m_core.PF == 0)
 	{
 		if (X87_IS_ST_EMPTY(i))
 		{
@@ -4272,9 +4272,9 @@ void i386_device::x87_fcomi_sti(uint8_t modrm)
 	if (X87_IS_ST_EMPTY(0) || X87_IS_ST_EMPTY(i))
 	{
 		x87_set_stack_underflow();
-		m_ZF = 1;
-		m_PF = 1;
-		m_CF = 1;
+		m_core.ZF = 1;
+		m_core.PF = 1;
+		m_core.CF = 1;
 	}
 	else
 	{
@@ -4285,22 +4285,22 @@ void i386_device::x87_fcomi_sti(uint8_t modrm)
 
 		if (extFloat80_is_nan(a) || extFloat80_is_nan(b))
 		{
-			m_ZF = 1;
-			m_PF = 1;
-			m_CF = 1;
+			m_core.ZF = 1;
+			m_core.PF = 1;
+			m_core.CF = 1;
 			m_x87_sw |= X87_SW_IE;
 		}
 		else
 		{
-			m_ZF = 0;
-			m_PF = 0;
-			m_CF = 0;
+			m_core.ZF = 0;
+			m_core.PF = 0;
+			m_core.CF = 0;
 
 			if (extF80_eq(a, b))
-				m_ZF = 1;
+				m_core.ZF = 1;
 
 			if (extF80_lt(a, b))
-				m_CF = 1;
+				m_core.CF = 1;
 		}
 	}
 
@@ -4321,9 +4321,9 @@ void i386_device::x87_fcomip_sti(uint8_t modrm)
 	if (X87_IS_ST_EMPTY(0) || X87_IS_ST_EMPTY(i))
 	{
 		x87_set_stack_underflow();
-		m_ZF = 1;
-		m_PF = 1;
-		m_CF = 1;
+		m_core.ZF = 1;
+		m_core.PF = 1;
+		m_core.CF = 1;
 	}
 	else
 	{
@@ -4334,22 +4334,22 @@ void i386_device::x87_fcomip_sti(uint8_t modrm)
 
 		if (extFloat80_is_nan(a) || extFloat80_is_nan(b))
 		{
-			m_ZF = 1;
-			m_PF = 1;
-			m_CF = 1;
+			m_core.ZF = 1;
+			m_core.PF = 1;
+			m_core.CF = 1;
 			m_x87_sw |= X87_SW_IE;
 		}
 		else
 		{
-			m_ZF = 0;
-			m_PF = 0;
-			m_CF = 0;
+			m_core.ZF = 0;
+			m_core.PF = 0;
+			m_core.CF = 0;
 
 			if (extF80_eq(a, b))
-				m_ZF = 1;
+				m_core.ZF = 1;
 
 			if (extF80_lt(a, b))
-				m_CF = 1;
+				m_core.CF = 1;
 		}
 	}
 
@@ -4371,9 +4371,9 @@ void i386_device::x87_fucomi_sti(uint8_t modrm)
 	if (X87_IS_ST_EMPTY(0) || X87_IS_ST_EMPTY(i))
 	{
 		x87_set_stack_underflow();
-		m_ZF = 1;
-		m_PF = 1;
-		m_CF = 1;
+		m_core.ZF = 1;
+		m_core.PF = 1;
+		m_core.CF = 1;
 	}
 	else
 	{
@@ -4384,28 +4384,28 @@ void i386_device::x87_fucomi_sti(uint8_t modrm)
 
 		if (floatx80_is_quiet_nan(a) || floatx80_is_quiet_nan(b))
 		{
-			m_ZF = 1;
-			m_PF = 1;
-			m_CF = 1;
+			m_core.ZF = 1;
+			m_core.PF = 1;
+			m_core.CF = 1;
 		}
 		else if (extFloat80_is_nan(a) || extFloat80_is_nan(b))
 		{
-			m_ZF = 1;
-			m_PF = 1;
-			m_CF = 1;
+			m_core.ZF = 1;
+			m_core.PF = 1;
+			m_core.CF = 1;
 			m_x87_sw |= X87_SW_IE;
 		}
 		else
 		{
-			m_ZF = 0;
-			m_PF = 0;
-			m_CF = 0;
+			m_core.ZF = 0;
+			m_core.PF = 0;
+			m_core.CF = 0;
 
 			if (extF80_eq(a, b))
-				m_ZF = 1;
+				m_core.ZF = 1;
 
 			if (extF80_lt(a, b))
-				m_CF = 1;
+				m_core.CF = 1;
 		}
 	}
 
@@ -4426,9 +4426,9 @@ void i386_device::x87_fucomip_sti(uint8_t modrm)
 	if (X87_IS_ST_EMPTY(0) || X87_IS_ST_EMPTY(i))
 	{
 		x87_set_stack_underflow();
-		m_ZF = 1;
-		m_PF = 1;
-		m_CF = 1;
+		m_core.ZF = 1;
+		m_core.PF = 1;
+		m_core.CF = 1;
 	}
 	else
 	{
@@ -4439,28 +4439,28 @@ void i386_device::x87_fucomip_sti(uint8_t modrm)
 
 		if (floatx80_is_quiet_nan(a) || floatx80_is_quiet_nan(b))
 		{
-			m_ZF = 1;
-			m_PF = 1;
-			m_CF = 1;
+			m_core.ZF = 1;
+			m_core.PF = 1;
+			m_core.CF = 1;
 		}
 		else if (extFloat80_is_nan(a) || extFloat80_is_nan(b))
 		{
-			m_ZF = 1;
-			m_PF = 1;
-			m_CF = 1;
+			m_core.ZF = 1;
+			m_core.PF = 1;
+			m_core.CF = 1;
 			m_x87_sw |= X87_SW_IE;
 		}
 		else
 		{
-			m_ZF = 0;
-			m_PF = 0;
-			m_CF = 0;
+			m_core.ZF = 0;
+			m_core.PF = 0;
+			m_core.CF = 0;
 
 			if (extF80_eq(a, b))
-				m_ZF = 1;
+				m_core.ZF = 1;
 
 			if (extF80_lt(a, b))
-				m_CF = 1;
+				m_core.CF = 1;
 		}
 	}
 
@@ -4736,7 +4736,7 @@ void i386_device::x87_fldenv(uint8_t modrm)
 	uint32_t ea = Getx87EA(modrm, 0);
 	uint32_t temp;
 
-	switch(((PROTECTED_MODE && !V8086_MODE) ? 1 : 0) | (m_operand_size & 1)<<1)
+	switch(((PROTECTED_MODE && !V8086_MODE) ? 1 : 0) | (m_core.operand_size & 1)<<1)
 	{
 		case 0: // 16-bit real mode
 			x87_write_cw(READ16(ea));
@@ -4791,14 +4791,14 @@ void i386_device::x87_fldenv(uint8_t modrm)
 
 	x87_check_exceptions();
 
-	CYCLES((m_cr[0] & CR0_PE) ? 34 : 44);
+	CYCLES((m_core.cr[0] & CR0_PE) ? 34 : 44);
 }
 
 void i386_device::x87_fstenv(uint8_t modrm)
 {
 	uint32_t ea = GetEA(modrm, 1);
 
-	switch(((PROTECTED_MODE && !V8086_MODE) ? 1 : 0) | (m_operand_size & 1)<<1)
+	switch(((PROTECTED_MODE && !V8086_MODE) ? 1 : 0) | (m_core.operand_size & 1)<<1)
 	{
 		case 0: // 16-bit real mode
 			WRITE16(ea + 0, m_x87_cw);
@@ -4839,14 +4839,14 @@ void i386_device::x87_fstenv(uint8_t modrm)
 	}
 	m_x87_cw |= 0x3f;   // set all masks
 
-	CYCLES((m_cr[0] & CR0_PE) ? 56 : 67);
+	CYCLES((m_core.cr[0] & CR0_PE) ? 56 : 67);
 }
 
 void i386_device::x87_fsave(uint8_t modrm)
 {
 	uint32_t ea = GetEA(modrm, 1);
 
-	switch(((PROTECTED_MODE && !V8086_MODE) ? 1 : 0) | (m_operand_size & 1)<<1)
+	switch(((PROTECTED_MODE && !V8086_MODE) ? 1 : 0) | (m_core.operand_size & 1)<<1)
 	{
 		case 0: // 16-bit real mode
 			WRITE16(ea + 0, m_x87_cw);
@@ -4894,7 +4894,7 @@ void i386_device::x87_fsave(uint8_t modrm)
 		WRITE80(ea + i*10, ST(i));
 	x87_reset();
 
-	CYCLES((m_cr[0] & CR0_PE) ? 56 : 67);
+	CYCLES((m_core.cr[0] & CR0_PE) ? 56 : 67);
 }
 
 void i386_device::x87_frstor(uint8_t modrm)
@@ -4904,7 +4904,7 @@ void i386_device::x87_frstor(uint8_t modrm)
 	uint32_t ea = GetEA(modrm, 0);
 	uint32_t temp;
 
-	switch(((PROTECTED_MODE && !V8086_MODE) ? 1 : 0) | (m_operand_size & 1)<<1)
+	switch(((PROTECTED_MODE && !V8086_MODE) ? 1 : 0) | (m_core.operand_size & 1)<<1)
 	{
 		case 0: // 16-bit real mode
 			x87_write_cw(READ16(ea));
@@ -4960,7 +4960,7 @@ void i386_device::x87_frstor(uint8_t modrm)
 	for (int i = 0; i < 8; ++i)
 		x87_write_stack(i, READ80(ea + i*10), false);
 
-	CYCLES((m_cr[0] & CR0_PE) ? 34 : 44);
+	CYCLES((m_core.cr[0] & CR0_PE) ? 34 : 44);
 }
 
 void i386_device::x87_fxch(uint8_t modrm)
@@ -5052,7 +5052,7 @@ void i386_device::x87_invalid(uint8_t modrm)
 
 void i386_device::i386_x87_group_d8()
 {
-	if (m_cr[0] & (CR0_TS | CR0_EM))
+	if (m_core.cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
 		return;
@@ -5063,7 +5063,7 @@ void i386_device::i386_x87_group_d8()
 
 void i386_device::i386_x87_group_d9()
 {
-	if (m_cr[0] & (CR0_TS | CR0_EM))
+	if (m_core.cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
 		return;
@@ -5074,7 +5074,7 @@ void i386_device::i386_x87_group_d9()
 
 void i386_device::i386_x87_group_da()
 {
-	if (m_cr[0] & (CR0_TS | CR0_EM))
+	if (m_core.cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
 		return;
@@ -5085,7 +5085,7 @@ void i386_device::i386_x87_group_da()
 
 void i386_device::i386_x87_group_db()
 {
-	if (m_cr[0] & (CR0_TS | CR0_EM))
+	if (m_core.cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
 		return;
@@ -5096,7 +5096,7 @@ void i386_device::i386_x87_group_db()
 
 void i386_device::i386_x87_group_dc()
 {
-	if (m_cr[0] & (CR0_TS | CR0_EM))
+	if (m_core.cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
 		return;
@@ -5107,7 +5107,7 @@ void i386_device::i386_x87_group_dc()
 
 void i386_device::i386_x87_group_dd()
 {
-	if (m_cr[0] & (CR0_TS | CR0_EM))
+	if (m_core.cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
 		return;
@@ -5118,7 +5118,7 @@ void i386_device::i386_x87_group_dd()
 
 void i386_device::i386_x87_group_de()
 {
-	if (m_cr[0] & (CR0_TS | CR0_EM))
+	if (m_core.cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
 		return;
@@ -5129,7 +5129,7 @@ void i386_device::i386_x87_group_de()
 
 void i386_device::i386_x87_group_df()
 {
-	if (m_cr[0] & (CR0_TS | CR0_EM))
+	if (m_core.cr[0] & (CR0_TS | CR0_EM))
 	{
 		i386_trap(FAULT_NM, 0);
 		return;

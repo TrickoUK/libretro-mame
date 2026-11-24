@@ -273,39 +273,71 @@ protected:
 	};
 	static const X86_OPCODE s_x86_opcode_table[];
 
-	I386_GPR m_reg;
-	I386_SREG m_sreg[6];
-	uint32_t m_eip;
-	uint32_t m_pc;
-	uint32_t m_prev_eip;
-	uint32_t m_eflags;
+	// CPU state read and written by the instruction handlers, kept in one block so that generated code can address it at fixed offsets
+	struct core_state {
+		I386_GPR reg;
+		I386_SREG sreg[6];
+		uint32_t eip;
+		uint32_t pc;
+		uint32_t prev_eip;
+		uint32_t eflags;
+		uint8_t CF;
+		uint8_t DF;
+		uint8_t SF;
+		uint8_t OF;
+		uint8_t ZF;
+		uint8_t PF;
+		uint8_t AF;
+		uint8_t IF;
+		uint8_t TF;
+		uint8_t IOP1;
+		uint8_t IOP2;
+		uint8_t NT;
+		uint8_t RF;
+		uint8_t VM;
+		uint8_t AC;
+		uint8_t VIF;
+		uint8_t VIP;
+		uint8_t ID;
+		uint8_t CPL;    // current privilege level
+		uint32_t cr[5]; // control registers
+		int cycles;
+		// per-instruction decode state shared by the handlers
+		int operand_size;
+		int xmm_operand_size;
+		int address_size;
+		int operand_prefix;
+		int address_prefix;
+		int segment_prefix;
+		int segment_override;
+		bool auto_clear_RF;
+		uint8_t performed_intersegment_jump;
+		uint8_t delayed_interrupt_enable;
+		bool lock;
+		// execution state tested between instructions
+		int halted;
+		uint8_t ext;            // external interrupt
+		uint8_t irq_state;
+		bool smm;
+		bool smi;
+		bool smi_latched;
+		bool nmi_masked;
+		bool nmi_latched;
+		offs_t a20_mask;
+		// lazy flag record, zero while the flag bytes above are current
+		uint32_t lf_kind;
+		uint32_t lf_res;
+		uint32_t lf_a;
+		uint32_t lf_b;
+		uint32_t lf_cf_in;
+		uint32_t fault;       // pending exception number, or 0xffffffff when none
+		uint32_t fault_code;  // error code of the pending exception
+	};
+
+	core_state m_core{};
 	uint32_t m_eflags_mask;
-	uint8_t m_CF;
-	uint8_t m_DF;
-	uint8_t m_SF;
-	uint8_t m_OF;
-	uint8_t m_ZF;
-	uint8_t m_PF;
-	uint8_t m_AF;
-	uint8_t m_IF;
-	uint8_t m_TF;
-	uint8_t m_IOP1;
-	uint8_t m_IOP2;
-	uint8_t m_NT;
-	uint8_t m_RF;
-	uint8_t m_VM;
-	uint8_t m_AC;
-	uint8_t m_VIF;
-	uint8_t m_VIP;
-	uint8_t m_ID;
 
-	uint8_t m_CPL;  // current privilege level
 
-	bool m_auto_clear_RF;
-	uint8_t m_performed_intersegment_jump;
-	uint8_t m_delayed_interrupt_enable;
-
-	uint32_t m_cr[5];       // Control registers
 	uint32_t m_dr[8];       // Debug registers
 	uint32_t m_tr[8];       // Test registers
 
@@ -322,27 +354,15 @@ protected:
 	I386_SEG_DESC m_task;     // Task register
 	I386_SEG_DESC m_ldtr;     // Local Descriptor Table Register
 
-	uint8_t m_ext;  // external interrupt
 
-	int m_halted;
 
-	int m_operand_size;
-	int m_xmm_operand_size;
-	int m_address_size;
-	int m_operand_prefix;
-	int m_address_prefix;
 
-	int m_segment_prefix;
-	int m_segment_override;
 
-	int m_cycles;
 	int m_base_cycles;
 	uint8_t m_opcode;
 
-	uint8_t m_irq_state;
 	address_space *m_program;
 	address_space *m_io;
-	offs_t m_a20_mask;
 	memory_access<32, 1, 0, ENDIANNESS_LITTLE>::cache macache16;
 	memory_access<32, 2, 0, ENDIANNESS_LITTLE>::cache macache32;
 
@@ -411,18 +431,12 @@ protected:
 	uint8_t *m_cycle_table_pm;
 	uint8_t *m_cycle_table_rm;
 
-	bool m_smm;
-	bool m_smi;
-	bool m_smi_latched;
-	bool m_nmi_masked;
-	bool m_nmi_latched;
 	uint32_t m_smbase;
 	devcb_write_line m_smiact;
 	devcb_write_line m_ferr_handler;
 	// coprocessor fitted, set by an I387_SLOT/I387SX_SLOT/I487SX_SLOT before start
 	friend class x87_slot_device;
 	bool m_x87_present;
-	bool m_lock;
 
 	// bytes in current opcode, debug only
 	uint8_t m_opcode_bytes[16];
@@ -445,19 +459,19 @@ protected:
 	inline uint8_t FETCH();
 	inline uint16_t FETCH16();
 	inline uint32_t FETCH32();
-	inline uint8_t READ8(uint32_t ea) { return READ8PL(ea, m_CPL); }
-	inline uint16_t READ16(uint32_t ea) { return READ16PL(ea, m_CPL); }
-	inline uint32_t READ32(uint32_t ea) { return READ32PL(ea, m_CPL); }
-	inline uint64_t READ64(uint32_t ea) { return READ64PL(ea, m_CPL); }
+	inline uint8_t READ8(uint32_t ea) { return READ8PL(ea, m_core.CPL); }
+	inline uint16_t READ16(uint32_t ea) { return READ16PL(ea, m_core.CPL); }
+	inline uint32_t READ32(uint32_t ea) { return READ32PL(ea, m_core.CPL); }
+	inline uint64_t READ64(uint32_t ea) { return READ64PL(ea, m_core.CPL); }
 	virtual uint8_t READ8PL(uint32_t ea, uint8_t privilege);
 	virtual uint16_t READ16PL(uint32_t ea, uint8_t privilege);
 	virtual uint32_t READ32PL(uint32_t ea, uint8_t privilege);
 	virtual uint64_t READ64PL(uint32_t ea, uint8_t privilege);
 	inline void WRITE_TEST(uint32_t ea);
-	inline void WRITE8(uint32_t ea, uint8_t value) { WRITE8PL(ea, m_CPL, value); }
-	inline void WRITE16(uint32_t ea, uint16_t value) { WRITE16PL(ea, m_CPL, value); }
-	inline void WRITE32(uint32_t ea, uint32_t value) { WRITE32PL(ea, m_CPL, value); }
-	inline void WRITE64(uint32_t ea, uint64_t value) { WRITE64PL(ea, m_CPL, value); }
+	inline void WRITE8(uint32_t ea, uint8_t value) { WRITE8PL(ea, m_core.CPL, value); }
+	inline void WRITE16(uint32_t ea, uint16_t value) { WRITE16PL(ea, m_core.CPL, value); }
+	inline void WRITE32(uint32_t ea, uint32_t value) { WRITE32PL(ea, m_core.CPL, value); }
+	inline void WRITE64(uint32_t ea, uint64_t value) { WRITE64PL(ea, m_core.CPL, value); }
 	virtual void WRITE8PL(uint32_t ea, uint8_t privilege, uint8_t value);
 	virtual void WRITE16PL(uint32_t ea, uint8_t privilege, uint16_t value);
 	virtual void WRITE32PL(uint32_t ea, uint8_t privilege, uint32_t value);

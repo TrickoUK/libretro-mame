@@ -101,39 +101,39 @@ void i386_device::i386_load_segment_descriptor(int segment )
 {
 	if (PROTECTED_MODE)
 	{
-		uint16_t old_flags = m_sreg[segment].flags;
+		uint16_t old_flags = m_core.sreg[segment].flags;
 		if (!V8086_MODE)
 		{
-			i386_load_protected_mode_segment(&m_sreg[segment], nullptr);
-			if (m_sreg[segment].selector)
+			i386_load_protected_mode_segment(&m_core.sreg[segment], nullptr);
+			if (m_core.sreg[segment].selector)
 			{
-				i386_set_descriptor_accessed(m_sreg[segment].selector);
-				m_sreg[segment].flags |= 0x0001;
+				i386_set_descriptor_accessed(m_core.sreg[segment].selector);
+				m_core.sreg[segment].flags |= 0x0001;
 			}
 		}
 		else
 		{
-			m_sreg[segment].base = m_sreg[segment].selector << 4;
-			m_sreg[segment].limit = 0xffff;
-			m_sreg[segment].flags = 0x00f3;
-			m_sreg[segment].d = 0;
-			m_sreg[segment].valid = true;
+			m_core.sreg[segment].base = m_core.sreg[segment].selector << 4;
+			m_core.sreg[segment].limit = 0xffff;
+			m_core.sreg[segment].flags = 0x00f3;
+			m_core.sreg[segment].d = 0;
+			m_core.sreg[segment].valid = true;
 		}
-		if (segment == CS && m_sreg[segment].flags != old_flags)
+		if (segment == CS && m_core.sreg[segment].flags != old_flags)
 			debugger_privilege_hook();
 	}
 	else
 	{
-		m_sreg[segment].base = m_sreg[segment].selector << 4;
-		m_sreg[segment].d = 0;
-		m_sreg[segment].valid = true;
+		m_core.sreg[segment].base = m_core.sreg[segment].selector << 4;
+		m_core.sreg[segment].d = 0;
+		m_core.sreg[segment].valid = true;
 
 		if (segment == CS)
 		{
-			if (!m_performed_intersegment_jump)
-				m_sreg[segment].base |= 0xfff00000;
+			if (!m_core.performed_intersegment_jump)
+				m_core.sreg[segment].base |= 0xfff00000;
 			if (m_cpu_version < 0x500)
-				m_sreg[segment].flags = 0x93;
+				m_core.sreg[segment].flags = 0x93;
 		}
 	}
 }
@@ -171,8 +171,8 @@ uint32_t i386_device::i386_get_stack_ptr(uint8_t privilege)
 /* Check segment register for validity when changing privilege level after an RETF */
 void i386_device::i386_check_sreg_validity(int reg)
 {
-	uint16_t selector = m_sreg[reg].selector;
-	uint8_t CPL = m_CPL;
+	uint16_t selector = m_core.sreg[reg].selector;
+	uint8_t CPL = m_core.CPL;
 	uint8_t DPL,RPL;
 	I386_SREG desc;
 	int invalid;
@@ -211,7 +211,7 @@ void i386_device::i386_check_sreg_validity(int reg)
 	/* if segment is invalid, then segment register is nulled */
 	if(invalid != 0)
 	{
-		m_sreg[reg].selector = 0;
+		m_core.sreg[reg].selector = 0;
 		i386_load_segment_descriptor(reg);
 	}
 }
@@ -222,20 +222,20 @@ int i386_device::i386_limit_check(int seg, uint32_t offset, int size)
 	{
 		// Include every byte of the access without wrapping a 32-bit offset.
 		const uint64_t last = uint64_t(offset) + size - 1;
-		if((m_sreg[seg].flags & 0x0018) == 0x0010 && m_sreg[seg].flags & 0x0004) // if expand-down data segment
+		if((m_core.sreg[seg].flags & 0x0018) == 0x0010 && m_core.sreg[seg].flags & 0x0004) // if expand-down data segment
 		{
-			const uint32_t upper_limit = m_sreg[seg].d ? 0xffffffffU : 0xffffU;
-			if((offset <= m_sreg[seg].limit) || (last > upper_limit))
+			const uint32_t upper_limit = m_core.sreg[seg].d ? 0xffffffffU : 0xffffU;
+			if((offset <= m_core.sreg[seg].limit) || (last > upper_limit))
 			{
-				LOGMASKED(LOG_LIMIT_CHECK, "Limit check at 0x%08x failed. Segment %04x, limit %08x, offset %08x (expand-down)\n",m_pc,m_sreg[seg].selector,m_sreg[seg].limit,offset);
+				LOGMASKED(LOG_LIMIT_CHECK, "Limit check at 0x%08x failed. Segment %04x, limit %08x, offset %08x (expand-down)\n",m_core.pc,m_core.sreg[seg].selector,m_core.sreg[seg].limit,offset);
 				return 1;
 			}
 		}
 		else
 		{
-			if(last > m_sreg[seg].limit)
+			if(last > m_core.sreg[seg].limit)
 			{
-				LOGMASKED(LOG_LIMIT_CHECK, "Limit check at 0x%08x failed. Segment %04x, limit %08x, offset %08x\n",m_pc,m_sreg[seg].selector,m_sreg[seg].limit,offset);
+				LOGMASKED(LOG_LIMIT_CHECK, "Limit check at 0x%08x failed. Segment %04x, limit %08x, offset %08x\n",m_core.pc,m_core.sreg[seg].selector,m_core.sreg[seg].limit,offset);
 				//machine().debug_break();
 				return 1;
 			}
@@ -249,12 +249,12 @@ void i386_device::i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault)
 	// Checks done when MOV changes a segment register in protected mode
 	uint8_t CPL,RPL,DPL;
 
-	CPL = m_CPL;
+	CPL = m_core.CPL;
 	RPL = selector & 0x0003;
 
 	if(!PROTECTED_MODE || V8086_MODE)
 	{
-		m_sreg[reg].selector = selector;
+		m_core.sreg[reg].selector = selector;
 		i386_load_segment_descriptor(reg);
 		if(fault) *fault = false;
 		return;
@@ -272,14 +272,14 @@ void i386_device::i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault)
 
 		if((selector & ~0x0003) == 0)
 		{
-			LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector is null.\n",m_pc);
+			LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector is null.\n",m_core.pc);
 			FAULT(FAULT_GP,0)
 		}
 		if(selector & 0x0004)  // LDT
 		{
 			if((selector & ~0x0007) > m_ldtr.limit)
 			{
-				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector is out of LDT bounds.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector is out of LDT bounds.\n",m_core.pc);
 				FAULT(FAULT_GP,selector & ~0x03)
 			}
 		}
@@ -287,28 +287,28 @@ void i386_device::i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault)
 		{
 			if((selector & ~0x0007) > m_gdtr.limit)
 			{
-				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector is out of GDT bounds.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector is out of GDT bounds.\n",m_core.pc);
 				FAULT(FAULT_GP,selector & ~0x03)
 			}
 		}
 		if (RPL != CPL)
 		{
-			LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector RPL does not equal CPL.\n",m_pc);
+			LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector RPL does not equal CPL.\n",m_core.pc);
 			FAULT(FAULT_GP,selector & ~0x03)
 		}
 		if(((stack.flags & 0x0018) != 0x10) && (stack.flags & 0x0002) != 0)
 		{
-			LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Segment is not a writable data segment.\n",m_pc);
+			LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Segment is not a writable data segment.\n",m_core.pc);
 			FAULT(FAULT_GP,selector & ~0x03)
 		}
 		if(DPL != CPL)
 		{
-			LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Segment DPL does not equal CPL.\n",m_pc);
+			LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Segment DPL does not equal CPL.\n",m_core.pc);
 			FAULT(FAULT_GP,selector & ~0x03)
 		}
 		if(!(stack.flags & 0x0080))
 		{
-			LOGMASKED(LOG_PM_FAULT_SS, "SReg Load (%08x): Segment is not present.\n",m_pc);
+			LOGMASKED(LOG_PM_FAULT_SS, "SReg Load (%08x): Segment is not present.\n",m_core.pc);
 			FAULT(FAULT_SS,selector & ~0x03)
 		}
 	}
@@ -318,7 +318,7 @@ void i386_device::i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault)
 
 		if((selector & ~0x0003) == 0)
 		{
-			m_sreg[reg].selector = selector;
+			m_core.sreg[reg].selector = selector;
 			i386_load_segment_descriptor(reg );
 			if(fault) *fault = false;
 			return;
@@ -333,7 +333,7 @@ void i386_device::i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault)
 		{
 			if((selector & ~0x0007) > m_ldtr.limit)
 			{
-				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector is out of LDT bounds.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector is out of LDT bounds.\n",m_core.pc);
 				FAULT(FAULT_GP,selector & ~0x03)
 			}
 		}
@@ -341,7 +341,7 @@ void i386_device::i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault)
 		{
 			if((selector & ~0x0007) > m_gdtr.limit)
 			{
-				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector is out of GDT bounds.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector is out of GDT bounds.\n",m_core.pc);
 				FAULT(FAULT_GP,selector & ~0x03)
 			}
 		}
@@ -349,7 +349,7 @@ void i386_device::i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault)
 		{
 			if((((desc.flags & 0x0002) != 0) && ((desc.flags & 0x0018) != 0x18)) || !(desc.flags & 0x10))
 			{
-				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Segment is not a data segment or readable code segment.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Segment is not a data segment or readable code segment.\n",m_core.pc);
 				FAULT(FAULT_GP,selector & ~0x03)
 			}
 		}
@@ -358,18 +358,18 @@ void i386_device::i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault)
 			// if data or non-conforming code segment
 			if((RPL > DPL) || (CPL > DPL))
 			{
-				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector RPL or CPL is not less or equal to segment DPL.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_GP, "SReg Load (%08x): Selector RPL or CPL is not less or equal to segment DPL.\n",m_core.pc);
 				FAULT(FAULT_GP,selector & ~0x03)
 			}
 		}
 		if(!(desc.flags & 0x0080))
 		{
-			LOGMASKED(LOG_PM_FAULT_NP, "SReg Load (%08x): Segment is not present.\n",m_pc);
+			LOGMASKED(LOG_PM_FAULT_NP, "SReg Load (%08x): Segment is not present.\n",m_core.pc);
 			FAULT(FAULT_NP,selector & ~0x03)
 		}
 	}
 
-	m_sreg[reg].selector = selector;
+	m_core.sreg[reg].selector = selector;
 	i386_load_segment_descriptor(reg );
 	if(fault) *fault = false;
 }
@@ -401,34 +401,34 @@ void i386_device::i386_trap(int irq, int irq_gate)
 	uint16_t segment;
 	int entry = irq * (PROTECTED_MODE ? 8 : 4);
 	int SetRPL;
-	m_lock = false;
+	m_core.lock = false;
 
 	debugger_exception_hook(irq);
 
-	m_cycles -= 4; // TODO: subtract correct number of cycles
+	m_core.cycles -= 4; // TODO: subtract correct number of cycles
 
 	if( !(PROTECTED_MODE) )
 	{
 		/* 16-bit */
 		PUSH16(oldflags & 0xffff );
-		PUSH16(m_sreg[CS].selector );
+		PUSH16(m_core.sreg[CS].selector );
 		if(irq == 3 || irq == 4 || irq == 9 || irq_gate == 1)
-			PUSH16(m_eip );
+			PUSH16(m_core.eip );
 		else
-			PUSH16(m_prev_eip );
+			PUSH16(m_core.prev_eip );
 
-		m_sreg[CS].selector = READ16(m_idtr.base + entry + 2 );
-		m_eip = READ16(m_idtr.base + entry );
+		m_core.sreg[CS].selector = READ16(m_idtr.base + entry + 2 );
+		m_core.eip = READ16(m_idtr.base + entry );
 
-		m_TF = 0;
-		m_IF = 0;
+		m_core.TF = 0;
+		m_core.IF = 0;
 	}
 	else
 	{
 		int type;
 		uint16_t flags;
 		I386_SREG desc;
-		uint8_t CPL = m_CPL, DPL; //, RPL = 0;
+		uint8_t CPL = m_core.CPL, DPL; //, RPL = 0;
 
 		/* 32-bit */
 		v1 = READ32PL(m_idtr.base + entry, 0);
@@ -441,28 +441,28 @@ void i386_device::i386_trap(int irq, int irq_gate)
 		/* segment privilege checks */
 		if(entry >= m_idtr.limit)
 		{
-			LOGMASKED(LOG_PM_FAULT_GP, "IRQ (%08x): Vector %02xh is past IDT limit.\n",m_pc,entry);
+			LOGMASKED(LOG_PM_FAULT_GP, "IRQ (%08x): Vector %02xh is past IDT limit.\n",m_core.pc,entry);
 			FAULT_EXP(FAULT_GP,entry+2)
 		}
 		/* segment must be interrupt gate, trap gate, or task gate */
 		if(type != 0x05 && type != 0x06 && type != 0x07 && type != 0x0e && type != 0x0f)
 		{
-			LOGMASKED(LOG_PM_FAULT_GP, "IRQ#%02x (%08x): Vector segment %04x is not an interrupt, trap or task gate.\n",irq,m_pc,segment);
+			LOGMASKED(LOG_PM_FAULT_GP, "IRQ#%02x (%08x): Vector segment %04x is not an interrupt, trap or task gate.\n",irq,m_core.pc,segment);
 			FAULT_EXP(FAULT_GP,entry+2)
 		}
 
-		if(m_ext == 0) // if software interrupt (caused by INT/INTO/INT3)
+		if(m_core.ext == 0) // if software interrupt (caused by INT/INTO/INT3)
 		{
 			if(((flags >> 5) & 0x03) < CPL)
 			{
-				LOGMASKED(LOG_PM_FAULT_GP, "IRQ (%08x): Software IRQ - gate DPL is less than CPL.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_GP, "IRQ (%08x): Software IRQ - gate DPL is less than CPL.\n",m_core.pc);
 				FAULT_EXP(FAULT_GP,entry+2)
 			}
 			if(V8086_MODE)
 			{
-				if((!m_IOP1 || !m_IOP2) && (m_opcode != 0xcc))
+				if((!m_core.IOP1 || !m_core.IOP2) && (m_opcode != 0xcc))
 				{
-					LOGMASKED(LOG_PM_FAULT_GP, "IRQ (%08x): Is in Virtual 8086 mode and IOPL != 3.\n",m_pc);
+					LOGMASKED(LOG_PM_FAULT_GP, "IRQ (%08x): Is in Virtual 8086 mode and IOPL != 3.\n",m_core.pc);
 					FAULT(FAULT_GP,0)
 				}
 
@@ -505,7 +505,7 @@ void i386_device::i386_trap(int irq, int irq_gate)
 				FAULT_EXP(FAULT_NP,segment & ~0x03);
 			}
 			if(!(irq == 3 || irq == 4 || irq == 9 || irq_gate == 1))
-				m_eip = m_prev_eip;
+				m_core.eip = m_core.prev_eip;
 			if(desc.flags & 0x08)
 				i386_task_switch(desc.selector,1);
 			else
@@ -518,21 +518,21 @@ void i386_device::i386_trap(int irq, int irq_gate)
 			memset(&desc, 0, sizeof(desc));
 			desc.selector = segment;
 			i386_load_protected_mode_segment(&desc,nullptr);
-			CPL = m_CPL;  // current privilege level
+			CPL = m_core.CPL;  // current privilege level
 			DPL = (desc.flags >> 5) & 0x03;  // descriptor privilege level
 //          RPL = segment & 0x03;  // requested privilege level
 
 			if((segment & ~0x03) == 0)
 			{
 				LOGMASKED(LOG_PM_FAULT_GP, "IRQ: Gate segment is null.\n");
-				FAULT_EXP(FAULT_GP,m_ext)
+				FAULT_EXP(FAULT_GP,m_core.ext)
 			}
 			if(segment & 0x04)
 			{
 				if((segment & ~0x07) > m_ldtr.limit)
 				{
 					LOGMASKED(LOG_PM_FAULT_GP, "IRQ: Gate segment is past LDT limit.\n");
-					FAULT_EXP(FAULT_GP,(segment & 0x03)+m_ext)
+					FAULT_EXP(FAULT_GP,(segment & 0x03)+m_core.ext)
 				}
 			}
 			else
@@ -540,18 +540,18 @@ void i386_device::i386_trap(int irq, int irq_gate)
 				if((segment & ~0x07) > m_gdtr.limit)
 				{
 					LOGMASKED(LOG_PM_FAULT_GP, "IRQ: Gate segment is past GDT limit.\n");
-					FAULT_EXP(FAULT_GP,(segment & 0x03)+m_ext)
+					FAULT_EXP(FAULT_GP,(segment & 0x03)+m_core.ext)
 				}
 			}
 			if((desc.flags & 0x0018) != 0x18)
 			{
 				LOGMASKED(LOG_PM_FAULT_GP, "IRQ: Gate descriptor is not a code segment.\n");
-				FAULT_EXP(FAULT_GP,(segment & 0x03)+m_ext)
+				FAULT_EXP(FAULT_GP,(segment & 0x03)+m_core.ext)
 			}
 			if((desc.flags & 0x0080) == 0)
 			{
 				LOGMASKED(LOG_PM_FAULT_NP, "IRQ: Gate segment is not present.\n");
-				FAULT_EXP(FAULT_NP,(segment & 0x03)+m_ext)
+				FAULT_EXP(FAULT_NP,(segment & 0x03)+m_core.ext)
 			}
 			if((desc.flags & 0x0004) == 0 && (DPL < CPL))
 			{
@@ -568,7 +568,7 @@ void i386_device::i386_trap(int irq, int irq_gate)
 				memset(&stack, 0, sizeof(stack));
 				stack.selector = i386_get_stack_segment(DPL);
 				i386_load_protected_mode_segment(&stack,nullptr);
-				oldSS = m_sreg[SS].selector;
+				oldSS = m_core.sreg[SS].selector;
 				if(flags & 0x0008)
 					oldESP = REG32(ESP);
 				else
@@ -576,14 +576,14 @@ void i386_device::i386_trap(int irq, int irq_gate)
 				if((stack.selector & ~0x03) == 0)
 				{
 					LOGMASKED(LOG_PM_FAULT_GP, "IRQ: New stack selector is null.\n");
-					FAULT_EXP(FAULT_GP,m_ext)
+					FAULT_EXP(FAULT_GP,m_core.ext)
 				}
 				if(stack.selector & 0x04)
 				{
 					if((stack.selector & ~0x07) > m_ldtr.base)
 					{
 						LOGMASKED(LOG_PM_FAULT_TS, "IRQ: New stack selector is past LDT limit.\n");
-						FAULT_EXP(FAULT_TS,(stack.selector & ~0x03)+m_ext)
+						FAULT_EXP(FAULT_TS,(stack.selector & ~0x03)+m_core.ext)
 					}
 				}
 				else
@@ -591,28 +591,28 @@ void i386_device::i386_trap(int irq, int irq_gate)
 					if((stack.selector & ~0x07) > m_gdtr.base)
 					{
 						LOGMASKED(LOG_PM_FAULT_TS, "IRQ: New stack selector is past GDT limit.\n");
-						FAULT_EXP(FAULT_TS,(stack.selector & ~0x03)+m_ext)
+						FAULT_EXP(FAULT_TS,(stack.selector & ~0x03)+m_core.ext)
 					}
 				}
 				if((stack.selector & 0x03) != DPL)
 				{
 					LOGMASKED(LOG_PM_FAULT_TS, "IRQ: New stack selector RPL is not equal to code segment DPL.\n");
-					FAULT_EXP(FAULT_TS,(stack.selector & ~0x03)+m_ext)
+					FAULT_EXP(FAULT_TS,(stack.selector & ~0x03)+m_core.ext)
 				}
 				if(((stack.flags >> 5) & 0x03) != DPL)
 				{
 					LOGMASKED(LOG_PM_FAULT_TS, "IRQ: New stack segment DPL is not equal to code segment DPL.\n");
-					FAULT_EXP(FAULT_TS,(stack.selector & ~0x03)+m_ext)
+					FAULT_EXP(FAULT_TS,(stack.selector & ~0x03)+m_core.ext)
 				}
 				if(((stack.flags & 0x0018) != 0x10) && (stack.flags & 0x0002) != 0)
 				{
 					LOGMASKED(LOG_PM_FAULT_TS, "IRQ: New stack segment is not a writable data segment.\n");
-					FAULT_EXP(FAULT_TS,(stack.selector & ~0x03)+m_ext) // #TS(stack selector + EXT)
+					FAULT_EXP(FAULT_TS,(stack.selector & ~0x03)+m_core.ext) // #TS(stack selector + EXT)
 				}
 				if((stack.flags & 0x0080) == 0)
 				{
 					LOGMASKED(LOG_PM_FAULT_SS, "IRQ: New stack segment is not present.\n");
-					FAULT_EXP(FAULT_SS,(stack.selector & ~0x03)+m_ext) // #TS(stack selector + EXT)
+					FAULT_EXP(FAULT_SS,(stack.selector & ~0x03)+m_core.ext) // #TS(stack selector + EXT)
 				}
 				newESP = i386_get_stack_ptr(DPL);
 				if(type & 0x08) // 32-bit gate
@@ -638,36 +638,36 @@ void i386_device::i386_trap(int irq, int irq_gate)
 					FAULT_EXP(FAULT_GP,0)
 				}
 				/* change CPL before accessing the stack */
-				m_CPL = DPL;
+				m_core.CPL = DPL;
 				/* check for page fault at new stack TODO: check if stack frame crosses page boundary */
 				WRITE_TEST(stack.base+newESP-1);
 				/* Load new stack segment descriptor */
-				m_sreg[SS].selector = stack.selector;
-				i386_load_protected_mode_segment(&m_sreg[SS],nullptr);
+				m_core.sreg[SS].selector = stack.selector;
+				i386_load_protected_mode_segment(&m_core.sreg[SS],nullptr);
 				i386_set_descriptor_accessed(stack.selector);
 				REG32(ESP) = newESP;
 				if(V8086_MODE)
 				{
-					//LOGMASKED(LOG_PM_EVENTS, "IRQ (%08x): Interrupt during V8086 task\n",m_pc);
+					//LOGMASKED(LOG_PM_EVENTS, "IRQ (%08x): Interrupt during V8086 task\n",m_core.pc);
 					if(type & 0x08)
 					{
-						PUSH32SEG(m_sreg[GS].selector & 0xffff);
-						PUSH32SEG(m_sreg[FS].selector & 0xffff);
-						PUSH32SEG(m_sreg[DS].selector & 0xffff);
-						PUSH32SEG(m_sreg[ES].selector & 0xffff);
+						PUSH32SEG(m_core.sreg[GS].selector & 0xffff);
+						PUSH32SEG(m_core.sreg[FS].selector & 0xffff);
+						PUSH32SEG(m_core.sreg[DS].selector & 0xffff);
+						PUSH32SEG(m_core.sreg[ES].selector & 0xffff);
 					}
 					else
 					{
-						PUSH16(m_sreg[GS].selector);
-						PUSH16(m_sreg[FS].selector);
-						PUSH16(m_sreg[DS].selector);
-						PUSH16(m_sreg[ES].selector);
+						PUSH16(m_core.sreg[GS].selector);
+						PUSH16(m_core.sreg[FS].selector);
+						PUSH16(m_core.sreg[DS].selector);
+						PUSH16(m_core.sreg[ES].selector);
 					}
-					m_sreg[GS].selector = 0;
-					m_sreg[FS].selector = 0;
-					m_sreg[DS].selector = 0;
-					m_sreg[ES].selector = 0;
-					m_VM = 0;
+					m_core.sreg[GS].selector = 0;
+					m_core.sreg[FS].selector = 0;
+					m_core.sreg[DS].selector = 0;
+					m_core.sreg[ES].selector = 0;
+					m_core.VM = 0;
 					i386_load_segment_descriptor(GS);
 					i386_load_segment_descriptor(FS);
 					i386_load_segment_descriptor(DS);
@@ -693,7 +693,7 @@ void i386_device::i386_trap(int irq, int irq_gate)
 				if((desc.flags & 0x0004) || (DPL == CPL))
 				{
 					/* IRQ to same privilege */
-					if(V8086_MODE && !m_ext)
+					if(V8086_MODE && !m_core.ext)
 					{
 						LOGMASKED(LOG_PM_FAULT_GP, "IRQ: Gate to same privilege from VM86 mode.\n");
 						FAULT_EXP(FAULT_GP,segment & ~0x03);
@@ -729,20 +729,20 @@ void i386_device::i386_trap(int irq, int irq_gate)
 			if(type != 0x0e && type != 0x0f)  // if not 386 interrupt or trap gate
 			{
 				PUSH16(oldflags & 0xffff );
-				PUSH16(m_sreg[CS].selector );
+				PUSH16(m_core.sreg[CS].selector );
 				if(irq == 3 || irq == 4 || irq == 9 || irq_gate == 1)
-					PUSH16(m_eip );
+					PUSH16(m_core.eip );
 				else
-					PUSH16(m_prev_eip );
+					PUSH16(m_core.prev_eip );
 			}
 			else
 			{
 				PUSH32((oldflags & 0x00ffffff) | (1 << 16) ); //386 faults always have the RF bit set in the saved flags register.
-				PUSH32SEG(m_sreg[CS].selector );
+				PUSH32SEG(m_core.sreg[CS].selector );
 				if(irq == 3 || irq == 4 || irq == 9 || irq_gate == 1)
-					PUSH32(m_eip );
+					PUSH32(m_core.eip );
 				else
-					PUSH32(m_prev_eip );
+					PUSH32(m_core.prev_eip );
 			}
 		}
 		catch(uint64_t e)
@@ -751,18 +751,18 @@ void i386_device::i386_trap(int irq, int irq_gate)
 			throw e;
 		}
 		if(SetRPL != 0)
-			segment = (segment & ~0x03) | m_CPL;
-		m_sreg[CS].selector = segment;
-		m_eip = offset;
+			segment = (segment & ~0x03) | m_core.CPL;
+		m_core.sreg[CS].selector = segment;
+		m_core.eip = offset;
 
 		if(type == 0x0e || type == 0x06)
-			m_IF = 0;
-		m_TF = 0;
-		m_NT = 0;
+			m_core.IF = 0;
+		m_core.TF = 0;
+		m_core.NT = 0;
 	}
 
 	i386_load_segment_descriptor(CS);
-	CHANGE_PC(m_eip);
+	CHANGE_PC(m_core.eip);
 
 }
 
@@ -801,7 +801,7 @@ void i386_device::i386_trap_with_error(int irq, int irq_gate, int trap_level, ui
 		trap_level++;
 		if(trap_level == 1)
 		{
-			m_ext = 1;
+			m_core.ext = 1;
 			LOGMASKED(LOG_PM_FAULT_DF, "IRQ: Double fault.\n");
 			i386_trap_with_error(FAULT_DF,0,trap_level,0);
 			return;
@@ -842,7 +842,7 @@ void i386_device::i286_task_switch(uint16_t selector, uint8_t nested)
 
 	/* Save the state of the current task in the current TSS (TR register base) */
 	tss = m_task.base;
-	WRITE16(tss+0x0e,m_eip & 0x0000ffff);
+	WRITE16(tss+0x0e,m_core.eip & 0x0000ffff);
 	WRITE16(tss+0x10,get_flags() & 0x0000ffff);
 	WRITE16(tss+0x12,REG16(AX));
 	WRITE16(tss+0x14,REG16(CX));
@@ -852,10 +852,10 @@ void i386_device::i286_task_switch(uint16_t selector, uint8_t nested)
 	WRITE16(tss+0x1c,REG16(BP));
 	WRITE16(tss+0x1e,REG16(SI));
 	WRITE16(tss+0x20,REG16(DI));
-	WRITE16(tss+0x22,m_sreg[ES].selector);
-	WRITE16(tss+0x24,m_sreg[CS].selector);
-	WRITE16(tss+0x26,m_sreg[SS].selector);
-	WRITE16(tss+0x28,m_sreg[DS].selector);
+	WRITE16(tss+0x22,m_core.sreg[ES].selector);
+	WRITE16(tss+0x24,m_core.sreg[CS].selector);
+	WRITE16(tss+0x26,m_core.sreg[SS].selector);
+	WRITE16(tss+0x28,m_core.sreg[DS].selector);
 
 	old_task = m_task.segment;
 
@@ -869,7 +869,7 @@ void i386_device::i286_task_switch(uint16_t selector, uint8_t nested)
 	m_task.flags = seg.flags;
 
 	/* Set TS bit in CR0 */
-	m_cr[0] |= CR0_TS;
+	m_core.cr[0] |= CR0_TS;
 
 	/* Load incoming task state from the new task's TSS */
 	tss = m_task.base;
@@ -879,7 +879,7 @@ void i386_device::i286_task_switch(uint16_t selector, uint8_t nested)
 	m_ldtr.limit = seg.limit;
 	m_ldtr.base = seg.base;
 	m_ldtr.flags = seg.flags;
-	m_eip = READ16(tss+0x0e);
+	m_core.eip = READ16(tss+0x0e);
 	set_flags(READ16(tss+0x10));
 	REG16(AX) = READ16(tss+0x12);
 	REG16(CX) = READ16(tss+0x14);
@@ -889,13 +889,13 @@ void i386_device::i286_task_switch(uint16_t selector, uint8_t nested)
 	REG16(BP) = READ16(tss+0x1c);
 	REG16(SI) = READ16(tss+0x1e);
 	REG16(DI) = READ16(tss+0x20);
-	m_sreg[ES].selector = READ16(tss+0x22) & 0xffff;
+	m_core.sreg[ES].selector = READ16(tss+0x22) & 0xffff;
 	i386_load_segment_descriptor(ES);
-	m_sreg[CS].selector = READ16(tss+0x24) & 0xffff;
+	m_core.sreg[CS].selector = READ16(tss+0x24) & 0xffff;
 	i386_load_segment_descriptor(CS);
-	m_sreg[SS].selector = READ16(tss+0x26) & 0xffff;
+	m_core.sreg[SS].selector = READ16(tss+0x26) & 0xffff;
 	i386_load_segment_descriptor(SS);
-	m_sreg[DS].selector = READ16(tss+0x28) & 0xffff;
+	m_core.sreg[DS].selector = READ16(tss+0x28) & 0xffff;
 	i386_load_segment_descriptor(DS);
 
 	/* Set the busy bit in the new task's descriptor */
@@ -915,13 +915,13 @@ void i386_device::i286_task_switch(uint16_t selector, uint8_t nested)
 	if(nested != 0)
 	{
 		WRITE16(tss+0,old_task);
-		m_NT = 1;
+		m_core.NT = 1;
 	}
-	CHANGE_PC(m_eip);
+	CHANGE_PC(m_core.eip);
 
-	m_CPL = (m_sreg[SS].flags >> 5) & 3;
+	m_core.CPL = (m_core.sreg[SS].flags >> 5) & 3;
 
-	m_auto_clear_RF = false;
+	m_core.auto_clear_RF = false;
 //  printf("286 Task Switch from selector %04x to %04x\n",old_task,selector);
 }
 
@@ -931,7 +931,7 @@ void i386_device::i386_task_switch(uint16_t selector, uint8_t nested)
 	I386_SREG seg;
 	uint16_t old_task;
 	uint8_t ar_byte;  // access rights byte
-	uint32_t oldcr3 = m_cr[3];
+	uint32_t oldcr3 = m_core.cr[3];
 
 	/* TODO: Task State Segment privilege checks */
 
@@ -952,8 +952,8 @@ void i386_device::i386_task_switch(uint16_t selector, uint8_t nested)
 
 	/* Save the state of the current task in the current TSS (TR register base) */
 	tss = m_task.base;
-	WRITE32(tss+0x1c,m_cr[3]);  // correct?
-	WRITE32(tss+0x20,m_eip);
+	WRITE32(tss+0x1c,m_core.cr[3]);  // correct?
+	WRITE32(tss+0x20,m_core.eip);
 	WRITE32(tss+0x24,get_flags());
 	WRITE32(tss+0x28,REG32(EAX));
 	WRITE32(tss+0x2c,REG32(ECX));
@@ -963,12 +963,12 @@ void i386_device::i386_task_switch(uint16_t selector, uint8_t nested)
 	WRITE32(tss+0x3c,REG32(EBP));
 	WRITE32(tss+0x40,REG32(ESI));
 	WRITE32(tss+0x44,REG32(EDI));
-	WRITE32(tss+0x48,m_sreg[ES].selector);
-	WRITE32(tss+0x4c,m_sreg[CS].selector);
-	WRITE32(tss+0x50,m_sreg[SS].selector);
-	WRITE32(tss+0x54,m_sreg[DS].selector);
-	WRITE32(tss+0x58,m_sreg[FS].selector);
-	WRITE32(tss+0x5c,m_sreg[GS].selector);
+	WRITE32(tss+0x48,m_core.sreg[ES].selector);
+	WRITE32(tss+0x4c,m_core.sreg[CS].selector);
+	WRITE32(tss+0x50,m_core.sreg[SS].selector);
+	WRITE32(tss+0x54,m_core.sreg[DS].selector);
+	WRITE32(tss+0x58,m_core.sreg[FS].selector);
+	WRITE32(tss+0x5c,m_core.sreg[GS].selector);
 
 	old_task = m_task.segment;
 
@@ -982,7 +982,7 @@ void i386_device::i386_task_switch(uint16_t selector, uint8_t nested)
 	m_task.flags = seg.flags;
 
 	/* Set TS bit in CR0 */
-	m_cr[0] |= CR0_TS;
+	m_core.cr[0] |= CR0_TS;
 
 	/* Load incoming task state from the new task's TSS */
 	tss = m_task.base;
@@ -992,7 +992,7 @@ void i386_device::i386_task_switch(uint16_t selector, uint8_t nested)
 	m_ldtr.limit = seg.limit;
 	m_ldtr.base = seg.base;
 	m_ldtr.flags = seg.flags;
-	m_eip = READ32(tss+0x20);
+	m_core.eip = READ32(tss+0x20);
 	set_flags(READ32(tss+0x24));
 	REG32(EAX) = READ32(tss+0x28);
 	REG32(ECX) = READ32(tss+0x2c);
@@ -1002,27 +1002,27 @@ void i386_device::i386_task_switch(uint16_t selector, uint8_t nested)
 	REG32(EBP) = READ32(tss+0x3c);
 	REG32(ESI) = READ32(tss+0x40);
 	REG32(EDI) = READ32(tss+0x44);
-	m_sreg[ES].selector = READ32(tss+0x48) & 0xffff;
+	m_core.sreg[ES].selector = READ32(tss+0x48) & 0xffff;
 	i386_load_segment_descriptor(ES);
-	m_sreg[CS].selector = READ32(tss+0x4c) & 0xffff;
+	m_core.sreg[CS].selector = READ32(tss+0x4c) & 0xffff;
 	i386_load_segment_descriptor(CS);
-	m_sreg[SS].selector = READ32(tss+0x50) & 0xffff;
+	m_core.sreg[SS].selector = READ32(tss+0x50) & 0xffff;
 	i386_load_segment_descriptor(SS);
-	m_sreg[DS].selector = READ32(tss+0x54) & 0xffff;
+	m_core.sreg[DS].selector = READ32(tss+0x54) & 0xffff;
 	i386_load_segment_descriptor(DS);
-	m_sreg[FS].selector = READ32(tss+0x58) & 0xffff;
+	m_core.sreg[FS].selector = READ32(tss+0x58) & 0xffff;
 	i386_load_segment_descriptor(FS);
-	m_sreg[GS].selector = READ32(tss+0x5c) & 0xffff;
+	m_core.sreg[GS].selector = READ32(tss+0x5c) & 0xffff;
 	i386_load_segment_descriptor(GS);
 	/* For nested tasks, we write the outgoing task's selector to the back-link field of the new TSS,
 	   and set the NT flag in the EFLAGS register before setting cr3 as the old tss address might be gone */
 	if(nested != 0)
 	{
 		WRITE32(tss+0,old_task);
-		m_NT = 1;
+		m_core.NT = 1;
 	}
-	m_cr[3] = READ32(tss+0x1c);  // CR3 (PDBR)
-	if(oldcr3 != m_cr[3])
+	m_core.cr[3] = READ32(tss+0x1c);  // CR3 (PDBR)
+	if(oldcr3 != m_core.cr[3])
 		vtlb_flush_dynamic();
 
 	/* Set the busy bit in the new task's descriptor */
@@ -1037,16 +1037,16 @@ void i386_device::i386_task_switch(uint16_t selector, uint8_t nested)
 		WRITE8(m_gdtr.base + (selector & ~0x0007) + 5,ar_byte | 0x02);
 	}
 
-	CHANGE_PC(m_eip);
+	CHANGE_PC(m_core.eip);
 
 
 	int t_bit = READ32(tss+0x64) & 1;
 	if(t_bit) m_dr[6] |= (1 << 15); //If the T bit of the new TSS is set, set the BT bit of DR6.
-	m_CPL = (m_sreg[SS].flags >> 5) & 3;
+	m_core.CPL = (m_core.sreg[SS].flags >> 5) & 3;
 
 	m_dr[7] &= ~(0x155); //Clear all of the local enable bits from DR7.
 
-	m_auto_clear_RF = false;
+	m_core.auto_clear_RF = false;
 //  printf("386 Task Switch from selector %04x to %04x\n",old_task,selector);
 }
 
@@ -1088,7 +1088,7 @@ void i386_device::i386_protected_mode_jump(uint16_t seg, uint32_t off, int indir
 	memset(&desc, 0, sizeof(desc));
 	desc.selector = segment;
 	i386_load_protected_mode_segment(&desc,nullptr);
-	CPL = m_CPL;  // current privilege level
+	CPL = m_core.CPL;  // current privilege level
 	DPL = (desc.flags >> 5) & 0x03;  // descriptor privilege level
 	RPL = segment & 0x03;  // requested privilege level
 	if((desc.flags & 0x0018) == 0x0018)
@@ -1142,7 +1142,7 @@ void i386_device::i386_protected_mode_jump(uint16_t seg, uint32_t off, int indir
 			{
 			case 0x01:  // 286 Available TSS
 			case 0x09:  // 386 Available TSS
-				LOGMASKED(LOG_PM_EVENTS, "JMP: Available 386 TSS at %08x\n",m_pc);
+				LOGMASKED(LOG_PM_EVENTS, "JMP: Available 386 TSS at %08x\n",m_core.pc);
 				memset(&desc, 0, sizeof(desc));
 				desc.selector = segment;
 				i386_load_protected_mode_segment(&desc,nullptr);
@@ -1169,7 +1169,7 @@ void i386_device::i386_protected_mode_jump(uint16_t seg, uint32_t off, int indir
 				return;
 			case 0x04:  // 286 Call Gate
 			case 0x0c:  // 386 Call Gate
-				//LOGMASKED(LOG_PM_EVENTS, "JMP: Call gate at %08x\n",m_pc);
+				//LOGMASKED(LOG_PM_EVENTS, "JMP: Call gate at %08x\n",m_core.pc);
 				SetRPL = 1;
 				memset(&call_gate, 0, sizeof(call_gate));
 				call_gate.segment = segment;
@@ -1250,7 +1250,7 @@ void i386_device::i386_protected_mode_jump(uint16_t seg, uint32_t off, int indir
 				offset = call_gate.offset;
 				break;
 			case 0x05:  // Task Gate
-				LOGMASKED(LOG_PM_EVENTS, "JMP: Task gate at %08x\n",m_pc);
+				LOGMASKED(LOG_PM_EVENTS, "JMP: Task gate at %08x\n",m_core.pc);
 				memset(&call_gate, 0, sizeof(call_gate));
 				call_gate.segment = segment;
 				i386_load_call_gate(&call_gate);
@@ -1311,15 +1311,15 @@ void i386_device::i386_protected_mode_jump(uint16_t seg, uint32_t off, int indir
 	}
 
 	if(SetRPL != 0)
-		segment = (segment & ~0x03) | m_CPL;
+		segment = (segment & ~0x03) | m_core.CPL;
 	if(operand32 == 0)
-		m_eip = offset & 0x0000ffff;
+		m_core.eip = offset & 0x0000ffff;
 	else
-		m_eip = offset;
-	m_sreg[CS].selector = segment;
-	m_performed_intersegment_jump = 1;
+		m_core.eip = offset;
+	m_core.sreg[CS].selector = segment;
+	m_core.performed_intersegment_jump = 1;
 	i386_load_segment_descriptor(CS);
-	CHANGE_PC(m_eip);
+	CHANGE_PC(m_core.eip);
 }
 
 void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indirect, int operand32)
@@ -1334,7 +1334,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 
 	if((selector & ~0x03) == 0)
 	{
-		LOGMASKED(LOG_PM_FAULT_GP, "CALL (%08x): Selector is null.\n",m_pc);
+		LOGMASKED(LOG_PM_FAULT_GP, "CALL (%08x): Selector is null.\n",m_core.pc);
 		FAULT(FAULT_GP,0)  // #GP(0)
 	}
 	if(selector & 0x04)
@@ -1358,7 +1358,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 	memset(&desc, 0, sizeof(desc));
 	desc.selector = selector;
 	i386_load_protected_mode_segment(&desc,nullptr);
-	CPL = m_CPL;  // current privilege level
+	CPL = m_core.CPL;  // current privilege level
 	DPL = (desc.flags >> 5) & 0x03;  // descriptor privilege level
 	RPL = selector & 0x03;  // requested privilege level
 	if((desc.flags & 0x0018) == 0x18)  // is a code segment
@@ -1389,7 +1389,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 		SetRPL = 1;
 		if((desc.flags & 0x0080) == 0)
 		{
-			LOGMASKED(LOG_PM_FAULT_NP, "CALL (%08x): Code segment is not present.\n",m_pc);
+			LOGMASKED(LOG_PM_FAULT_NP, "CALL (%08x): Code segment is not present.\n",m_core.pc);
 			FAULT(FAULT_NP,selector & ~0x03)  // #NP(selector)
 		}
 		if (operand32 != 0)  // if 32-bit
@@ -1397,7 +1397,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 			uint32_t offset = (STACK_32BIT ? REG32(ESP) - 8 : (REG16(SP) - 8) & 0xffff);
 			if(i386_limit_check(SS, offset))
 			{
-				LOGMASKED(LOG_PM_FAULT_SS, "CALL (%08x): Stack has no room for return address.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_SS, "CALL (%08x): Stack has no room for return address.\n",m_core.pc);
 				FAULT(FAULT_SS,0)  // #SS(0)
 			}
 		}
@@ -1406,7 +1406,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 			uint32_t offset = (STACK_32BIT ? REG32(ESP) - 4 : (REG16(SP) - 4) & 0xffff);
 			if(i386_limit_check(SS, offset))
 			{
-				LOGMASKED(LOG_PM_FAULT_SS, "CALL (%08x): Stack has no room for return address.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_SS, "CALL (%08x): Stack has no room for return address.\n",m_core.pc);
 				FAULT(FAULT_SS,0)  // #SS(0)
 			}
 		}
@@ -1430,7 +1430,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 			{
 			case 0x01:  // Available 286 TSS
 			case 0x09:  // Available 386 TSS
-				LOGMASKED(LOG_PM_EVENTS, "CALL: Available TSS at %08x\n",m_pc);
+				LOGMASKED(LOG_PM_EVENTS, "CALL: Available TSS at %08x\n",m_core.pc);
 				if(DPL < CPL)
 				{
 					LOGMASKED(LOG_PM_FAULT_TS, "CALL: TSS: DPL is less than CPL.\n");
@@ -1466,7 +1466,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 				gate.segment = selector;
 				i386_load_call_gate(&gate);
 				DPL = gate.dpl;
-				//LOGMASKED(LOG_PM_EVENTS, "CALL: Call gate at %08x (%i parameters)\n",m_pc,gate.dword_count);
+				//LOGMASKED(LOG_PM_EVENTS, "CALL: Call gate at %08x (%i parameters)\n",m_core.pc,gate.dword_count);
 				if(DPL < CPL)
 				{
 					LOGMASKED(LOG_PM_FAULT_GP, "CALL: Call gate DPL %i is less than CPL %i.\n",DPL,CPL);
@@ -1518,7 +1518,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 				}
 				if((desc.flags & 0x0080) == 0)
 				{
-					LOGMASKED(LOG_PM_FAULT_NP, "CALL (%08x): Code segment is not present.\n",m_pc);
+					LOGMASKED(LOG_PM_FAULT_NP, "CALL (%08x): Code segment is not present.\n",m_core.pc);
 					FAULT(FAULT_NP,desc.selector & ~0x03)  // #NP(selector)
 				}
 				if(DPL < CPL && (desc.flags & 0x0004) == 0)
@@ -1606,12 +1606,12 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 					selector = gate.selector;
 					offset = gate.offset;
 
-					m_CPL = (stack.flags >> 5) & 0x03;
+					m_core.CPL = (stack.flags >> 5) & 0x03;
 					/* check for page fault at new stack */
 					WRITE_TEST(stack.base+newESP-1);
 					/* switch to new stack */
-					oldSS = m_sreg[SS].selector;
-					m_sreg[SS].selector = i386_get_stack_segment(m_CPL);
+					oldSS = m_core.sreg[SS].selector;
+					m_core.sreg[SS].selector = i386_get_stack_segment(m_core.CPL);
 					if(operand32 != 0)
 					{
 						oldESP = REG32(ESP);
@@ -1683,7 +1683,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 				}
 				break;
 			case 0x05:  // task gate
-				LOGMASKED(LOG_PM_EVENTS, "CALL: Task gate at %08x\n",m_pc);
+				LOGMASKED(LOG_PM_EVENTS, "CALL: Task gate at %08x\n",m_core.pc);
 				memset(&gate, 0, sizeof(gate));
 				gate.segment = selector;
 				i386_load_call_gate(&gate);
@@ -1742,7 +1742,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 	}
 
 	if(SetRPL != 0)
-		selector = (selector & ~0x03) | m_CPL;
+		selector = (selector & ~0x03) | m_core.CPL;
 
 	uint32_t tempSP = REG32(ESP);
 	try
@@ -1751,21 +1751,21 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 		if(operand32 == 0)
 		{
 			/* 16-bit operand size */
-			PUSH16(m_sreg[CS].selector );
-			PUSH16(m_eip & 0x0000ffff );
-			m_sreg[CS].selector = selector;
-			m_performed_intersegment_jump = 1;
-			m_eip = offset;
+			PUSH16(m_core.sreg[CS].selector );
+			PUSH16(m_core.eip & 0x0000ffff );
+			m_core.sreg[CS].selector = selector;
+			m_core.performed_intersegment_jump = 1;
+			m_core.eip = offset;
 			i386_load_segment_descriptor(CS);
 		}
 		else
 		{
 			/* 32-bit operand size */
-			PUSH32SEG(m_sreg[CS].selector );
-			PUSH32(m_eip );
-			m_sreg[CS].selector = selector;
-			m_performed_intersegment_jump = 1;
-			m_eip = offset;
+			PUSH32SEG(m_core.sreg[CS].selector );
+			PUSH32(m_core.eip );
+			m_core.sreg[CS].selector = selector;
+			m_core.performed_intersegment_jump = 1;
+			m_core.eip = offset;
 			i386_load_segment_descriptor(CS );
 		}
 	}
@@ -1775,7 +1775,7 @@ void i386_device::i386_protected_mode_call(uint16_t seg, uint32_t off, int indir
 		throw e;
 	}
 
-	CHANGE_PC(m_eip);
+	CHANGE_PC(m_core.eip);
 }
 
 void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
@@ -1800,13 +1800,13 @@ void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
 	memset(&desc, 0, sizeof(desc));
 	desc.selector = newCS;
 	i386_load_protected_mode_segment(&desc,nullptr);
-	CPL = m_CPL;  // current privilege level
+	CPL = m_core.CPL;  // current privilege level
 	DPL = (desc.flags >> 5) & 0x03;  // descriptor privilege level
 	RPL = newCS & 0x03;
 
 	if(RPL < CPL)
 	{
-		LOGMASKED(LOG_PM_FAULT_GP, "RETF (%08x): Return segment RPL is less than CPL.\n",m_pc);
+		LOGMASKED(LOG_PM_FAULT_GP, "RETF (%08x): Return segment RPL is less than CPL.\n",m_core.pc);
 		FAULT(FAULT_GP,newCS & ~0x03)
 	}
 
@@ -1857,7 +1857,7 @@ void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
 		}
 		if((desc.flags & 0x0080) == 0)
 		{
-			LOGMASKED(LOG_PM_FAULT_NP, "RETF (%08x): Code segment is not present.\n",m_pc);
+			LOGMASKED(LOG_PM_FAULT_NP, "RETF (%08x): Code segment is not present.\n",m_core.pc);
 			FAULT(FAULT_NP,newCS & ~0x03)
 		}
 		if(newEIP > desc.limit)
@@ -1870,7 +1870,7 @@ void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
 			uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 			if(i386_limit_check(SS,offset+count+3) != 0)
 			{
-				LOGMASKED(LOG_PM_FAULT_SS, "RETF (%08x): SP is past stack segment limit.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_SS, "RETF (%08x): SP is past stack segment limit.\n",m_core.pc);
 				FAULT(FAULT_SS,0)
 			}
 		}
@@ -1897,7 +1897,7 @@ void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
 			uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 			if(i386_limit_check(SS,offset+count+7) != 0)
 			{
-				LOGMASKED(LOG_PM_FAULT_SS, "RETF (%08x): SP is past stack segment limit.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_SS, "RETF (%08x): SP is past stack segment limit.\n",m_core.pc);
 				FAULT(FAULT_SS,0)
 			}
 		}
@@ -1990,7 +1990,7 @@ void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
 		{
 			if((newSS & ~0x07) > m_ldtr.limit)
 			{
-				LOGMASKED(LOG_PM_FAULT_GP, "RETF (%08x): SS segment selector is past LDT limit.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_GP, "RETF (%08x): SS segment selector is past LDT limit.\n",m_core.pc);
 				FAULT(FAULT_GP,newSS & ~0x03)
 			}
 		}
@@ -1998,7 +1998,7 @@ void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
 		{
 			if((newSS & ~0x07) > m_gdtr.limit)
 			{
-				LOGMASKED(LOG_PM_FAULT_GP, "RETF (%08x): SS segment selector is past GDT limit.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_GP, "RETF (%08x): SS segment selector is past GDT limit.\n",m_core.pc);
 				FAULT(FAULT_GP,newSS & ~0x03)
 			}
 		}
@@ -2022,14 +2022,14 @@ void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
 			LOGMASKED(LOG_PM_FAULT_GP, "RETF: SS segment is not present.\n");
 			FAULT(FAULT_GP,newSS & ~0x03)
 		}
-		m_CPL = newCS & 0x03;
+		m_core.CPL = newCS & 0x03;
 
 		/* Load new SS:(E)SP */
 		if(operand32 == 0)
 			REG16(SP) = (newESP+count) & 0xffff;
 		else
 			REG32(ESP) = newESP+count;
-		m_sreg[SS].selector = newSS;
+		m_core.sreg[SS].selector = newSS;
 		i386_load_segment_descriptor(SS );
 
 		/* Check that DS, ES, FS and GS are valid for the new privilege level */
@@ -2041,12 +2041,12 @@ void i386_device::i386_protected_mode_retf(uint8_t count, uint8_t operand32)
 
 	/* Load new CS:(E)IP */
 	if(operand32 == 0)
-		m_eip = newEIP & 0xffff;
+		m_core.eip = newEIP & 0xffff;
 	else
-		m_eip = newEIP;
-	m_sreg[CS].selector = newCS;
+		m_core.eip = newEIP;
+	m_core.sreg[CS].selector = newCS;
 	i386_load_segment_descriptor(CS );
-	CHANGE_PC(m_eip);
+	CHANGE_PC(m_core.eip);
 }
 
 void i386_device::i386_protected_mode_iret(int operand32)
@@ -2056,9 +2056,9 @@ void i386_device::i386_protected_mode_iret(int operand32)
 	I386_SREG desc,stack;
 	uint8_t CPL, RPL, DPL;
 	uint32_t newflags;
-	uint8_t IOPL = m_IOP1 | (m_IOP2 << 1);
+	uint8_t IOPL = m_core.IOP1 | (m_core.IOP2 << 1);
 
-	CPL = m_CPL;
+	CPL = m_core.CPL;
 	uint32_t ea = i386_translate(SS, (STACK_32BIT)?REG32(ESP):REG16(SP), 0);
 	if(operand32 == 0)
 	{
@@ -2078,13 +2078,13 @@ void i386_device::i386_protected_mode_iret(int operand32)
 		uint32_t oldflags = get_flags();
 		if(IOPL != 3)
 		{
-			LOGMASKED(LOG_PM_FAULT_GP, "IRET (%08x): Is in Virtual 8086 mode and IOPL != 3.\n",m_pc);
+			LOGMASKED(LOG_PM_FAULT_GP, "IRET (%08x): Is in Virtual 8086 mode and IOPL != 3.\n",m_core.pc);
 			FAULT(FAULT_GP,0)
 		}
 		if(operand32 == 0)
 		{
-			m_eip = newEIP & 0xffff;
-			m_sreg[CS].selector = newCS & 0xffff;
+			m_core.eip = newEIP & 0xffff;
+			m_core.sreg[CS].selector = newCS & 0xffff;
 			newflags &= ~(3<<12);
 			newflags |= (((oldflags>>12)&3)<<12);  // IOPL cannot be changed in V86 mode
 			set_flags((newflags & 0xffff) | (oldflags & ~0xffff));
@@ -2092,8 +2092,8 @@ void i386_device::i386_protected_mode_iret(int operand32)
 		}
 		else
 		{
-			m_eip = newEIP;
-			m_sreg[CS].selector = newCS & 0xffff;
+			m_core.eip = newEIP;
+			m_core.sreg[CS].selector = newCS & 0xffff;
 			newflags &= ~(3<<12);
 			newflags |= 0x20000 | (((oldflags>>12)&3)<<12);  // IOPL and VM cannot be changed in V86 mode
 			set_flags(newflags);
@@ -2104,7 +2104,7 @@ void i386_device::i386_protected_mode_iret(int operand32)
 	{
 		uint32_t task = READ32(m_task.base);
 		/* Task Return */
-		LOGMASKED(LOG_PM_EVENTS, "IRET (%08x): Nested task return.\n",m_pc);
+		LOGMASKED(LOG_PM_EVENTS, "IRET (%08x): Nested task return.\n",m_core.pc);
 		/* Check back-link selector in TSS */
 		if(task & 0x04)
 		{
@@ -2121,7 +2121,7 @@ void i386_device::i386_protected_mode_iret(int operand32)
 		i386_load_protected_mode_segment(&desc,nullptr);
 		if((desc.flags & 0x001f) != 0x000b)
 		{
-			LOGMASKED(LOG_PM_FAULT_TS, "IRET (%08x): Task return: Back-linked TSS is not a busy TSS.\n",m_pc);
+			LOGMASKED(LOG_PM_FAULT_TS, "IRET (%08x): Task return: Back-linked TSS is not a busy TSS.\n",m_core.pc);
 			FAULT(FAULT_TS,task & ~0x03)
 		}
 		if((desc.flags & 0x0080) == 0)
@@ -2143,7 +2143,7 @@ void i386_device::i386_protected_mode_iret(int operand32)
 			newESP = READ32(ea+12);
 			newSS = READ32(ea+16) & 0xffff;
 			/* Return to v86 mode */
-			LOGMASKED(LOG_PM_EVENTS, "IRET (%08x): Returning to Virtual 8086 mode.\n",m_pc);
+			LOGMASKED(LOG_PM_EVENTS, "IRET (%08x): Returning to Virtual 8086 mode.\n",m_core.pc);
 			if(CPL != 0)
 			{
 				uint32_t oldflags = get_flags();
@@ -2152,23 +2152,23 @@ void i386_device::i386_protected_mode_iret(int operand32)
 					newflags = (newflags & ~0x200 ) | (oldflags & 0x200);
 			}
 			set_flags(newflags);
-			m_eip = POP32() & 0xffff;  // high 16 bits are ignored
-			m_sreg[CS].selector = POP32() & 0xffff;
+			m_core.eip = POP32() & 0xffff;  // high 16 bits are ignored
+			m_core.sreg[CS].selector = POP32() & 0xffff;
 			POP32();  // already set flags
 			newESP = POP32();
 			newSS = POP32() & 0xffff;
-			m_sreg[ES].selector = POP32() & 0xffff;
-			m_sreg[DS].selector = POP32() & 0xffff;
-			m_sreg[FS].selector = POP32() & 0xffff;
-			m_sreg[GS].selector = POP32() & 0xffff;
+			m_core.sreg[ES].selector = POP32() & 0xffff;
+			m_core.sreg[DS].selector = POP32() & 0xffff;
+			m_core.sreg[FS].selector = POP32() & 0xffff;
+			m_core.sreg[GS].selector = POP32() & 0xffff;
 			REG32(ESP) = newESP;  // all 32 bits are loaded
-			m_sreg[SS].selector = newSS;
+			m_core.sreg[SS].selector = newSS;
 			i386_load_segment_descriptor(ES);
 			i386_load_segment_descriptor(DS);
 			i386_load_segment_descriptor(FS);
 			i386_load_segment_descriptor(GS);
 			i386_load_segment_descriptor(SS);
-			m_CPL = 3;  // Virtual 8086 tasks are always run at CPL 3
+			m_core.CPL = 3;  // Virtual 8086 tasks are always run at CPL 3
 		}
 		else
 		{
@@ -2193,7 +2193,7 @@ void i386_device::i386_protected_mode_iret(int operand32)
 			RPL = newCS & 0x03;
 			if(RPL < CPL)
 			{
-				LOGMASKED(LOG_PM_FAULT_GP, "IRET (%08x): Return CS RPL is less than CPL.\n",m_pc);
+				LOGMASKED(LOG_PM_FAULT_GP, "IRET (%08x): Return CS RPL is less than CPL.\n",m_core.pc);
 				FAULT(FAULT_GP,newCS & ~0x03)
 			}
 			if(RPL == CPL)
@@ -2204,7 +2204,7 @@ void i386_device::i386_protected_mode_iret(int operand32)
 					uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 					if(i386_limit_check(SS,offset+5) != 0)
 					{
-						LOGMASKED(LOG_PM_FAULT_SS, "IRET (%08x): Data on stack is past SS limit.\n",m_pc);
+						LOGMASKED(LOG_PM_FAULT_SS, "IRET (%08x): Data on stack is past SS limit.\n",m_core.pc);
 						FAULT(FAULT_SS,0)
 					}
 				}
@@ -2213,7 +2213,7 @@ void i386_device::i386_protected_mode_iret(int operand32)
 					uint32_t offset = (STACK_32BIT ? REG32(ESP) : REG16(SP));
 					if(i386_limit_check(SS,offset+11) != 0)
 					{
-						LOGMASKED(LOG_PM_FAULT_SS, "IRET (%08x): Data on stack is past SS limit.\n",m_pc);
+						LOGMASKED(LOG_PM_FAULT_SS, "IRET (%08x): Data on stack is past SS limit.\n",m_core.pc);
 						FAULT(FAULT_SS,0)
 					}
 				}
@@ -2245,7 +2245,7 @@ void i386_device::i386_protected_mode_iret(int operand32)
 				RPL = newCS & 0x03;
 				if((desc.flags & 0x0018) != 0x0018)
 				{
-					LOGMASKED(LOG_PM_FAULT_GP, "IRET (%08x): Return CS segment is not a code segment.\n",m_pc);
+					LOGMASKED(LOG_PM_FAULT_GP, "IRET (%08x): Return CS segment is not a code segment.\n",m_core.pc);
 					FAULT(FAULT_GP,newCS & ~0x07)
 				}
 				if(desc.flags & 0x0004)
@@ -2266,7 +2266,7 @@ void i386_device::i386_protected_mode_iret(int operand32)
 				}
 				if((desc.flags & 0x0080) == 0)
 				{
-					LOGMASKED(LOG_PM_FAULT_NP, "IRET: (%08x) Return CS segment is not present.\n", m_pc);
+					LOGMASKED(LOG_PM_FAULT_NP, "IRET: (%08x) Return CS segment is not present.\n", m_core.pc);
 					FAULT(FAULT_NP,newCS & ~0x03)
 				}
 				if(newEIP > desc.limit)
@@ -2285,15 +2285,15 @@ void i386_device::i386_protected_mode_iret(int operand32)
 
 				if(operand32 == 0)
 				{
-					m_eip = newEIP;
-					m_sreg[CS].selector = newCS;
+					m_core.eip = newEIP;
+					m_core.sreg[CS].selector = newCS;
 					set_flags(newflags);
 					REG16(SP) += 6;
 				}
 				else
 				{
-					m_eip = newEIP;
-					m_sreg[CS].selector = newCS & 0xffff;
+					m_core.eip = newEIP;
+					m_core.sreg[CS].selector = newCS & 0xffff;
 					set_flags(newflags);
 					REG32(ESP) += 12;
 				}
@@ -2456,21 +2456,21 @@ void i386_device::i386_protected_mode_iret(int operand32)
 
 				if(operand32 == 0)
 				{
-					m_eip = newEIP & 0xffff;
-					m_sreg[CS].selector = newCS;
+					m_core.eip = newEIP & 0xffff;
+					m_core.sreg[CS].selector = newCS;
 					set_flags(newflags);
 					REG16(SP) = newESP & 0xffff;
-					m_sreg[SS].selector = newSS;
+					m_core.sreg[SS].selector = newSS;
 				}
 				else
 				{
-					m_eip = newEIP;
-					m_sreg[CS].selector = newCS & 0xffff;
+					m_core.eip = newEIP;
+					m_core.sreg[CS].selector = newCS & 0xffff;
 					set_flags(newflags);
 					REG32(ESP) = newESP;
-					m_sreg[SS].selector = newSS & 0xffff;
+					m_core.sreg[SS].selector = newSS & 0xffff;
 				}
-				m_CPL = newCS & 0x03;
+				m_core.CPL = newCS & 0x03;
 				i386_load_segment_descriptor(SS);
 
 				/* Check that DS, ES, FS and GS are valid for the new privilege level */
@@ -2483,7 +2483,7 @@ void i386_device::i386_protected_mode_iret(int operand32)
 	}
 
 	i386_load_segment_descriptor(CS);
-	CHANGE_PC(m_eip);
+	CHANGE_PC(m_core.eip);
 }
 
 inline void i386_device::dri_changed()
@@ -2504,7 +2504,7 @@ inline void i386_device::dri_changed()
 			int breakpoint_length = (m_dr[7] >> ((dr << 2) + 16 + 2)) & 3;
 			offs_t phys_addr = m_dr[dr];
 			uint32_t error;
-			if(translate_address(m_CPL, TR_READ, &phys_addr, &error))
+			if(translate_address(m_core.CPL, TR_READ, &phys_addr, &error))
 			{
 				phys_addr &= ~3; // According to CUP386, data breakpoints are only reliable on dword-aligned addresses, so align this to a dword.
 				uint32_t true_mask = 0;
