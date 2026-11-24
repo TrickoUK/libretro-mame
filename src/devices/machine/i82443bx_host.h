@@ -28,6 +28,9 @@ public:
 	}
 	i82443bx_host_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 
+	// host bus frequency strap, reported in NBXCFG bits 13-12 (100 MHz by default)
+	void set_host_bus_66mhz(bool is_66mhz) { m_host_66mhz = is_66mhz; }
+
 protected:
 	i82443bx_host_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
 
@@ -45,6 +48,8 @@ private:
 
 	u8 m_fdhc = 0;
 	u8 m_bspad[8]{};
+	u8 m_nbxcfg[3]{};
+	bool m_host_66mhz = false;
 
 	u8 fdhc_r();
 	void fdhc_w(u8 data);
