@@ -1076,6 +1076,7 @@ misc/nexus3d.cpp
 misc/nibble.cpp
 misc/nl_cocoloco.cpp  // [HELPER]
 misc/nl_gi6809.cpp  // [HELPER]
+misc/nl_spitfire.cpp  // [HELPER]
 misc/odyssey.cpp
 misc/oneshot.cpp
 misc/pachifev.cpp
@@ -2918,6 +2919,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -lhzb3p
 -lhzb3sjb
 -lhzbgqb
+-lhzbgqb104cn
 -livegal
 -livequiz
 -lluck3x3
