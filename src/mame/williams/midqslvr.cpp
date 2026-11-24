@@ -290,6 +290,7 @@ Notes:
 #include "machine/i82371eb_ide.h"
 #include "machine/i82371eb_acpi.h"
 #include "machine/i82371eb_usb.h"
+#include "machine/intelfsh.h"
 #include "machine/pci.h"
 #include "machine/pci-smbus.h"
 #include "video/voodoo_pci.h"
@@ -400,7 +401,10 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 	I82443BX_BRIDGE(config, "pci:01.0", 0 ); //"pci:01.0:00.0");
 	//I82443BX_AGP   (config, "pci:01.0:00.0");
 
+	SHARP_LH28F004SC(config, "bios");
+
 	i82371eb_isa_device &isa(I82371EB_ISA(config, "pci:07.0", m_maincpu, true));
+	isa.set_bios_flash("bios");
 	isa.boot_state_hook().set([](u8 data) { /* printf("%02x\n", data); */ });
 	isa.apmc().set("pci:07.3", FUNC(i82371eb_acpi_device::apmc_w));
 	isa.a20m().set_inputline("maincpu", INPUT_LINE_A20);
@@ -476,7 +480,7 @@ void midway_graphite_state::graphite(machine_config &config)
 
 
 ROM_START( hydrthnd )
-	ROM_REGION32_LE(0x80000, "pci:07.0", 0)
+	ROM_REGION(0x80000, "bios", 0)
 	ROM_LOAD( "lh28f004sct.u8b1", 0x000000, 0x080000, CRC(ab04a343) SHA1(ba77933400fe470f45ab187bc0d315922caadb12) )
 
 	ROM_REGION( 0x2000, "iocpu", 0 )   /* Diego board CY7C63513 MCU code */
@@ -487,7 +491,7 @@ ROM_START( hydrthnd )
 ROM_END
 
 ROM_START( hydrthnd101b )
-	ROM_REGION32_LE(0x80000, "pci:07.0", 0)
+	ROM_REGION(0x80000, "bios", 0)
 	ROM_LOAD( "lh28f004sct.u8b1", 0x000000, 0x080000, CRC(ab04a343) SHA1(ba77933400fe470f45ab187bc0d315922caadb12) )
 
 	ROM_REGION( 0x2000, "iocpu", 0 )   /* Diego board CY7C63513 MCU code */
@@ -498,7 +502,7 @@ ROM_START( hydrthnd101b )
 ROM_END
 
 ROM_START( hydrthnd100d )
-	ROM_REGION32_LE(0x80000, "pci:07.0", 0)
+	ROM_REGION(0x80000, "bios", 0)
 	ROM_LOAD( "lh28f004sct.u8b1", 0x000000, 0x080000, CRC(ab04a343) SHA1(ba77933400fe470f45ab187bc0d315922caadb12) )
 
 	ROM_REGION( 0x2000, "iocpu", 0 )   /* Diego board CY7C63513 MCU code */
@@ -509,7 +513,7 @@ ROM_START( hydrthnd100d )
 ROM_END
 
 ROM_START( offrthnd )
-	ROM_REGION32_LE(0x80000, "pci:07.0", 0)
+	ROM_REGION(0x80000, "bios", 0)
 	ROM_LOAD( "lh28f004sct.u8b1", 0x000000, 0x080000, CRC(ab04a343) SHA1(ba77933400fe470f45ab187bc0d315922caadb12) )
 
 	ROM_REGION( 0x2000, "iocpu", 0 )   /* Magicbus board CY7C63513 MCU code */
