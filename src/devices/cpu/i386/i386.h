@@ -519,6 +519,7 @@ protected:
 	void i386_trap_with_error(int irq, int irq_gate, int trap_level, uint32_t error);
 	void i286_task_switch(uint16_t selector, uint8_t nested);
 	void i386_task_switch(uint16_t selector, uint8_t nested);
+	void step();
 	void i386_check_irq_line();
 	void i386_protected_mode_jump(uint16_t seg, uint32_t off, int indirect, int operand32);
 	void i386_protected_mode_call(uint16_t seg, uint32_t off, int indirect, int operand32);
