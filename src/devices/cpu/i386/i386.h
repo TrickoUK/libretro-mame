@@ -9,6 +9,7 @@
 #include "divtlb.h"
 #include "softfloat3/source/include/softfloat.h"
 #include <algorithm>
+#include <memory>
 
 #define INPUT_LINE_A20      1
 #define INPUT_LINE_SMI      2
@@ -332,11 +333,30 @@ protected:
 		uint32_t lf_cf_in;
 		uint32_t fault;       // pending exception number, or 0xffffffff when none
 		uint32_t fault_code;  // error code of the pending exception
+		// x87 state
+		extFloat80_t x87_reg[8];
+		uint16_t x87_cw;
+		uint16_t x87_sw;
+		uint16_t x87_tw;
+		uint16_t x87_ds;
+		uint32_t x87_data_ptr;
+		uint16_t x87_cs;
+		uint32_t x87_inst_ptr;
+		uint16_t x87_opcode;
+		// scratch and summary fields for generated code, zero while unused and not saved
+		uint32_t mode;          // compile-time mode key of the running block
+		uint32_t ea_tmp;        // effective address passed between generated code and helpers
+		uint64_t arg0;          // helper call operands and results
+		uint64_t arg1;
+		uint32_t seg_flat;      // bit n set while segment n has base 0 and a 4 GiB limit
+		uint32_t ferr_needed;   // an x87 operation left an unmasked exception to report
+		void *page_table;       // host page pointers for the data fast path (heap allocated)
+		void *code_page_table;  // per-page code generation marks (heap allocated)
 	};
 
-	core_state m_core{};
+	core_state *m_core;
+	std::unique_ptr<core_state> m_core_storage;
 	uint32_t m_eflags_mask;
-
 
 	uint32_t m_dr[8];       // Debug registers
 	uint32_t m_tr[8];       // Test registers
@@ -353,10 +373,6 @@ protected:
 	I386_SYS_TABLE m_idtr;    // Interrupt Descriptor Table Register
 	I386_SEG_DESC m_task;     // Task register
 	I386_SEG_DESC m_ldtr;     // Local Descriptor Table Register
-
-
-
-
 
 	int m_base_cycles;
 	uint8_t m_opcode;
@@ -375,18 +391,6 @@ protected:
 	uint64_t current_tsc() const { return m_tsc + total_cycles(); }
 	void set_tsc(uint64_t value) { m_tsc = value - total_cycles(); }
 	uint64_t m_perfctr[2];
-
-	// FPU
-	extFloat80_t m_x87_reg[8];
-
-	uint16_t m_x87_cw;
-	uint16_t m_x87_sw;
-	uint16_t m_x87_tw;
-	uint16_t m_x87_ds;
-	uint32_t m_x87_data_ptr;
-	uint16_t m_x87_cs;
-	uint32_t m_x87_inst_ptr;
-	uint16_t m_x87_opcode;
 
 	i386_modrm_func m_opcode_table_x87_d8[256];
 	i386_modrm_func m_opcode_table_x87_d9[256];
@@ -459,19 +463,19 @@ protected:
 	inline uint8_t FETCH();
 	inline uint16_t FETCH16();
 	inline uint32_t FETCH32();
-	inline uint8_t READ8(uint32_t ea) { return READ8PL(ea, m_core.CPL); }
-	inline uint16_t READ16(uint32_t ea) { return READ16PL(ea, m_core.CPL); }
-	inline uint32_t READ32(uint32_t ea) { return READ32PL(ea, m_core.CPL); }
-	inline uint64_t READ64(uint32_t ea) { return READ64PL(ea, m_core.CPL); }
+	inline uint8_t READ8(uint32_t ea) { return READ8PL(ea, m_core->CPL); }
+	inline uint16_t READ16(uint32_t ea) { return READ16PL(ea, m_core->CPL); }
+	inline uint32_t READ32(uint32_t ea) { return READ32PL(ea, m_core->CPL); }
+	inline uint64_t READ64(uint32_t ea) { return READ64PL(ea, m_core->CPL); }
 	virtual uint8_t READ8PL(uint32_t ea, uint8_t privilege);
 	virtual uint16_t READ16PL(uint32_t ea, uint8_t privilege);
 	virtual uint32_t READ32PL(uint32_t ea, uint8_t privilege);
 	virtual uint64_t READ64PL(uint32_t ea, uint8_t privilege);
 	inline void WRITE_TEST(uint32_t ea);
-	inline void WRITE8(uint32_t ea, uint8_t value) { WRITE8PL(ea, m_core.CPL, value); }
-	inline void WRITE16(uint32_t ea, uint16_t value) { WRITE16PL(ea, m_core.CPL, value); }
-	inline void WRITE32(uint32_t ea, uint32_t value) { WRITE32PL(ea, m_core.CPL, value); }
-	inline void WRITE64(uint32_t ea, uint64_t value) { WRITE64PL(ea, m_core.CPL, value); }
+	inline void WRITE8(uint32_t ea, uint8_t value) { WRITE8PL(ea, m_core->CPL, value); }
+	inline void WRITE16(uint32_t ea, uint16_t value) { WRITE16PL(ea, m_core->CPL, value); }
+	inline void WRITE32(uint32_t ea, uint32_t value) { WRITE32PL(ea, m_core->CPL, value); }
+	inline void WRITE64(uint32_t ea, uint64_t value) { WRITE64PL(ea, m_core->CPL, value); }
 	virtual void WRITE8PL(uint32_t ea, uint8_t privilege, uint8_t value);
 	virtual void WRITE16PL(uint32_t ea, uint8_t privilege, uint16_t value);
 	virtual void WRITE32PL(uint32_t ea, uint8_t privilege, uint32_t value);
@@ -1575,6 +1579,7 @@ protected:
 	void i386_postload();
 	void i386_common_init();
 	void build_opcode_table(uint32_t features);
+	void alloc_core_state();
 	void zero_state();
 	void i386_set_a20_line(int state);
 

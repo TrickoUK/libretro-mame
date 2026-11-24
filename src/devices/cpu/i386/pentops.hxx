@@ -4,19 +4,19 @@
 
 bool i386_device::MMXPROLOG()
 {
-	if (m_core.cr[0] & CR0_TS)
+	if (m_core->cr[0] & CR0_TS)
 	{
 		i386_trap(FAULT_NM, 0);
 		return true;
 	}
 	x87_set_stack_top(0);
-	m_x87_tw = 0; // tag word = 0
+	m_core->x87_tw = 0; // tag word = 0
 	return false;
 }
 
 bool i386_device::SSEPROLOG()
 {
-	if (m_core.cr[0] & CR0_TS)
+	if (m_core->cr[0] & CR0_TS)
 	{
 		i386_trap(FAULT_NM, 0);
 		return true;
@@ -73,7 +73,7 @@ void i386_device::pentium_rdmsr()          // Opcode 0x0f 32
 
 	// call the model specific implementation
 	data = opcode_rdmsr(valid_msr);
-	if (m_core.CPL != 0 || valid_msr == false) // if current privilege level isn't 0 or the register isn't recognized ...
+	if (m_core->CPL != 0 || valid_msr == false) // if current privilege level isn't 0 or the register isn't recognized ...
 		FAULT(FAULT_GP, 0) // ... throw a general exception fault
 	else
 	{
@@ -95,7 +95,7 @@ void i386_device::pentium_wrmsr()          // Opcode 0x0f 30
 	// call the model specific implementation
 	opcode_wrmsr(data, valid_msr);
 
-	if(m_core.CPL != 0 || valid_msr == 0) // if current privilege level isn't 0 or the register isn't recognized
+	if(m_core->CPL != 0 || valid_msr == 0) // if current privilege level isn't 0 or the register isn't recognized
 		FAULT(FAULT_GP,0) // ... throw a general exception fault
 
 	CYCLES(1);     // TODO: correct cycle count (~30-45)
@@ -117,22 +117,22 @@ void i386_device::pentium_ud2()    // Opcode 0x0f 0b
 
 void i386_device::pentium_rsm()
 {
-	if(!m_core.smm)
+	if(!m_core->smm)
 	{
-		LOGMASKED(LOG_INVALID_OPCODE, "i386: Invalid RSM outside SMM at %08X\n", m_core.pc - 1);
+		LOGMASKED(LOG_INVALID_OPCODE, "i386: Invalid RSM outside SMM at %08X\n", m_core->pc - 1);
 		i386_trap(6, 0);
 		return;
 	}
 
 	leave_smm();
-	if(m_core.smi_latched)
+	if(m_core->smi_latched)
 	{
 		enter_smm();
 		return;
 	}
-	if(m_core.nmi_latched)
+	if(m_core->nmi_latched)
 	{
-		m_core.nmi_latched = false;
+		m_core->nmi_latched = false;
 		i386_trap(2, 1);
 	}
 }
@@ -152,7 +152,7 @@ void i386_device::pentium_cmovo_r16_rm16()    // Opcode 0x0f 40
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.OF == 1)
+		if (m_core->OF == 1)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -162,7 +162,7 @@ void i386_device::pentium_cmovo_r16_rm16()    // Opcode 0x0f 40
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.OF == 1)
+		if (m_core->OF == 1)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -178,7 +178,7 @@ void i386_device::pentium_cmovo_r32_rm32()    // Opcode 0x0f 40
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.OF == 1)
+		if (m_core->OF == 1)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -188,7 +188,7 @@ void i386_device::pentium_cmovo_r32_rm32()    // Opcode 0x0f 40
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.OF == 1)
+		if (m_core->OF == 1)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -204,7 +204,7 @@ void i386_device::pentium_cmovno_r16_rm16()    // Opcode 0x0f 41
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.OF == 0)
+		if (m_core->OF == 0)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -214,7 +214,7 @@ void i386_device::pentium_cmovno_r16_rm16()    // Opcode 0x0f 41
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.OF == 0)
+		if (m_core->OF == 0)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -230,7 +230,7 @@ void i386_device::pentium_cmovno_r32_rm32()    // Opcode 0x0f 41
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.OF == 0)
+		if (m_core->OF == 0)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -240,7 +240,7 @@ void i386_device::pentium_cmovno_r32_rm32()    // Opcode 0x0f 41
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.OF == 0)
+		if (m_core->OF == 0)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -256,7 +256,7 @@ void i386_device::pentium_cmovb_r16_rm16()    // Opcode 0x0f 42
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.CF == 1)
+		if (m_core->CF == 1)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -266,7 +266,7 @@ void i386_device::pentium_cmovb_r16_rm16()    // Opcode 0x0f 42
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.CF == 1)
+		if (m_core->CF == 1)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -282,7 +282,7 @@ void i386_device::pentium_cmovb_r32_rm32()    // Opcode 0x0f 42
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.CF == 1)
+		if (m_core->CF == 1)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -292,7 +292,7 @@ void i386_device::pentium_cmovb_r32_rm32()    // Opcode 0x0f 42
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.CF == 1)
+		if (m_core->CF == 1)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -308,7 +308,7 @@ void i386_device::pentium_cmovae_r16_rm16()    // Opcode 0x0f 43
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.CF == 0)
+		if (m_core->CF == 0)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -318,7 +318,7 @@ void i386_device::pentium_cmovae_r16_rm16()    // Opcode 0x0f 43
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.CF == 0)
+		if (m_core->CF == 0)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -334,7 +334,7 @@ void i386_device::pentium_cmovae_r32_rm32()    // Opcode 0x0f 43
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.CF == 0)
+		if (m_core->CF == 0)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -344,7 +344,7 @@ void i386_device::pentium_cmovae_r32_rm32()    // Opcode 0x0f 43
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.CF == 0)
+		if (m_core->CF == 0)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -360,7 +360,7 @@ void i386_device::pentium_cmove_r16_rm16()    // Opcode 0x0f 44
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.ZF == 1)
+		if (m_core->ZF == 1)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -370,7 +370,7 @@ void i386_device::pentium_cmove_r16_rm16()    // Opcode 0x0f 44
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.ZF == 1)
+		if (m_core->ZF == 1)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -386,7 +386,7 @@ void i386_device::pentium_cmove_r32_rm32()    // Opcode 0x0f 44
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.ZF == 1)
+		if (m_core->ZF == 1)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -396,7 +396,7 @@ void i386_device::pentium_cmove_r32_rm32()    // Opcode 0x0f 44
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.ZF == 1)
+		if (m_core->ZF == 1)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -412,7 +412,7 @@ void i386_device::pentium_cmovne_r16_rm16()    // Opcode 0x0f 45
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.ZF == 0)
+		if (m_core->ZF == 0)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -422,7 +422,7 @@ void i386_device::pentium_cmovne_r16_rm16()    // Opcode 0x0f 45
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.ZF == 0)
+		if (m_core->ZF == 0)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -438,7 +438,7 @@ void i386_device::pentium_cmovne_r32_rm32()    // Opcode 0x0f 45
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.ZF == 0)
+		if (m_core->ZF == 0)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -448,7 +448,7 @@ void i386_device::pentium_cmovne_r32_rm32()    // Opcode 0x0f 45
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.ZF == 0)
+		if (m_core->ZF == 0)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -464,7 +464,7 @@ void i386_device::pentium_cmovbe_r16_rm16()    // Opcode 0x0f 46
 
 	if( modrm >= 0xc0 )
 	{
-		if ((m_core.CF == 1) || (m_core.ZF == 1))
+		if ((m_core->CF == 1) || (m_core->ZF == 1))
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -474,7 +474,7 @@ void i386_device::pentium_cmovbe_r16_rm16()    // Opcode 0x0f 46
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if ((m_core.CF == 1) || (m_core.ZF == 1))
+		if ((m_core->CF == 1) || (m_core->ZF == 1))
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -490,7 +490,7 @@ void i386_device::pentium_cmovbe_r32_rm32()    // Opcode 0x0f 46
 
 	if( modrm >= 0xc0 )
 	{
-		if ((m_core.CF == 1) || (m_core.ZF == 1))
+		if ((m_core->CF == 1) || (m_core->ZF == 1))
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -500,7 +500,7 @@ void i386_device::pentium_cmovbe_r32_rm32()    // Opcode 0x0f 46
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if ((m_core.CF == 1) || (m_core.ZF == 1))
+		if ((m_core->CF == 1) || (m_core->ZF == 1))
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -516,7 +516,7 @@ void i386_device::pentium_cmova_r16_rm16()    // Opcode 0x0f 47
 
 	if( modrm >= 0xc0 )
 	{
-		if ((m_core.CF == 0) && (m_core.ZF == 0))
+		if ((m_core->CF == 0) && (m_core->ZF == 0))
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -526,7 +526,7 @@ void i386_device::pentium_cmova_r16_rm16()    // Opcode 0x0f 47
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if ((m_core.CF == 0) && (m_core.ZF == 0))
+		if ((m_core->CF == 0) && (m_core->ZF == 0))
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -542,7 +542,7 @@ void i386_device::pentium_cmova_r32_rm32()    // Opcode 0x0f 47
 
 	if( modrm >= 0xc0 )
 	{
-		if ((m_core.CF == 0) && (m_core.ZF == 0))
+		if ((m_core->CF == 0) && (m_core->ZF == 0))
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -552,7 +552,7 @@ void i386_device::pentium_cmova_r32_rm32()    // Opcode 0x0f 47
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if ((m_core.CF == 0) && (m_core.ZF == 0))
+		if ((m_core->CF == 0) && (m_core->ZF == 0))
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -568,7 +568,7 @@ void i386_device::pentium_cmovs_r16_rm16()    // Opcode 0x0f 48
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.SF == 1)
+		if (m_core->SF == 1)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -578,7 +578,7 @@ void i386_device::pentium_cmovs_r16_rm16()    // Opcode 0x0f 48
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.SF == 1)
+		if (m_core->SF == 1)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -594,7 +594,7 @@ void i386_device::pentium_cmovs_r32_rm32()    // Opcode 0x0f 48
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.SF == 1)
+		if (m_core->SF == 1)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -604,7 +604,7 @@ void i386_device::pentium_cmovs_r32_rm32()    // Opcode 0x0f 48
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.SF == 1)
+		if (m_core->SF == 1)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -620,7 +620,7 @@ void i386_device::pentium_cmovns_r16_rm16()    // Opcode 0x0f 49
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.SF == 0)
+		if (m_core->SF == 0)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -630,7 +630,7 @@ void i386_device::pentium_cmovns_r16_rm16()    // Opcode 0x0f 49
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.SF == 0)
+		if (m_core->SF == 0)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -646,7 +646,7 @@ void i386_device::pentium_cmovns_r32_rm32()    // Opcode 0x0f 49
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.SF == 0)
+		if (m_core->SF == 0)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -656,7 +656,7 @@ void i386_device::pentium_cmovns_r32_rm32()    // Opcode 0x0f 49
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.SF == 0)
+		if (m_core->SF == 0)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -672,7 +672,7 @@ void i386_device::pentium_cmovp_r16_rm16()    // Opcode 0x0f 4a
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.PF == 1)
+		if (m_core->PF == 1)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -682,7 +682,7 @@ void i386_device::pentium_cmovp_r16_rm16()    // Opcode 0x0f 4a
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.PF == 1)
+		if (m_core->PF == 1)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -698,7 +698,7 @@ void i386_device::pentium_cmovp_r32_rm32()    // Opcode 0x0f 4a
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.PF == 1)
+		if (m_core->PF == 1)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -708,7 +708,7 @@ void i386_device::pentium_cmovp_r32_rm32()    // Opcode 0x0f 4a
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.PF == 1)
+		if (m_core->PF == 1)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -724,7 +724,7 @@ void i386_device::pentium_cmovnp_r16_rm16()    // Opcode 0x0f 4b
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.PF == 0)
+		if (m_core->PF == 0)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -734,7 +734,7 @@ void i386_device::pentium_cmovnp_r16_rm16()    // Opcode 0x0f 4b
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.PF == 0)
+		if (m_core->PF == 0)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -750,7 +750,7 @@ void i386_device::pentium_cmovnp_r32_rm32()    // Opcode 0x0f 4b
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.PF == 0)
+		if (m_core->PF == 0)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -760,7 +760,7 @@ void i386_device::pentium_cmovnp_r32_rm32()    // Opcode 0x0f 4b
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.PF == 0)
+		if (m_core->PF == 0)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -776,7 +776,7 @@ void i386_device::pentium_cmovl_r16_rm16()    // Opcode 0x0f 4c
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.SF != m_core.OF)
+		if (m_core->SF != m_core->OF)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -786,7 +786,7 @@ void i386_device::pentium_cmovl_r16_rm16()    // Opcode 0x0f 4c
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.SF != m_core.OF)
+		if (m_core->SF != m_core->OF)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -802,7 +802,7 @@ void i386_device::pentium_cmovl_r32_rm32()    // Opcode 0x0f 4c
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.SF != m_core.OF)
+		if (m_core->SF != m_core->OF)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -812,7 +812,7 @@ void i386_device::pentium_cmovl_r32_rm32()    // Opcode 0x0f 4c
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.SF != m_core.OF)
+		if (m_core->SF != m_core->OF)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -828,7 +828,7 @@ void i386_device::pentium_cmovge_r16_rm16()    // Opcode 0x0f 4d
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.SF == m_core.OF)
+		if (m_core->SF == m_core->OF)
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -838,7 +838,7 @@ void i386_device::pentium_cmovge_r16_rm16()    // Opcode 0x0f 4d
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.SF == m_core.OF)
+		if (m_core->SF == m_core->OF)
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -854,7 +854,7 @@ void i386_device::pentium_cmovge_r32_rm32()    // Opcode 0x0f 4d
 
 	if( modrm >= 0xc0 )
 	{
-		if (m_core.SF == m_core.OF)
+		if (m_core->SF == m_core->OF)
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -864,7 +864,7 @@ void i386_device::pentium_cmovge_r32_rm32()    // Opcode 0x0f 4d
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if (m_core.SF == m_core.OF)
+		if (m_core->SF == m_core->OF)
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -880,7 +880,7 @@ void i386_device::pentium_cmovle_r16_rm16()    // Opcode 0x0f 4e
 
 	if( modrm >= 0xc0 )
 	{
-		if ((m_core.ZF == 1) || (m_core.SF != m_core.OF))
+		if ((m_core->ZF == 1) || (m_core->SF != m_core->OF))
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -890,7 +890,7 @@ void i386_device::pentium_cmovle_r16_rm16()    // Opcode 0x0f 4e
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if ((m_core.ZF == 1) || (m_core.SF != m_core.OF))
+		if ((m_core->ZF == 1) || (m_core->SF != m_core->OF))
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -906,7 +906,7 @@ void i386_device::pentium_cmovle_r32_rm32()    // Opcode 0x0f 4e
 
 	if( modrm >= 0xc0 )
 	{
-		if ((m_core.ZF == 1) || (m_core.SF != m_core.OF))
+		if ((m_core->ZF == 1) || (m_core->SF != m_core->OF))
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -916,7 +916,7 @@ void i386_device::pentium_cmovle_r32_rm32()    // Opcode 0x0f 4e
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if ((m_core.ZF == 1) || (m_core.SF != m_core.OF))
+		if ((m_core->ZF == 1) || (m_core->SF != m_core->OF))
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -932,7 +932,7 @@ void i386_device::pentium_cmovg_r16_rm16()    // Opcode 0x0f 4f
 
 	if( modrm >= 0xc0 )
 	{
-		if ((m_core.ZF == 0) && (m_core.SF == m_core.OF))
+		if ((m_core->ZF == 0) && (m_core->SF == m_core->OF))
 		{
 			src = LOAD_RM16(modrm);
 			STORE_REG16(modrm, src);
@@ -942,7 +942,7 @@ void i386_device::pentium_cmovg_r16_rm16()    // Opcode 0x0f 4f
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if ((m_core.ZF == 0) && (m_core.SF == m_core.OF))
+		if ((m_core->ZF == 0) && (m_core->SF == m_core->OF))
 		{
 			src = READ16(ea);
 			STORE_REG16(modrm, src);
@@ -958,7 +958,7 @@ void i386_device::pentium_cmovg_r32_rm32()    // Opcode 0x0f 4f
 
 	if( modrm >= 0xc0 )
 	{
-		if ((m_core.ZF == 0) && (m_core.SF == m_core.OF))
+		if ((m_core->ZF == 0) && (m_core->SF == m_core->OF))
 		{
 			src = LOAD_RM32(modrm);
 			STORE_REG32(modrm, src);
@@ -968,7 +968,7 @@ void i386_device::pentium_cmovg_r32_rm32()    // Opcode 0x0f 4f
 	else
 	{
 		uint32_t ea = GetEA(modrm,0);
-		if ((m_core.ZF == 0) && (m_core.SF == m_core.OF))
+		if ((m_core->ZF == 0) && (m_core->SF == m_core->OF))
 		{
 			src = READ32(ea);
 			STORE_REG32(modrm, src);
@@ -1018,12 +1018,12 @@ void i386_device::pentium_cmpxchg8b_m64()  // Opcode 0x0f c7
 
 		if( value == edx_eax ) {
 			WRITE64(ea, ecx_ebx);
-			m_core.ZF = 1;
+			m_core->ZF = 1;
 			CYCLES(CYCLES_CMPXCHG_REG_MEM_T);
 		} else {
 			REG32(EDX) = (uint32_t) (value >> 32);
 			REG32(EAX) = (uint32_t) (value >>  0);
-			m_core.ZF = 0;
+			m_core->ZF = 0;
 			CYCLES(CYCLES_CMPXCHG_REG_MEM_F);
 		}
 	}
@@ -1905,17 +1905,17 @@ void i386_device::mmx_paddd_r64_rm64()  // Opcode 0f fe
 
 void i386_device::mmx_emms() // Opcode 0f 77
 {
-	if (m_core.cr[0] & CR0_TS)
+	if (m_core->cr[0] & CR0_TS)
 	{
 		i386_trap(FAULT_NM, 0);
 		return;
 	}
-	if (m_core.cr[0] & CR0_EM)
+	if (m_core->cr[0] & CR0_EM)
 	{
 		i386_trap(FAULT_UD, 0);
 		return;
 	}
-	m_x87_tw = 0xffff; // tag word = 0xffff
+	m_core->x87_tw = 0xffff; // tag word = 0xffff
 	CYCLES(1);     // TODO: correct cycle count
 }
 
@@ -1984,18 +1984,18 @@ void i386_device::i386_cyrix_svdc() // Opcode 0f 78
 			}
 		}
 
-		limit = m_core.sreg[index].limit;
+		limit = m_core->sreg[index].limit;
 
-		if (m_core.sreg[index].flags & 0x8000) //G bit
+		if (m_core->sreg[index].flags & 0x8000) //G bit
 		{
 			limit >>= 12;
 		}
 
 		WRITE16(ea + 0, limit);
-		WRITE32(ea + 2, m_core.sreg[index].base);
-		WRITE16(ea + 5, m_core.sreg[index].flags); //replace top 8 bits of base
-		WRITE8(ea + 7, m_core.sreg[index].base >> 24);
-		WRITE16(ea + 8, m_core.sreg[index].selector);
+		WRITE32(ea + 2, m_core->sreg[index].base);
+		WRITE16(ea + 5, m_core->sreg[index].flags); //replace top 8 bits of base
+		WRITE8(ea + 7, m_core->sreg[index].base >> 24);
+		WRITE16(ea + 8, m_core->sreg[index].selector);
 	} else {
 		i386_trap(6, 0);
 	}
@@ -2059,10 +2059,10 @@ void i386_device::i386_cyrix_rsdc() // Opcode 0f 79
 			limit = (limit << 12) | 0xfff;
 		}
 
-		m_core.sreg[index].selector = READ16(ea + 8);
-		m_core.sreg[index].flags = flags;
-		m_core.sreg[index].base = base;
-		m_core.sreg[index].limit = limit;
+		m_core->sreg[index].selector = READ16(ea + 8);
+		m_core->sreg[index].flags = flags;
+		m_core->sreg[index].base = base;
+		m_core->sreg[index].limit = limit;
 	} else {
 		i386_trap(6, 0);
 	}
@@ -2102,7 +2102,7 @@ void i386_device::i386_cyrix_rsldt() // Opcode 0f 7b
 {
 	if ( PROTECTED_MODE && !V8086_MODE )
 	{
-		if(m_core.CPL)
+		if(m_core->CPL)
 			FAULT(FAULT_GP,0)
 
 		uint8_t modrm = FETCH();
@@ -2166,7 +2166,7 @@ void i386_device::i386_cyrix_rsts() // Opcode 0f 7d
 {
 	if ( PROTECTED_MODE )
 	{
-		if(m_core.CPL)
+		if(m_core->CPL)
 			FAULT(FAULT_GP,0)
 
 		uint8_t modrm = FETCH();
@@ -2822,22 +2822,22 @@ void i386_device::sse_group_0fae()  // Opcode 0f ae
 			{
 				u8 atag = 0;
 				ea = GetEA(modm, 1);
-				WRITE16(ea + 0, m_x87_cw);
-				WRITE16(ea + 2, m_x87_sw);
+				WRITE16(ea + 0, m_core->x87_cw);
+				WRITE16(ea + 2, m_core->x87_sw);
 				for(int i = 0; i < 8; i++)
-					if (((m_x87_tw >> (i * 2)) & 3) != X87_TW_EMPTY) atag |= 1 << i;
+					if (((m_core->x87_tw >> (i * 2)) & 3) != X87_TW_EMPTY) atag |= 1 << i;
 				WRITE16(ea + 4, atag);
-				WRITE16(ea + 6, m_x87_opcode);
-				WRITE32(ea + 8, m_x87_inst_ptr);
-				WRITE32(ea + 12, m_x87_cs);
-				WRITE32(ea + 16, m_x87_data_ptr);
-				WRITE32(ea + 20, m_x87_ds);
+				WRITE16(ea + 6, m_core->x87_opcode);
+				WRITE32(ea + 8, m_core->x87_inst_ptr);
+				WRITE32(ea + 12, m_core->x87_cs);
+				WRITE32(ea + 16, m_core->x87_data_ptr);
+				WRITE32(ea + 20, m_core->x87_ds);
 				WRITE32(ea + 24, m_mxcsr);
 				WRITE32(ea + 28, 0); // mxcsr_mask
 				for(int i = 0; i < 8; i++)
 				{
-					WRITE64(ea + i*16 + 32, m_x87_reg[i].signif);
-					WRITE16(ea + i*16 + 40, m_x87_reg[i].signExp);
+					WRITE64(ea + i*16 + 32, m_core->x87_reg[i].signif);
+					WRITE16(ea + i*16 + 40, m_core->x87_reg[i].signExp);
 				}
 				for(int i = 0; i < 8; i++)
 				{
@@ -2851,25 +2851,25 @@ void i386_device::sse_group_0fae()  // Opcode 0f ae
 				u8 atag;
 				ea = GetEA(modm, 0);
 				x87_write_cw(READ16(ea));
-				m_x87_sw = READ16(ea + 2);
+				m_core->x87_sw = READ16(ea + 2);
 				atag = READ8(ea + 4);
-				m_x87_opcode = READ16(ea + 6);
-				m_x87_inst_ptr = READ32(ea + 8);
-				m_x87_cs = READ16(ea + 12);
-				m_x87_data_ptr = READ32(ea + 16);
-				m_x87_ds = READ16(ea + 20);
+				m_core->x87_opcode = READ16(ea + 6);
+				m_core->x87_inst_ptr = READ32(ea + 8);
+				m_core->x87_cs = READ16(ea + 12);
+				m_core->x87_data_ptr = READ32(ea + 16);
+				m_core->x87_ds = READ16(ea + 20);
 				m_mxcsr = READ32(ea + 24);
 				// mxcsr_mask
 				for(int i = 0; i < 8; i++)
 				{
 					int tag;
-					m_x87_reg[i].signif = READ64(ea + i*16 + 32);
-					m_x87_reg[i].signExp = READ16(ea + i*16 + 40);
+					m_core->x87_reg[i].signif = READ64(ea + i*16 + 32);
+					m_core->x87_reg[i].signExp = READ16(ea + i*16 + 40);
 					if(!(atag & (1 << i)))
 						tag = X87_TW_EMPTY;
-					else if(floatx80_is_zero(m_x87_reg[i]))
+					else if(floatx80_is_zero(m_core->x87_reg[i]))
 						tag = X87_TW_ZERO;
-					else if(floatx80_is_inf(m_x87_reg[i]) || extFloat80_is_nan(m_x87_reg[i]))
+					else if(floatx80_is_inf(m_core->x87_reg[i]) || extFloat80_is_nan(m_core->x87_reg[i]))
 						tag = X87_TW_SPECIAL;
 					else
 						tag = X87_TW_VALID;
@@ -4121,24 +4121,24 @@ void i386_device::sse_comiss_r128_r128m32() // Opcode 0f 2f
 		a.v = XMM((modrm >> 3) & 0x7).d[0];
 		b.v = src.d[0];
 	}
-	m_core.OF=0;
-	m_core.SF=0;
-	m_core.AF=0;
+	m_core->OF=0;
+	m_core->SF=0;
+	m_core->AF=0;
 	if (f32_isNaN(a) || f32_isNaN(b))
 	{
-		m_core.ZF = 1;
-		m_core.PF = 1;
-		m_core.CF = 1;
+		m_core->ZF = 1;
+		m_core->PF = 1;
+		m_core->CF = 1;
 	}
 	else
 	{
-		m_core.ZF = 0;
-		m_core.PF = 0;
-		m_core.CF = 0;
+		m_core->ZF = 0;
+		m_core->PF = 0;
+		m_core->CF = 0;
 		if (f32_eq(a, b))
-			m_core.ZF = 1;
+			m_core->ZF = 1;
 		if (f32_lt(a, b))
-			m_core.CF = 1;
+			m_core->CF = 1;
 	}
 	// should generate exception when at least one of the operands is either QNaN or SNaN
 	CYCLES(1);     // TODO: correct cycle count
@@ -4159,24 +4159,24 @@ void i386_device::sse_comisd_r128_r128m64() // Opcode 66 0f 2f
 		a.v = XMM((modrm >> 3) & 0x7).q[0];
 		b.v = src.q[0];
 	}
-	m_core.OF=0;
-	m_core.SF=0;
-	m_core.AF=0;
+	m_core->OF=0;
+	m_core->SF=0;
+	m_core->AF=0;
 	if (f64_isNaN(a) || f64_isNaN(b))
 	{
-		m_core.ZF = 1;
-		m_core.PF = 1;
-		m_core.CF = 1;
+		m_core->ZF = 1;
+		m_core->PF = 1;
+		m_core->CF = 1;
 	}
 	else
 	{
-		m_core.ZF = 0;
-		m_core.PF = 0;
-		m_core.CF = 0;
+		m_core->ZF = 0;
+		m_core->PF = 0;
+		m_core->CF = 0;
 		if (f64_eq(a, b))
-			m_core.ZF = 1;
+			m_core->ZF = 1;
 		if (f64_lt(a, b))
-			m_core.CF = 1;
+			m_core->CF = 1;
 	}
 	// should generate exception when at least one of the operands is either QNaN or SNaN
 	CYCLES(1);     // TODO: correct cycle count
@@ -4197,24 +4197,24 @@ void i386_device::sse_ucomiss_r128_r128m32() // Opcode 0f 2e
 		a.v = XMM((modrm >> 3) & 0x7).d[0];
 		b.v = src.d[0];
 	}
-	m_core.OF=0;
-	m_core.SF=0;
-	m_core.AF=0;
+	m_core->OF=0;
+	m_core->SF=0;
+	m_core->AF=0;
 	if (f32_isNaN(a) || f32_isNaN(b))
 	{
-		m_core.ZF = 1;
-		m_core.PF = 1;
-		m_core.CF = 1;
+		m_core->ZF = 1;
+		m_core->PF = 1;
+		m_core->CF = 1;
 	}
 	else
 	{
-		m_core.ZF = 0;
-		m_core.PF = 0;
-		m_core.CF = 0;
+		m_core->ZF = 0;
+		m_core->PF = 0;
+		m_core->CF = 0;
 		if (f32_eq(a, b))
-			m_core.ZF = 1;
+			m_core->ZF = 1;
 		if (f32_lt(a, b))
-			m_core.CF = 1;
+			m_core->CF = 1;
 	}
 	// should generate exception when at least one of the operands is SNaN
 	CYCLES(1);     // TODO: correct cycle count
@@ -4235,24 +4235,24 @@ void i386_device::sse_ucomisd_r128_r128m64() // Opcode 66 0f 2e
 		a.v = XMM((modrm >> 3) & 0x7).q[0];
 		b.v = src.q[0];
 	}
-	m_core.OF=0;
-	m_core.SF=0;
-	m_core.AF=0;
+	m_core->OF=0;
+	m_core->SF=0;
+	m_core->AF=0;
 	if (f64_isNaN(a) || f64_isNaN(b))
 	{
-		m_core.ZF = 1;
-		m_core.PF = 1;
-		m_core.CF = 1;
+		m_core->ZF = 1;
+		m_core->PF = 1;
+		m_core->CF = 1;
 	}
 	else
 	{
-		m_core.ZF = 0;
-		m_core.PF = 0;
-		m_core.CF = 0;
+		m_core->ZF = 0;
+		m_core->PF = 0;
+		m_core->CF = 0;
 		if (f64_eq(a, b))
-			m_core.ZF = 1;
+			m_core->ZF = 1;
 		if (f64_lt(a, b))
-			m_core.CF = 1;
+			m_core->CF = 1;
 	}
 	// should generate exception when at least one of the operands is SNaN
 	CYCLES(1);     // TODO: correct cycle count
@@ -4677,7 +4677,7 @@ void i386_device::sse_pinsrw_r64_r16m16_i8() // Opcode 0f c4, 16bit register
 	if( modrm >= 0xc0 ) {
 		uint8_t imm8 = FETCH();
 		uint16_t v = LOAD_RM16(modrm);
-		if (m_core.xmm_operand_size) {
+		if (m_core->xmm_operand_size) {
 			if(SSEPROLOG()) return;
 			XMM((modrm >> 3) & 0x7).w[imm8 & 7] = v;
 		}
@@ -4689,7 +4689,7 @@ void i386_device::sse_pinsrw_r64_r16m16_i8() // Opcode 0f c4, 16bit register
 		uint32_t ea = GetEA(modrm, 0);
 		uint8_t imm8 = FETCH();
 		uint16_t v = READ16(ea);
-		if (m_core.xmm_operand_size) {
+		if (m_core->xmm_operand_size) {
 			if(SSEPROLOG()) return;
 			XMM((modrm >> 3) & 0x7).w[imm8 & 7] = v;
 		}
@@ -4741,7 +4741,7 @@ void i386_device::sse_pextrw_r16_r64_i8() // Opcode 0f c5
 	uint8_t modrm = FETCH();
 	if( modrm >= 0xc0 ) {
 		uint8_t imm8 = FETCH();
-		if (m_core.xmm_operand_size) {
+		if (m_core->xmm_operand_size) {
 			if(SSEPROLOG()) return;
 			STORE_REG16(modrm, XMM(modrm & 0x7).w[imm8 & 7]);
 		}
