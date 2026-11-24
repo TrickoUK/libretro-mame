@@ -32,6 +32,7 @@ i82371eb_isa_device::i82371eb_isa_device(const machine_config &mconfig, const ch
 	: i82371sb_isa_device(mconfig, I82371EB_ISA, tag, owner, clock)
 	, m_rtc(*this, "rtc")
 	, m_a20m_callback(*this)
+	, m_apmc_callback(*this)
 	, m_ext_gatea20(0)
 	, m_fast_gatea20(0)
 	, m_port92(0)
@@ -65,6 +66,8 @@ void i82371eb_isa_device::device_start()
 	save_item(NAME(m_gencfg));
 	save_item(NAME(m_rtccfg));
 	save_item(NAME(m_rtc_index));
+	save_item(NAME(m_apmc));
+	save_item(NAME(m_apms));
 	save_item(NAME(m_ext_gatea20));
 	save_item(NAME(m_fast_gatea20));
 	save_item(NAME(m_port92));
@@ -81,6 +84,8 @@ void i82371eb_isa_device::device_reset()
 	std::fill(std::begin(m_gencfg), std::end(m_gencfg), 0);
 	m_rtccfg = 0x21;
 	m_rtc_index[0] = m_rtc_index[1] = 0;
+	m_apmc = 0;
+	m_apms = 0;
 	m_fast_gatea20 = 0;
 	m_port92 = 0;
 }
@@ -199,6 +204,16 @@ void i82371eb_isa_device::internal_io_map(address_map &map)
 	i82371sb_isa_device::internal_io_map(map);
 	map(0x0092, 0x0092).rw(FUNC(i82371eb_isa_device::port92_r), FUNC(i82371eb_isa_device::port92_w));
 	map(0x00eb, 0x00eb).lw8(NAME([] (offs_t offset, u8 data) { }));
+	// APM Control/Status, the SMI logic is in the power management function
+	// TODO: unify m_apmc/m_apms with the base class apmc/apms (hook write_apmcapms instead of keeping a second copy)
+	map(0x00b2, 0x00b2).lrw8(
+		NAME([this] () { return m_apmc; }),
+		NAME([this] (u8 data) { m_apmc = data; m_apmc_callback(data); })
+	);
+	map(0x00b3, 0x00b3).lrw8(
+		NAME([this] () { return m_apms; }),
+		NAME([this] (u8 data) { m_apms = data; })
+	);
 }
 
 u8 i82371eb_isa_device::pdmacfg_r(offs_t offset)
