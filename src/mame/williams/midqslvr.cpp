@@ -275,11 +275,13 @@ Notes:
 
 #include "emu.h"
 
+#include "midway_diego.h"
+
 #include "bus/isa/isa_cards.h"
 #include "bus/pci/virge_pci.h"
 //#include "bus/rs232/hlemouse.h"
 //#include "bus/rs232/null_modem.h"
-//#include "bus/rs232/rs232.h"
+#include "bus/rs232/rs232.h"
 //#include "bus/rs232/sun_kbd.h"
 //#include "bus/rs232/terminal.h"
 #include "cpu/i386/i386.h"
@@ -362,6 +364,11 @@ void midway_quicksilver2_state::midqslvr_map(address_map &map)
 	map.unmap_value_high();
 }
 
+static void diego_serial_devices(device_slot_interface &device)
+{
+	device.option_add("diego", MIDWAY_DIEGO);
+}
+
 static void isa_internal_devices(device_slot_interface &device)
 {
 	device.option_add("fdc37m707", FDC37M707);
@@ -375,10 +382,10 @@ void midway_quicksilver2_state::superio_config(device_t *device)
 	fdc.gp25_gatea20().set(":pci:07.0", FUNC(i82371eb_isa_device::a20gate_w));
 	fdc.irq1().set(":pci:07.0", FUNC(i82371eb_isa_device::pc_irq1_w));
 	fdc.irq8().set(":pci:07.0", FUNC(i82371eb_isa_device::pc_irq8n_w));
-#if 0
 	fdc.txd1().set(":serport0", FUNC(rs232_port_device::write_txd));
 	fdc.ndtr1().set(":serport0", FUNC(rs232_port_device::write_dtr));
 	fdc.nrts1().set(":serport0", FUNC(rs232_port_device::write_rts));
+#if 0
 	fdc.txd2().set(":serport1", FUNC(rs232_port_device::write_txd));
 	fdc.ndtr2().set(":serport1", FUNC(rs232_port_device::write_dtr));
 	fdc.nrts2().set(":serport1", FUNC(rs232_port_device::write_rts));
@@ -423,6 +430,14 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 	// FIXME: determine ISA bus clock
 	ISA16_SLOT(config, "board4", 0, "pci:07.0:isabus", isa_internal_devices, "fdc37m707", true).set_option_machine_config("fdc37m707", superio_config);
 	ISA16_SLOT(config, "isa1",   0, "pci:07.0:isabus", pc_isa16_cards, nullptr, false);
+
+	// Diego I/O board on COM1
+	rs232_port_device &serport0(RS232_PORT(config, "serport0", diego_serial_devices, "diego"));
+	serport0.rxd_handler().set("board4:fdc37m707", FUNC(fdc37c93x_device::rxd1_w));
+	serport0.dcd_handler().set("board4:fdc37m707", FUNC(fdc37c93x_device::ndcd1_w));
+	serport0.dsr_handler().set("board4:fdc37m707", FUNC(fdc37c93x_device::ndsr1_w));
+	serport0.ri_handler().set("board4:fdc37m707", FUNC(fdc37c93x_device::nri1_w));
+	serport0.cts_handler().set("board4:fdc37m707", FUNC(fdc37c93x_device::ncts1_w));
 	ISA16_SLOT(config, "isa2",   0, "pci:07.0:isabus", pc_isa16_cards, nullptr, false);
 
 	// YMF740G goes thru "pci:0c.0"
