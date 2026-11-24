@@ -968,8 +968,20 @@ uint8_t i82371sb_isa_device::reset_control_r(offs_t offset)
 
 void i82371sb_isa_device::reset_control_w(offs_t offset, uint8_t data)
 {
+	logerror("reset_control = %02x\n", data);
+
+	// RCPU (bit 2) starts a reset on its 0 to 1 transition; SRST (bit 1) selects a full system
+	// reset (PCIRST# to every device, which also clears the chipset's lock bits) over a CPU-only one
+	const bool start = BIT(data, 2) && !BIT(reset_control, 2);
 	reset_control = data;
-	logerror("reset_control = %02x\n", reset_control);
+	if (start)
+	{
+		reset_control &= ~0x04;
+		if (BIT(data, 1))
+			machine().schedule_soft_reset();
+		else
+			m_maincpu->pulse_input_line(INPUT_LINE_RESET, attotime::zero);
+	}
 }
 
 void i82371sb_isa_device::update_smireq_line()
