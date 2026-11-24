@@ -225,6 +225,7 @@ void i82371eb_acpi_device::unmap_log_w(offs_t offset, u8 data)
 acpi_piix4_device::acpi_piix4_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
 	: device_t(mconfig, ACPI_PIIX4, tag, owner, clock)
 	, m_smi_w(*this)
+	, m_gpi_r(*this, 0)
 {
 }
 
@@ -536,7 +537,7 @@ void acpi_piix4_device::map(address_map &map)
 				if (mem_mask == 0xffff)
 					LOG("\tInvalid word access!\n");
 			}
-			return 0;
+			return u16((m_gpi_r() & 0x3fffff) >> (offset * 16));
 		})
 	);
 	map(0x34, 0x37).lrw16(

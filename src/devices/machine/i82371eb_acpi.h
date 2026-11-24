@@ -73,6 +73,8 @@ public:
 	acpi_piix4_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = XTAL(3'579'545).value());
 
 	auto smi() { return m_smi_w.bind(); }
+	// GPI[21:0] input pins
+	auto gpi() { return m_gpi_r.bind(); }
 
 	void map(address_map &map);
 
@@ -88,6 +90,7 @@ private:
 	void update_smi();
 
 	devcb_write_line m_smi_w;
+	devcb_read32 m_gpi_r;
 
 	bool m_smi_state;
 	u16 m_pmsts;

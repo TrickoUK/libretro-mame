@@ -399,6 +399,7 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 	I82371EB_ACPI(config, "pci:07.3");
 	acpi_piix4_device &pm(ACPI_PIIX4(config, "pci:07.3:acpi"));
 	pm.smi().set_inputline("maincpu", INPUT_LINE_SMI);
+	pm.gpi().set_ioport(":JUMPERS");
 	SMBUS        (config, "pci:07.3:smbus", 0);
 
 	// FIXME: determine ISA bus clock
@@ -427,6 +428,16 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 	// "pci:0e.0" J4D1
 	PCI_SLOT(config, "pci:1", pci_cards, 14, 0, 1, 2, 3, "virge");
 }
+
+static INPUT_PORTS_START( midqslvr )
+	// motherboard configuration jumper, read through PIIX4 GPI21/GPI20 (pulled up, each position grounds one)
+	// TODO: verify the position names and their GPI pins against the SE440BX-2 manual
+	PORT_START("JUMPERS")
+	PORT_CONFNAME( 0x300000, 0x200000, "BIOS Configuration Jumper" )
+	PORT_CONFSETTING(        0x200000, "Position 1" )
+	PORT_CONFSETTING(        0x100000, "Position 2" )
+	PORT_CONFSETTING(        0x300000, "Position 3" )
+INPUT_PORTS_END
 
 // Graphite runs on incompatible HW, consider splitting if things starts to get hairy ...
 
@@ -540,11 +551,11 @@ ROM_END
 
 
 // there are almost certainly multiple versions of these; updates were offered on floppy disk.  The version numbers for the existing CHDs are unknown.
-GAME(1999, hydrthnd,    0,        midqslvr, 0, midway_quicksilver2_state, empty_init, ROT0, "Midway Games", "Hydro Thunder", MACHINE_NO_SOUND | MACHINE_NOT_WORKING)
-GAME(1999, hydrthnd101b,hydrthnd, midqslvr, 0, midway_quicksilver2_state, empty_init, ROT0, "Midway Games", "Hydro Thunder (v1.01b)", MACHINE_NO_SOUND | MACHINE_NOT_WORKING)
-GAME(1999, hydrthnd100d,hydrthnd, midqslvr, 0, midway_quicksilver2_state, empty_init, ROT0, "Midway Games", "Hydro Thunder (v1.00d)", MACHINE_NO_SOUND | MACHINE_NOT_WORKING)
+GAME(1999, hydrthnd,    0,        midqslvr, midqslvr, midway_quicksilver2_state, empty_init, ROT0, "Midway Games", "Hydro Thunder", MACHINE_NO_SOUND | MACHINE_NOT_WORKING)
+GAME(1999, hydrthnd101b,hydrthnd, midqslvr, midqslvr, midway_quicksilver2_state, empty_init, ROT0, "Midway Games", "Hydro Thunder (v1.01b)", MACHINE_NO_SOUND | MACHINE_NOT_WORKING)
+GAME(1999, hydrthnd100d,hydrthnd, midqslvr, midqslvr, midway_quicksilver2_state, empty_init, ROT0, "Midway Games", "Hydro Thunder (v1.00d)", MACHINE_NO_SOUND | MACHINE_NOT_WORKING)
 
-GAME(2000, offrthnd,    0,        midqslvr, 0, midway_quicksilver2_state, empty_init, ROT0, "Midway Games", "Offroad Thunder", MACHINE_NO_SOUND | MACHINE_NOT_WORKING)
+GAME(2000, offrthnd,    0,        midqslvr, midqslvr, midway_quicksilver2_state, empty_init, ROT0, "Midway Games", "Offroad Thunder", MACHINE_NO_SOUND | MACHINE_NOT_WORKING)
 
 GAME(2001, arctthnd,    0,        graphite, 0, midway_graphite_state, empty_init, ROT0, "Midway Games", "Arctic Thunder (v1.002)", MACHINE_NO_SOUND | MACHINE_NOT_WORKING)
 
