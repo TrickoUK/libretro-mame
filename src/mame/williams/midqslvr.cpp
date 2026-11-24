@@ -395,6 +395,7 @@ void midway_quicksilver2_state::superio_config(device_t *device)
 void midway_quicksilver2_state::midqslvr(machine_config &config)
 {
 	PENTIUM2(config, m_maincpu, 333'000'000); // Celeron 333
+	m_maincpu->set_rdtsc_idle_skip(true);
 	m_maincpu->set_addrmap(AS_PROGRAM, &midway_quicksilver2_state::midqslvr_map);
 	//m_maincpu->set_addrmap(AS_IO, &midway_quicksilver2_state::midqslvr_io);
 	m_maincpu->set_irq_acknowledge_callback("pci:07.0:pic8259_master", FUNC(pic8259_device::inta_cb));
