@@ -163,6 +163,7 @@ i82371sb_isa_device::i82371sb_isa_device(const machine_config &mconfig, device_t
 	, m_stpclk_callback(*this)
 	, m_boot_state_hook(*this)
 	, m_maincpu(*this, finder_base::DUMMY_TAG)
+	, m_bios_flash(*this, finder_base::DUMMY_TAG)
 	, m_pic8259_master(*this, "pic8259_master")
 	, m_pic8259_slave(*this, "pic8259_slave")
 	, m_dma8237_1(*this, "dma8237_1")
@@ -449,6 +450,21 @@ void i82371sb_isa_device::cthtmr_w(uint8_t data)
 
 void i82371sb_isa_device::map_bios(address_space *memory_space, uint32_t start, uint32_t end)
 {
+	if (m_bios_flash)
+	{
+		const uint32_t mask = m_bios_flash->length() - 1;
+		const uint32_t base = start & mask;
+		memory_space->install_readwrite_handler(start, end,
+				read8sm_delegate(*this, [this, base, mask] (offs_t offset) { return m_bios_flash->read((base + offset) & mask); }, "bios_flash_r"),
+				write8sm_delegate(*this, [this, base, mask] (offs_t offset, u8 data)
+				{
+					// XBCS bit 2: BIOSCS# Write Protect Enable, writes don't reach the flash while clear
+					if (BIT(xbcs, 2))
+						m_bios_flash->write((base + offset) & mask, data);
+				}, "bios_flash_w"));
+		return;
+	}
+
 	uint32_t mask = m_region->bytes() - 1;
 	memory_space->install_rom(start, end, m_region->base() + (start & mask));
 }
@@ -465,7 +481,7 @@ void i82371sb_isa_device::map_extra(
 {
 	// assume that map_extra of the southbridge is called before the one of the northbridge
 	m_isabus->remap(AS_PROGRAM, 0, 1 << 24);
-	map_bios(memory_space, 0xffffffff - m_region->bytes() + 1, 0xffffffff);
+	map_bios(memory_space, 0xffffffff - (m_bios_flash ? m_bios_flash->length() : m_region->bytes()) + 1, 0xffffffff);
 	map_bios(memory_space, 0x000e0000, 0x000fffff);
 	m_isabus->remap(AS_IO, 0, 0xffff);
 	io_space->install_device(0, 0xffff, *this, &i82371sb_isa_device::internal_io_map);

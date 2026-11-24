@@ -15,6 +15,7 @@
 #include "machine/ds128x.h"
 #include "machine/idectrl.h"
 #include "machine/ins8250.h"
+#include "machine/intelfsh.h"
 #include "machine/nvram.h"
 #include "machine/pic8259.h"
 #include "machine/pit8253.h"
@@ -47,6 +48,8 @@ public:
 	auto boot_state_hook() { return m_boot_state_hook.bind(); }
 
 	template <typename T> void set_cpu_tag(T &&tag) { m_maincpu.set_tag(std::forward<T>(tag)); }
+	// BIOS held in a flash device rather than in the device region
+	template <typename T> void set_bios_flash(T &&tag) { m_bios_flash.set_tag(std::forward<T>(tag)); }
 
 	void pc_pirqa_w(int state);
 	void pc_pirqb_w(int state);
@@ -195,6 +198,7 @@ private:
 
 	// southbridge
 	required_device<cpu_device> m_maincpu;
+	optional_device<intelfsh8_device> m_bios_flash;
 	required_device<pic8259_device> m_pic8259_master;
 	// protected because needed by EB
 protected:
