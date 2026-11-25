@@ -747,7 +747,7 @@ void i386_device::cfunc_access(void *param)
 						cpu.m_drc_data->slow_writes++;
 						uint32_t value = core.arg0;
 						if (cpu.drc_verify_breaks(DRC_BREAK_STORE))
-							value ^= 1;
+							cpu.drc_verify_break_store(value);
 						if constexpr (sizeof(Data) == 1)
 							cpu.WRITE8(address, uint8_t(value));
 						else

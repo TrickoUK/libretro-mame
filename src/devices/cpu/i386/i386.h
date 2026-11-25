@@ -1711,6 +1711,7 @@ protected:
 	void drc_verify_instruction();
 	void drc_verify_break_mov();
 	void drc_verify_break_ea();
+	void drc_verify_break_store(uint32_t &value) const;
 	static void cfunc_verify_break_ea(void *param);
 	uint8_t *drc_verify_host_page(offs_t address) const;
 	bool drc_verify_breaks(int kind) const;

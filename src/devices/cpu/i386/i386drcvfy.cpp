@@ -68,7 +68,7 @@
         load     inverts a bit of the register written by each compiled load
                  of checked blocks
         store    inverts a bit of the value written by each compiled store
-                 which calls a function
+                 of checked blocks which calls a function
         ea       moves the address of each compiled memory access of checked
                  blocks by a dword
         nodrop   leaves the write table entry of a page that starts being
@@ -333,6 +333,15 @@ void i386_device::drc_verify_break_ea()
 	drc_verifier const &v = *m_verifier;
 	if (v.recording && !v.unsafe)
 		m_core->ea_tmp += 4;
+}
+
+
+// inverts a bit of the value a compiled instruction stores
+void i386_device::drc_verify_break_store(uint32_t &value) const
+{
+	drc_verifier const &v = *m_verifier;
+	if (v.recording && !v.unsafe)
+		value ^= 1;
 }
 
 
