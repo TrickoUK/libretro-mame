@@ -225,7 +225,7 @@ void i386_device::i386_check_sreg_validity(int reg)
 	}
 }
 
-int i386_device::i386_limit_check(int seg, uint32_t offset, int size)
+inline int i386_device::i386_limit_check(int seg, uint32_t offset, int size)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(PROTECTED_MODE && !V8086_MODE)

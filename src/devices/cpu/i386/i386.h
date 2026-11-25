@@ -551,7 +551,7 @@ protected:
 	uint32_t GetEA(uint8_t modrm, int rwn, int size = 1);
 	uint32_t Getx87EA(uint8_t modrm, int rwn);
 	void i386_check_sreg_validity(int reg);
-	int i386_limit_check(int seg, uint32_t offset, int size = 1);
+	ATTR_FORCE_INLINE int i386_limit_check(int seg, uint32_t offset, int size = 1);
 	void i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault);
 	void i386_trap(int irq, int irq_gate);
 	void i386_trap_with_error(int irq, int irq_gate, int trap_level, uint32_t error);
