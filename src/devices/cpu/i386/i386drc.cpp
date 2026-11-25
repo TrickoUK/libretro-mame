@@ -60,6 +60,7 @@ constexpr int EXECUTE_OUT_OF_CYCLES = 0;
 constexpr int EXECUTE_MISSING_CODE = 1;
 constexpr int EXECUTE_RESET_CACHE = 2;
 constexpr int EXECUTE_INTERPRET = 3;
+constexpr int EXECUTE_BLOCK_DONE = 4;
 
 
 inline void alloc_handle(drcuml_state &drcuml, uml::code_handle *&handleptr, const char *name)
@@ -258,7 +259,7 @@ void i386_device::static_generate_fault_handler(drcuml_block &block)
 	UML_CALLC(block, &i386_device::cfunc_deliver_fault, this);              // callc   cfunc_deliver_fault
 	UML_CMP(block, mem(&m_core->drc_exit), 0);                              // cmp     [drc_exit],0
 	block.append().exit(COND_NE, EXECUTE_INTERPRET);                        // exit    EXECUTE_INTERPRET,ne
-	UML_HASHJMP(block, mem(&m_core->mode), mem(&m_core->pc), *m_nocode);    // hashjmp <mode>,<pc>,nocode
+	generate_block_end(block);
 }
 
 
@@ -280,7 +281,7 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 
 			UML_HASH(block, mode, pc);                                      // hash    mode,pc
 			generate_step_instruction(block, pc);
-			UML_HASHJMP(block, mem(&m_core->mode), mem(&m_core->pc), *m_nocode); // hashjmp <mode>,<pc>,nocode
+			generate_block_end(block);
 
 			block.end();
 			succeeded = true;
@@ -293,6 +294,17 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 }
 
 
+// goes on to the block for the current mode and address
+void i386_device::generate_block_end(drcuml_block &block)
+{
+	// the verifier compares the state after each block
+	if (m_verifier)
+		UML_EXIT(block, EXECUTE_BLOCK_DONE);                                // exit    EXECUTE_BLOCK_DONE
+	else
+		UML_HASHJMP(block, mem(&m_core->mode), mem(&m_core->pc), *m_nocode); // hashjmp <mode>,<pc>,nocode
+}
+
+
 // executes one instruction with the interpreter
 void i386_device::generate_step_instruction(drcuml_block &block, offs_t pc)
 {
@@ -300,6 +312,9 @@ void i386_device::generate_step_instruction(drcuml_block &block, offs_t pc)
 	// the cycle cost before the last instruction is zero
 	UML_CMP(block, mem(&m_core->cycles), 0);                                // cmp     [cycles],0
 	UML_EXHc(block, COND_LE, *m_out_of_cycles, pc);                         // exh     out_of_cycles,pc,le
+
+	if (m_verifier)
+		UML_ADD(block, mem(&m_core->verify_count), mem(&m_core->verify_count), 1); // add     [verify_count],[verify_count],1
 
 	UML_CALLC(block, &i386_device::cfunc_step, this);                       // callc   cfunc_step
 
@@ -331,7 +346,7 @@ void i386_device::execute_run_drc()
 		if (m_drc_cache_dirty)
 			drc_flush_cache();
 
-		switch (m_drcuml->execute(*m_entry))
+		switch (m_verifier ? drc_verify_execute() : m_drcuml->execute(*m_entry))
 		{
 		case EXECUTE_MISSING_CODE:
 			drc_compile_block(m_core->mode, m_core->pc);
@@ -347,6 +362,7 @@ void i386_device::execute_run_drc()
 			break;
 
 		case EXECUTE_INTERPRET:
+		case EXECUTE_BLOCK_DONE:
 			break;
 		}
 	}

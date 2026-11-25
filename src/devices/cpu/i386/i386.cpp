@@ -2192,6 +2192,15 @@ void i386_device::i386_common_init()
 
 	set_icountptr(m_core->cycles);
 	m_notifier = m_program->add_change_notifier([this] (read_or_write mode) { dri_changed(); });
+
+	if (m_drc_enabled)
+		drc_verify_start();
+}
+
+void i386_device::device_stop()
+{
+	if (m_verifier)
+		drc_verify_report();
 }
 
 void i386_device::device_start()
@@ -2648,6 +2657,7 @@ void i386_device::zero_state()
 	m_core->seg_flat = 0;
 	m_core->ferr_needed = 0;
 	m_core->drc_exit = 0;
+	m_core->verify_count = 0;
 	m_drc_cache_dirty = true;
 	m_base_cycles = 0;
 	m_opcode = 0;

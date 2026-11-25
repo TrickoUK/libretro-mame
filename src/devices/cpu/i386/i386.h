@@ -48,6 +48,7 @@ protected:
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
 	virtual void device_debug_setup() override;
+	virtual void device_stop() override ATTR_COLD;
 
 	// device_execute_interface overrides
 	virtual uint32_t execute_min_cycles() const noexcept override { return 1; }
@@ -354,6 +355,7 @@ protected:
 		uint32_t seg_flat;      // bit n set while segment n has base 0 and a 4 GiB limit
 		uint32_t ferr_needed;   // an x87 operation left an unmasked exception to report
 		uint32_t drc_exit;      // generated code must return to the execution loop
+		uint32_t verify_count;  // instructions executed by the block being checked
 		void *page_table;       // host page pointers for the data fast path (heap allocated)
 		void *code_page_table;  // per-page code generation marks (heap allocated)
 	};
@@ -1610,9 +1612,18 @@ protected:
 	void static_generate_nocode_handler(drcuml_block &block);
 	void static_generate_out_of_cycles(drcuml_block &block);
 	void static_generate_fault_handler(drcuml_block &block);
+	void generate_block_end(drcuml_block &block);
 	void generate_step_instruction(drcuml_block &block, offs_t pc);
 	static void cfunc_step(void *param);
 	static void cfunc_deliver_fault(void *param);
+
+	// lockstep verifier
+	struct drc_verifier;
+	std::shared_ptr<drc_verifier> m_verifier;
+	void drc_verify_start();
+	void drc_verify_map();
+	int drc_verify_execute();
+	void drc_verify_report();
 
 };
 

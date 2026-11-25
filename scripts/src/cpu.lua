@@ -1395,6 +1395,7 @@ if CPUS["I386"] then
 		MAME_DIR .. "src/devices/cpu/i386/i386.cpp",
 		MAME_DIR .. "src/devices/cpu/i386/i386.h",
 		MAME_DIR .. "src/devices/cpu/i386/i386drc.cpp",
+		MAME_DIR .. "src/devices/cpu/i386/i386drcvfy.cpp",
 		MAME_DIR .. "src/devices/cpu/i386/athlon.cpp",
 		MAME_DIR .. "src/devices/cpu/i386/athlon.h",
 		MAME_DIR .. "src/devices/cpu/i386/cache.h",
