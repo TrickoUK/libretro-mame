@@ -90,6 +90,10 @@ protected:
 	virtual void cache_invalidate() {}
 	virtual void cache_clean() {}
 
+	// recompiler front end
+	class opcode_desc;
+	class frontend;
+
 	// reports the CPU state a subclass holds to the recompiler verifier
 	using drc_region_adder = std::function<void (char const *name, void *base, size_t length)>;
 	virtual void drc_verify_add_state(drc_region_adder const &add) {}
@@ -362,6 +366,7 @@ protected:
 		uint32_t ferr_needed;   // an x87 operation left an unmasked exception to report
 		uint32_t drc_exit;      // generated code must return to the execution loop
 		uint32_t verify_count;  // instructions executed by the block being checked
+		uint32_t verify_pc;     // address at which the next instruction of the block was compiled
 		uint32_t mode_dirty;    // set by anything that changes an input of the mode key
 		void *page_table;       // host page pointers for the data fast path (heap allocated)
 		void *code_page_table;  // per-page code generation marks (heap allocated)
@@ -1607,6 +1612,7 @@ protected:
 	bool m_drc_verify_break = false;
 	std::exception_ptr m_drc_exception;
 	std::unique_ptr<drcuml_state> m_drcuml;
+	std::shared_ptr<frontend> m_drcfe;
 	uml::code_handle *m_entry = nullptr;
 	uml::code_handle *m_nocode = nullptr;
 	uml::code_handle *m_out_of_cycles = nullptr;
@@ -1617,6 +1623,7 @@ protected:
 	uint32_t drc_mode() const;
 	bool drc_eligible(uint32_t mode) const;
 	bool drc_runnable();
+	bool drc_read_code(offs_t address, uint8_t &value);
 	uint32_t drc_exit_request();
 	template <typename Body> void drc_guarded_call(Body &&body);
 	void drc_rethrow_exception();
@@ -1628,10 +1635,12 @@ protected:
 	void static_generate_fault_handler(drcuml_block &block);
 	void generate_call(drcuml_block &block, void (*function)(void *));
 	void generate_block_end(drcuml_block &block);
-	void generate_step_instruction(drcuml_block &block, offs_t pc);
+	void generate_step_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow);
+	void generate_slow_exit(drcuml_block &block);
 	static void cfunc_step(void *param);
 	static void cfunc_deliver_fault(void *param);
 	static void cfunc_verify_break(void *param);
+	static void cfunc_verify_instruction(void *param);
 
 	// lockstep verifier
 	struct drc_verifier;
@@ -1640,6 +1649,9 @@ protected:
 	void drc_verify_map();
 	int drc_verify_execute();
 	void drc_verify_break();
+	void drc_verify_instruction();
+	bool drc_verify_ignores_address() const;
+	bool drc_verify_read_code(offs_t address, uint8_t &value);
 	void drc_verify_report();
 
 };

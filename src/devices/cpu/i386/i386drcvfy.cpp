@@ -6,11 +6,12 @@
 
     A debugging aid, selected by setting the environment variable
     MAME_I386_DRC_VERIFY to N, which checks one block in every N against the
-    interpreter.  Generated code is built to return after each block.  For a
-    checked block the CPU state is saved, the block is run, its memory writes
-    are undone, the saved state is restored and the interpreter executes the
-    same number of instructions.  CPU state and memory writes are then
-    compared, and execution continues from the interpreter's result.
+    interpreter.  Generated code is built to return after each block, and to
+    call the verifier before each instruction.  For a checked block the CPU
+    state is saved, the block is run, its memory writes are undone, the saved
+    state is restored and the interpreter executes the same number of
+    instructions.  CPU state and memory writes are then compared, and
+    execution continues from the interpreter's result.
 
     Only accesses to plain memory can be repeated.  A block that accesses
     anything else, or any I/O port, is left as the recompiled code executed it
@@ -22,7 +23,8 @@
     The replay also checks that the block did not execute an instruction
     which the interpreter loop would not have started, or which has to be
     left to the interpreter, or after the code cache had to be flushed.
-    After each block, checked or not, the cached mode key must agree with the
+    In every block, checked or not, each instruction must be started at the
+    address it was compiled at, and the cached mode key must agree with the
     segment registers and CR0.
 
     To show that errors are detected, MAME_I386_DRC_VERIFY_BREAK selects a
@@ -32,10 +34,13 @@
         eip      adds one to EIP in checked blocks
         write    writes the dword below the stack pointer back to itself
                  in checked blocks
-        overrun  executes a second instruction in checked blocks, whatever
-                 the cycles left and the state after the first.  This is only
-                 reported when the extra instruction lands at the end of a
-                 timeslice or in an ineligible state.
+        overrun  executes a second instruction after the first one of checked
+                 blocks, whatever the cycles left and the state.  The block
+                 is left if that does not end at the next compiled address,
+                 so this is only reported when the extra instruction lands
+                 at the end of a timeslice or in an ineligible state.
+        address  leaves out the test of the address between the instructions
+                 of a block
         mode     changes the cached mode key in checked blocks
         throw    throws a C++ exception in the first block run
 
@@ -68,6 +73,7 @@ enum : int
 	BREAK_EIP,
 	BREAK_WRITE,
 	BREAK_OVERRUN,
+	BREAK_ADDRESS,
 	BREAK_MODE,
 	BREAK_THROW
 };
@@ -101,6 +107,12 @@ struct i386_device::drc_verifier
 	uint64_t mismatched = 0;
 	int sabotage = BREAK_NONE;
 
+	// violations seen while generated code was running
+	uint32_t misplaced = 0;
+	uint32_t misplaced_pc = 0;
+	uint32_t misplaced_expected = 0;
+	uint32_t stale_modes = 0;
+
 	bool recording = false;
 	bool unsafe = false;
 	bool remap = true;
@@ -113,7 +125,8 @@ struct i386_device::drc_verifier
 	std::vector<access> writes;
 	std::vector<access> block_writes;
 
-	// per page: bit 0 set if reads come from memory, bit 1 set if writes go to memory
+	// per page: bit 0 set if reads come from memory, bit 1 set if writes go to memory, bit 2 set if the page has
+	// a pointer for reads
 	std::vector<uint8_t> pages;
 
 	memory_passthrough_handler program_tap;
@@ -209,6 +222,7 @@ void i386_device::drc_verify_start()
 				{ "eip", BREAK_EIP },
 				{ "write", BREAK_WRITE },
 				{ "overrun", BREAK_OVERRUN },
+				{ "address", BREAK_ADDRESS },
 				{ "mode", BREAK_MODE },
 				{ "throw", BREAK_THROW } };
 		for (auto const &[name, kind] : NAMES)
@@ -259,14 +273,54 @@ void i386_device::drc_verify_break()
 		break;
 
 	case BREAK_OVERRUN:
-		step();
-		core.verify_count++;
+		if (core.verify_count == 1)
+		{
+			step();
+			core.verify_count++;
+		}
 		break;
 
 	case BREAK_MODE:
 		core.mode ^= 0x100;
 		break;
 	}
+}
+
+
+bool i386_device::drc_verify_ignores_address() const
+{
+	return m_verifier && (m_verifier->sabotage == BREAK_ADDRESS);
+}
+
+
+// called before each instruction of a block
+void i386_device::drc_verify_instruction()
+{
+	drc_verifier &v = *m_verifier;
+	core_state &core = *m_core;
+
+	core.verify_count++;
+	if (core.pc != core.verify_pc)
+	{
+		v.misplaced++;
+		v.misplaced_pc = core.pc;
+		v.misplaced_expected = core.verify_pc;
+	}
+	if (!core.mode_dirty && (core.mode != drc_mode()))
+		v.stale_modes++;
+}
+
+
+// reads code from a page that is memory while the taps hide its pointer
+bool i386_device::drc_verify_read_code(offs_t address, uint8_t &value)
+{
+	drc_verifier &v = *m_verifier;
+	if (v.remap)
+		drc_verify_map();
+	if (!(v.page_flags(address) & 4))
+		return false;
+	value = m_program->read_byte(address);
+	return true;
 }
 
 
@@ -287,7 +341,7 @@ void i386_device::drc_verify_map()
 		auto const *const write = reinterpret_cast<uint8_t const *>(m_program->get_write_ptr(base));
 		uint8_t flags = 0;
 		if (read && (m_program->get_read_ptr(base + 0xffc) == (read + 0xffc)))
-			flags |= 1;
+			flags |= 1 | 4;
 		if (write && (m_program->get_write_ptr(base + 0xffc) == (write + 0xffc)))
 			flags |= 2;
 		// the system BIOS is often a flash device behind a read handler, which reads without side effects
@@ -308,7 +362,7 @@ void i386_device::drc_verify_map()
 			{
 				if (!v.recording)
 					return;
-				if (v.page_flags(offset) != 3)
+				if ((v.page_flags(offset) & 3) != 3)
 				{
 					v.unsafe = true;
 					return;
@@ -356,10 +410,19 @@ int i386_device::drc_verify_execute()
 
 	// the cached mode key, as the block left it
 	if (!m_core->mode_dirty && (m_core->mode != drc_mode()))
+		v.stale_modes++;
+	if (v.misplaced || v.stale_modes)
 	{
 		if (v.mismatched < VERIFY_REPORT_LIMIT)
-			osd_printf_error("%s: DRC verify at %08X: the cached mode key is out of date\n", tag(), pc);
+		{
+			if (v.misplaced)
+				osd_printf_error("%s: DRC verify at %08X: an instruction compiled at %08X was started at %08X\n", tag(), pc, v.misplaced_expected, v.misplaced_pc);
+			if (v.stale_modes)
+				osd_printf_error("%s: DRC verify at %08X: the cached mode key is out of date\n", tag(), pc);
+		}
 		v.mismatched++;
+		v.misplaced = 0;
+		v.stale_modes = 0;
 	}
 	if (!count)
 		return result;
@@ -411,6 +474,7 @@ int i386_device::drc_verify_execute()
 				clear(offsetof(core_state, arg1), sizeof(core_state::arg1));
 				clear(offsetof(core_state, drc_exit), sizeof(core_state::drc_exit));
 				clear(offsetof(core_state, verify_count), sizeof(core_state::verify_count));
+				clear(offsetof(core_state, verify_pc), sizeof(core_state::verify_pc));
 				clear(offsetof(core_state, mode_dirty), sizeof(core_state::mode_dirty));
 			};
 	clear_scratch(v.after_block);

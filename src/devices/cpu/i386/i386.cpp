@@ -21,6 +21,7 @@
 #include "emu.h"
 #include "i386.h"
 #include "i386priv.h"
+#include "i386drcfe.h"
 #include "x87priv.h"
 #include "cycles.h"
 #include "i386ops.h"
@@ -2202,6 +2203,8 @@ void i386_device::device_stop()
 {
 	if (m_verifier)
 		drc_verify_report();
+	if (m_drcfe)
+		m_drcfe->report();
 }
 
 void i386_device::device_start()
@@ -2660,6 +2663,7 @@ void i386_device::zero_state()
 	m_core->drc_exit = 0;
 	m_core->verify_count = 0;
 	m_core->mode_dirty = 1;
+	m_core->verify_pc = 0;
 	m_drc_cache_dirty = true;
 	m_base_cycles = 0;
 	m_opcode = 0;

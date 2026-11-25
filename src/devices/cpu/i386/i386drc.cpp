@@ -12,18 +12,22 @@
     interrupt shadow, LOCK prefix, resume flag, halt), is executed by the
     interpreter loop.
 
-    Each block holds a single instruction and executes it with step(), the
-    interpreter's per-instruction function.  The block key is the linear
-    address of the instruction together with the mode bits.
+    A block holds a straight sequence of instructions described by the front
+    end, and executes each of them with step(), the interpreter's
+    per-instruction function, which fetches the instruction from memory as it
+    then is.  The block key is the linear address of the first instruction
+    together with the mode bits.
 
     Rules the blocks follow:
-    - A block is entered only while the cycles left cover everything before its
-      last instruction, so a timeslice ends after the same instruction as in
-      the interpreter.  The remaining instructions of a timeslice are executed
-      by the interpreter loop.
+    - An instruction is started only while cycles are left, so a timeslice
+      ends after the same instruction as in the interpreter.  The remaining
+      instructions of a timeslice are executed by the interpreter loop.
     - After every call that can run device code, an interrupt, a change to
       the mode or a need to flush the code cache ends generated code at the
       instruction boundary.
+    - A block goes on to its next instruction only if execution has arrived at
+      the address it was compiled at.  This ends the block at taken branches,
+      and also when the code has been rewritten since it was described.
     - No C++ exception propagates through generated code, which has no unwind
       information.  A called function runs its body through drc_guarded_call(),
       and generated code calls it through generate_call().  A guest fault
@@ -36,8 +40,11 @@
 #include "emu.h"
 #include "i386.h"
 #include "i386priv.h"
+#include "i386drcfe.h"
 
 #include "cpu/drcumlsh.h"
+
+#include <cstdlib>
 
 using namespace uml;
 
@@ -47,8 +54,15 @@ namespace {
 // size of the code cache; the two-level block lookup table takes 512 KiB for each 64 KiB of linear address space holding code
 constexpr size_t DRC_CACHE_SIZE = 128 * 1024 * 1024;
 
+// the front end describes instructions starting within this many bytes of the first, and at most this many in a block
+constexpr uint32_t COMPILE_WINDOW_BYTES = 1024;
+constexpr uint32_t COMPILE_MAX_SEQUENCE = 64;
+
 // longest range of guest bytes a block may cover, used when invalidating blocks that begin before a written range
-constexpr uint32_t COMPILE_MAX_SEQUENCE_BYTES = 1024 + 15;
+constexpr uint32_t COMPILE_MAX_SEQUENCE_BYTES = COMPILE_WINDOW_BYTES + 15;
+
+// room for the UML instructions of the longest block
+constexpr uint32_t COMPILE_MAX_UML = 16 * COMPILE_MAX_SEQUENCE + 64;
 
 // bits of the mode key
 constexpr uint32_t MODE_CODE32 = 1 << 0;
@@ -64,6 +78,7 @@ constexpr uint32_t NO_FAULT = 0xffffffff;
 constexpr uint32_t DRC_EXIT_NONE = 0;
 constexpr uint32_t DRC_EXIT_INTERPRET = 1;
 constexpr uint32_t DRC_EXIT_EXCEPTION = 2;
+constexpr uint32_t DRC_EXIT_FAULT = 3;
 
 // reasons for leaving generated code
 constexpr int EXECUTE_OUT_OF_CYCLES = 0;
@@ -104,6 +119,9 @@ void i386_device::drc_start()
 	m_drcuml->symbol_add(&m_core->pc, sizeof(m_core->pc), "pc");
 	m_drcuml->symbol_add(&m_core->cycles, sizeof(m_core->cycles), "cycles");
 	m_drcuml->symbol_add(&m_core->mode, sizeof(m_core->mode), "mode");
+
+	m_drcfe = std::make_shared<frontend>(*this, 0, COMPILE_WINDOW_BYTES, COMPILE_MAX_SEQUENCE);
+	m_drcfe->set_check(std::getenv("MAME_I386_DRC_FE_CHECK") != nullptr);
 }
 
 
@@ -211,6 +229,33 @@ bool i386_device::drc_runnable()
 }
 
 
+// Reads a byte of code at a linear address without side effects.  This fails for anything but memory.
+bool i386_device::drc_read_code(offs_t address, uint8_t &value)
+{
+	offs_t const physical = address & m_core->a20_mask;
+	unsigned const bytes = m_program->data_width() / 8;
+	void const *const unit = m_program->get_read_ptr(physical & ~offs_t(bytes - 1));
+	if (!unit)
+		return m_verifier && drc_verify_read_code(physical, value);
+
+	unsigned const shift = (physical & (bytes - 1)) * 8;
+	switch (bytes)
+	{
+	case 2:
+		value = uint8_t(*reinterpret_cast<uint16_t const *>(unit) >> shift);
+		return true;
+	case 4:
+		value = uint8_t(*reinterpret_cast<uint32_t const *>(unit) >> shift);
+		return true;
+	case 8:
+		value = uint8_t(*reinterpret_cast<uint64_t const *>(unit) >> shift);
+		return true;
+	default:
+		return false;
+	}
+}
+
+
 
 /***************************************************************************
     FUNCTIONS CALLED FROM GENERATED CODE
@@ -238,6 +283,8 @@ void i386_device::drc_guarded_call(Body &&body)
 // what generated code has to do after a called function
 uint32_t i386_device::drc_exit_request()
 {
+	if (m_core->fault != NO_FAULT)
+		return DRC_EXIT_FAULT;
 	return (!drc_runnable() || m_drc_cache_dirty) ? DRC_EXIT_INTERPRET : DRC_EXIT_NONE;
 }
 
@@ -286,6 +333,13 @@ void i386_device::cfunc_deliver_fault(void *param)
 				cpu.m_core->ext = 1;
 				cpu.i386_trap_with_error(fault, 0, 0, error);
 			});
+}
+
+
+void i386_device::cfunc_verify_instruction(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_instruction(); });
 }
 
 
@@ -355,16 +409,34 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 {
 	auto profile = g_profiler.start(PROFILER_DRC_COMPILE);
 
+	// the first sequence of the list starts at the address; its instructions follow each other
+	opcode_desc const *const first = m_drcfe->describe_code(pc);
+	assert(first && (first->pc == pc));
+
+	uml::code_label const done = 1;
+	uml::code_label const slow = 2;
+
 	bool succeeded = false;
 	while (!succeeded)
 	{
 		try
 		{
-			drcuml_block &block(m_drcuml->begin_block(32));
+			drcuml_block &block(m_drcuml->begin_block(COMPILE_MAX_UML));
 
 			UML_HASH(block, mode, pc);                                      // hash    mode,pc
-			generate_step_instruction(block, pc);
+			for (opcode_desc const *desc = first; desc; desc = desc->next())
+			{
+				bool const last = desc->end_sequence() || !desc->next();
+				assert(last || (desc->next()->pc == (desc->pc + desc->length)));
+				generate_step_instruction(block, *desc, last, done, slow);
+				if (last)
+					break;
+			}
+
+			UML_LABEL(block, done);                                         // done:
 			generate_block_end(block);
+			UML_LABEL(block, slow);                                         // slow:
+			generate_slow_exit(block);
 
 			block.end();
 			succeeded = true;
@@ -397,25 +469,46 @@ void i386_device::generate_block_end(drcuml_block &block)
 }
 
 
-// executes one instruction with the interpreter
-void i386_device::generate_step_instruction(drcuml_block &block, offs_t pc)
+// Executes one instruction with the interpreter.  Control goes on to the next instruction of the block only while
+// the interpreter loop would run it next: there are cycles left, nothing needs the interpreter, and execution has
+// arrived at the address the instruction was compiled at.
+void i386_device::generate_step_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow)
 {
-	// the block is entered only if the interpreter would start every instruction in it; for a single instruction
-	// the cycle cost before the last instruction is zero
 	UML_CMP(block, mem(&m_core->cycles), 0);                                // cmp     [cycles],0
-	UML_EXHc(block, COND_LE, *m_out_of_cycles, pc);                         // exh     out_of_cycles,pc,le
+	UML_EXHc(block, COND_LE, *m_out_of_cycles, desc.pc);                    // exh     out_of_cycles,pc,le
 
 	if (m_verifier)
-		UML_ADD(block, mem(&m_core->verify_count), mem(&m_core->verify_count), 1); // add     [verify_count],[verify_count],1
+	{
+		UML_MOV(block, mem(&m_core->verify_pc), desc.pc);                   // mov     [verify_pc],pc
+		generate_call(block, &i386_device::cfunc_verify_instruction);       // callc   cfunc_verify_instruction
+	}
 
-	generate_call(block, &i386_device::cfunc_step);                         // callc   cfunc_step
+	UML_CALLC(block, &i386_device::cfunc_step, this);                       // callc   cfunc_step
 	if (m_drc_verify_break)
+	{
+		UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_EXCEPTION);         // cmp     [drc_exit],exception
+		block.append().exit(COND_E, EXECUTE_EXCEPTION);                     // exit    EXECUTE_EXCEPTION,e
 		generate_call(block, &i386_device::cfunc_verify_break);             // callc   cfunc_verify_break
-
-	UML_CMP(block, mem(&m_core->fault), NO_FAULT);                          // cmp     [fault],none
-	UML_EXHc(block, COND_NE, *m_fault_handler, pc);                         // exh     fault,pc,ne
+	}
 	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_NONE);                  // cmp     [drc_exit],none
-	block.append().exit(COND_NE, EXECUTE_INTERPRET);                        // exit    EXECUTE_INTERPRET,ne
+	UML_JMPc(block, COND_NE, slow);                                         // jmp     slow,ne
+
+	if (!last && !drc_verify_ignores_address())
+	{
+		UML_CMP(block, mem(&m_core->pc), uint32_t(desc.pc + desc.length));  // cmp     [pc],next
+		UML_JMPc(block, COND_NE, done);                                     // jmp     done,ne
+	}
+}
+
+
+// leaves a block after a called function has asked for it
+void i386_device::generate_slow_exit(drcuml_block &block)
+{
+	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_EXCEPTION);             // cmp     [drc_exit],exception
+	block.append().exit(COND_E, EXECUTE_EXCEPTION);                         // exit    EXECUTE_EXCEPTION,e
+	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_FAULT);                 // cmp     [drc_exit],fault
+	UML_EXHc(block, COND_E, *m_fault_handler, 0);                           // exh     fault,0,e
+	UML_EXIT(block, EXECUTE_INTERPRET);                                     // exit    EXECUTE_INTERPRET
 }
 
 
