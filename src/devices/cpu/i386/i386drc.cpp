@@ -18,8 +18,8 @@
     SBB, CMP, AND, OR, XOR, TEST, INC, DEC, NEG and NOT whose operands are
     registers and immediates, all without prefixes.  Every other instruction
     is executed with step(), the interpreter's per-instruction function, which
-    fetches the instruction from memory as it then is.  The block key is the linear address of the first
-    instruction together with the mode bits.
+    fetches the instruction from memory as it then is.  The block key is the
+    linear address of the first instruction together with the mode bits.
 
     Rules the blocks follow:
     - An instruction is started only while cycles are left, so a timeslice
@@ -47,9 +47,10 @@
     - The values follow the handlers: logic operations clear CF and OF and
       leave AF alone, except TEST with an immediate in the F6 and F7 groups,
       which also clears AF; INC and DEC leave CF alone.
-    - 32-bit operations take CF, OF, ZF and SF from the host operation.  PF,
-      AF and all flags of 8-bit operations are computed from the operands and
-      the result.
+    - 32-bit arithmetic takes CF, OF, ZF and SF from the host operation, and
+      32-bit logic takes ZF and SF from a compare of the result.  PF, AF and
+      all flags of 8-bit operations are computed from the operands and the
+      result.
 
     Compiled memory accesses:
     - The segment of an operand has base zero, so the effective address is the
