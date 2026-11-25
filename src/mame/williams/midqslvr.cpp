@@ -399,6 +399,7 @@ void midway_quicksilver2_state::midqslvr(machine_config &config)
 	//m_maincpu->set_addrmap(AS_IO, &midway_quicksilver2_state::midqslvr_io);
 	m_maincpu->set_irq_acknowledge_callback("pci:07.0:pic8259_master", FUNC(pic8259_device::inta_cb));
 	m_maincpu->smiact().set("pci:00.0", FUNC(i82443bx_host_device::smi_act_w));
+	m_maincpu->set_drc_enable(true);
 
 	P87C552(config, "iocpu", 16'000'000).set_disable();
 
