@@ -24,6 +24,7 @@ protected:
 	virtual void cache_writeback() override;
 	virtual void cache_invalidate() override;
 	virtual void cache_clean() override;
+	virtual void drc_verify_add_state(drc_region_adder const &add) override;
 	virtual void device_start() override ATTR_COLD;
 	virtual void device_reset() override ATTR_COLD;
 	virtual void enter_smm() override;

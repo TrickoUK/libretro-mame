@@ -10,6 +10,8 @@
 #include "cpu/drcuml.h"
 #include "softfloat3/source/include/softfloat.h"
 #include <algorithm>
+#include <exception>
+#include <functional>
 #include <memory>
 
 #define INPUT_LINE_A20      1
@@ -87,6 +89,10 @@ protected:
 	virtual void cache_writeback() {}
 	virtual void cache_invalidate() {}
 	virtual void cache_clean() {}
+
+	// reports the CPU state a subclass holds to the recompiler verifier
+	using drc_region_adder = std::function<void (char const *name, void *base, size_t length)>;
+	virtual void drc_verify_add_state(drc_region_adder const &add) {}
 
 	// routine to access memory
 	virtual u8 mem_pr8(offs_t address) { return macache32.read_byte(address); }
@@ -1596,6 +1602,8 @@ protected:
 	bool m_drc_requested = false;
 	bool m_drc_enabled = false;
 	bool m_drc_cache_dirty = true;
+	bool m_drc_verify_break = false;
+	std::exception_ptr m_drc_exception;
 	std::unique_ptr<drcuml_state> m_drcuml;
 	uml::code_handle *m_entry = nullptr;
 	uml::code_handle *m_nocode = nullptr;
@@ -1605,17 +1613,22 @@ protected:
 	void drc_start();
 	void drc_flush_cache();
 	uint32_t drc_mode() const;
+	bool drc_eligible(uint32_t mode) const;
 	bool drc_runnable();
+	template <typename Body> void drc_guarded_call(Body &&body);
+	void drc_rethrow_exception();
 	void drc_compile_block(uint32_t mode, offs_t pc);
 	void execute_run_drc();
 	void static_generate_entry_point(drcuml_block &block);
 	void static_generate_nocode_handler(drcuml_block &block);
 	void static_generate_out_of_cycles(drcuml_block &block);
 	void static_generate_fault_handler(drcuml_block &block);
+	void generate_call(drcuml_block &block, void (*function)(void *));
 	void generate_block_end(drcuml_block &block);
 	void generate_step_instruction(drcuml_block &block, offs_t pc);
 	static void cfunc_step(void *param);
 	static void cfunc_deliver_fault(void *param);
+	static void cfunc_verify_break(void *param);
 
 	// lockstep verifier
 	struct drc_verifier;
@@ -1623,6 +1636,7 @@ protected:
 	void drc_verify_start();
 	void drc_verify_map();
 	int drc_verify_execute();
+	void drc_verify_break();
 	void drc_verify_report();
 
 };

@@ -21,10 +21,15 @@
       last instruction, so a timeslice ends after the same instruction as in
       the interpreter.  The remaining instructions of a timeslice are executed
       by the interpreter loop.
-    - After every call that can run device code, an interrupt or a change to
-      the mode ends generated code at the instruction boundary.
-    - No C++ exception propagates through generated code.  Called functions
-      catch a guest fault and record it, and the fault handler delivers it.
+    - After every call that can run device code, an interrupt, a change to
+      the mode or a need to flush the code cache ends generated code at the
+      instruction boundary.
+    - No C++ exception propagates through generated code, which has no unwind
+      information.  A called function runs its body through drc_guarded_call(),
+      and generated code calls it through generate_call().  A guest fault
+      that generated code is to deliver is caught by the function itself and
+      recorded for the fault handler.  Any other exception is kept, generated
+      code is left at once, and it is rethrown from the execution loop.
 
 ***************************************************************************/
 
@@ -55,12 +60,18 @@ constexpr uint32_t MODE_COMPILED = MODE_CODE32 | MODE_PROTECTED | MODE_FLAT;
 // value of the pending fault field when no fault is pending
 constexpr uint32_t NO_FAULT = 0xffffffff;
 
+// values of the exit request that a called function leaves for generated code
+constexpr uint32_t DRC_EXIT_NONE = 0;
+constexpr uint32_t DRC_EXIT_INTERPRET = 1;
+constexpr uint32_t DRC_EXIT_EXCEPTION = 2;
+
 // reasons for leaving generated code
 constexpr int EXECUTE_OUT_OF_CYCLES = 0;
 constexpr int EXECUTE_MISSING_CODE = 1;
 constexpr int EXECUTE_RESET_CACHE = 2;
 constexpr int EXECUTE_INTERPRET = 3;
 constexpr int EXECUTE_BLOCK_DONE = 4;
+constexpr int EXECUTE_EXCEPTION = 5;
 
 
 inline void alloc_handle(drcuml_state &drcuml, uml::code_handle *&handleptr, const char *name)
@@ -80,7 +91,10 @@ inline void alloc_handle(drcuml_state &drcuml, uml::code_handle *&handleptr, con
 // creates the recompiler and places the CPU state in the part of the code cache that generated code can address directly
 void i386_device::drc_start()
 {
-	m_drcuml = std::make_unique<drcuml_state>(*this, DRC_CACHE_SIZE + sizeof(core_state));
+	// the near area of the code cache has a fixed size of 128 KiB, shared with the recompiler's own near data
+	static_assert(sizeof(core_state) <= 4 * 1024);
+
+	m_drcuml = std::make_unique<drcuml_state>(*this, DRC_CACHE_SIZE);
 	m_drcuml->initialize(0, MODE_COUNT, 32, 0, COMPILE_MAX_SEQUENCE_BYTES);
 
 	m_core = m_drcuml->cache_alloc_near<core_state>();
@@ -160,12 +174,11 @@ uint32_t i386_device::drc_mode() const
 }
 
 
-// true if the next instruction can be run from the code cache; updates the mode key
-bool i386_device::drc_runnable()
+// true if the next instruction can be run from the code cache in the given mode
+bool i386_device::drc_eligible(uint32_t mode) const
 {
-	core_state &core = *m_core;
-	core.mode = drc_mode();
-	if (core.mode != MODE_COMPILED)
+	core_state const &core = *m_core;
+	if (mode != MODE_COMPILED)
 		return false;
 	if ((core.cr[0] & CR0_PG) || core.VM)
 		return false;
@@ -175,41 +188,89 @@ bool i386_device::drc_runnable()
 }
 
 
+// updates the mode key and tests whether the next instruction can be run from the code cache
+bool i386_device::drc_runnable()
+{
+	m_core->mode = drc_mode();
+	return drc_eligible(m_core->mode);
+}
+
+
 
 /***************************************************************************
     FUNCTIONS CALLED FROM GENERATED CODE
 ***************************************************************************/
 
+// Runs the body of a function called from generated code, and tells generated code whether it may continue.
+// Nothing thrown by the body leaves this function.
+template <typename Body>
+void i386_device::drc_guarded_call(Body &&body)
+{
+	try
+	{
+		body();
+		m_core->drc_exit = (m_drc_cache_dirty || !drc_runnable()) ? DRC_EXIT_INTERPRET : DRC_EXIT_NONE;
+	}
+	catch (...)
+	{
+		// a fatal error, an allocation failure or a guest fault that the body does not handle
+		m_drc_exception = std::current_exception();
+		m_core->drc_exit = DRC_EXIT_EXCEPTION;
+	}
+}
+
+
+// passes on an exception caught while generated code was running
+void i386_device::drc_rethrow_exception()
+{
+	if (m_drc_exception)
+		std::rethrow_exception(std::exchange(m_drc_exception, nullptr));
+}
+
+
 void i386_device::cfunc_step(void *param)
 {
 	i386_device &cpu = *static_cast<i386_device *>(param);
-
-	// step() handles the faults raised while an instruction executes, but not any raised by the checks that precede it
-	try
-	{
-		cpu.step();
-	}
-	catch (uint64_t e)
-	{
-		cpu.m_core->fault = uint32_t(e);
-		cpu.m_core->fault_code = uint32_t(e >> 32);
-	}
-
-	cpu.m_core->drc_exit = cpu.drc_runnable() ? 0 : 1;
+	cpu.drc_guarded_call(
+			[&cpu] ()
+			{
+				// step() delivers the faults raised while an instruction executes.  The interrupt and breakpoint checks
+				// that precede an instruction can raise one only with an interrupt, SMI or breakpoint pending, and no
+				// block is entered then: the execution loop calls step() itself, so such a fault leaves execute_run()
+				// with or without the recompiler, and the catch below is not reached by it.
+				try
+				{
+					cpu.step();
+				}
+				catch (uint64_t e)
+				{
+					cpu.m_core->fault = uint32_t(e);
+					cpu.m_core->fault_code = uint32_t(e >> 32);
+				}
+			});
 }
 
 
 void i386_device::cfunc_deliver_fault(void *param)
 {
 	i386_device &cpu = *static_cast<i386_device *>(param);
-	uint32_t const fault = cpu.m_core->fault;
-	uint32_t const error = cpu.m_core->fault_code;
+	cpu.drc_guarded_call(
+			[&cpu] ()
+			{
+				uint32_t const fault = cpu.m_core->fault;
+				uint32_t const error = cpu.m_core->fault_code;
 
-	cpu.m_core->fault = NO_FAULT;
-	cpu.m_core->ext = 1;
-	cpu.i386_trap_with_error(fault, 0, 0, error);
+				cpu.m_core->fault = NO_FAULT;
+				cpu.m_core->ext = 1;
+				cpu.i386_trap_with_error(fault, 0, 0, error);
+			});
+}
 
-	cpu.m_core->drc_exit = cpu.drc_runnable() ? 0 : 1;
+
+void i386_device::cfunc_verify_break(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_break(); });
 }
 
 
@@ -256,8 +317,8 @@ void i386_device::static_generate_fault_handler(drcuml_block &block)
 	alloc_handle(*m_drcuml, m_fault_handler, "fault");
 
 	UML_HANDLE(block, *m_fault_handler);                                    // handle  fault
-	UML_CALLC(block, &i386_device::cfunc_deliver_fault, this);              // callc   cfunc_deliver_fault
-	UML_CMP(block, mem(&m_core->drc_exit), 0);                              // cmp     [drc_exit],0
+	generate_call(block, &i386_device::cfunc_deliver_fault);                // callc   cfunc_deliver_fault
+	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_NONE);                  // cmp     [drc_exit],none
 	block.append().exit(COND_NE, EXECUTE_INTERPRET);                        // exit    EXECUTE_INTERPRET,ne
 	generate_block_end(block);
 }
@@ -294,6 +355,15 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 }
 
 
+// calls a function that uses drc_guarded_call(), and leaves generated code at once if it caught an exception
+void i386_device::generate_call(drcuml_block &block, void (*function)(void *))
+{
+	UML_CALLC(block, function, this);                                       // callc   function
+	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_EXCEPTION);             // cmp     [drc_exit],exception
+	block.append().exit(COND_E, EXECUTE_EXCEPTION);                         // exit    EXECUTE_EXCEPTION,e
+}
+
+
 // goes on to the block for the current mode and address
 void i386_device::generate_block_end(drcuml_block &block)
 {
@@ -316,11 +386,13 @@ void i386_device::generate_step_instruction(drcuml_block &block, offs_t pc)
 	if (m_verifier)
 		UML_ADD(block, mem(&m_core->verify_count), mem(&m_core->verify_count), 1); // add     [verify_count],[verify_count],1
 
-	UML_CALLC(block, &i386_device::cfunc_step, this);                       // callc   cfunc_step
+	generate_call(block, &i386_device::cfunc_step);                         // callc   cfunc_step
+	if (m_drc_verify_break)
+		generate_call(block, &i386_device::cfunc_verify_break);             // callc   cfunc_verify_break
 
 	UML_CMP(block, mem(&m_core->fault), NO_FAULT);                          // cmp     [fault],none
 	UML_EXHc(block, COND_NE, *m_fault_handler, pc);                         // exh     fault,pc,ne
-	UML_CMP(block, mem(&m_core->drc_exit), 0);                              // cmp     [drc_exit],0
+	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_NONE);                  // cmp     [drc_exit],none
 	block.append().exit(COND_NE, EXECUTE_INTERPRET);                        // exit    EXECUTE_INTERPRET,ne
 }
 
@@ -342,11 +414,14 @@ void i386_device::execute_run_drc()
 			continue;
 		}
 
-		// a reset or state load marks the cache dirty, and either can happen while an instruction executes
+		// a reset, a state load or an A20 change marks the cache dirty, and each can happen while an instruction executes
 		if (m_drc_cache_dirty)
 			drc_flush_cache();
 
-		switch (m_verifier ? drc_verify_execute() : m_drcuml->execute(*m_entry))
+		int const result = m_verifier ? drc_verify_execute() : m_drcuml->execute(*m_entry);
+		drc_rethrow_exception();
+
+		switch (result)
 		{
 		case EXECUTE_MISSING_CODE:
 			drc_compile_block(m_core->mode, m_core->pc);
@@ -363,6 +438,7 @@ void i386_device::execute_run_drc()
 
 		case EXECUTE_INTERPRET:
 		case EXECUTE_BLOCK_DONE:
+		case EXECUTE_EXCEPTION:
 			break;
 		}
 	}

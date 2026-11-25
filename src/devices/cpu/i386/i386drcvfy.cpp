@@ -17,15 +17,33 @@
     and is counted as not checked.  Memory is recognised in the first 256 MiB
     and the last 1 MiB of the physical address space.  Reads from the system
     BIOS windows (0xe0000-0xfffff and the last 1 MiB) count as repeatable.
+    The contents of a cache modelled by a subclass are not covered.
+
+    The replay also checks that the block did not execute an instruction
+    which the interpreter loop would not have started, or which has to be
+    left to the interpreter.
+
+    To show that errors are detected, MAME_I386_DRC_VERIFY_BREAK selects a
+    deliberate error made by the generated code of every block:
+        cf       inverts CF in checked blocks
+        cycles   takes one more cycle in checked blocks
+        eip      adds one to EIP in checked blocks
+        write    writes the dword below the stack pointer back to itself
+                 in checked blocks
+        overrun  executes a second instruction in checked blocks, whatever
+                 the cycles left and the state after the first
+        throw    throws a C++ exception in the first block run
 
 ***************************************************************************/
 
 #include "emu.h"
 #include "i386.h"
+#include "i386priv.h"
 
 #include "softfloat3/source/include/softfloat.h"
 
 #include <cstdlib>
+#include <string_view>
 
 
 namespace {
@@ -35,6 +53,18 @@ constexpr uint32_t VERIFY_HIGH_PAGES = 0x100;       // 4 KiB pages at the top of
 constexpr uint32_t VERIFY_HIGH_BASE = 0xfff00000;
 constexpr unsigned VERIFY_REPORT_LIMIT = 20;
 constexpr uint64_t VERIFY_PROGRESS_INTERVAL = 1'000'000;
+
+// deliberate errors
+enum : int
+{
+	BREAK_NONE,
+	BREAK_CF,
+	BREAK_CYCLES,
+	BREAK_EIP,
+	BREAK_WRITE,
+	BREAK_OVERRUN,
+	BREAK_THROW
+};
 
 } // anonymous namespace
 
@@ -63,6 +93,7 @@ struct i386_device::drc_verifier
 	uint64_t checked = 0;
 	uint64_t unrepeatable = 0;
 	uint64_t mismatched = 0;
+	int sabotage = BREAK_NONE;
 
 	bool recording = false;
 	bool unsafe = false;
@@ -155,12 +186,76 @@ void i386_device::drc_verify_start()
 	v.add("softfloat rounding", &softfloat_roundingMode, sizeof(softfloat_roundingMode));
 	v.add("softfloat exceptions", &softfloat_exceptionFlags, sizeof(softfloat_exceptionFlags));
 	v.add("softfloat precision", &extF80_roundingPrecision, sizeof(extF80_roundingPrecision));
+	drc_verify_add_state([&v] (char const *name, void *base, size_t length) { v.add(name, base, length); });
 
 	v.pages.resize(VERIFY_LOW_PAGES + VERIFY_HIGH_PAGES);
 	v.program_notifier = m_program->add_change_notifier([&v] (read_or_write) { if (!v.installing) v.remap = true; });
 	v.io_notifier = m_io->add_change_notifier([&v] (read_or_write) { if (!v.installing) v.remap = true; });
 
 	osd_printf_info("%s: recompiler verifier checking one block in %u\n", tag(), v.interval);
+
+	char const *const breakage = std::getenv("MAME_I386_DRC_VERIFY_BREAK");
+	if (breakage)
+	{
+		static constexpr std::pair<std::string_view, int> NAMES[] = {
+				{ "cf", BREAK_CF },
+				{ "cycles", BREAK_CYCLES },
+				{ "eip", BREAK_EIP },
+				{ "write", BREAK_WRITE },
+				{ "overrun", BREAK_OVERRUN },
+				{ "throw", BREAK_THROW } };
+		for (auto const &[name, kind] : NAMES)
+		{
+			if (name == breakage)
+				v.sabotage = kind;
+		}
+		if (v.sabotage == BREAK_NONE)
+			fatalerror("%s: unknown MAME_I386_DRC_VERIFY_BREAK value %s\n", tag(), breakage);
+		m_drc_verify_break = true;
+		osd_printf_warning("%s: recompiled code is deliberately wrong (%s)\n", tag(), breakage);
+	}
+}
+
+
+// disturbs the state as a faulty compiled instruction would
+void i386_device::drc_verify_break()
+{
+	drc_verifier const &v = *m_verifier;
+	core_state &core = *m_core;
+
+	if (v.sabotage == BREAK_THROW)
+		throw emu_fatalerror("%s: DRC verify: test exception thrown below generated code\n", tag());
+
+	// an error in a block that is not compared would be left in the guest
+	if (!v.recording || v.unsafe)
+		return;
+
+	switch (v.sabotage)
+	{
+	case BREAK_CF:
+		core.CF ^= 1;
+		break;
+
+	case BREAK_CYCLES:
+		core.cycles -= 1;
+		break;
+
+	case BREAK_EIP:
+		core.eip += 1;
+		break;
+
+	case BREAK_WRITE:
+		{
+			uint32_t const address = (core.reg.d[ESP] - 4) & ~uint32_t(3);
+			m_program->write_dword(address, m_program->read_dword(address));
+		}
+		break;
+
+	case BREAK_OVERRUN:
+		step();
+		core.verify_count++;
+		break;
+	}
 }
 
 
@@ -245,6 +340,7 @@ int i386_device::drc_verify_execute()
 	int const result = m_drcuml->execute(*m_entry);
 
 	v.recording = false;
+	drc_rethrow_exception();
 	uint32_t const count = m_core->verify_count;
 	if (!count)
 		return result;
@@ -263,8 +359,17 @@ int i386_device::drc_verify_execute()
 
 	v.writes.clear();
 	v.recording = true;
-	for (uint32_t i = 0; i < count; i++)
-		step();
+	char const *overrun = nullptr;
+	for (uint32_t i = 0; (i < count) && !overrun; i++)
+	{
+		// the first instruction was tested before the block was entered
+		if (i && (m_core->cycles <= 0))
+			overrun = "block ran past the timeslice";
+		else if (i && !drc_eligible(drc_mode()))
+			overrun = "block continued where it must exit";
+		else
+			step();
+	}
 	v.recording = false;
 	v.capture(v.after_interpreter);
 	v.checked++;
@@ -294,6 +399,13 @@ int i386_device::drc_verify_execute()
 		failed = true;
 		if (report)
 			osd_printf_error("%s: DRC verify at %08X: the interpreter accessed something the recompiled code did not\n", tag(), pc);
+	}
+
+	if (overrun)
+	{
+		failed = true;
+		if (report)
+			osd_printf_error("%s: DRC verify at %08X: %s\n", tag(), pc, overrun);
 	}
 
 	for (auto const &r : v.regions)
@@ -339,6 +451,6 @@ void i386_device::drc_verify_report()
 {
 	drc_verifier const &v = *m_verifier;
 	osd_printf_info(
-			"%s: DRC verify: %u blocks checked, %u not repeatable, %u mismatched (of %u run)\n",
-			tag(), v.checked, v.unrepeatable, v.mismatched, v.blocks);
+			"%s: DRC verify: %u blocks checked, %u not repeatable (%.5f per checked block), %u mismatched (of %u run)\n",
+			tag(), v.checked, v.unrepeatable, v.checked ? (double(v.unrepeatable) / double(v.checked)) : 0.0, v.mismatched, v.blocks);
 }

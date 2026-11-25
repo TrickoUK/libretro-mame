@@ -49,6 +49,16 @@ void athlonxp_device::device_start()
 	save_item(NAME(m_memory_ranges_1m));
 }
 
+void athlonxp_device::drc_verify_add_state(drc_region_adder const &add)
+{
+	add("top of memory MSR", &m_msr_top_mem, sizeof(m_msr_top_mem));
+	add("SYSCFG MSR", &m_msr_sys_cfg, sizeof(m_msr_sys_cfg));
+	add("SMM base MSR", &m_msr_smm_base, sizeof(m_msr_smm_base));
+	add("SMM mask MSR", &m_msr_smm_mask, sizeof(m_msr_smm_mask));
+	add("fixed MTRRs", m_msr_mtrrfix, sizeof(m_msr_mtrrfix));
+	add("first 1 MiB memory types", m_memory_ranges_1m, sizeof(m_memory_ranges_1m));
+}
+
 void athlonxp_device::device_reset()
 {
 	zero_state();
