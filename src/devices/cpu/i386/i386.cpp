@@ -2988,7 +2988,8 @@ void i386_device::i386_set_a20_line(int state)
 }
 
 // Executes one instruction, including the interrupt and breakpoint checks that precede it and the trap and fault handling that follow it.
-void i386_device::step()
+// The body is inlined into the interpreter loop; step() is the entry point for other callers.
+inline void i386_device::step_inline()
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_check_irq_line();
@@ -3078,6 +3079,11 @@ void i386_device::step()
 	if(!m_core->auto_clear_RF) m_core->auto_clear_RF = true;
 }
 
+void i386_device::step()
+{
+	step_inline();
+}
+
 void i386_device::execute_run()
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
@@ -3099,7 +3105,7 @@ void i386_device::execute_run()
 	else
 	{
 		while( m_core->cycles > 0 )
-			step();
+			step_inline();
 	}
 }
 
