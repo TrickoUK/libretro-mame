@@ -74,6 +74,16 @@
                  of checked blocks
         ea       moves the address of each compiled memory access of checked
                  blocks by a dword
+        alu      inverts a bit of the register written by each compiled
+                 arithmetic, logic, increment or lea instruction of checked
+                 blocks
+        flags    inverts one of the six arithmetic flags, chosen by the
+                 address, after each compiled instruction of checked blocks
+                 which sets flags
+        carry    clears CF before each compiled adc and sbb of checked blocks
+        stale    leaves the flags as they were before each compiled
+                 instruction of checked blocks which sets them and is followed
+                 by a stepped instruction
         nodrop   leaves the write table entry of a page that starts being
                  watched for writes to compiled code.  This also applies
                  without the verifier.
@@ -138,6 +148,9 @@ struct i386_device::drc_verifier
 
 	bool recording = false;
 	bool unsafe = false;
+
+	// the arithmetic flags as they were before an instruction, for a deliberate error
+	uint8_t saved_flags[6] = { };
 
 	// the store being made by generated code: the two dwords it can reach and what they have to hold afterwards
 	bool store_pending = false;
@@ -265,7 +278,11 @@ void i386_device::drc_verify_start()
 				{ "load", DRC_BREAK_LOAD },
 				{ "store", DRC_BREAK_STORE },
 				{ "ea", DRC_BREAK_EA },
-				{ "nodrop", DRC_BREAK_NODROP } };
+				{ "nodrop", DRC_BREAK_NODROP },
+				{ "alu", DRC_BREAK_ALU },
+				{ "flags", DRC_BREAK_FLAGS },
+				{ "carry", DRC_BREAK_CARRY },
+				{ "stale", DRC_BREAK_STALE } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
@@ -334,6 +351,46 @@ void i386_device::drc_verify_break_mov()
 	drc_verifier const &v = *m_verifier;
 	if (v.recording && !v.unsafe)
 		m_core->reg.b[m_core->ea_tmp] ^= 1;
+}
+
+
+// inverts one arithmetic flag after a compiled instruction, chosen by generated code
+void i386_device::drc_verify_break_flags()
+{
+	drc_verifier const &v = *m_verifier;
+	if (!v.recording || v.unsafe)
+		return;
+	uint8_t *const flags[6] = { &m_core->CF, &m_core->PF, &m_core->AF, &m_core->ZF, &m_core->SF, &m_core->OF };
+	*flags[m_core->ea_tmp % 6] ^= 1;
+}
+
+
+// loses the carry into a compiled adc or sbb
+void i386_device::drc_verify_break_carry()
+{
+	drc_verifier const &v = *m_verifier;
+	if (v.recording && !v.unsafe)
+		m_core->CF = 0;
+}
+
+
+// the two parts of leaving the flags as they were before a compiled instruction
+void i386_device::drc_verify_break_save_flags()
+{
+	drc_verifier &v = *m_verifier;
+	uint8_t const flags[6] = { m_core->CF, m_core->PF, m_core->AF, m_core->ZF, m_core->SF, m_core->OF };
+	std::copy(std::begin(flags), std::end(flags), std::begin(v.saved_flags));
+}
+
+
+void i386_device::drc_verify_break_restore_flags()
+{
+	drc_verifier const &v = *m_verifier;
+	if (!v.recording || v.unsafe)
+		return;
+	uint8_t *const flags[6] = { &m_core->CF, &m_core->PF, &m_core->AF, &m_core->ZF, &m_core->SF, &m_core->OF };
+	for (int i = 0; i < 6; i++)
+		*flags[i] = v.saved_flags[i];
 }
 
 

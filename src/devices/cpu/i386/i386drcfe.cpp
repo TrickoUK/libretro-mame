@@ -777,6 +777,11 @@ void i386_device::frontend::classify(opcode_desc &desc)
 			set_flags(lazy_flags::LOGIC);
 			use_rm(desc.width, true, false);
 		}
+		else if (reg == 2)  // not, which sets no flags
+		{
+			desc.kind = family::ALU;
+			use_rm(desc.width, true, true);
+		}
 		else if (reg == 3)
 		{
 			desc.kind = family::ALU;

@@ -14,7 +14,9 @@
 
     A block holds a straight sequence of instructions described by the front
     end.  MOV of 8 and 32 bits between registers, memory and immediates is
-    compiled.  Every other instruction is executed with step(), the
+    compiled, and so are LEA and the 8 and 32-bit forms of ADD, ADC, SUB,
+    SBB, CMP, AND, OR, XOR, TEST, INC, DEC, NEG and NOT whose operands are
+    registers and immediates, all without prefixes.  Every other instruction is executed with step(), the
     interpreter's per-instruction function, which fetches the instruction from
     memory as it then is.  The block key is the linear address of the first
     instruction together with the mode bits.
@@ -36,6 +38,18 @@
       that generated code is to deliver is caught by the function itself and
       recorded for the fault handler.  Any other exception is kept, generated
       code is left at once, and it is rethrown from the execution loop.
+
+    Flags:
+    - A compiled instruction stores each arithmetic flag byte which its
+      interpreter handler changes, with the same value, so the flags are
+      current wherever generated code is left or calls a function.  The lazy
+      flag record is not used.
+    - The values follow the handlers: logic operations clear CF and OF and
+      leave AF alone, except TEST with an immediate in the F6 and F7 groups,
+      which also clears AF; INC and DEC leave CF alone.
+    - 32-bit operations take CF, OF, ZF and SF from the host operation.  PF,
+      AF and all flags of 8-bit operations are computed from the operands and
+      the result.
 
     Compiled memory accesses:
     - The segment of an operand has base zero, so the effective address is the
@@ -155,6 +169,26 @@ inline void alloc_handle(drcuml_state &drcuml, uml::code_handle *&handleptr, con
 }
 
 } // anonymous namespace
+
+
+// the operation of a compiled arithmetic or logic instruction
+struct i386_device::drc_alu_form
+{
+	enum operation : uint8_t { ADD, ADC, SUB, SBB, AND, OR, XOR, NOT, INC, DEC };
+
+	operation op;
+	bool bytes;         // operands of 8 rather than 32 bits
+	bool write;         // the result is written to the destination
+	bool clear_af;      // a logic operation which clears AF rather than leaving it
+	int dest;           // register receiving the result, as a byte or dword index
+	int first;          // register of the first operand, or -1 for the first immediate
+	int second;         // register of the second operand, or -1 for the second immediate
+	uint32_t imm_first;
+	uint32_t imm_second;
+	X86_CYCLES cycles;
+
+	bool sets_flags() const { return op != NOT; }
+};
 
 
 // the pages holding bytes of compiled instructions, and counts of what happens to them
@@ -832,6 +866,34 @@ void i386_device::cfunc_verify_break_mov(void *param)
 }
 
 
+void i386_device::cfunc_verify_break_flags(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_break_flags(); });
+}
+
+
+void i386_device::cfunc_verify_break_carry(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_break_carry(); });
+}
+
+
+void i386_device::cfunc_verify_break_save_flags(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_break_save_flags(); });
+}
+
+
+void i386_device::cfunc_verify_break_restore_flags(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_break_restore_flags(); });
+}
+
+
 
 /***************************************************************************
     STATIC CODE
@@ -945,11 +1007,165 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 }
 
 
-// The compiled instructions are MOV of 8 and 32 bits between registers, memory and immediates, without prefixes.
+// Decodes the compiled forms of the arithmetic and logic instructions, which have register and immediate operands and
+// no prefix, as the length shows.
+bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) const
+{
+	static constexpr drc_alu_form::operation ARITHMETIC[8] = {
+			drc_alu_form::ADD, drc_alu_form::OR, drc_alu_form::ADC, drc_alu_form::SBB,
+			drc_alu_form::AND, drc_alu_form::SUB, drc_alu_form::XOR, drc_alu_form::SUB };
+	constexpr unsigned ARITHMETIC_CMP = 7;
+
+	uint16_t const op = desc.opcode;
+	bool const register_rm = desc.modrm >= 0xc0;
+	unsigned const group = BIT(desc.modrm, 3, 3);
+	MODRM_TABLE const &fields = i386_MODRM_table[desc.modrm];
+
+	form.write = true;
+	form.clear_af = false;
+	form.imm_first = 0;
+	form.imm_second = 0;
+	form.second = -1;
+	form.cycles = CYCLES_ALU_REG_REG;
+
+	auto const rm = [&form, &fields] () { return int(form.bytes ? fields.rm.b : fields.rm.d); };
+	auto const reg = [&form, &fields] () { return int(form.bytes ? fields.reg.b : fields.reg.d); };
+	auto const accumulator = [&form] () { return int(form.bytes ? AL : EAX); };
+
+	if ((op < 0x40) && ((op & 7) < 6))
+	{
+		unsigned const operation = op >> 3;
+		form.op = ARITHMETIC[operation];
+		form.bytes = !(op & 1);
+		form.write = operation != ARITHMETIC_CMP;
+		switch (op & 7)
+		{
+		case 0:
+		case 1:
+			form.dest = form.first = rm();
+			form.second = reg();
+			break;
+		case 2:
+		case 3:
+			form.dest = form.first = reg();
+			form.second = rm();
+			break;
+		default:
+			form.dest = form.first = accumulator();
+			form.imm_second = desc.immediate;
+			form.cycles = form.write ? CYCLES_ALU_IMM_ACC : CYCLES_CMP_IMM_ACC;
+			return desc.length == (form.bytes ? 2 : 5);
+		}
+		form.cycles = form.write ? CYCLES_ALU_REG_REG : CYCLES_CMP_REG_REG;
+		return register_rm && (desc.length == 2);
+	}
+	else if ((op >= 0x40) && (op <= 0x4f))
+	{
+		form.op = (op < 0x48) ? drc_alu_form::INC : drc_alu_form::DEC;
+		form.bytes = false;
+		form.dest = form.first = op & 7;
+		form.imm_second = 1;
+		form.cycles = (op < 0x48) ? CYCLES_INC_REG : CYCLES_DEC_REG;
+		return desc.length == 1;
+	}
+
+	switch (op)
+	{
+	case 0x80:
+	case 0x81:
+	case 0x82:
+	case 0x83:
+		form.op = ARITHMETIC[group];
+		form.bytes = (op == 0x80) || (op == 0x82);
+		form.write = group != ARITHMETIC_CMP;
+		form.dest = form.first = rm();
+		form.imm_second = (op == 0x83) ? uint32_t(int32_t(int8_t(desc.immediate))) : desc.immediate;
+		form.cycles = form.write ? CYCLES_ALU_REG_REG : CYCLES_CMP_REG_REG;
+		return register_rm && (desc.length == ((op == 0x81) ? 6 : 3));
+
+	case 0x84:
+	case 0x85:
+		form.op = drc_alu_form::AND;
+		form.bytes = op == 0x84;
+		form.write = false;
+		form.dest = form.first = rm();
+		form.second = reg();
+		form.cycles = CYCLES_TEST_REG_REG;
+		return register_rm && (desc.length == 2);
+
+	case 0xa8:
+	case 0xa9:
+		form.op = drc_alu_form::AND;
+		form.bytes = op == 0xa8;
+		form.write = false;
+		form.dest = form.first = accumulator();
+		form.imm_second = desc.immediate;
+		form.cycles = (op == 0xa8) ? CYCLES_ALU_IMM_ACC : CYCLES_TEST_IMM_ACC;
+		return desc.length == (form.bytes ? 2 : 5);
+
+	case 0xf6:
+	case 0xf7:
+		form.bytes = op == 0xf6;
+		form.dest = form.first = rm();
+		switch (group)
+		{
+		case 0:     // test with an immediate
+			form.op = drc_alu_form::AND;
+			form.write = false;
+			form.clear_af = true;
+			form.imm_second = desc.immediate;
+			form.cycles = CYCLES_TEST_IMM_REG;
+			return register_rm && (desc.length == (form.bytes ? 3 : 6));
+		case 2:
+			form.op = drc_alu_form::NOT;
+			form.cycles = CYCLES_NOT_REG;
+			return register_rm && (desc.length == 2);
+		case 3:     // neg subtracts from zero
+			form.op = drc_alu_form::SUB;
+			form.first = -1;
+			form.second = rm();
+			form.cycles = CYCLES_NEG_REG;
+			return register_rm && (desc.length == 2);
+		default:
+			return false;
+		}
+
+	case 0xfe:
+	case 0xff:
+		form.bytes = op == 0xfe;
+		form.op = group ? drc_alu_form::DEC : drc_alu_form::INC;
+		form.dest = form.first = rm();
+		form.imm_second = 1;
+		form.cycles = group ? CYCLES_DEC_REG : CYCLES_INC_REG;
+		return register_rm && (group <= 1) && (desc.length == 2);
+
+	default:
+		return false;
+	}
+}
+
+
+// The compiled instructions are MOV of 8 and 32 bits between registers, memory and immediates, LEA, and arithmetic and
+// logic on registers and immediates, all without prefixes.
 bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 {
-	if ((desc.kind != opcode_desc::family::MOV) || !desc.in_memory || (m_program->data_width() != 32) || !drc_can_bake_code())
+	if (!desc.in_memory || (m_program->data_width() != 32) || !drc_can_bake_code())
 		return false;
+
+	drc_alu_form form;
+	switch (desc.kind)
+	{
+	case opcode_desc::family::MOV:
+		break;
+	case opcode_desc::family::LEA:
+		return !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT) && (desc.opcode == 0x8d) && (desc.modrm < 0xc0);
+	case opcode_desc::family::ALU:
+	case opcode_desc::family::TEST:
+	case opcode_desc::family::INCDEC:
+		return !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT) && drc_decode_alu(desc, form);
+	default:
+		return false;
+	}
 
 	// a memory operand in the data or stack segment; a prefix would be recorded in one of the other two fields
 	bool const memory_operand = !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT)
@@ -1018,7 +1234,26 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 
 	if (drc_compiles_natively(desc))
 	{
-		generate_mov_start(block, desc, decode_state_set);
+		generate_native_start(block, desc, decode_state_set);
+		if (desc.kind == opcode_desc::family::LEA)
+		{
+			generate_lea(block, desc);
+			return;
+		}
+		if (desc.kind != opcode_desc::family::MOV)
+		{
+			// a deliberate error: the flags of an instruction before a stepped one are lost
+			drc_alu_form form;
+			bool const lose_flags = drc_verify_breaks(DRC_BREAK_STALE)
+					&& drc_decode_alu(desc, form) && form.sets_flags()
+					&& !last && !drc_compiles_natively(*desc.next());
+			if (lose_flags)
+				generate_call(block, &i386_device::cfunc_verify_break_save_flags);     // callc   cfunc_verify_break_save_flags
+			generate_alu(block, desc);
+			if (lose_flags)
+				generate_call(block, &i386_device::cfunc_verify_break_restore_flags);  // callc   cfunc_verify_break_restore_flags
+			return;
+		}
 		bool const moffs = (desc.opcode >= 0xa0) && (desc.opcode <= 0xa3);
 		bool const modrm = ((desc.opcode >= 0x88) && (desc.opcode <= 0x8b)) || (desc.opcode == 0xc6) || (desc.opcode == 0xc7);
 		if (moffs || (modrm && (desc.modrm < 0xc0)))
@@ -1057,9 +1292,9 @@ void i386_device::generate_step(drcuml_block &block, opcode_desc const &desc, bo
 }
 
 
-// The part of a compiled MOV that leaves behind the state step() would have while executing the instruction: the
+// The part of a compiled instruction that leaves behind the state step() would have while executing the instruction: the
 // per-instruction decode fields and the addresses.
-void i386_device::generate_mov_start(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set)
+void i386_device::generate_native_start(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set)
 {
 	// the decode fields of a 32-bit instruction without prefixes stay as set until an instruction is stepped
 	if (!decode_state_set)
@@ -1134,6 +1369,261 @@ void i386_device::generate_register_mov(drcuml_block &block, opcode_desc const &
 }
 
 
+// the effective address of a 32-bit ModRM memory operand, in i0
+void i386_device::generate_effective_address(drcuml_block &block, opcode_desc const &desc)
+{
+	unsigned const mod = BIT(desc.modrm, 6, 2);
+	unsigned base = BIT(desc.modrm, 0, 3);
+	int index = -1;
+	unsigned scale = 0;
+	if (base == 4)
+	{
+		base = BIT(desc.sib, 0, 3);
+		scale = BIT(desc.sib, 6, 2);
+		if (BIT(desc.sib, 3, 3) != 4)
+			index = BIT(desc.sib, 3, 3);
+	}
+	bool const has_base = mod || (base != 5);
+	if (index >= 0)
+	{
+		if (scale)
+			UML_SHL(block, I0, mem(&m_core->reg.d[index]), scale);      // shl     i0,[index],scale
+		else
+			UML_MOV(block, I0, mem(&m_core->reg.d[index]));             // mov     i0,[index]
+		if (has_base)
+			UML_ADD(block, I0, I0, mem(&m_core->reg.d[base]));          // add     i0,i0,[base]
+		if (desc.displacement)
+			UML_ADD(block, I0, I0, desc.displacement);                  // add     i0,i0,displacement
+	}
+	else if (!has_base)
+	{
+		UML_MOV(block, I0, desc.displacement);                          // mov     i0,displacement
+	}
+	else if (desc.displacement)
+	{
+		UML_ADD(block, I0, mem(&m_core->reg.d[base]), desc.displacement);   // add     i0,[base],displacement
+	}
+	else
+	{
+		UML_MOV(block, I0, mem(&m_core->reg.d[base]));                  // mov     i0,[base]
+	}
+}
+
+
+// Compiled LEA, which writes the effective address to a register and sets no flags.
+void i386_device::generate_lea(drcuml_block &block, opcode_desc const &desc)
+{
+	int const reg = i386_MODRM_table[desc.modrm].reg.d;
+	generate_effective_address(block, desc);
+	UML_MOV(block, mem(&m_core->reg.d[reg]), I0);                           // mov     [reg],i0
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[CYCLES_LEA]);  // sub     [cycles],[cycles],n
+
+	if (drc_verify_breaks(DRC_BREAK_ALU))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), reg * 4);                      // mov     [ea_tmp],offset
+		generate_call(block, &i386_device::cfunc_verify_break_mov);         // callc   cfunc_verify_break_mov
+	}
+}
+
+
+// Compiled arithmetic and logic on registers and immediates.  The operands are in i0 and i1 and the result in i2; i3 and
+// i4 are used to work out flags.  Each flag byte is stored with the value the interpreter's handler gives it.  Nothing
+// here can fault, call out or change the mode or the interrupt state.
+void i386_device::generate_alu(drcuml_block &block, opcode_desc const &desc)
+{
+	drc_alu_form form;
+	bool const decoded = drc_decode_alu(desc, form);
+	assert(decoded);
+	if (!decoded)
+		return;
+
+	bool const arithmetic = (form.op == drc_alu_form::ADD) || (form.op == drc_alu_form::ADC) || (form.op == drc_alu_form::INC)
+			|| (form.op == drc_alu_form::SUB) || (form.op == drc_alu_form::SBB) || (form.op == drc_alu_form::DEC);
+	bool const logic = (form.op == drc_alu_form::AND) || (form.op == drc_alu_form::OR) || (form.op == drc_alu_form::XOR);
+	bool const subtract = (form.op == drc_alu_form::SUB) || (form.op == drc_alu_form::SBB) || (form.op == drc_alu_form::DEC);
+	bool const carry_in = (form.op == drc_alu_form::ADC) || (form.op == drc_alu_form::SBB);
+	bool const carry_out = arithmetic && (form.op != drc_alu_form::INC) && (form.op != drc_alu_form::DEC);
+
+	if (carry_in && drc_verify_breaks(DRC_BREAK_CARRY))
+		generate_call(block, &i386_device::cfunc_verify_break_carry);       // callc   cfunc_verify_break_carry
+
+	auto const load_operand =
+			[this, &block, &form] (uml::parameter dest, int reg, uint32_t immediate)
+			{
+				if (reg < 0)
+					UML_MOV(block, dest, form.bytes ? (immediate & 0xff) : immediate);  // mov     dest,imm
+				else if (form.bytes)
+					UML_LOAD(block, dest, &m_core->reg.b[0], reg, SIZE_BYTE, SCALE_x1); // load    dest,reg8
+				else
+					UML_MOV(block, dest, mem(&m_core->reg.d[reg]));                     // mov     dest,[reg]
+			};
+	auto const store_flag =
+			[&block] (uint8_t &flag, uml::parameter value)
+			{
+				UML_STORE(block, &flag, 0, value, SIZE_BYTE, SCALE_x1);                 // store   flag,value
+			};
+
+	load_operand(I0, form.first, form.imm_first);
+	if (form.op != drc_alu_form::NOT)
+		load_operand(I1, form.second, form.imm_second);
+
+	// CF as a value in i3, for the operations that read it
+	if (carry_in)
+		UML_LOAD(block, I3, &m_core->CF, 0, SIZE_BYTE, SCALE_x1);           // load    i3,CF
+
+	switch (form.op)
+	{
+	case drc_alu_form::ADD:
+	case drc_alu_form::INC:
+		UML_ADD(block, I2, I0, I1);                                         // add     i2,i0,i1
+		break;
+	case drc_alu_form::SUB:
+	case drc_alu_form::DEC:
+		UML_SUB(block, I2, I0, I1);                                         // sub     i2,i0,i1
+		break;
+	case drc_alu_form::ADC:
+		if (form.bytes)
+		{
+			UML_ADD(block, I2, I0, I1);                                     // add     i2,i0,i1
+			UML_ADD(block, I2, I2, I3);                                     // add     i2,i2,i3
+		}
+		else
+		{
+			UML_CARRY(block, I3, 0);                                        // carry   i3,0
+			UML_ADDC(block, I2, I0, I1);                                    // addc    i2,i0,i1
+		}
+		break;
+	case drc_alu_form::SBB:
+		if (form.bytes)
+		{
+			UML_SUB(block, I2, I0, I1);                                     // sub     i2,i0,i1
+			UML_SUB(block, I2, I2, I3);                                     // sub     i2,i2,i3
+		}
+		else
+		{
+			UML_CARRY(block, I3, 0);                                        // carry   i3,0
+			UML_SUBB(block, I2, I0, I1);                                    // subb    i2,i0,i1
+		}
+		break;
+	case drc_alu_form::AND:
+		UML_AND(block, I2, I0, I1);                                         // and     i2,i0,i1
+		break;
+	case drc_alu_form::OR:
+		UML_OR(block, I2, I0, I1);                                          // or      i2,i0,i1
+		break;
+	case drc_alu_form::XOR:
+		UML_XOR(block, I2, I0, I1);                                         // xor     i2,i0,i1
+		break;
+	case drc_alu_form::NOT:
+		UML_XOR(block, I2, I0, 0xffffffff);                                 // xor     i2,i0,0xffffffff
+		break;
+	}
+
+	if (form.sets_flags())
+	{
+		if (!form.bytes && arithmetic)
+		{
+			// the host flags of the operation, none of the operations in between changing them
+			if (carry_out)
+			{
+				UML_SETc(block, COND_C, I3);                                // set     i3,c
+				store_flag(m_core->CF, I3);
+			}
+			UML_SETc(block, COND_V, I3);                                    // set     i3,v
+			store_flag(m_core->OF, I3);
+			UML_SETc(block, COND_Z, I3);                                    // set     i3,z
+			store_flag(m_core->ZF, I3);
+			UML_SETc(block, COND_S, I3);                                    // set     i3,s
+			store_flag(m_core->SF, I3);
+		}
+		else
+		{
+			if (form.bytes)
+			{
+				UML_TEST(block, I2, 0xff);                                  // test    i2,0xff
+				UML_SETc(block, COND_Z, I3);                                // set     i3,z
+				store_flag(m_core->ZF, I3);
+				UML_ROLAND(block, I3, I2, 25, 1);                           // roland  i3,i2,25,1
+				store_flag(m_core->SF, I3);
+			}
+			else
+			{
+				UML_CMP(block, I2, 0);                                      // cmp     i2,0
+				UML_SETc(block, COND_Z, I3);                                // set     i3,z
+				store_flag(m_core->ZF, I3);
+				UML_ROLAND(block, I3, I2, 1, 1);                            // roland  i3,i2,1,1
+				store_flag(m_core->SF, I3);
+			}
+
+			if (logic)
+			{
+				store_flag(m_core->CF, 0);
+				store_flag(m_core->OF, 0);
+				if (form.clear_af)
+					store_flag(m_core->AF, 0);
+			}
+			else
+			{
+				// the 8-bit result keeps the carry or borrow out in bit 8
+				if (carry_out)
+				{
+					UML_ROLAND(block, I3, I2, 24, 1);                       // roland  i3,i2,24,1
+					store_flag(m_core->CF, I3);
+				}
+				// signed overflow: the result differs in sign from both operands of an addition, or from the first of a
+				// subtraction whose operands differ in sign
+				if (subtract)
+				{
+					UML_XOR(block, I3, I0, I1);                             // xor     i3,i0,i1
+					UML_XOR(block, I4, I0, I2);                             // xor     i4,i0,i2
+				}
+				else
+				{
+					UML_XOR(block, I3, I2, I1);                             // xor     i3,i2,i1
+					UML_XOR(block, I4, I2, I0);                             // xor     i4,i2,i0
+				}
+				UML_AND(block, I3, I3, I4);                                 // and     i3,i3,i4
+				UML_ROLAND(block, I3, I3, 25, 1);                           // roland  i3,i3,25,1
+				store_flag(m_core->OF, I3);
+			}
+		}
+
+		if (arithmetic)
+		{
+			UML_XOR(block, I3, I0, I1);                                     // xor     i3,i0,i1
+			UML_XOR(block, I3, I3, I2);                                     // xor     i3,i3,i2
+			UML_ROLAND(block, I3, I3, 28, 1);                               // roland  i3,i3,28,1
+			store_flag(m_core->AF, I3);
+		}
+
+		static_assert(sizeof(i386_parity_table[0]) == 4);
+		UML_AND(block, I3, I2, 0xff);                                       // and     i3,i2,0xff
+		UML_LOAD(block, I3, &i386_parity_table[0], I3, SIZE_DWORD, SCALE_x4);  // load    i3,parity[i3]
+		store_flag(m_core->PF, I3);
+	}
+
+	if (form.write)
+	{
+		if (form.bytes)
+			UML_STORE(block, &m_core->reg.b[0], form.dest, I2, SIZE_BYTE, SCALE_x1);   // store   reg8,i2
+		else
+			UML_MOV(block, mem(&m_core->reg.d[form.dest]), I2);                        // mov     [reg],i2
+	}
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[form.cycles]);  // sub     [cycles],[cycles],n
+
+	if (form.write && drc_verify_breaks(DRC_BREAK_ALU))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), form.bytes ? form.dest : (form.dest * 4));  // mov     [ea_tmp],offset
+		generate_call(block, &i386_device::cfunc_verify_break_mov);         // callc   cfunc_verify_break_mov
+	}
+	if (form.sets_flags() && drc_verify_breaks(DRC_BREAK_FLAGS))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), desc.pc % 6);                  // mov     [ea_tmp],flag
+		generate_call(block, &i386_device::cfunc_verify_break_flags);       // callc   cfunc_verify_break_flags
+	}
+}
+
+
 // Compiled MOV between memory and a register, or of an immediate to memory.  A page with a table entry is accessed
 // directly; otherwise a function performs the access, which can fault, run device code and ask for the block to be
 // left.  A faulting instruction changes no register and takes no cycles, and an access that was performed completes
@@ -1179,47 +1669,9 @@ void i386_device::generate_memory_mov(drcuml_block &block, opcode_desc const &de
 
 	// effective address in i0
 	if (moffs)
-	{
 		UML_MOV(block, I0, desc.displacement);                              // mov     i0,offset
-	}
 	else
-	{
-		unsigned const mod = BIT(desc.modrm, 6, 2);
-		unsigned base = BIT(desc.modrm, 0, 3);
-		int index = -1;
-		unsigned scale = 0;
-		if (base == 4)
-		{
-			base = BIT(desc.sib, 0, 3);
-			scale = BIT(desc.sib, 6, 2);
-			if (BIT(desc.sib, 3, 3) != 4)
-				index = BIT(desc.sib, 3, 3);
-		}
-		bool const has_base = mod || (base != 5);
-		if (index >= 0)
-		{
-			if (scale)
-				UML_SHL(block, I0, mem(&m_core->reg.d[index]), scale);      // shl     i0,[index],scale
-			else
-				UML_MOV(block, I0, mem(&m_core->reg.d[index]));             // mov     i0,[index]
-			if (has_base)
-				UML_ADD(block, I0, I0, mem(&m_core->reg.d[base]));          // add     i0,i0,[base]
-			if (desc.displacement)
-				UML_ADD(block, I0, I0, desc.displacement);                  // add     i0,i0,displacement
-		}
-		else if (!has_base)
-		{
-			UML_MOV(block, I0, desc.displacement);                          // mov     i0,displacement
-		}
-		else if (desc.displacement)
-		{
-			UML_ADD(block, I0, mem(&m_core->reg.d[base]), desc.displacement);   // add     i0,[base],displacement
-		}
-		else
-		{
-			UML_MOV(block, I0, mem(&m_core->reg.d[base]));                  // mov     i0,[base]
-		}
-	}
+		generate_effective_address(block, desc);
 	if (drc_verify_breaks(DRC_BREAK_EA))
 	{
 		UML_MOV(block, mem(&m_core->ea_tmp), I0);                           // mov     [ea_tmp],i0

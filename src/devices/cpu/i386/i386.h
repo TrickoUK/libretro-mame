@@ -1673,7 +1673,12 @@ protected:
 	bool drc_compiles_natively(opcode_desc const &desc) const;
 	void generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set);
 	void generate_step(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow);
-	void generate_mov_start(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set);
+	void generate_native_start(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set);
+	struct drc_alu_form;
+	bool drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) const;
+	void generate_effective_address(drcuml_block &block, opcode_desc const &desc);
+	void generate_lea(drcuml_block &block, opcode_desc const &desc);
+	void generate_alu(drcuml_block &block, opcode_desc const &desc);
 	void generate_register_mov(drcuml_block &block, opcode_desc const &desc);
 	void generate_slow_exit(drcuml_block &block);
 	static void cfunc_step(void *param);
@@ -1681,6 +1686,10 @@ protected:
 	static void cfunc_verify_break(void *param);
 	static void cfunc_verify_instruction(void *param);
 	static void cfunc_verify_break_mov(void *param);
+	static void cfunc_verify_break_flags(void *param);
+	static void cfunc_verify_break_carry(void *param);
+	static void cfunc_verify_break_save_flags(void *param);
+	static void cfunc_verify_break_restore_flags(void *param);
 
 	// lockstep verifier
 	// deliberate errors made to show that checks detect them
@@ -1701,7 +1710,11 @@ protected:
 		DRC_BREAK_LOAD,
 		DRC_BREAK_STORE,
 		DRC_BREAK_EA,
-		DRC_BREAK_NODROP
+		DRC_BREAK_NODROP,
+		DRC_BREAK_ALU,
+		DRC_BREAK_FLAGS,
+		DRC_BREAK_CARRY,
+		DRC_BREAK_STALE
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;
@@ -1712,6 +1725,10 @@ protected:
 	void drc_verify_break();
 	void drc_verify_instruction();
 	void drc_verify_break_mov();
+	void drc_verify_break_flags();
+	void drc_verify_break_carry();
+	void drc_verify_break_save_flags();
+	void drc_verify_break_restore_flags();
 	void drc_verify_break_ea();
 	void drc_verify_break_store(uint32_t &value) const;
 	template <typename Data> void drc_verify_store_start();

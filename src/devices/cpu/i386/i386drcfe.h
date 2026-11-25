@@ -48,7 +48,7 @@ public:
 	{
 		STEP,       // executed only by the interpreter's per-instruction function; may change anything and may fault
 		MOV,
-		ALU,        // add, adc, and, cmp, or, sbb, sub, xor, neg
+		ALU,        // add, adc, and, cmp, or, sbb, sub, xor, neg, not
 		TEST,
 		INCDEC,
 		LEA,
