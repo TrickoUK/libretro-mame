@@ -121,6 +121,11 @@ pci_device::pci_device(const machine_config &mconfig, device_type type, const ch
 	expansion_rom_size = 0;
 	expansion_rom_base = 0;
 	is_multifunction_device = false;
+	// the bus can be mapped while another function starts, before this one has started:
+	// no BARs and no address space decoding until then
+	bank_count = 0;
+	bank_reg_count = 0;
+	command = 0x0000;
 	intr_pin = 0x0;
 	intr_line = 0xff;
 	for(int i=0; i<6; i++) {
