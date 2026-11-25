@@ -174,25 +174,40 @@ uint32_t i386_device::drc_mode() const
 }
 
 
-// true if the next instruction can be run from the code cache in the given mode
+// True if the next instruction can be run from the code cache in the given mode.  The conditions are those that the
+// CPU tests between instructions, paging and virtual 8086 mode, all combined into one value.
 bool i386_device::drc_eligible(uint32_t mode) const
 {
 	core_state const &core = *m_core;
-	if (mode != MODE_COMPILED)
-		return false;
-	if ((core.cr[0] & CR0_PG) || core.VM)
-		return false;
-	if (core.TF || core.RF || (m_dr[7] & 0xff) || core.smi || core.halted || core.delayed_interrupt_enable || core.lock)
-		return false;
-	return !(core.irq_state && core.IF);
+	return !((mode ^ MODE_COMPILED)
+			| (core.cr[0] & CR0_PG)
+			| core.VM
+			| core.TF
+			| core.RF
+			| (m_dr[7] & 0xff)
+			| uint32_t(core.smi)
+			| uint32_t(core.halted)
+			| core.delayed_interrupt_enable
+			| uint32_t(core.lock)
+			| uint32_t(core.irq_state ? core.IF : 0));
 }
 
 
-// updates the mode key and tests whether the next instruction can be run from the code cache
+// brings the mode key up to date and tests whether the next instruction can be run from the code cache
 bool i386_device::drc_runnable()
 {
-	m_core->mode = drc_mode();
-	return drc_eligible(m_core->mode);
+	core_state &core = *m_core;
+
+	// the mode only changes with the segment registers and CR0, whose writers mark it, except for edits made
+	// through the debugger
+	if (core.mode_dirty || debugger_enabled())
+	{
+		core.mode = drc_mode();
+		core.mode_dirty = 0;
+	}
+	assert(core.mode == drc_mode());
+
+	return drc_eligible(core.mode);
 }
 
 
@@ -209,7 +224,7 @@ void i386_device::drc_guarded_call(Body &&body)
 	try
 	{
 		body();
-		m_core->drc_exit = (m_drc_cache_dirty || !drc_runnable()) ? DRC_EXIT_INTERPRET : DRC_EXIT_NONE;
+		m_core->drc_exit = drc_exit_request();
 	}
 	catch (...)
 	{
@@ -217,6 +232,13 @@ void i386_device::drc_guarded_call(Body &&body)
 		m_drc_exception = std::current_exception();
 		m_core->drc_exit = DRC_EXIT_EXCEPTION;
 	}
+}
+
+
+// what generated code has to do after a called function
+uint32_t i386_device::drc_exit_request()
+{
+	return (!drc_runnable() || m_drc_cache_dirty) ? DRC_EXIT_INTERPRET : DRC_EXIT_NONE;
 }
 
 
@@ -405,6 +427,9 @@ void i386_device::generate_step_instruction(drcuml_block &block, offs_t pc)
 void i386_device::execute_run_drc()
 {
 	core_state *const m_core = this->m_core;
+
+	// state may have been edited since the last timeslice
+	m_core->mode_dirty = 1;
 
 	while (m_core->cycles > 0)
 	{

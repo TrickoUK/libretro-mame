@@ -756,6 +756,7 @@ void i386_device::i386_mov_cr_r32()        // Opcode 0x0f 22
 			return;
 	}
 	m_core->cr[cr] = data;
+	m_core->mode_dirty = 1;
 }
 
 void i386_device::i386_mov_dr_r32()        // Opcode 0x0f 23
@@ -2691,6 +2692,7 @@ void i386_device::i386_loadall()       // Opcode 0x0f 0x07 (0x0f 0x05 on 80286),
 		FAULT(FAULT_GP,0)
 	uint32_t ea = i386_translate(ES, REG32(EDI), 0);
 	uint32_t old_dr7 = m_dr[7];
+	m_core->mode_dirty = 1;
 	m_core->cr[0] = READ32(ea) & 0xfffeffff; // wp not supported on 386
 	set_flags(READ32(ea + 0x04));
 	m_core->eip = READ32(ea + 0x08);

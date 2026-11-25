@@ -3391,6 +3391,7 @@ void i386_device::i386_group0F01_32()      // Opcode 0x0f 01
 					b |= 0x0001;  // cannot return to real mode using this instruction.
 				m_core->cr[0] &= ~0x0000000f;
 				m_core->cr[0] |= b & 0x0000000f;
+				m_core->mode_dirty = 1;
 				break;
 			}
 		default:

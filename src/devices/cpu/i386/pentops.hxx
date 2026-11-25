@@ -2158,6 +2158,7 @@ void i386_device::i386_cyrix_rsdc() // Opcode 0f 79
 			limit = (limit << 12) | 0xfff;
 		}
 
+		m_core->mode_dirty = 1;
 		m_core->sreg[index].selector = READ16(ea + 8);
 		m_core->sreg[index].flags = flags;
 		m_core->sreg[index].base = base;

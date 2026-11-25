@@ -21,7 +21,9 @@
 
     The replay also checks that the block did not execute an instruction
     which the interpreter loop would not have started, or which has to be
-    left to the interpreter.
+    left to the interpreter, or after the code cache had to be flushed.
+    After each block, checked or not, the cached mode key must agree with the
+    segment registers and CR0.
 
     To show that errors are detected, MAME_I386_DRC_VERIFY_BREAK selects a
     deliberate error made by the generated code of every block:
@@ -31,7 +33,10 @@
         write    writes the dword below the stack pointer back to itself
                  in checked blocks
         overrun  executes a second instruction in checked blocks, whatever
-                 the cycles left and the state after the first
+                 the cycles left and the state after the first.  This is only
+                 reported when the extra instruction lands at the end of a
+                 timeslice or in an ineligible state.
+        mode     changes the cached mode key in checked blocks
         throw    throws a C++ exception in the first block run
 
 ***************************************************************************/
@@ -63,6 +68,7 @@ enum : int
 	BREAK_EIP,
 	BREAK_WRITE,
 	BREAK_OVERRUN,
+	BREAK_MODE,
 	BREAK_THROW
 };
 
@@ -203,6 +209,7 @@ void i386_device::drc_verify_start()
 				{ "eip", BREAK_EIP },
 				{ "write", BREAK_WRITE },
 				{ "overrun", BREAK_OVERRUN },
+				{ "mode", BREAK_MODE },
 				{ "throw", BREAK_THROW } };
 		for (auto const &[name, kind] : NAMES)
 		{
@@ -254,6 +261,10 @@ void i386_device::drc_verify_break()
 	case BREAK_OVERRUN:
 		step();
 		core.verify_count++;
+		break;
+
+	case BREAK_MODE:
+		core.mode ^= 0x100;
 		break;
 	}
 }
@@ -342,6 +353,14 @@ int i386_device::drc_verify_execute()
 	v.recording = false;
 	drc_rethrow_exception();
 	uint32_t const count = m_core->verify_count;
+
+	// the cached mode key, as the block left it
+	if (!m_core->mode_dirty && (m_core->mode != drc_mode()))
+	{
+		if (v.mismatched < VERIFY_REPORT_LIMIT)
+			osd_printf_error("%s: DRC verify at %08X: the cached mode key is out of date\n", tag(), pc);
+		v.mismatched++;
+	}
 	if (!count)
 		return result;
 	if (v.unsafe)
@@ -360,17 +379,22 @@ int i386_device::drc_verify_execute()
 	v.writes.clear();
 	v.recording = true;
 	char const *overrun = nullptr;
+
+	// a block must also be left once the code cache has to be flushed
+	bool const cache_dirty = m_drc_cache_dirty;
+	m_drc_cache_dirty = false;
 	for (uint32_t i = 0; (i < count) && !overrun; i++)
 	{
 		// the first instruction was tested before the block was entered
 		if (i && (m_core->cycles <= 0))
 			overrun = "block ran past the timeslice";
-		else if (i && !drc_eligible(drc_mode()))
+		else if (i && (m_drc_cache_dirty || !drc_eligible(drc_mode())))
 			overrun = "block continued where it must exit";
 		else
 			step();
 	}
 	v.recording = false;
+	m_drc_cache_dirty = m_drc_cache_dirty || cache_dirty;
 	v.capture(v.after_interpreter);
 	v.checked++;
 
@@ -387,6 +411,7 @@ int i386_device::drc_verify_execute()
 				clear(offsetof(core_state, arg1), sizeof(core_state::arg1));
 				clear(offsetof(core_state, drc_exit), sizeof(core_state::drc_exit));
 				clear(offsetof(core_state, verify_count), sizeof(core_state::verify_count));
+				clear(offsetof(core_state, mode_dirty), sizeof(core_state::mode_dirty));
 			};
 	clear_scratch(v.after_block);
 	clear_scratch(v.after_interpreter);

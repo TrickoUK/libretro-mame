@@ -4,6 +4,7 @@
 uint32_t i386_device::i386_load_protected_mode_segment(I386_SREG *seg, uint64_t *desc )
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
+	m_core->mode_dirty = 1;
 	uint32_t v1,v2;
 	uint32_t base, limit;
 	int entry;
@@ -103,6 +104,7 @@ void i386_device::i386_set_descriptor_accessed(uint16_t selector)
 void i386_device::i386_load_segment_descriptor(int segment )
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
+	m_core->mode_dirty = 1;
 	if (PROTECTED_MODE)
 	{
 		uint16_t old_flags = m_core->sreg[segment].flags;

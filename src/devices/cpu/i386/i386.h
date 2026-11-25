@@ -362,6 +362,7 @@ protected:
 		uint32_t ferr_needed;   // an x87 operation left an unmasked exception to report
 		uint32_t drc_exit;      // generated code must return to the execution loop
 		uint32_t verify_count;  // instructions executed by the block being checked
+		uint32_t mode_dirty;    // set by anything that changes an input of the mode key
 		void *page_table;       // host page pointers for the data fast path (heap allocated)
 		void *code_page_table;  // per-page code generation marks (heap allocated)
 	};
@@ -1616,6 +1617,7 @@ protected:
 	uint32_t drc_mode() const;
 	bool drc_eligible(uint32_t mode) const;
 	bool drc_runnable();
+	uint32_t drc_exit_request();
 	template <typename Body> void drc_guarded_call(Body &&body);
 	void drc_rethrow_exception();
 	void drc_compile_block(uint32_t mode, offs_t pc);
