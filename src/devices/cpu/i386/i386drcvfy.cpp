@@ -89,6 +89,8 @@
         jcycles  charges each way of a compiled conditional jump the cycles of
                  the other, and in checked blocks one more for a taken jump,
                  as the two are the same on some CPUs
+        fuse     takes the condition of a fused conditional jump from the host
+                 flags as they are after the test for cycles
         nodrop   leaves the write table entry of a page that starts being
                  watched for writes to compiled code.  This also applies
                  without the verifier.
@@ -289,7 +291,8 @@ void i386_device::drc_verify_start()
 				{ "carry", DRC_BREAK_CARRY },
 				{ "stale", DRC_BREAK_STALE },
 				{ "cond", DRC_BREAK_COND },
-				{ "jcycles", DRC_BREAK_JCYCLES } };
+				{ "jcycles", DRC_BREAK_JCYCLES },
+				{ "fuse", DRC_BREAK_FUSE } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)

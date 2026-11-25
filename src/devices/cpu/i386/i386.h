@@ -1671,7 +1671,7 @@ protected:
 	void generate_call(drcuml_block &block, void (*function)(void *));
 	void generate_block_end(drcuml_block &block);
 	bool drc_compiles_natively(opcode_desc const &desc) const;
-	void generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set);
+	void generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set, bool &fused);
 	void generate_step(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow);
 	void generate_native_start(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set);
 	struct drc_alu_form;
@@ -1679,7 +1679,8 @@ protected:
 	void generate_effective_address(drcuml_block &block, opcode_desc const &desc);
 	void generate_lea(drcuml_block &block, opcode_desc const &desc);
 	void generate_alu(drcuml_block &block, opcode_desc const &desc);
-	void generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label done, uml::code_label &label);
+	bool drc_fuses(opcode_desc const &setter, opcode_desc const &jcc) const;
+	void generate_jcc(drcuml_block &block, opcode_desc const &desc, bool fused, uml::code_label done, uml::code_label &label);
 	void generate_register_mov(drcuml_block &block, opcode_desc const &desc);
 	void generate_slow_exit(drcuml_block &block);
 	static void cfunc_step(void *param);
@@ -1717,7 +1718,8 @@ protected:
 		DRC_BREAK_CARRY,
 		DRC_BREAK_STALE,
 		DRC_BREAK_COND,
-		DRC_BREAK_JCYCLES
+		DRC_BREAK_JCYCLES,
+		DRC_BREAK_FUSE
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;

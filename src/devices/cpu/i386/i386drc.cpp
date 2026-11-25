@@ -169,6 +169,10 @@ constexpr int EXECUTE_BLOCK_DONE = 4;
 constexpr int EXECUTE_EXCEPTION = 5;
 
 
+// the host condition after a compare for each pair of x86 conditions other than parity
+constexpr uml::condition_t FUSED_CONDITIONS[8] = { COND_V, COND_C, COND_Z, COND_BE, COND_S, COND_ALWAYS, COND_L, COND_LE };
+
+
 inline void alloc_handle(drcuml_state &drcuml, uml::code_handle *&handleptr, const char *name)
 {
 	if (!handleptr)
@@ -978,12 +982,13 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 
 			UML_HASH(block, mode, pc);                                      // hash    mode,pc
 			bool decode_state_set = false;
+			bool fused = false;
 			uml::code_label label = slow + 1;
 			for (opcode_desc const *desc = first; desc; desc = desc->next())
 			{
 				bool const last = desc->end_sequence() || !desc->next();
 				assert(last || (desc->next()->pc == (desc->pc + desc->length)));
-				generate_instruction(block, *desc, last, done, slow, label, decode_state_set);
+				generate_instruction(block, *desc, last, done, slow, label, decode_state_set, fused);
 				if (last)
 					break;
 			}
@@ -1232,7 +1237,7 @@ void i386_device::generate_block_end(drcuml_block &block)
 
 
 // Executes one instruction, which is started only while cycles are left.
-void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set)
+void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set, bool &fused)
 {
 	UML_CMP(block, mem(&m_core->cycles), 0);                                // cmp     [cycles],0
 	UML_EXHc(block, COND_LE, *m_out_of_cycles, desc.pc);                    // exh     out_of_cycles,pc,le
@@ -1253,7 +1258,8 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 		}
 		if (desc.kind == opcode_desc::family::JCC)
 		{
-			generate_jcc(block, desc, done, label);
+			generate_jcc(block, desc, fused, done, label);
+			fused = false;
 			return;
 		}
 		if (desc.kind != opcode_desc::family::MOV)
@@ -1266,6 +1272,7 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 			if (lose_flags)
 				generate_call(block, &i386_device::cfunc_verify_break_save_flags);     // callc   cfunc_verify_break_save_flags
 			generate_alu(block, desc);
+			fused = !last && drc_fuses(desc, *desc.next());
 			if (lose_flags)
 				generate_call(block, &i386_device::cfunc_verify_break_restore_flags);  // callc   cfunc_verify_break_restore_flags
 			return;
@@ -1625,6 +1632,32 @@ void i386_device::generate_alu(drcuml_block &block, opcode_desc const &desc)
 		else
 			UML_MOV(block, mem(&m_core->reg.d[form.dest]), I2);                        // mov     [reg],i2
 	}
+	// the condition of a following jcc, kept in i5 across the test for cycles
+	if (desc.next() && !desc.end_sequence() && drc_fuses(desc, *desc.next()))
+	{
+		if (form.op == drc_alu_form::SUB)
+		{
+			if (form.bytes)
+			{
+				UML_SHL(block, I3, I0, 24);                                 // shl     i3,i0,24
+				UML_SHL(block, I4, I1, 24);                                 // shl     i4,i1,24
+				UML_CMP(block, I3, I4);                                     // cmp     i3,i4
+			}
+			else
+				UML_CMP(block, I0, I1);                                     // cmp     i0,i1
+		}
+		else
+		{
+			if (form.bytes)
+			{
+				UML_SHL(block, I3, I2, 24);                                 // shl     i3,i2,24
+				UML_CMP(block, I3, 0);                                      // cmp     i3,0
+			}
+			else
+				UML_CMP(block, I2, 0);                                      // cmp     i2,0
+		}
+		UML_SETc(block, FUSED_CONDITIONS[BIT(desc.next()->opcode, 1, 3)], I5);   // set     i5,cc
+	}
 	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[form.cycles]);  // sub     [cycles],[cycles],n
 
 	if (form.write && drc_verify_breaks(DRC_BREAK_ALU))
@@ -1640,10 +1673,23 @@ void i386_device::generate_alu(drcuml_block &block, opcode_desc const &desc)
 }
 
 
+// True if a conditional jump takes its condition from the host flags of the instruction before it: a compiled CMP or
+// TEST, and any condition but parity.
+bool i386_device::drc_fuses(opcode_desc const &setter, opcode_desc const &jcc) const
+{
+	drc_alu_form form;
+	return (jcc.kind == opcode_desc::family::JCC) && (BIT(jcc.opcode, 1, 3) != 5)
+			&& ((setter.kind == opcode_desc::family::ALU) || (setter.kind == opcode_desc::family::TEST))
+			&& drc_compiles_natively(setter) && drc_compiles_natively(jcc)
+			&& drc_decode_alu(setter, form) && !form.write
+			&& ((form.op == drc_alu_form::SUB) || (form.op == drc_alu_form::AND));
+}
+
+
 // Compiled conditional jumps.  The condition is that of the interpreter's handler, worked out from the flag bytes: the
 // low bit of the opcode inverts the condition given by the other three bits of the low half.  A taken jump leaves the
 // block through the label at its end.  Nothing here can fault, call out or change the mode or the interrupt state.
-void i386_device::generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label done, uml::code_label &label)
+void i386_device::generate_jcc(drcuml_block &block, opcode_desc const &desc, bool fused, uml::code_label done, uml::code_label &label)
 {
 	bool const short_form = desc.opcode < 0x80;
 	unsigned const condition = BIT(desc.opcode, 0, 4);
@@ -1655,7 +1701,17 @@ void i386_device::generate_jcc(drcuml_block &block, opcode_desc const &desc, uml
 			};
 
 	// i0 is non-zero if the condition of the even opcode holds
-	switch (condition >> 1)
+	if (fused)
+	{
+		// a deliberate error: the host flags are those of the test for cycles
+		if (drc_verify_breaks(DRC_BREAK_FUSE))
+		{
+			UML_CMP(block, mem(&m_core->cycles), 0);                        // cmp     [cycles],0
+			UML_SETc(block, FUSED_CONDITIONS[condition >> 1], I5);          // set     i5,cc
+		}
+		UML_MOV(block, I0, I5);                                             // mov     i0,i5
+	}
+	else switch (condition >> 1)
 	{
 	case 0: // o
 		load_flag(I0, m_core->OF);
