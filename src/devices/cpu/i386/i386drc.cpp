@@ -1028,9 +1028,9 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 	form.second = -1;
 	form.cycles = CYCLES_ALU_REG_REG;
 
-	auto const rm = [&form, &fields] () { return int(form.bytes ? fields.rm.b : fields.rm.d); };
-	auto const reg = [&form, &fields] () { return int(form.bytes ? fields.reg.b : fields.reg.d); };
-	auto const accumulator = [&form] () { return int(form.bytes ? AL : EAX); };
+	auto const rm = [&form, &fields] () { return form.bytes ? int(fields.rm.b) : int(fields.rm.d); };
+	auto const reg = [&form, &fields] () { return form.bytes ? int(fields.reg.b) : int(fields.reg.d); };
+	auto const accumulator = [&form] () { return form.bytes ? int(AL) : int(EAX); };
 
 	if ((op < 0x40) && ((op & 7) < 6))
 	{
