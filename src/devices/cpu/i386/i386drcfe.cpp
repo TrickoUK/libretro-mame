@@ -372,6 +372,8 @@ bool i386_device::frontend::describe(opcode_desc &desc, opcode_desc const *prev)
 	if (unreadable)
 	{
 		// the interpreter fetches the instruction when it is executed, and faults then if the address calls for it
+		// NOTE: the length of an unreadable instruction is unknown; the value is only the non-zero length that the
+		// generic front end requires of a description, and must not be used to find the following instruction
 		desc.length = length + 1;
 		desc.prefixes = 0;
 		desc.set_compiler_page_fault();
@@ -617,8 +619,14 @@ void i386_device::frontend::classify(opcode_desc &desc)
 		if (mod != 3)
 		{
 			use_address();
-			if ((op == 0xd9) && (reg == 5))             // fldcw
+			// fldenv, fldcw and frstor load the control word, fnstenv masks all exceptions after storing the
+			// environment, and fnsave initialises the FPU
+			if (((op == 0xd9) && (reg >= 4) && (reg <= 6)) || ((op == 0xdd) && ((reg == 4) || (reg == 6))))
 				desc.set_flag_modified(opcode_desc::REG_BIT_X87_CW);
+		}
+		else if ((op == 0xdb) && (desc.modrm == 0xe3))  // fninit
+		{
+			desc.set_flag_modified(opcode_desc::REG_BIT_X87_CW);
 		}
 		else if ((op == 0xdf) && (desc.modrm == 0xe0))  // fnstsw ax
 		{
@@ -905,8 +913,11 @@ void i386_device::frontend::classify(opcode_desc &desc)
 		desc.flags_kind = lazy_flags::NONE;
 	}
 
+	// A STEP instruction is not analysed (it may be a divide, bound, into, a string operation or any other
+	// instruction): it may read and change any register and flag, and it may fault.
 	if (desc.kind == family::STEP)
 	{
+		desc.set_can_cause_exception();
 		desc.regin.set();
 		desc.regout.set();
 	}

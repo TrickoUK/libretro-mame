@@ -20,6 +20,13 @@
     BIOS windows (0xe0000-0xfffff and the last 1 MiB) count as repeatable.
     The contents of a cache modelled by a subclass are not covered.
 
+    Two paths of normal execution are not exercised under the verifier:
+    - Blocks may be shaped differently.  Code in a BIOS window that has no
+      read pointer is described as single-instruction blocks without the
+      verifier, and as longer blocks with it.
+    - Normally a block goes straight on to the next one with HASHJMP, while
+      with the verifier generated code returns after every block.
+
     The replay also checks that the block did not execute an instruction
     which the interpreter loop would not have started, or which has to be
     left to the interpreter, or after the code cache had to be flushed.

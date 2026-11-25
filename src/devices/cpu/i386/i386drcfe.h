@@ -46,7 +46,7 @@ public:
 	// instruction families
 	enum class family : u8
 	{
-		STEP,       // executed only by the interpreter's per-instruction function
+		STEP,       // executed only by the interpreter's per-instruction function; may change anything and may fault
 		MOV,
 		ALU,        // add, adc, and, cmp, or, sbb, sub, xor, neg
 		TEST,

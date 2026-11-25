@@ -61,8 +61,13 @@ constexpr uint32_t COMPILE_MAX_SEQUENCE = 64;
 // longest range of guest bytes a block may cover, used when invalidating blocks that begin before a written range
 constexpr uint32_t COMPILE_MAX_SEQUENCE_BYTES = COMPILE_WINDOW_BYTES + 15;
 
+// UML instructions allowed for each instruction of a block (up to 16 are generated, with the verifier and a
+// deliberate error) and for the rest of the block
+constexpr uint32_t COMPILE_UML_PER_INSTRUCTION = 24;
+constexpr uint32_t COMPILE_UML_PER_BLOCK = 32;
+
 // room for the UML instructions of the longest block
-constexpr uint32_t COMPILE_MAX_UML = 16 * COMPILE_MAX_SEQUENCE + 64;
+constexpr uint32_t COMPILE_MAX_UML = COMPILE_UML_PER_INSTRUCTION * COMPILE_MAX_SEQUENCE + COMPILE_UML_PER_BLOCK;
 
 // bits of the mode key
 constexpr uint32_t MODE_CODE32 = 1 << 0;
@@ -416,6 +421,8 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 	uml::code_label const done = 1;
 	uml::code_label const slow = 2;
 
+	// A full code cache aborts the compilation, which is repeated after a flush.  A block that needs more UML
+	// instructions than it has room for raises a fatal error instead, which is not caught here.
 	bool succeeded = false;
 	while (!succeeded)
 	{
