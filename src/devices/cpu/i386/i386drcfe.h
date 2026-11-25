@@ -140,6 +140,8 @@ private:
 	i386_device &m_cpu;
 	i386_disassembler m_disassembler;
 	bool m_check = false;
+	u64 m_blocks = 0;
+	u64 m_described = 0;
 	u64 m_checked = 0;
 	u64 m_mismatched = 0;
 };

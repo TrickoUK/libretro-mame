@@ -212,6 +212,7 @@ i386_device::frontend::frontend(i386_device &cpu, u32 window_start, u32 window_e
 
 i386_device::opcode_desc const *i386_device::frontend::describe_code(offs_t startpc)
 {
+	m_blocks++;
 	return do_describe_code(
 			[this] (opcode_desc &desc, opcode_desc const *prev) { return describe(desc, prev); },
 			startpc);
@@ -220,6 +221,7 @@ i386_device::opcode_desc const *i386_device::frontend::describe_code(offs_t star
 
 void i386_device::frontend::report() const
 {
+	osd_printf_verbose("%s: recompiler front end: %u instructions described for %u blocks\n", m_cpu.tag(), m_described, m_blocks);
 	if (m_check)
 		osd_printf_info("%s: recompiler front end: %u instruction lengths compared with the disassembler, %u differ\n", m_cpu.tag(), m_checked, m_mismatched);
 }
@@ -381,6 +383,7 @@ bool i386_device::frontend::describe(opcode_desc &desc, opcode_desc const *prev)
 	}
 
 	desc.length = length;
+	m_described++;
 	if (m_check)
 		check_length(desc, bytes);
 

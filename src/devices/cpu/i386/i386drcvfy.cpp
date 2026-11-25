@@ -125,8 +125,7 @@ struct i386_device::drc_verifier
 	std::vector<access> writes;
 	std::vector<access> block_writes;
 
-	// per page: bit 0 set if reads come from memory, bit 1 set if writes go to memory, bit 2 set if the page has
-	// a pointer for reads
+	// per page: bit 0 set if reads come from memory, bit 1 set if writes go to memory
 	std::vector<uint8_t> pages;
 
 	memory_passthrough_handler program_tap;
@@ -311,13 +310,14 @@ void i386_device::drc_verify_instruction()
 }
 
 
-// reads code from a page that is memory while the taps hide its pointer
+// Reads code from a page whose reads repeat: memory while the taps hide its pointer, and the system BIOS windows, so
+// that the verifier also sees blocks of several instructions there.
 bool i386_device::drc_verify_read_code(offs_t address, uint8_t &value)
 {
 	drc_verifier &v = *m_verifier;
 	if (v.remap)
 		drc_verify_map();
-	if (!(v.page_flags(address) & 4))
+	if (!(v.page_flags(address) & 1))
 		return false;
 	value = m_program->read_byte(address);
 	return true;
@@ -341,7 +341,7 @@ void i386_device::drc_verify_map()
 		auto const *const write = reinterpret_cast<uint8_t const *>(m_program->get_write_ptr(base));
 		uint8_t flags = 0;
 		if (read && (m_program->get_read_ptr(base + 0xffc) == (read + 0xffc)))
-			flags |= 1 | 4;
+			flags |= 1;
 		if (write && (m_program->get_write_ptr(base + 0xffc) == (write + 0xffc)))
 			flags |= 2;
 		// the system BIOS is often a flash device behind a read handler, which reads without side effects
@@ -362,7 +362,7 @@ void i386_device::drc_verify_map()
 			{
 				if (!v.recording)
 					return;
-				if ((v.page_flags(offset) & 3) != 3)
+				if (v.page_flags(offset) != 3)
 				{
 					v.unsafe = true;
 					return;
