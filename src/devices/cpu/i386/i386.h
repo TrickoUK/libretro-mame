@@ -98,6 +98,10 @@ protected:
 	using drc_region_adder = std::function<void (char const *name, void *base, size_t length)>;
 	virtual void drc_verify_add_state(drc_region_adder const &add) {}
 
+	// whether the recompiler may build the bytes of an instruction into its code, which requires that an opcode fetch
+	// reads what is in memory
+	virtual bool drc_can_bake_code() const { return true; }
+
 	// routine to access memory
 	virtual u8 mem_pr8(offs_t address) { return macache32.read_byte(address); }
 	virtual u16 mem_pr16(offs_t address) { return macache32.read_word(address); }
@@ -1609,6 +1613,8 @@ protected:
 	bool m_drc_requested = false;
 	bool m_drc_enabled = false;
 	bool m_drc_cache_dirty = true;
+	bool m_drc_code_modified = false;   // compiled instruction bytes were written since generated code was entered
+	bool m_drc_installing_taps = false; // the recompiler or its verifier is changing its own taps
 	bool m_drc_verify_break = false;
 	std::exception_ptr m_drc_exception;
 	std::unique_ptr<drcuml_state> m_drcuml;
@@ -1623,7 +1629,17 @@ protected:
 	uint32_t drc_mode() const;
 	bool drc_eligible(uint32_t mode) const;
 	bool drc_runnable();
-	bool drc_read_code(offs_t address, uint8_t &value);
+	bool drc_read_code(offs_t address, uint8_t &value, bool &memory);
+
+	// tracking of the memory holding instructions whose bytes are built into compiled code
+	struct drc_code_watch;
+	std::shared_ptr<drc_code_watch> m_drc_code;
+	util::notifier_subscription m_drc_map_notifier;
+	void drc_code_start();
+	bool drc_code_clear();
+	void drc_code_protect(opcode_desc const &desc);
+	void drc_code_written(uint32_t address, uint32_t lanes);
+	void drc_code_report(bool periodic);
 	uint32_t drc_exit_request();
 	template <typename Body> void drc_guarded_call(Body &&body);
 	void drc_rethrow_exception();
@@ -1635,23 +1651,47 @@ protected:
 	void static_generate_fault_handler(drcuml_block &block);
 	void generate_call(drcuml_block &block, void (*function)(void *));
 	void generate_block_end(drcuml_block &block);
-	void generate_step_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow);
+	bool drc_compiles_natively(opcode_desc const &desc) const;
+	void generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, bool &decode_state_set);
+	void generate_step(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow);
+	void generate_mov(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set);
 	void generate_slow_exit(drcuml_block &block);
 	static void cfunc_step(void *param);
 	static void cfunc_deliver_fault(void *param);
 	static void cfunc_verify_break(void *param);
 	static void cfunc_verify_instruction(void *param);
+	static void cfunc_verify_break_mov(void *param);
 
 	// lockstep verifier
+	// deliberate errors made to show that checks detect them
+	enum : int
+	{
+		DRC_BREAK_NONE,
+		DRC_BREAK_CF,
+		DRC_BREAK_CYCLES,
+		DRC_BREAK_EIP,
+		DRC_BREAK_WRITE,
+		DRC_BREAK_OVERRUN,
+		DRC_BREAK_ADDRESS,
+		DRC_BREAK_MODE,
+		DRC_BREAK_THROW,
+		DRC_BREAK_MOV,
+		DRC_BREAK_SMC,
+		DRC_BREAK_NOEXIT
+	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;
 	void drc_verify_start();
 	void drc_verify_map();
+	void drc_verify_prepare();
 	int drc_verify_execute();
 	void drc_verify_break();
 	void drc_verify_instruction();
+	void drc_verify_break_mov();
+	bool drc_verify_breaks(int kind) const;
+	void drc_verify_code_written();
 	bool drc_verify_ignores_address() const;
-	bool drc_verify_read_code(offs_t address, uint8_t &value);
+	bool drc_verify_read_code(offs_t address, uint8_t &value, bool &memory);
 	void drc_verify_report();
 
 };

@@ -30,6 +30,8 @@ protected:
 	virtual void enter_smm() override;
 	virtual void leave_smm() override;
 
+	// opcode fetches come from the modelled cache, which can differ from memory
+	virtual bool drc_can_bake_code() const override { return false; }
 	virtual u8 mem_pr8(offs_t address) override { return opcode_read_cache<u8, NATIVE_ENDIAN_VALUE_LE_BE(0, 3)>(address);   }
 	virtual u16 mem_pr16(offs_t address) override { return opcode_read_cache<u16, NATIVE_ENDIAN_VALUE_LE_BE(0, 2)>(address); }
 	virtual u32 mem_pr32(offs_t address) override { return opcode_read_cache<u32, 0>(address); }

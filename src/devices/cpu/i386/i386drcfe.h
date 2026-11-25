@@ -98,6 +98,7 @@ public:
 	u8 width;               // operand width in bits of a compiled instruction
 	u8 segment;             // segment of a ModRM or offset memory operand, any override applied, or NO_SEGMENT
 	u8 override_segment;    // segment named by an override prefix, NO_SEGMENT without one
+	bool in_memory;         // every byte was read from memory, so a change to it is a write or a map change
 	family kind;
 	lazy_flags flags_kind;
 	u32 displacement;
@@ -118,6 +119,7 @@ public:
 		width = 32;
 		segment = NO_SEGMENT;
 		override_segment = NO_SEGMENT;
+		in_memory = false;
 		kind = family::STEP;
 		flags_kind = lazy_flags::NONE;
 		displacement = 0;

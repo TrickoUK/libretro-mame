@@ -234,6 +234,8 @@ bool i386_device::frontend::describe(opcode_desc &desc, opcode_desc const *prev)
 	bool unreadable = false;
 	bool overlong = false;
 
+	desc.in_memory = true;
+
 	// reads the next byte of the instruction, giving zero once a byte cannot be read
 	auto const next =
 			[this, &desc, &bytes, &length, &unreadable, &overlong] () -> u8
@@ -245,11 +247,13 @@ bool i386_device::frontend::describe(opcode_desc &desc, opcode_desc const *prev)
 					overlong = true;
 					return 0;
 				}
-				if (!m_cpu.drc_read_code(desc.pc + length, bytes[length]))
+				bool memory = false;
+				if (!m_cpu.drc_read_code(desc.pc + length, bytes[length], memory))
 				{
 					unreadable = true;
 					return 0;
 				}
+				desc.in_memory = desc.in_memory && memory;
 				return bytes[length++];
 			};
 	auto const next_value =
@@ -388,6 +392,7 @@ bool i386_device::frontend::describe(opcode_desc &desc, opcode_desc const *prev)
 		// generic front end requires of a description, and must not be used to find the following instruction
 		desc.length = length + 1;
 		desc.prefixes = 0;
+		desc.in_memory = false;
 		desc.set_compiler_page_fault();
 		desc.set_can_cause_exception();
 		desc.set_end_sequence();

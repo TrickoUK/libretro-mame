@@ -2196,7 +2196,10 @@ void i386_device::i386_common_init()
 	m_notifier = m_program->add_change_notifier([this] (read_or_write mode) { dri_changed(); });
 
 	if (m_drc_enabled)
+	{
+		drc_code_start();
 		drc_verify_start();
+	}
 }
 
 void i386_device::device_stop()
@@ -2205,6 +2208,8 @@ void i386_device::device_stop()
 		drc_verify_report();
 	if (m_drcfe)
 		m_drcfe->report();
+	if (m_drc_code)
+		drc_code_report(false);
 }
 
 void i386_device::device_start()

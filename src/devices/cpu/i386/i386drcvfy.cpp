@@ -13,6 +13,13 @@
     instructions.  CPU state and memory writes are then compared, and
     execution continues from the interpreter's result.
 
+    Compiled instructions are compared in the same way: the interpreter
+    fetches them from memory, so a block that goes on using bytes which have
+    been rewritten differs.  A block must also end with the instruction that
+    writes to the bytes of a compiled instruction.  The opcode byte that the
+    interpreter keeps while decoding (m_opcode) is not compared, as compiled
+    instructions do not set it and it is only used within the instruction.
+
     Only accesses to plain memory can be repeated.  A block that accesses
     anything else, or any I/O port, is left as the recompiled code executed it
     and is counted as not checked.  Memory is recognised in the first 256 MiB
@@ -50,6 +57,11 @@
                  of a block
         mode     changes the cached mode key in checked blocks
         throw    throws a C++ exception in the first block run
+        mov      inverts a bit of the register written by each compiled MOV of
+                 checked blocks
+        smc      ignores writes to the bytes of compiled instructions, which
+                 leaves stale code running
+        noexit   goes on with a block after it wrote to compiled code
 
 ***************************************************************************/
 
@@ -70,20 +82,6 @@ constexpr uint32_t VERIFY_HIGH_PAGES = 0x100;       // 4 KiB pages at the top of
 constexpr uint32_t VERIFY_HIGH_BASE = 0xfff00000;
 constexpr unsigned VERIFY_REPORT_LIMIT = 20;
 constexpr uint64_t VERIFY_PROGRESS_INTERVAL = 1'000'000;
-
-// deliberate errors
-enum : int
-{
-	BREAK_NONE,
-	BREAK_CF,
-	BREAK_CYCLES,
-	BREAK_EIP,
-	BREAK_WRITE,
-	BREAK_OVERRUN,
-	BREAK_ADDRESS,
-	BREAK_MODE,
-	BREAK_THROW
-};
 
 } // anonymous namespace
 
@@ -112,7 +110,7 @@ struct i386_device::drc_verifier
 	uint64_t checked = 0;
 	uint64_t unrepeatable = 0;
 	uint64_t mismatched = 0;
-	int sabotage = BREAK_NONE;
+	int sabotage = DRC_BREAK_NONE;
 
 	// violations seen while generated code was running
 	uint32_t misplaced = 0;
@@ -123,7 +121,8 @@ struct i386_device::drc_verifier
 	bool recording = false;
 	bool unsafe = false;
 	bool remap = true;
-	bool installing = false;
+	// instructions executed when the block wrote to compiled code, zero if it did not
+	uint32_t code_written = 0;
 
 	std::vector<region> regions;
 	std::vector<uint8_t> before;
@@ -132,7 +131,8 @@ struct i386_device::drc_verifier
 	std::vector<access> writes;
 	std::vector<access> block_writes;
 
-	// per page: bit 0 set if reads come from memory, bit 1 set if writes go to memory
+	// per page: bit 0 set if reads can be repeated, bit 1 set if writes go to memory, bit 2 set if reads can be repeated
+	// but do not come from memory
 	std::vector<uint8_t> pages;
 
 	memory_passthrough_handler program_tap;
@@ -207,15 +207,14 @@ void i386_device::drc_verify_start()
 	v.add("TSC", &m_tsc, sizeof(m_tsc));
 	v.add("performance counters", m_perfctr, sizeof(m_perfctr));
 	v.add("SMBASE", &m_smbase, sizeof(m_smbase));
-	v.add("opcode", &m_opcode, sizeof(m_opcode));
 	v.add("softfloat rounding", &softfloat_roundingMode, sizeof(softfloat_roundingMode));
 	v.add("softfloat exceptions", &softfloat_exceptionFlags, sizeof(softfloat_exceptionFlags));
 	v.add("softfloat precision", &extF80_roundingPrecision, sizeof(extF80_roundingPrecision));
 	drc_verify_add_state([&v] (char const *name, void *base, size_t length) { v.add(name, base, length); });
 
 	v.pages.resize(VERIFY_LOW_PAGES + VERIFY_HIGH_PAGES);
-	v.program_notifier = m_program->add_change_notifier([&v] (read_or_write) { if (!v.installing) v.remap = true; });
-	v.io_notifier = m_io->add_change_notifier([&v] (read_or_write) { if (!v.installing) v.remap = true; });
+	v.program_notifier = m_program->add_change_notifier([this, &v] (read_or_write) { if (!m_drc_installing_taps) v.remap = true; });
+	v.io_notifier = m_io->add_change_notifier([this, &v] (read_or_write) { if (!m_drc_installing_taps) v.remap = true; });
 
 	osd_printf_info("%s: recompiler verifier checking one block in %u\n", tag(), v.interval);
 
@@ -223,20 +222,23 @@ void i386_device::drc_verify_start()
 	if (breakage)
 	{
 		static constexpr std::pair<std::string_view, int> NAMES[] = {
-				{ "cf", BREAK_CF },
-				{ "cycles", BREAK_CYCLES },
-				{ "eip", BREAK_EIP },
-				{ "write", BREAK_WRITE },
-				{ "overrun", BREAK_OVERRUN },
-				{ "address", BREAK_ADDRESS },
-				{ "mode", BREAK_MODE },
-				{ "throw", BREAK_THROW } };
+				{ "cf", DRC_BREAK_CF },
+				{ "cycles", DRC_BREAK_CYCLES },
+				{ "eip", DRC_BREAK_EIP },
+				{ "write", DRC_BREAK_WRITE },
+				{ "overrun", DRC_BREAK_OVERRUN },
+				{ "address", DRC_BREAK_ADDRESS },
+				{ "mode", DRC_BREAK_MODE },
+				{ "throw", DRC_BREAK_THROW },
+				{ "mov", DRC_BREAK_MOV },
+				{ "smc", DRC_BREAK_SMC },
+				{ "noexit", DRC_BREAK_NOEXIT } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
 				v.sabotage = kind;
 		}
-		if (v.sabotage == BREAK_NONE)
+		if (v.sabotage == DRC_BREAK_NONE)
 			fatalerror("%s: unknown MAME_I386_DRC_VERIFY_BREAK value %s\n", tag(), breakage);
 		m_drc_verify_break = true;
 		osd_printf_warning("%s: recompiled code is deliberately wrong (%s)\n", tag(), breakage);
@@ -250,7 +252,7 @@ void i386_device::drc_verify_break()
 	drc_verifier const &v = *m_verifier;
 	core_state &core = *m_core;
 
-	if (v.sabotage == BREAK_THROW)
+	if (v.sabotage == DRC_BREAK_THROW)
 		throw emu_fatalerror("%s: DRC verify: test exception thrown below generated code\n", tag());
 
 	// an error in a block that is not compared would be left in the guest
@@ -259,26 +261,26 @@ void i386_device::drc_verify_break()
 
 	switch (v.sabotage)
 	{
-	case BREAK_CF:
+	case DRC_BREAK_CF:
 		core.CF ^= 1;
 		break;
 
-	case BREAK_CYCLES:
+	case DRC_BREAK_CYCLES:
 		core.cycles -= 1;
 		break;
 
-	case BREAK_EIP:
+	case DRC_BREAK_EIP:
 		core.eip += 1;
 		break;
 
-	case BREAK_WRITE:
+	case DRC_BREAK_WRITE:
 		{
 			uint32_t const address = (core.reg.d[ESP] - 4) & ~uint32_t(3);
 			m_program->write_dword(address, m_program->read_dword(address));
 		}
 		break;
 
-	case BREAK_OVERRUN:
+	case DRC_BREAK_OVERRUN:
 		if (core.verify_count == 1)
 		{
 			step();
@@ -286,16 +288,40 @@ void i386_device::drc_verify_break()
 		}
 		break;
 
-	case BREAK_MODE:
+	case DRC_BREAK_MODE:
 		core.mode ^= 0x100;
 		break;
 	}
 }
 
 
+// inverts a bit of the register a compiled instruction wrote, at the byte offset left by generated code
+void i386_device::drc_verify_break_mov()
+{
+	drc_verifier const &v = *m_verifier;
+	if (v.recording && !v.unsafe)
+		m_core->reg.b[m_core->ea_tmp] ^= 1;
+}
+
+
+bool i386_device::drc_verify_breaks(int kind) const
+{
+	return m_verifier && (m_verifier->sabotage == kind);
+}
+
+
 bool i386_device::drc_verify_ignores_address() const
 {
-	return m_verifier && (m_verifier->sabotage == BREAK_ADDRESS);
+	return drc_verify_breaks(DRC_BREAK_ADDRESS);
+}
+
+
+// notes the instruction of a checked block that wrote to compiled code
+void i386_device::drc_verify_code_written()
+{
+	drc_verifier &v = *m_verifier;
+	if (v.recording && !v.code_written)
+		v.code_written = m_core->verify_count;
 }
 
 
@@ -319,13 +345,15 @@ void i386_device::drc_verify_instruction()
 
 // Reads code from a page whose reads repeat: memory while the taps hide its pointer, and the system BIOS windows, so
 // that the verifier also sees blocks of several instructions there.
-bool i386_device::drc_verify_read_code(offs_t address, uint8_t &value)
+bool i386_device::drc_verify_read_code(offs_t address, uint8_t &value, bool &memory)
 {
 	drc_verifier &v = *m_verifier;
 	if (v.remap)
 		drc_verify_map();
-	if (!(v.page_flags(address) & 1))
+	uint8_t const flags = v.page_flags(address);
+	if (!(flags & 1))
 		return false;
+	memory = !(flags & 4);
 	value = m_program->read_byte(address);
 	return true;
 }
@@ -335,9 +363,12 @@ bool i386_device::drc_verify_read_code(offs_t address, uint8_t &value)
 void i386_device::drc_verify_map()
 {
 	drc_verifier &v = *m_verifier;
-	v.installing = true;
 
-	// pointers cannot be obtained through a tap
+	// pointers cannot be obtained through a tap, including those protecting compiled code, which is then discarded
+	if (drc_code_clear())
+		m_drc_cache_dirty = true;
+	m_drc_installing_taps = true;
+
 	v.program_tap.remove();
 	v.io_tap.remove();
 
@@ -352,8 +383,8 @@ void i386_device::drc_verify_map()
 		if (write && (m_program->get_write_ptr(base + 0xffc) == (write + 0xffc)))
 			flags |= 2;
 		// the system BIOS is often a flash device behind a read handler, which reads without side effects
-		if (((base >= 0x000e0000) && (base < 0x00100000)) || (base >= VERIFY_HIGH_BASE))
-			flags |= 1;
+		if (!(flags & 1) && (((base >= 0x000e0000) && (base < 0x00100000)) || (base >= VERIFY_HIGH_BASE)))
+			flags |= 1 | 4;
 		v.pages[page] = flags;
 	}
 
@@ -369,7 +400,7 @@ void i386_device::drc_verify_map()
 			{
 				if (!v.recording)
 					return;
-				if (v.page_flags(offset) != 3)
+				if ((v.page_flags(offset) & 3) != 3)
 				{
 					v.unsafe = true;
 					return;
@@ -387,8 +418,16 @@ void i386_device::drc_verify_map()
 			[&v] (offs_t offset, u32 &data, u32 mem_mask) { if (v.recording) v.unsafe = true; },
 			&v.io_tap);
 
-	v.installing = false;
+	m_drc_installing_taps = false;
 	v.remap = false;
+}
+
+
+// classifies the program space again if it has changed, which discards compiled code
+void i386_device::drc_verify_prepare()
+{
+	if (m_verifier->remap)
+		drc_verify_map();
 }
 
 
@@ -399,11 +438,9 @@ int i386_device::drc_verify_execute()
 	if (++v.blocks % v.interval)
 		return m_drcuml->execute(*m_entry);
 
-	if (v.remap)
-		drc_verify_map();
-
 	uint32_t const pc = m_core->pc;
 	m_core->verify_count = 0;
+	v.code_written = 0;
 	v.capture(v.before);
 	v.writes.clear();
 	v.unsafe = false;
@@ -418,6 +455,12 @@ int i386_device::drc_verify_execute()
 	// the cached mode key, as the block left it
 	if (!m_core->mode_dirty && (m_core->mode != drc_mode()))
 		v.stale_modes++;
+	if (v.code_written && (v.code_written != count))
+	{
+		if (v.mismatched < VERIFY_REPORT_LIMIT)
+			osd_printf_error("%s: DRC verify at %08X: block continued after writing to compiled code\n", tag(), pc);
+		v.mismatched++;
+	}
 	if (v.misplaced || v.stale_modes)
 	{
 		if (v.mismatched < VERIFY_REPORT_LIMIT)
