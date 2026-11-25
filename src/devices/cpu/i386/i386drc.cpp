@@ -54,8 +54,8 @@
       compiled instructions has no entry for writes: it is removed when the
       page starts being watched.
     - Nothing is entered while the debugger is enabled, or on a host that is
-      not little-endian.  The lockstep verifier allows entries for reads only,
-      as it has to see every write.
+      not little-endian.  Under the lockstep verifier, a store of a checked
+      block that goes straight to memory is also examined by it.
 
     A compiled instruction has its bytes built into the code, so it must be
     compiled again once they change.  x86 code is not flushed explicitly: any
@@ -111,9 +111,9 @@ constexpr uint32_t COMPILE_MAX_SEQUENCE = 64;
 // longest range of guest bytes a block may cover, used when invalidating blocks that begin before a written range
 constexpr uint32_t COMPILE_MAX_SEQUENCE_BYTES = COMPILE_WINDOW_BYTES + 15;
 
-// UML instructions allowed for each instruction of a block (up to about 56 are generated for a memory access, with the
+// UML instructions allowed for each instruction of a block (up to about 70 are generated for a memory access, with the
 // verifier, the debugger and a deliberate error) and for the rest of the block
-constexpr uint32_t COMPILE_UML_PER_INSTRUCTION = 64;
+constexpr uint32_t COMPILE_UML_PER_INSTRUCTION = 96;
 constexpr uint32_t COMPILE_UML_PER_BLOCK = 32;
 
 // room for the UML instructions of the longest block
@@ -398,7 +398,7 @@ void i386_device::drc_pages_choose_anchor()
 	{
 		offs_t const base = page << 12;
 		auto *const pointer = m_verifier
-				? drc_verify_host_page(base)
+				? drc_verify_host_page(base, false)
 				: reinterpret_cast<uint8_t *>(m_program->get_read_ptr(base));
 		if (pointer && length && (pointer == (start + (size_t(length) << 12))))
 		{
@@ -431,9 +431,9 @@ void i386_device::drc_pages_flush()
 // returns the host memory of a physical page if all of it can be read, or written, directly
 uint8_t *i386_device::drc_host_page(offs_t address, bool write)
 {
-	// the verifier's taps hide the pointers, and writes have to go through them
+	// the verifier's taps hide the pointers
 	if (m_verifier)
-		return write ? nullptr : drc_verify_host_page(address);
+		return drc_verify_host_page(address, write);
 
 	auto const pointer =
 			[this, write] (offs_t a)
@@ -509,7 +509,7 @@ void i386_device::drc_code_start()
 	if (interval)
 		m_drc_code->report_interval = m_drc_code->next_report = std::max(std::atoi(interval), 1);
 
-	// this deliberate error also applies without the verifier, which does not let the write table be filled
+	// this deliberate error applies with and without the verifier
 	char const *const breakage = std::getenv("MAME_I386_DRC_VERIFY_BREAK");
 	m_drc_break_nodrop = breakage && (std::string_view(breakage) == "nodrop");
 
@@ -769,6 +769,21 @@ void i386_device::cfunc_access(void *param)
 					core.fault_code = uint32_t(e >> 32);
 				}
 			});
+}
+
+
+template <typename Data>
+void i386_device::cfunc_verify_store_start(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_store_start<Data>(); });
+}
+
+
+void i386_device::cfunc_verify_store_end(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_store_end(); });
 }
 
 
@@ -1234,7 +1249,28 @@ void i386_device::generate_memory_mov(drcuml_block &block, opcode_desc const &de
 	if (store)
 	{
 		load_value();
+		// the verifier examines the entry and records the write before and after the store of a checked block
+		uml::code_label const unrecorded = m_verifier ? label++ : 0;
+		if (m_verifier)
+		{
+			UML_CMP(block, mem(&m_core->verify_checking), 0);               // cmp     [verify_checking],0
+			UML_JMPc(block, COND_E, unrecorded);                            // jmp     unrecorded,e
+			UML_MOV(block, mem(&m_core->ea_tmp), I0);                       // mov     [ea_tmp],i0
+			UML_MOV(block, mem(&m_core->arg0), I2);                         // mov     [arg0],i2
+			UML_MOV(block, mem(&m_core->arg1), I1);                         // mov     [arg1],i1
+			generate_call(block, bytes ? &i386_device::cfunc_verify_store_start<uint8_t> : &i386_device::cfunc_verify_store_start<uint32_t>);
+			UML_MOV(block, I2, mem(&m_core->arg0));                         // mov     i2,[arg0]
+			UML_LABEL(block, unrecorded);                                   // unrecorded:
+		}
 		UML_STORE(block, data.anchor - 1, I1, I2, size, SCALE_x1);          // store   [host],i2
+		if (m_verifier)
+		{
+			uml::code_label const unchecked = label++;
+			UML_CMP(block, mem(&m_core->verify_checking), 0);               // cmp     [verify_checking],0
+			UML_JMPc(block, COND_E, unchecked);                             // jmp     unchecked,e
+			generate_call(block, &i386_device::cfunc_verify_store_end);     // callc   cfunc_verify_store_end
+			UML_LABEL(block, unchecked);                                    // unchecked:
+		}
 	}
 	else
 	{

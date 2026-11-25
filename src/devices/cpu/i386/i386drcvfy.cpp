@@ -13,10 +13,13 @@
     instructions.  CPU state and memory writes are then compared, and
     execution continues from the interpreter's result.
 
-    Compiled loads from memory read it directly as they do without the
-    verifier.  Compiled stores always call the function that performs them,
-    so that the taps see them: the write table is only covered by running
-    without the verifier.
+    Compiled accesses use the page tables as they do without the verifier.  A
+    store of a checked block that goes straight to memory does not pass the
+    taps, so a function is called before and after it.  Before, the table
+    entry and the index the store uses are compared with those computed afresh
+    for the address, and the write is made through the program space, where
+    the taps record it as one by the interpreter, and then taken back.  After,
+    the memory is compared with what that write left.
 
     Compiled instructions are compared in the same way: the interpreter
     fetches them from memory, so a block that goes on using bytes which have
@@ -68,12 +71,12 @@
         load     inverts a bit of the register written by each compiled load
                  of checked blocks
         store    inverts a bit of the value written by each compiled store
-                 of checked blocks which calls a function
+                 of checked blocks
         ea       moves the address of each compiled memory access of checked
                  blocks by a dword
         nodrop   leaves the write table entry of a page that starts being
                  watched for writes to compiled code.  This also applies
-                 without the verifier, which has no write table entries.
+                 without the verifier.
         smc      ignores writes to the bytes of compiled instructions, which
                  leaves stale code running
         noexit   goes on with a block after it wrote to compiled code
@@ -135,6 +138,11 @@ struct i386_device::drc_verifier
 
 	bool recording = false;
 	bool unsafe = false;
+
+	// the store being made by generated code: the two dwords it can reach and what they have to hold afterwards
+	bool store_pending = false;
+	uint32_t store_address[2] = { };
+	uint32_t store_result[2] = { };
 	bool remap = true;
 	// instructions executed when the block wrote to compiled code, zero if it did not
 	uint32_t code_written = 0;
@@ -147,11 +155,12 @@ struct i386_device::drc_verifier
 	std::vector<access> block_writes;
 
 	// per page: bit 0 set if reads can be repeated, bit 1 set if writes go to memory, bit 2 set if reads can be repeated
-	// but do not come from memory
+	// but do not come from memory, bits 3 and 4 set if all of the page can be read, or written, through one pointer
 	std::vector<uint8_t> pages;
 
-	// per page: the host memory it is read from, hidden by the taps once they are installed
+	// per page: the host memory it is read from and written to, hidden by the taps once they are installed
 	std::vector<uint8_t *> pointers;
+	std::vector<uint8_t *> write_pointers;
 
 	memory_passthrough_handler program_tap;
 	memory_passthrough_handler io_tap;
@@ -232,6 +241,7 @@ void i386_device::drc_verify_start()
 
 	v.pages.resize(VERIFY_LOW_PAGES + VERIFY_HIGH_PAGES);
 	v.pointers.resize(v.pages.size());
+	v.write_pointers.resize(v.pages.size());
 	v.program_notifier = m_program->add_change_notifier([this, &v] (read_or_write) { if (!m_drc_installing_taps) v.remap = true; });
 	v.io_notifier = m_io->add_change_notifier([this, &v] (read_or_write) { if (!m_drc_installing_taps) v.remap = true; });
 
@@ -345,13 +355,97 @@ void i386_device::drc_verify_break_store(uint32_t &value) const
 }
 
 
-// the host memory from which compiled instructions may read a page directly
-uint8_t *i386_device::drc_verify_host_page(offs_t address) const
+// the host memory which compiled instructions may read, or write, directly
+uint8_t *i386_device::drc_verify_host_page(offs_t address, bool write) const
 {
 	drc_verifier const &v = *m_verifier;
-	if ((v.page_flags(address) & 5) != 1)
+	uint8_t const flags = v.page_flags(address);
+
+	// a store is only examined where its reads and writes can both be repeated
+	if (write ? ((flags & (1 | 2 | 4 | 16)) != (1 | 2 | 16)) : ((flags & (1 | 4 | 8)) != (1 | 8)))
 		return nullptr;
-	return v.pointers[(address < (VERIFY_LOW_PAGES << 12)) ? (address >> 12) : (VERIFY_LOW_PAGES + ((address - VERIFY_HIGH_BASE) >> 12))];
+	size_t const page = (address < (VERIFY_LOW_PAGES << 12)) ? (address >> 12) : (VERIFY_LOW_PAGES + ((address - VERIFY_HIGH_BASE) >> 12));
+	return write ? v.write_pointers[page] : v.pointers[page];
+}
+
+
+// Called before a store of a checked block that goes straight to memory.  The linear address is in ea_tmp, the value
+// in arg0 and the index which the store adds to the anchor in arg1.
+template <typename Data>
+void i386_device::drc_verify_store_start()
+{
+	drc_verifier &v = *m_verifier;
+	core_state &core = *m_core;
+	v.store_pending = false;
+	if (!v.recording || v.unsafe)
+		return;
+
+	// the entry that the address would be given now
+	uint32_t const address = core.ea_tmp;
+	uint32_t const page = address >> 12;
+	offs_t const physical = address & core.a20_mask;
+	uint8_t *const host = (page && !m_drc_code->pages.count(physical >> 12) && !debugger_enabled())
+			? drc_host_page(physical & ~offs_t(0xfff), true)
+			: nullptr;
+	uint32_t const entry = host
+			? (uint32_t(reinterpret_cast<intptr_t>(host) - reinterpret_cast<intptr_t>(m_drc_data->anchor)) - (page << 12)) + 1
+			: 0;
+	if (!entry || (m_drc_data->write[page] != entry) || (core.arg1 != uint32_t(entry + address)))
+	{
+		if (v.mismatched < VERIFY_REPORT_LIMIT)
+			osd_printf_error("%s: DRC verify at %08X: store to %08X through a wrong page table entry\n", tag(), core.prev_eip, address);
+		v.mismatched++;
+	}
+
+	if (v.sabotage == DRC_BREAK_STORE)
+		core.arg0 ^= 1;
+
+	// make the write where the taps record it, note the result and take it back
+	v.store_address[0] = physical & ~offs_t(3);
+	v.store_address[1] = (physical + sizeof(Data) - 1) & ~offs_t(3);
+	uint32_t old[2];
+	v.recording = false;
+	for (int i = 0; i < 2; i++)
+		old[i] = m_program->read_dword(v.store_address[i]);
+	v.recording = true;
+	if constexpr (sizeof(Data) == 1)
+		WRITE8(address, uint8_t(core.arg0));
+	else
+		WRITE32(address, core.arg0);
+	v.recording = false;
+	for (int i = 0; i < 2; i++)
+		v.store_result[i] = m_program->read_dword(v.store_address[i]);
+	for (int i = 0; i < 2; i++)
+		m_program->write_dword(v.store_address[i], old[i]);
+	v.recording = true;
+	v.store_pending = true;
+}
+
+template void i386_device::drc_verify_store_start<uint8_t>();
+template void i386_device::drc_verify_store_start<uint32_t>();
+
+
+// called after the store
+void i386_device::drc_verify_store_end()
+{
+	drc_verifier &v = *m_verifier;
+	if (!v.store_pending)
+		return;
+	v.store_pending = false;
+
+	bool const recording = v.recording;
+	v.recording = false;
+	for (int i = 0; i < 2; i++)
+	{
+		if (m_program->read_dword(v.store_address[i]) != v.store_result[i])
+		{
+			if (v.mismatched < VERIFY_REPORT_LIMIT)
+				osd_printf_error("%s: DRC verify at %08X: store to %08X left the wrong value in memory\n", tag(), m_core->prev_eip, v.store_address[i]);
+			v.mismatched++;
+			break;
+		}
+	}
+	v.recording = recording;
 }
 
 
@@ -428,7 +522,7 @@ void i386_device::drc_verify_map()
 	{
 		uint32_t const base = (page < VERIFY_LOW_PAGES) ? (page << 12) : (VERIFY_HIGH_BASE + ((page - VERIFY_LOW_PAGES) << 12));
 		auto *const read = reinterpret_cast<uint8_t *>(m_program->get_read_ptr(base));
-		auto const *const write = reinterpret_cast<uint8_t const *>(m_program->get_write_ptr(base));
+		auto *const write = reinterpret_cast<uint8_t *>(m_program->get_write_ptr(base));
 		uint8_t flags = 0;
 		if (read && (m_program->get_read_ptr(base + 0xffc) == (read + 0xffc)))
 			flags |= 1;
@@ -437,8 +531,17 @@ void i386_device::drc_verify_map()
 		// the system BIOS is often a flash device behind a read handler, which reads without side effects
 		if (!(flags & 1) && (((base >= 0x000e0000) && (base < 0x00100000)) || (base >= VERIFY_HIGH_BASE)))
 			flags |= 1 | 4;
-		v.pages[page] = flags;
+		// compiled accesses need the same pointer test of every dword as without the verifier
+		bool whole_read = (flags & 1) && read;
+		bool whole_write = (flags & 2) != 0;
+		for (uint32_t offset = 4; (offset < 0x1000) && (whole_read || whole_write); offset += 4)
+		{
+			whole_read = whole_read && (m_program->get_read_ptr(base + offset) == (read + offset));
+			whole_write = whole_write && (m_program->get_write_ptr(base + offset) == (write + offset));
+		}
+		v.pages[page] = flags | (whole_read ? 8 : 0) | (whole_write ? 16 : 0);
 		v.pointers[page] = read;
+		v.write_pointers[page] = write;
 	}
 
 	v.program_tap = m_program->install_readwrite_tap(
@@ -498,9 +601,11 @@ int i386_device::drc_verify_execute()
 	v.writes.clear();
 	v.unsafe = false;
 	v.recording = true;
+	m_core->verify_checking = 1;
 
 	int const result = m_drcuml->execute(*m_entry);
 
+	m_core->verify_checking = 0;
 	v.recording = false;
 	drc_rethrow_exception();
 	uint32_t const count = m_core->verify_count;
@@ -578,6 +683,7 @@ int i386_device::drc_verify_execute()
 				clear(offsetof(core_state, drc_exit), sizeof(core_state::drc_exit));
 				clear(offsetof(core_state, verify_count), sizeof(core_state::verify_count));
 				clear(offsetof(core_state, verify_pc), sizeof(core_state::verify_pc));
+				clear(offsetof(core_state, verify_checking), sizeof(core_state::verify_checking));
 				clear(offsetof(core_state, mode_dirty), sizeof(core_state::mode_dirty));
 			};
 	clear_scratch(v.after_block);

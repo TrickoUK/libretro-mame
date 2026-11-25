@@ -2665,6 +2665,7 @@ void i386_device::zero_state()
 	m_core->verify_count = 0;
 	m_core->mode_dirty = 1;
 	m_core->verify_pc = 0;
+	m_core->verify_checking = 0;
 	m_drc_cache_dirty = true;
 	m_base_cycles = 0;
 	m_opcode = 0;

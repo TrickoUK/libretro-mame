@@ -370,6 +370,7 @@ protected:
 		uint32_t drc_exit;      // generated code must return to the execution loop
 		uint32_t verify_count;  // instructions executed by the block being checked
 		uint32_t verify_pc;     // address at which the next instruction of the block was compiled
+		uint32_t verify_checking;   // the block being run is compared with the interpreter
 		uint32_t mode_dirty;    // set by anything that changes an input of the mode key
 	};
 
@@ -1712,8 +1713,12 @@ protected:
 	void drc_verify_break_mov();
 	void drc_verify_break_ea();
 	void drc_verify_break_store(uint32_t &value) const;
+	template <typename Data> void drc_verify_store_start();
+	void drc_verify_store_end();
+	template <typename Data> static void cfunc_verify_store_start(void *param);
+	static void cfunc_verify_store_end(void *param);
 	static void cfunc_verify_break_ea(void *param);
-	uint8_t *drc_verify_host_page(offs_t address) const;
+	uint8_t *drc_verify_host_page(offs_t address, bool write) const;
 	bool drc_verify_breaks(int kind) const;
 	void drc_verify_code_written();
 	bool drc_verify_ignores_address() const;
