@@ -481,7 +481,14 @@ protected:
 	uint32_t i386_translate(int segment, uint32_t ip, int rwn, int size = 1);
 	inline vtlb_entry get_permissions(uint32_t pte, int wp);
 	bool i386_translate_address(int intention, bool debug, offs_t *address, vtlb_entry *entry);
-	bool translate_address(int pl, int type, offs_t *address, uint32_t *error);
+	// The paging test is inlined into the callers; with paging off the linear address is the physical address
+	ATTR_FORCE_INLINE bool translate_address(int pl, int type, offs_t *address, uint32_t *error)
+	{
+		if (!(m_core->cr[0] & CR0_PG)) // Some (very few) old OS's won't work with this
+			return true;
+		return translate_paged_address(pl, type, address, error);
+	}
+	bool translate_paged_address(int pl, int type, offs_t *address, uint32_t *error);
 	void CHANGE_PC(uint32_t pc);
 	inline void NEAR_BRANCH(int32_t offs);
 	inline uint8_t FETCH();
@@ -555,7 +562,7 @@ protected:
 	uint32_t GetEA(uint8_t modrm, int rwn, int size = 1);
 	uint32_t Getx87EA(uint8_t modrm, int rwn);
 	void i386_check_sreg_validity(int reg);
-	int i386_limit_check(int seg, uint32_t offset, int size = 1);
+	ATTR_FORCE_INLINE int i386_limit_check(int seg, uint32_t offset, int size = 1);
 	void i386_sreg_load(uint16_t selector, uint8_t reg, bool *fault);
 	void i386_trap(int irq, int irq_gate);
 	void i386_trap_with_error(int irq, int irq_gate, int trap_level, uint32_t error);
@@ -563,7 +570,7 @@ protected:
 	void i386_task_switch(uint16_t selector, uint8_t nested);
 	void step();
 	ATTR_FORCE_INLINE void step_inline();
-	void i386_check_irq_line();
+	ATTR_FORCE_INLINE void i386_check_irq_line();
 	void i386_protected_mode_jump(uint16_t seg, uint32_t off, int indirect, int operand32);
 	void i386_protected_mode_call(uint16_t seg, uint32_t off, int indirect, int operand32);
 	void i386_protected_mode_retf(uint8_t count, uint8_t operand32);
