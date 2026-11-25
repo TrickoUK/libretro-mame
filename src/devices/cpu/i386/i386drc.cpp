@@ -16,9 +16,9 @@
     end.  MOV of 8 and 32 bits between registers, memory and immediates is
     compiled, and so are LEA and the 8 and 32-bit forms of ADD, ADC, SUB,
     SBB, CMP, AND, OR, XOR, TEST, INC, DEC, NEG and NOT whose operands are
-    registers and immediates, all without prefixes.  Every other instruction is executed with step(), the
-    interpreter's per-instruction function, which fetches the instruction from
-    memory as it then is.  The block key is the linear address of the first
+    registers and immediates, all without prefixes.  Every other instruction
+    is executed with step(), the interpreter's per-instruction function, which
+    fetches the instruction from memory as it then is.  The block key is the linear address of the first
     instruction together with the mode bits.
 
     Rules the blocks follow:
