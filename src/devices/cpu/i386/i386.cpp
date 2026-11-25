@@ -1647,7 +1647,7 @@ uint32_t i386_device::GetEA(uint8_t modrm, int rwn, int size)
 	return i386_translate(segment, ea, rwn, size );
 }
 
-void i386_device::i386_check_irq_line()
+inline void i386_device::i386_check_irq_line()
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if(!m_core->smm && m_core->smi)
