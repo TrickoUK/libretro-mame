@@ -78,7 +78,6 @@ i386_device::i386_device(const machine_config &mconfig, device_type type, const 
 	, m_ferr_handler(*this)
 	, m_x87_present(false)
 {
-	alloc_core_state();
 	// 32 unified
 	set_vtlb_dynamic_entries(32);
 }
@@ -2061,11 +2060,15 @@ void i386_device::i386_postload()
 	for (i = 0; i < 6; i++)
 		i386_load_segment_descriptor(i);
 	CHANGE_PC(m_core->eip);
+	m_drc_cache_dirty = true;
 }
 
 void i386_device::i386_common_init()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
+	m_drc_enabled = allow_drc() && m_drc_requested;
+	alloc_core_state();
+
+	core_state *const m_core = this->m_core;
 	int i, j;
 	static const int regs8[8] = {AL,CL,DL,BL,AH,CH,DH,BH};
 	static const int regs16[8] = {AX,CX,DX,BX,SP,BP,SI,DI};
@@ -2193,7 +2196,6 @@ void i386_device::i386_common_init()
 
 void i386_device::device_start()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 
 	build_opcode_table(OP_I386 | (m_x87_present ? OP_FPU : 0));
@@ -2573,8 +2575,15 @@ void i386_device::build_opcode_table(uint32_t features)
 // from a base that must lie within reach of the code cache, so this is the only place that decides where it lives.
 void i386_device::alloc_core_state()
 {
-	m_core_storage = std::make_unique<core_state>();
-	m_core = m_core_storage.get();
+	if (m_drc_enabled)
+	{
+		drc_start();
+	}
+	else
+	{
+		m_core_storage = std::make_unique<core_state>();
+		m_core = m_core_storage.get();
+	}
 }
 
 void i386_device::zero_state()
@@ -2638,6 +2647,8 @@ void i386_device::zero_state()
 	m_core->arg1 = 0;
 	m_core->seg_flat = 0;
 	m_core->ferr_needed = 0;
+	m_core->drc_exit = 0;
+	m_drc_cache_dirty = true;
 	m_base_cycles = 0;
 	m_opcode = 0;
 	m_core->irq_state = 0;
@@ -3069,8 +3080,15 @@ void i386_device::execute_run()
 		return;
 	}
 
-	while( m_core->cycles > 0 )
-		step();
+	if (m_drc_enabled)
+	{
+		execute_run_drc();
+	}
+	else
+	{
+		while( m_core->cycles > 0 )
+			step();
+	}
 }
 
 /*************************************************************************/
@@ -3125,7 +3143,6 @@ void i386_device::opcode_wrmsr(uint64_t data, bool &valid_msr)
 
 void i486_device::device_start()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 
 	build_opcode_table(OP_I386 | (m_x87_present ? OP_FPU : 0) | OP_I486);
@@ -3207,7 +3224,6 @@ void i486dx4_device::device_reset()
 
 void pentium_device::device_start()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3281,7 +3297,6 @@ void pentium_device::device_reset()
 
 void mediagx_device::device_start()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3346,7 +3361,6 @@ void mediagx_device::device_reset()
 
 void mediagxm_device::device_start()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3379,7 +3393,6 @@ void mediagxm_device::device_reset()
 
 void pentium_pro_device::device_start()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3454,7 +3467,6 @@ void pentium_pro_device::device_reset()
 
 void pentium_mmx_device::device_start()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3527,7 +3539,6 @@ void pentium_mmx_device::device_reset()
 
 void pentium2_device::device_start()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87();
 
@@ -3609,7 +3620,6 @@ void pentium2_device::device_reset()
 
 void pentium3_device::device_start()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87_xmm();
 
@@ -3706,7 +3716,6 @@ void pentium3_device::opcode_cpuid()
 
 void pentium4_device::device_start()
 {
-	[[maybe_unused]] core_state *const m_core = this->m_core;
 	i386_common_init();
 	register_state_i386_x87_xmm();
 

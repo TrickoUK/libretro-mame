@@ -7,6 +7,7 @@
 
 #include "i386dasm.h"
 #include "divtlb.h"
+#include "cpu/drcuml.h"
 #include "softfloat3/source/include/softfloat.h"
 #include <algorithm>
 #include <memory>
@@ -31,6 +32,8 @@ public:
 	// configuration helpers
 	auto smiact() { return m_smiact.bind(); }
 	auto ferr() { return m_ferr_handler.bind(); }
+	// selects the recompiler for this CPU, subject to the global DRC option
+	void set_drc_enable(bool value) { m_drc_requested = value; }
 
 	uint64_t debug_segbase(int params, const uint64_t *param);
 	uint64_t debug_seglimit(int params, const uint64_t *param);
@@ -350,13 +353,14 @@ protected:
 		uint64_t arg1;
 		uint32_t seg_flat;      // bit n set while segment n has base 0 and a 4 GiB limit
 		uint32_t ferr_needed;   // an x87 operation left an unmasked exception to report
+		uint32_t drc_exit;      // generated code must return to the execution loop
 		void *page_table;       // host page pointers for the data fast path (heap allocated)
 		void *code_page_table;  // per-page code generation marks (heap allocated)
 	};
 
 	// Byte-wide stores to the flags may alias this pointer, so each member function that touches the state copies it into a
 	// local of the same name first, which lets the compiler keep it in a register across those stores.
-	core_state *m_core;
+	core_state *m_core = nullptr;
 	std::unique_ptr<core_state> m_core_storage;
 	uint32_t m_eflags_mask;
 
@@ -1585,6 +1589,30 @@ protected:
 	void alloc_core_state();
 	void zero_state();
 	void i386_set_a20_line(int state);
+
+	// recompiler
+	bool m_drc_requested = false;
+	bool m_drc_enabled = false;
+	bool m_drc_cache_dirty = true;
+	std::unique_ptr<drcuml_state> m_drcuml;
+	uml::code_handle *m_entry = nullptr;
+	uml::code_handle *m_nocode = nullptr;
+	uml::code_handle *m_out_of_cycles = nullptr;
+	uml::code_handle *m_fault_handler = nullptr;
+
+	void drc_start();
+	void drc_flush_cache();
+	uint32_t drc_mode() const;
+	bool drc_runnable();
+	void drc_compile_block(uint32_t mode, offs_t pc);
+	void execute_run_drc();
+	void static_generate_entry_point(drcuml_block &block);
+	void static_generate_nocode_handler(drcuml_block &block);
+	void static_generate_out_of_cycles(drcuml_block &block);
+	void static_generate_fault_handler(drcuml_block &block);
+	void generate_step_instruction(drcuml_block &block, offs_t pc);
+	static void cfunc_step(void *param);
+	static void cfunc_deliver_fault(void *param);
 
 };
 
