@@ -487,6 +487,23 @@ void i386_device::drc_page_fill(uint32_t address, bool write)
 }
 
 
+// For the verifier: tests that the write table holds the entry which the page of a linear address would be given now,
+// and that the index is the sum of that entry and the address.
+bool i386_device::drc_page_write_is_current(uint32_t address, uint32_t index)
+{
+	uint32_t const page = address >> 12;
+	offs_t const physical = (address & ~uint32_t(0xfff)) & m_core->a20_mask;
+	uint8_t *const host = (page && !m_drc_code->pages.count(physical >> 12) && !debugger_enabled())
+			? drc_host_page(physical, true)
+			: nullptr;
+	if (!host)
+		return false;
+	uint32_t const distance = uint32_t(reinterpret_cast<intptr_t>(host) - reinterpret_cast<intptr_t>(m_drc_data->anchor));
+	uint32_t const entry = (distance - (page << 12)) + 1;
+	return (m_drc_data->write[page] == entry) && (index == uint32_t(entry + address));
+}
+
+
 // removes the write entries of the linear pages that reach a physical page
 void i386_device::drc_page_unmap_write(uint32_t physical_page)
 {

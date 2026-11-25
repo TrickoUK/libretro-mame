@@ -1656,6 +1656,7 @@ protected:
 	uint8_t *drc_host_page(offs_t address, bool write);
 	void drc_page_fill(uint32_t address, bool write);
 	void drc_page_unmap_write(uint32_t physical_page);
+	bool drc_page_write_is_current(uint32_t address, uint32_t index);
 	template <typename Data, bool Write> static void cfunc_access(void *param);
 	void generate_memory_mov(drcuml_block &block, opcode_desc const &desc, uml::code_label &label, uml::code_label slow);
 	uint32_t drc_exit_request();

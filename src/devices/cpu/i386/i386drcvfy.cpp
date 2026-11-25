@@ -380,17 +380,9 @@ void i386_device::drc_verify_store_start()
 	if (!v.recording || v.unsafe)
 		return;
 
-	// the entry that the address would be given now
 	uint32_t const address = core.ea_tmp;
-	uint32_t const page = address >> 12;
 	offs_t const physical = address & core.a20_mask;
-	uint8_t *const host = (page && !m_drc_code->pages.count(physical >> 12) && !debugger_enabled())
-			? drc_host_page(physical & ~offs_t(0xfff), true)
-			: nullptr;
-	uint32_t const entry = host
-			? (uint32_t(reinterpret_cast<intptr_t>(host) - reinterpret_cast<intptr_t>(m_drc_data->anchor)) - (page << 12)) + 1
-			: 0;
-	if (!entry || (m_drc_data->write[page] != entry) || (core.arg1 != uint32_t(entry + address)))
+	if (!drc_page_write_is_current(address, core.arg1))
 	{
 		if (v.mismatched < VERIFY_REPORT_LIMIT)
 			osd_printf_error("%s: DRC verify at %08X: store to %08X through a wrong page table entry\n", tag(), core.prev_eip, address);
