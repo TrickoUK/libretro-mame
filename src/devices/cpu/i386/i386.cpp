@@ -1447,7 +1447,8 @@ void i386sx_device::WRITEPORT32(offs_t port, uint32_t value)
 uint32_t i386_device::get_flags() const
 {
 	// The flag bytes must be current whenever C++ code reads them; a pending lazy-flag record would make them stale.
-	assert(m_core->lf_kind == 0);
+	if (m_core->lf_kind != 0)
+		fatalerror("%s: flags read while a lazy-flag record is pending\n", tag());
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	uint32_t f = 0x2;
 	f |= m_core->CF;
