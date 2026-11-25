@@ -267,13 +267,25 @@ bool i386_device::frontend::describe(opcode_desc &desc, opcode_desc const *prev)
 	{
 		switch (op)
 		{
-		case 0x26:  // ES, SS and DS have the same base and limit as the segment they replace
+		case 0x26:  // ES, SS and DS have the same base and limit as the segment they replace, but the segment
+			desc.override_segment = ES;     // still selects the exception raised for an offset outside it
+			break;
 		case 0x36:
+			desc.override_segment = SS;
+			break;
 		case 0x3e:
+			desc.override_segment = DS;
 			break;
 		case 0x2e:
+			desc.override_segment = CS;
+			desc.prefixes |= opcode_desc::PREFIX_SEGMENT;
+			break;
 		case 0x64:
+			desc.override_segment = FS;
+			desc.prefixes |= opcode_desc::PREFIX_SEGMENT;
+			break;
 		case 0x65:
+			desc.override_segment = GS;
 			desc.prefixes |= opcode_desc::PREFIX_SEGMENT;
 			break;
 		case 0x66:
@@ -429,9 +441,20 @@ void i386_device::frontend::classify(opcode_desc &desc)
 				if (write)
 					desc.set_gpr_modified(gpr);
 			};
-	auto const use_address =
-			[&desc, mod, rm] ()
+	// the segment of a memory operand: an override, or the stack segment for ESP and EBP based addresses
+	auto const use_segment =
+			[&desc] (bool stack_based)
 			{
+				if (desc.override_segment != opcode_desc::NO_SEGMENT)
+					desc.segment = desc.override_segment;
+				else
+					desc.segment = stack_based ? SS : DS;
+			};
+	auto const use_address =
+			[&desc, &use_segment, mod, rm] ()
+			{
+				u8 const base_register = (rm == 4) ? BIT(desc.sib, 0, 3) : rm;
+				use_segment((base_register == ESP) || ((base_register == EBP) && mod));
 				if (rm == 4)
 				{
 					u8 const base = BIT(desc.sib, 0, 3);
@@ -709,6 +732,7 @@ void i386_device::frontend::classify(opcode_desc &desc)
 		{
 			desc.kind = family::LEA;
 			use_address();
+			desc.segment = opcode_desc::NO_SEGMENT;
 			use_register(reg, 32, false, true);
 		}
 		break;
@@ -725,6 +749,7 @@ void i386_device::frontend::classify(opcode_desc &desc)
 		desc.kind = family::MOV;
 		desc.width = (op & 1) ? 32 : 8;
 		use_register(EAX, desc.width, op >= 0xa2, op < 0xa2);
+		use_segment(false);
 		desc.set_can_cause_exception();
 		break;
 

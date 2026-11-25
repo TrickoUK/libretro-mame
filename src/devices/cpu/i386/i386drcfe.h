@@ -78,6 +78,8 @@ public:
 		DEC         // CF unchanged
 	};
 
+	static constexpr u8 NO_SEGMENT = 0xff;
+
 	// prefix bits
 	enum : u8
 	{
@@ -94,6 +96,8 @@ public:
 	u8 sib;
 	u8 prefixes;
 	u8 width;               // operand width in bits of a compiled instruction
+	u8 segment;             // segment of a ModRM or offset memory operand, any override applied, or NO_SEGMENT
+	u8 override_segment;    // segment named by an override prefix, NO_SEGMENT without one
 	family kind;
 	lazy_flags flags_kind;
 	u32 displacement;
@@ -112,6 +116,8 @@ public:
 		sib = 0;
 		prefixes = 0;
 		width = 32;
+		segment = NO_SEGMENT;
+		override_segment = NO_SEGMENT;
 		kind = family::STEP;
 		flags_kind = lazy_flags::NONE;
 		displacement = 0;
