@@ -46,17 +46,19 @@
       through the program space: the CPU, whether the interpreter or step()
       executes the store, DMA controllers and the debugger.  Without the
       recompiler no taps are installed.
-    - The tap compares the bytes written with the bytes built into code.  When
-      one of them is written, the blocks that can contain it are removed from
-      the block lookup, and generated code is left after the instruction that
-      wrote it.  Data kept in the same page as code costs only the test.
-    - A change to the memory map can change the bytes at an address without a
-      write, and drops taps, so it flushes the code cache, as do reset, a
-      loaded state and a change of the A20 mask.
-    - Changes that bypass the above are not seen: writes through a pointer to
-      the memory or through a second address of the same memory, and switching
-      a memory bank or view holding code.  TODO: handle these before enabling
-      the recompiler for a system that does any of them.
+    - The tap tests whether any byte written is one built into code; the values
+      are not compared.  When such a byte is written, the blocks that can
+      contain it are removed from the block lookup, and generated code is left
+      after the instruction that wrote it.  Data kept in the same page as code
+      costs only the test.
+    - A change to the memory map, which includes selecting a memory view, can
+      change the bytes at an address without a write, and drops taps, so it
+      flushes the code cache, as do reset, a loaded state and a change of the
+      A20 mask.
+    - Changes that bypass the above are not seen: writes through a host pointer
+      to the memory or through a mirror of the address, and switching the entry
+      of a memory bank holding code (memory_bank::set_entry).  TODO: handle
+      these before enabling the recompiler for a system that does any of them.
 
 ***************************************************************************/
 
