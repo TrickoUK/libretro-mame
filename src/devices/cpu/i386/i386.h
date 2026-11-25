@@ -364,16 +364,13 @@ protected:
 		// scratch and summary fields for generated code, zero while unused and not saved
 		uint32_t mode;          // compile-time mode key of the running block
 		uint32_t ea_tmp;        // effective address passed between generated code and helpers
-		uint64_t arg0;          // helper call operands and results
-		uint64_t arg1;
-		uint32_t seg_flat;      // bit n set while segment n has base 0 and a 4 GiB limit
+		uint32_t arg0;          // helper call operands and results
+		uint32_t arg1;
 		uint32_t ferr_needed;   // an x87 operation left an unmasked exception to report
 		uint32_t drc_exit;      // generated code must return to the execution loop
 		uint32_t verify_count;  // instructions executed by the block being checked
 		uint32_t verify_pc;     // address at which the next instruction of the block was compiled
 		uint32_t mode_dirty;    // set by anything that changes an input of the mode key
-		void *page_table;       // host page pointers for the data fast path (heap allocated)
-		void *code_page_table;  // per-page code generation marks (heap allocated)
 	};
 
 	// Byte-wide stores to the flags may alias this pointer, so each member function that touches the state copies it into a
@@ -1649,6 +1646,17 @@ protected:
 	void drc_code_protect(opcode_desc const &desc);
 	void drc_code_written(uint32_t address, uint32_t lanes);
 	void drc_code_report(bool periodic);
+	struct drc_data_pages;
+	std::shared_ptr<drc_data_pages> m_drc_data;
+	bool m_drc_break_nodrop = false;    // deliberate error: leaves write pointers to pages holding compiled code
+	void drc_pages_start();
+	void drc_pages_choose_anchor();
+	void drc_pages_flush();
+	uint8_t *drc_host_page(offs_t address, bool write);
+	void drc_page_fill(uint32_t address, bool write);
+	void drc_page_unmap_write(uint32_t physical_page);
+	template <typename Data, bool Write> static void cfunc_access(void *param);
+	void generate_memory_mov(drcuml_block &block, opcode_desc const &desc, uml::code_label &label, uml::code_label slow);
 	uint32_t drc_exit_request();
 	template <typename Body> void drc_guarded_call(Body &&body);
 	void drc_rethrow_exception();
@@ -1661,9 +1669,10 @@ protected:
 	void generate_call(drcuml_block &block, void (*function)(void *));
 	void generate_block_end(drcuml_block &block);
 	bool drc_compiles_natively(opcode_desc const &desc) const;
-	void generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, bool &decode_state_set);
+	void generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set);
 	void generate_step(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow);
-	void generate_mov(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set);
+	void generate_mov_start(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set);
+	void generate_register_mov(drcuml_block &block, opcode_desc const &desc);
 	void generate_slow_exit(drcuml_block &block);
 	static void cfunc_step(void *param);
 	static void cfunc_deliver_fault(void *param);
@@ -1686,7 +1695,11 @@ protected:
 		DRC_BREAK_THROW,
 		DRC_BREAK_MOV,
 		DRC_BREAK_SMC,
-		DRC_BREAK_NOEXIT
+		DRC_BREAK_NOEXIT,
+		DRC_BREAK_LOAD,
+		DRC_BREAK_STORE,
+		DRC_BREAK_EA,
+		DRC_BREAK_NODROP
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;
@@ -1697,6 +1710,9 @@ protected:
 	void drc_verify_break();
 	void drc_verify_instruction();
 	void drc_verify_break_mov();
+	void drc_verify_break_ea();
+	static void cfunc_verify_break_ea(void *param);
+	uint8_t *drc_verify_host_page(offs_t address) const;
 	bool drc_verify_breaks(int kind) const;
 	void drc_verify_code_written();
 	bool drc_verify_ignores_address() const;

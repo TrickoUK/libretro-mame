@@ -2660,7 +2660,6 @@ void i386_device::zero_state()
 	m_core->ea_tmp = 0;
 	m_core->arg0 = 0;
 	m_core->arg1 = 0;
-	m_core->seg_flat = 0;
 	m_core->ferr_needed = 0;
 	m_core->drc_exit = 0;
 	m_core->verify_count = 0;

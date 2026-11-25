@@ -13,6 +13,11 @@
     instructions.  CPU state and memory writes are then compared, and
     execution continues from the interpreter's result.
 
+    Compiled loads from memory read it directly as they do without the
+    verifier.  Compiled stores always call the function that performs them,
+    so that the taps see them: the write table is only covered by running
+    without the verifier.
+
     Compiled instructions are compared in the same way: the interpreter
     fetches them from memory, so a block that goes on using bytes which have
     been rewritten differs.  A block must also end with the instruction that
@@ -57,8 +62,18 @@
                  of a block
         mode     changes the cached mode key in checked blocks
         throw    throws a C++ exception in the first block run
-        mov      inverts a bit of the register written by each compiled MOV of
-                 checked blocks
+        mov      inverts a bit of the register written by each compiled MOV
+                 between registers, or of an immediate to one, of checked
+                 blocks
+        load     inverts a bit of the register written by each compiled load
+                 of checked blocks
+        store    inverts a bit of the value written by each compiled store
+                 which calls a function
+        ea       moves the address of each compiled memory access of checked
+                 blocks by a dword
+        nodrop   leaves the write table entry of a page that starts being
+                 watched for writes to compiled code.  This also applies
+                 without the verifier, which has no write table entries.
         smc      ignores writes to the bytes of compiled instructions, which
                  leaves stale code running
         noexit   goes on with a block after it wrote to compiled code
@@ -134,6 +149,9 @@ struct i386_device::drc_verifier
 	// per page: bit 0 set if reads can be repeated, bit 1 set if writes go to memory, bit 2 set if reads can be repeated
 	// but do not come from memory
 	std::vector<uint8_t> pages;
+
+	// per page: the host memory it is read from, hidden by the taps once they are installed
+	std::vector<uint8_t *> pointers;
 
 	memory_passthrough_handler program_tap;
 	memory_passthrough_handler io_tap;
@@ -213,6 +231,7 @@ void i386_device::drc_verify_start()
 	drc_verify_add_state([&v] (char const *name, void *base, size_t length) { v.add(name, base, length); });
 
 	v.pages.resize(VERIFY_LOW_PAGES + VERIFY_HIGH_PAGES);
+	v.pointers.resize(v.pages.size());
 	v.program_notifier = m_program->add_change_notifier([this, &v] (read_or_write) { if (!m_drc_installing_taps) v.remap = true; });
 	v.io_notifier = m_io->add_change_notifier([this, &v] (read_or_write) { if (!m_drc_installing_taps) v.remap = true; });
 
@@ -232,7 +251,11 @@ void i386_device::drc_verify_start()
 				{ "throw", DRC_BREAK_THROW },
 				{ "mov", DRC_BREAK_MOV },
 				{ "smc", DRC_BREAK_SMC },
-				{ "noexit", DRC_BREAK_NOEXIT } };
+				{ "noexit", DRC_BREAK_NOEXIT },
+				{ "load", DRC_BREAK_LOAD },
+				{ "store", DRC_BREAK_STORE },
+				{ "ea", DRC_BREAK_EA },
+				{ "nodrop", DRC_BREAK_NODROP } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
@@ -304,6 +327,25 @@ void i386_device::drc_verify_break_mov()
 }
 
 
+// moves the effective address of a compiled memory access
+void i386_device::drc_verify_break_ea()
+{
+	drc_verifier const &v = *m_verifier;
+	if (v.recording && !v.unsafe)
+		m_core->ea_tmp += 4;
+}
+
+
+// the host memory from which compiled instructions may read a page directly
+uint8_t *i386_device::drc_verify_host_page(offs_t address) const
+{
+	drc_verifier const &v = *m_verifier;
+	if ((v.page_flags(address) & 5) != 1)
+		return nullptr;
+	return v.pointers[(address < (VERIFY_LOW_PAGES << 12)) ? (address >> 12) : (VERIFY_LOW_PAGES + ((address - VERIFY_HIGH_BASE) >> 12))];
+}
+
+
 bool i386_device::drc_verify_breaks(int kind) const
 {
 	return m_verifier && (m_verifier->sabotage == kind);
@@ -367,6 +409,7 @@ void i386_device::drc_verify_map()
 	// pointers cannot be obtained through a tap, including those protecting compiled code, which is then discarded
 	if (drc_code_clear())
 		m_drc_cache_dirty = true;
+	drc_pages_flush();
 	m_drc_installing_taps = true;
 
 	v.program_tap.remove();
@@ -375,7 +418,7 @@ void i386_device::drc_verify_map()
 	for (uint32_t page = 0; page < v.pages.size(); page++)
 	{
 		uint32_t const base = (page < VERIFY_LOW_PAGES) ? (page << 12) : (VERIFY_HIGH_BASE + ((page - VERIFY_LOW_PAGES) << 12));
-		auto const *const read = reinterpret_cast<uint8_t const *>(m_program->get_read_ptr(base));
+		auto *const read = reinterpret_cast<uint8_t *>(m_program->get_read_ptr(base));
 		auto const *const write = reinterpret_cast<uint8_t const *>(m_program->get_write_ptr(base));
 		uint8_t flags = 0;
 		if (read && (m_program->get_read_ptr(base + 0xffc) == (read + 0xffc)))
@@ -386,6 +429,7 @@ void i386_device::drc_verify_map()
 		if (!(flags & 1) && (((base >= 0x000e0000) && (base < 0x00100000)) || (base >= VERIFY_HIGH_BASE)))
 			flags |= 1 | 4;
 		v.pages[page] = flags;
+		v.pointers[page] = read;
 	}
 
 	v.program_tap = m_program->install_readwrite_tap(

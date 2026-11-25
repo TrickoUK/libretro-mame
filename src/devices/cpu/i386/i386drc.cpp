@@ -13,7 +13,7 @@
     interpreter loop.
 
     A block holds a straight sequence of instructions described by the front
-    end.  MOV between registers and MOV of an immediate to a register are
+    end.  MOV of 8 and 32 bits between registers, memory and immediates is
     compiled.  Every other instruction is executed with step(), the
     interpreter's per-instruction function, which fetches the instruction from
     memory as it then is.  The block key is the linear address of the first
@@ -37,6 +37,26 @@
       recorded for the fault handler.  Any other exception is kept, generated
       code is left at once, and it is rethrown from the execution loop.
 
+    Compiled memory accesses:
+    - The segment of an operand has base zero, so the effective address is the
+      linear address.  Only DS and SS operands without prefixes are compiled.
+    - Two tables indexed by linear page, one for reads and one for writes,
+      give the host memory of a page.  An access goes straight to that memory
+      if it lies within one page that has an entry.  Every other access calls
+      a function which performs it as the interpreter does, with the segment
+      checks, so that faults, devices, accesses crossing pages and write taps
+      behave as there.  The function then enters the page in the table if all
+      of it is plain memory.
+    - Page zero never has an entry, as the expand-down segments exclude
+      offsets in it.
+    - An entry reflects the A20 mask and the memory map, and the tables are
+      emptied whenever the code cache is flushed.  A page that holds bytes of
+      compiled instructions has no entry for writes: it is removed when the
+      page starts being watched.
+    - Nothing is entered while the debugger is enabled, or on a host that is
+      not little-endian.  The lockstep verifier allows entries for reads only,
+      as it has to see every write.
+
     A compiled instruction has its bytes built into the code, so it must be
     compiled again once they change.  x86 code is not flushed explicitly: any
     write to memory can change instructions.
@@ -57,8 +77,9 @@
       A20 mask.
     - Changes that bypass the above are not seen: writes through a host pointer
       to the memory or through a mirror of the address, and switching the entry
-      of a memory bank holding code (memory_bank::set_entry).  TODO: handle
-      these before enabling the recompiler for a system that does any of them.
+      of a memory bank (memory_bank::set_entry), which would also leave the
+      page tables pointing at the old entry.  TODO: handle these before
+      enabling the recompiler for a system that does any of them.
 
 ***************************************************************************/
 
@@ -71,7 +92,9 @@
 
 #include <array>
 #include <cstdlib>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 using namespace uml;
 
@@ -88,13 +111,17 @@ constexpr uint32_t COMPILE_MAX_SEQUENCE = 64;
 // longest range of guest bytes a block may cover, used when invalidating blocks that begin before a written range
 constexpr uint32_t COMPILE_MAX_SEQUENCE_BYTES = COMPILE_WINDOW_BYTES + 15;
 
-// UML instructions allowed for each instruction of a block (up to 26 are generated, with the verifier, the debugger
-// and a deliberate error) and for the rest of the block
-constexpr uint32_t COMPILE_UML_PER_INSTRUCTION = 32;
+// UML instructions allowed for each instruction of a block (up to about 56 are generated for a memory access, with the
+// verifier, the debugger and a deliberate error) and for the rest of the block
+constexpr uint32_t COMPILE_UML_PER_INSTRUCTION = 64;
 constexpr uint32_t COMPILE_UML_PER_BLOCK = 32;
 
 // room for the UML instructions of the longest block
 constexpr uint32_t COMPILE_MAX_UML = COMPILE_UML_PER_INSTRUCTION * COMPILE_MAX_SEQUENCE + COMPILE_UML_PER_BLOCK;
+
+// pages of the data tables, and the pages from address zero searched for the largest range of memory
+constexpr uint32_t DATA_PAGES = 0x100000;
+constexpr uint32_t DATA_ANCHOR_PAGES = 0x10000;
 
 // bits of the mode key
 constexpr uint32_t MODE_CODE32 = 1 << 0;
@@ -159,6 +186,26 @@ struct i386_device::drc_code_watch
 };
 
 
+// The host memory of linear pages, for compiled accesses.  A non-zero entry is one more than the difference between
+// the host address of a byte and the anchor, less the byte's linear address, truncated to 32 bits.  Generated code
+// adds the linear address and uses the sum as a signed index from one byte below the anchor.  Memory more than 2 GiB
+// away from the anchor cannot be reached this way and has no entry.
+struct i386_device::drc_data_pages
+{
+	std::unique_ptr<uint32_t []> read;
+	std::unique_ptr<uint32_t []> write;
+	uint8_t *anchor = nullptr;                  // start of the largest range of memory, built into generated code
+	std::vector<uint32_t> filled;               // twice the page number, plus one for the write table
+	std::unordered_set<uint32_t> refused;       // pages that cannot be entered, in the same form
+
+	// statistics
+	uint64_t slow_reads = 0;
+	uint64_t slow_writes = 0;
+	uint64_t fills = 0;
+	uint64_t unreachable = 0;
+};
+
+
 
 /***************************************************************************
     SETUP
@@ -190,6 +237,8 @@ void i386_device::drc_flush_cache()
 {
 	m_drcuml->reset();
 	drc_code_clear();
+	drc_pages_flush();
+	drc_pages_choose_anchor();
 	m_drc_code->flushes++;
 
 	try
@@ -323,6 +372,133 @@ bool i386_device::drc_read_code(offs_t address, uint8_t &value, bool &memory)
 
 
 /***************************************************************************
+    DATA PAGES
+***************************************************************************/
+
+void i386_device::drc_pages_start()
+{
+	m_drc_data = std::make_shared<drc_data_pages>();
+	m_drc_data->read = make_unique_clear<uint32_t []>(DATA_PAGES);
+	m_drc_data->write = make_unique_clear<uint32_t []>(DATA_PAGES);
+}
+
+
+// Chooses the host address that table entries are relative to.  It is built into generated code, so it is only chosen
+// while the code cache is empty, and is kept from then on.
+void i386_device::drc_pages_choose_anchor()
+{
+	drc_data_pages &data = *m_drc_data;
+	if (data.anchor || (m_program->data_width() != 32))
+		return;
+
+	uint8_t *start = nullptr;
+	uint32_t length = 0;
+	uint32_t longest = 0;
+	for (uint32_t page = 0; page < DATA_ANCHOR_PAGES; page++)
+	{
+		offs_t const base = page << 12;
+		auto *const pointer = m_verifier
+				? drc_verify_host_page(base)
+				: reinterpret_cast<uint8_t *>(m_program->get_read_ptr(base));
+		if (pointer && length && (pointer == (start + (size_t(length) << 12))))
+		{
+			length++;
+		}
+		else
+		{
+			start = pointer;
+			length = pointer ? 1 : 0;
+		}
+		if (length > longest)
+		{
+			longest = length;
+			data.anchor = start;
+		}
+	}
+}
+
+
+void i386_device::drc_pages_flush()
+{
+	drc_data_pages &data = *m_drc_data;
+	for (uint32_t const key : data.filled)
+		(BIT(key, 0) ? data.write : data.read)[key >> 1] = 0;
+	data.filled.clear();
+	data.refused.clear();
+}
+
+
+// returns the host memory of a physical page if all of it can be read, or written, directly
+uint8_t *i386_device::drc_host_page(offs_t address, bool write)
+{
+	// the verifier's taps hide the pointers, and writes have to go through them
+	if (m_verifier)
+		return write ? nullptr : drc_verify_host_page(address);
+
+	auto const pointer =
+			[this, write] (offs_t a)
+			{
+				return reinterpret_cast<uint8_t *>(write ? m_program->get_write_ptr(a) : m_program->get_read_ptr(a));
+			};
+	uint8_t *const result = pointer(address);
+	if (!result)
+		return nullptr;
+	for (offs_t offset = 4; offset < 0x1000; offset += 4)
+	{
+		if (pointer(address + offset) != (result + offset))
+			return nullptr;
+	}
+	return result;
+}
+
+
+// enters the page of a linear address in a data table, if it can be
+void i386_device::drc_page_fill(uint32_t address, bool write)
+{
+	drc_data_pages &data = *m_drc_data;
+	uint32_t const page = address >> 12;
+	uint32_t *const table = (write ? data.write : data.read).get();
+	if ((ENDIANNESS_NATIVE != ENDIANNESS_LITTLE) || !data.anchor || !page || table[page] || debugger_enabled())
+		return;
+
+	offs_t const physical = (address & ~uint32_t(0xfff)) & m_core->a20_mask;
+
+	// writes to a page holding compiled instructions have to go through its tap
+	if (write && m_drc_code->pages.count(physical >> 12))
+		return;
+
+	uint32_t const key = (page << 1) | (write ? 1 : 0);
+	if (data.refused.count(key))
+		return;
+
+	uint8_t *const host = drc_host_page(physical, write);
+	intptr_t const distance = host ? (reinterpret_cast<intptr_t>(host) - reinterpret_cast<intptr_t>(data.anchor)) : 0;
+	if (!host || (distance < INT32_MIN) || (distance > (INT32_MAX - 0x1000)) || (distance & 3))
+	{
+		if (host)
+			data.unreachable++;
+		data.refused.insert(key);
+		return;
+	}
+
+	table[page] = (uint32_t(distance) - (page << 12)) + 1;
+	data.filled.push_back(key);
+	data.fills++;
+}
+
+
+// removes the write entries of the linear pages that reach a physical page
+void i386_device::drc_page_unmap_write(uint32_t physical_page)
+{
+	drc_data_pages &data = *m_drc_data;
+	data.write[physical_page] = 0;
+	if (!BIT(m_core->a20_mask, 20))
+		data.write[physical_page ^ 0x100] = 0;
+}
+
+
+
+/***************************************************************************
     CODE WRITES
 ***************************************************************************/
 
@@ -332,6 +508,12 @@ void i386_device::drc_code_start()
 	char const *const interval = std::getenv("MAME_I386_DRC_STATS");
 	if (interval)
 		m_drc_code->report_interval = m_drc_code->next_report = std::max(std::atoi(interval), 1);
+
+	// this deliberate error also applies without the verifier, which does not let the write table be filled
+	char const *const breakage = std::getenv("MAME_I386_DRC_VERIFY_BREAK");
+	m_drc_break_nodrop = breakage && (std::string_view(breakage) == "nodrop");
+
+	drc_pages_start();
 
 	m_drc_map_notifier = m_program->add_change_notifier(
 			[this] (read_or_write)
@@ -375,6 +557,8 @@ void i386_device::drc_code_protect(opcode_desc const &desc)
 			drc_code_watch::page *const page = entry.get();
 			offs_t const base = physical & ~offs_t(0xfff);
 			watch.page_installs++;
+			if (!m_drc_break_nodrop)
+				drc_page_unmap_write(physical >> 12);
 			m_drc_installing_taps = true;
 			watch.tap = m_program->install_write_tap(
 					base, base | 0xfff,
@@ -442,11 +626,14 @@ void i386_device::drc_code_written(uint32_t address, uint32_t lanes)
 void i386_device::drc_code_report(bool periodic)
 {
 	drc_code_watch const &watch = *m_drc_code;
+	drc_data_pages const &data = *m_drc_data;
 	auto const line = util::string_format(
 			"%s: recompiler at %.3f s: %u blocks, %u compiled instructions, %u flushes, %u map changes, %u pages tapped, "
-			"%u writes to tapped pages, %u invalidations (%u by page, %u by 256-byte region)\n",
+			"%u writes to tapped pages, %u invalidations (%u by page, %u by 256-byte region), %u data pages entered, "
+			"%u out of reach, %u called reads, %u called writes\n",
 			tag(), machine().time().as_double(), watch.blocks, watch.native, watch.flushes, watch.map_changes, watch.page_installs,
-			watch.writes, watch.invalidations, watch.page_hits, watch.region_hits);
+			watch.writes, watch.invalidations, watch.page_hits, watch.region_hits, data.fills,
+			data.unreachable, data.slow_reads, data.slow_writes);
 	if (periodic)
 		osd_printf_info("%s", line);
 	else
@@ -531,6 +718,56 @@ void i386_device::cfunc_deliver_fault(void *param)
 				cpu.m_core->fault = NO_FAULT;
 				cpu.m_core->ext = 1;
 				cpu.i386_trap_with_error(fault, 0, 0, error);
+
+				// as at the end of an instruction
+				if (cpu.m_core->RF && cpu.m_core->auto_clear_RF)
+					cpu.m_core->RF = 0;
+				if (!cpu.m_core->auto_clear_RF)
+					cpu.m_core->auto_clear_RF = true;
+			});
+}
+
+
+// Performs a memory access for a compiled instruction whose page has no entry, as the interpreter does.  The offset
+// is in ea_tmp, the segment in arg1, and the value written or read in arg0.
+template <typename Data, bool Write>
+void i386_device::cfunc_access(void *param)
+{
+	static_assert((sizeof(Data) == 1) || (sizeof(Data) == 4));
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call(
+			[&cpu] ()
+			{
+				core_state &core = *cpu.m_core;
+				try
+				{
+					uint32_t const address = cpu.i386_translate(int(core.arg1), core.ea_tmp, Write ? 1 : 0, sizeof(Data));
+					if constexpr (Write)
+					{
+						cpu.m_drc_data->slow_writes++;
+						uint32_t value = core.arg0;
+						if (cpu.drc_verify_breaks(DRC_BREAK_STORE))
+							value ^= 1;
+						if constexpr (sizeof(Data) == 1)
+							cpu.WRITE8(address, uint8_t(value));
+						else
+							cpu.WRITE32(address, value);
+					}
+					else
+					{
+						cpu.m_drc_data->slow_reads++;
+						if constexpr (sizeof(Data) == 1)
+							core.arg0 = cpu.READ8(address);
+						else
+							core.arg0 = cpu.READ32(address);
+					}
+					cpu.drc_page_fill(address, Write);
+				}
+				catch (uint64_t e)
+				{
+					core.fault = uint32_t(e);
+					core.fault_code = uint32_t(e >> 32);
+				}
 			});
 }
 
@@ -546,6 +783,13 @@ void i386_device::cfunc_verify_break(void *param)
 {
 	i386_device &cpu = *static_cast<i386_device *>(param);
 	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_break(); });
+}
+
+
+void i386_device::cfunc_verify_break_ea(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_break_ea(); });
 }
 
 
@@ -633,11 +877,12 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 
 			UML_HASH(block, mode, pc);                                      // hash    mode,pc
 			bool decode_state_set = false;
+			uml::code_label label = slow + 1;
 			for (opcode_desc const *desc = first; desc; desc = desc->next())
 			{
 				bool const last = desc->end_sequence() || !desc->next();
 				assert(last || (desc->next()->pc == (desc->pc + desc->length)));
-				generate_instruction(block, *desc, last, done, slow, decode_state_set);
+				generate_instruction(block, *desc, last, done, slow, label, decode_state_set);
 				if (last)
 					break;
 			}
@@ -668,12 +913,15 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 }
 
 
-// The compiled instructions are MOV between registers and MOV of an immediate to a register, in 8 and 32 bits and
-// without prefixes (which the length shows, as a prefix adds a byte).
+// The compiled instructions are MOV of 8 and 32 bits between registers, memory and immediates, without prefixes.
 bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 {
 	if ((desc.kind != opcode_desc::family::MOV) || !desc.in_memory || (m_program->data_width() != 32) || !drc_can_bake_code())
 		return false;
+
+	// a memory operand in the data or stack segment; a prefix would be recorded in one of the other two fields
+	bool const memory_operand = !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT)
+			&& ((desc.segment == DS) || (desc.segment == SS));
 
 	switch (desc.opcode)
 	{
@@ -681,12 +929,22 @@ bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 	case 0x89:
 	case 0x8a:
 	case 0x8b:
-		return (desc.length == 2) && (desc.modrm >= 0xc0);
+		return (desc.modrm >= 0xc0) ? (desc.length == 2) : memory_operand;
+	case 0xa0:
+	case 0xa1:
+	case 0xa2:
+	case 0xa3:
+		return memory_operand;
 	case 0xc6:
-		return (desc.length == 3) && ((desc.modrm & 0xf8) == 0xc0);
+		if (desc.modrm >= 0xc0)
+			return (desc.length == 3) && ((desc.modrm & 0xf8) == 0xc0);
+		return memory_operand && !(desc.modrm & 0x38);
 	case 0xc7:
-		return (desc.length == 6) && ((desc.modrm & 0xf8) == 0xc0);
+		if (desc.modrm >= 0xc0)
+			return (desc.length == 6) && ((desc.modrm & 0xf8) == 0xc0);
+		return memory_operand && !(desc.modrm & 0x38);
 	default:
+		// the length shows that there is no prefix
 		if ((desc.opcode >= 0xb0) && (desc.opcode <= 0xb7))
 			return desc.length == 2;
 		return (desc.opcode >= 0xb8) && (desc.opcode <= 0xbf) && (desc.length == 5);
@@ -715,7 +973,7 @@ void i386_device::generate_block_end(drcuml_block &block)
 
 
 // Executes one instruction, which is started only while cycles are left.
-void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, bool &decode_state_set)
+void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set)
 {
 	UML_CMP(block, mem(&m_core->cycles), 0);                                // cmp     [cycles],0
 	UML_EXHc(block, COND_LE, *m_out_of_cycles, desc.pc);                    // exh     out_of_cycles,pc,le
@@ -728,7 +986,13 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 
 	if (drc_compiles_natively(desc))
 	{
-		generate_mov(block, desc, decode_state_set);
+		generate_mov_start(block, desc, decode_state_set);
+		bool const moffs = (desc.opcode >= 0xa0) && (desc.opcode <= 0xa3);
+		bool const modrm = ((desc.opcode >= 0x88) && (desc.opcode <= 0x8b)) || (desc.opcode == 0xc6) || (desc.opcode == 0xc7);
+		if (moffs || (modrm && (desc.modrm < 0xc0)))
+			generate_memory_mov(block, desc, label, slow);
+		else
+			generate_register_mov(block, desc);
 	}
 	else
 	{
@@ -761,9 +1025,9 @@ void i386_device::generate_step(drcuml_block &block, opcode_desc const &desc, bo
 }
 
 
-// Compiled MOV to a register.  The state left behind is that of step(): the per-instruction decode fields, the
-// addresses and the cycle count.  Nothing here can fault, call out or change the mode or the interrupt state.
-void i386_device::generate_mov(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set)
+// The part of a compiled MOV that leaves behind the state step() would have while executing the instruction: the
+// per-instruction decode fields and the addresses.
+void i386_device::generate_mov_start(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set)
 {
 	// the decode fields of a 32-bit instruction without prefixes stay as set until an instruction is stepped
 	if (!decode_state_set)
@@ -782,6 +1046,16 @@ void i386_device::generate_mov(drcuml_block &block, opcode_desc const &desc, boo
 	if (debugger_enabled())
 		UML_DEBUG(block, desc.pc);                                          // debug   pc
 
+	uint32_t const next = desc.pc + desc.length;
+	UML_MOV(block, mem(&m_core->eip), next);                                // mov     [eip],next
+	UML_MOV(block, mem(&m_core->pc), next);                                 // mov     [pc],next
+}
+
+
+// Compiled MOV to a register from a register or an immediate.  Nothing here can fault, call out or change the mode or
+// the interrupt state.
+void i386_device::generate_register_mov(drcuml_block &block, opcode_desc const &desc)
+{
 	// the register encodings of the instruction: for opcodes B0-BF in the low three bits of the opcode, otherwise in
 	// the ModRM byte, where the reg field is the source of 88 and 89 and the destination of 8A and 8B
 	bool const immediate = desc.opcode >= 0xb0;
@@ -817,16 +1091,187 @@ void i386_device::generate_mov(drcuml_block &block, opcode_desc const &desc, boo
 		UML_MOV(block, mem(&m_core->reg.d[destination]), mem(&m_core->reg.d[source]));  // mov     [reg],[reg]
 	}
 
-	uint32_t const next = desc.pc + desc.length;
-	UML_MOV(block, mem(&m_core->eip), next);                                // mov     [eip],next
-	UML_MOV(block, mem(&m_core->pc), next);                                 // mov     [pc],next
-
 	X86_CYCLES const cycles = (immediate || (desc.opcode == 0xc6) || (desc.opcode == 0xc7)) ? CYCLES_MOV_IMM_REG : CYCLES_MOV_REG_REG;
 	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[cycles]);   // sub     [cycles],[cycles],n
 
 	if (drc_verify_breaks(DRC_BREAK_MOV))
 	{
 		UML_MOV(block, mem(&m_core->ea_tmp), bytes ? destination : (destination * 4));  // mov     [ea_tmp],offset
+		generate_call(block, &i386_device::cfunc_verify_break_mov);         // callc   cfunc_verify_break_mov
+	}
+}
+
+
+// Compiled MOV between memory and a register, or of an immediate to memory.  A page with a table entry is accessed
+// directly; otherwise a function performs the access, which can fault, run device code and ask for the block to be
+// left.  A faulting instruction changes no register and takes no cycles, and an access that was performed completes
+// the instruction before the block is left.
+void i386_device::generate_memory_mov(drcuml_block &block, opcode_desc const &desc, uml::code_label &label, uml::code_label slow)
+{
+	drc_data_pages const &data = *m_drc_data;
+	bool const moffs = (desc.opcode >= 0xa0) && (desc.opcode <= 0xa3);
+	bool const immediate = (desc.opcode == 0xc6) || (desc.opcode == 0xc7);
+	bool const store = immediate || (desc.opcode == 0x88) || (desc.opcode == 0x89) || (desc.opcode == 0xa2) || (desc.opcode == 0xa3);
+	bool const bytes = (desc.opcode == 0x88) || (desc.opcode == 0x8a) || (desc.opcode == 0xa0) || (desc.opcode == 0xa2) || (desc.opcode == 0xc6);
+	operand_size const size = bytes ? SIZE_BYTE : SIZE_DWORD;
+
+	// the register operand, as a byte or dword index into the registers
+	int reg = EAX;
+	if (!moffs && !immediate)
+		reg = bytes ? i386_MODRM_table[desc.modrm].reg.b : i386_MODRM_table[desc.modrm].reg.d;
+	else if (bytes)
+		reg = AL;
+
+	X86_CYCLES cycles;
+	switch (desc.opcode)
+	{
+	case 0x88:
+	case 0x89:
+		cycles = CYCLES_MOV_REG_MEM;
+		break;
+	case 0x8a:
+	case 0x8b:
+		cycles = CYCLES_MOV_MEM_REG;
+		break;
+	case 0xa1:
+	case 0xa2:
+		cycles = CYCLES_MOV_MEM_ACC;
+		break;
+	case 0xa3:
+		cycles = CYCLES_MOV_ACC_MEM;
+		break;
+	default:    // a0, c6 and c7
+		cycles = CYCLES_MOV_IMM_MEM;
+		break;
+	}
+
+	// effective address in i0
+	if (moffs)
+	{
+		UML_MOV(block, I0, desc.displacement);                              // mov     i0,offset
+	}
+	else
+	{
+		unsigned const mod = BIT(desc.modrm, 6, 2);
+		unsigned base = BIT(desc.modrm, 0, 3);
+		int index = -1;
+		unsigned scale = 0;
+		if (base == 4)
+		{
+			base = BIT(desc.sib, 0, 3);
+			scale = BIT(desc.sib, 6, 2);
+			if (BIT(desc.sib, 3, 3) != 4)
+				index = BIT(desc.sib, 3, 3);
+		}
+		bool const has_base = mod || (base != 5);
+		if (index >= 0)
+		{
+			if (scale)
+				UML_SHL(block, I0, mem(&m_core->reg.d[index]), scale);      // shl     i0,[index],scale
+			else
+				UML_MOV(block, I0, mem(&m_core->reg.d[index]));             // mov     i0,[index]
+			if (has_base)
+				UML_ADD(block, I0, I0, mem(&m_core->reg.d[base]));          // add     i0,i0,[base]
+			if (desc.displacement)
+				UML_ADD(block, I0, I0, desc.displacement);                  // add     i0,i0,displacement
+		}
+		else if (!has_base)
+		{
+			UML_MOV(block, I0, desc.displacement);                          // mov     i0,displacement
+		}
+		else if (desc.displacement)
+		{
+			UML_ADD(block, I0, mem(&m_core->reg.d[base]), desc.displacement);   // add     i0,[base],displacement
+		}
+		else
+		{
+			UML_MOV(block, I0, mem(&m_core->reg.d[base]));                  // mov     i0,[base]
+		}
+	}
+	if (drc_verify_breaks(DRC_BREAK_EA))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), I0);                           // mov     [ea_tmp],i0
+		generate_call(block, &i386_device::cfunc_verify_break_ea);          // callc   cfunc_verify_break_ea
+		UML_MOV(block, I0, mem(&m_core->ea_tmp));                           // mov     i0,[ea_tmp]
+	}
+
+	// the value of a store, in i2
+	auto const load_value =
+			[this, &block, &desc, immediate, bytes, reg] ()
+			{
+				if (immediate)
+					UML_MOV(block, I2, bytes ? uint8_t(desc.immediate) : desc.immediate);  // mov     i2,imm
+				else if (bytes)
+					UML_LOAD(block, I2, &m_core->reg.b[0], reg, SIZE_BYTE, SCALE_x1);      // load    i2,reg8
+				else
+					UML_MOV(block, I2, mem(&m_core->reg.d[reg]));                          // mov     i2,[reg]
+			};
+	auto const store_register =
+			[this, &block, bytes, reg] ()
+			{
+				if (bytes)
+					UML_STORE(block, &m_core->reg.b[0], reg, I2, SIZE_BYTE, SCALE_x1);     // store   reg8,i2
+				else
+					UML_MOV(block, mem(&m_core->reg.d[reg]), I2);                          // mov     [reg],i2
+			};
+
+	uml::code_label const miss = label++;
+	uml::code_label const complete = label++;
+	uint32_t const *const table = (store ? data.write : data.read).get();
+
+	// access directly if within one page that has an entry
+	if (!bytes)
+	{
+		UML_AND(block, I1, I0, 0xfff);                                      // and     i1,i0,0xfff
+		UML_CMP(block, I1, 0x1000 - 4);                                     // cmp     i1,0xffc
+		UML_JMPc(block, COND_A, miss);                                      // jmp     miss,a
+	}
+	UML_SHR(block, I1, I0, 12);                                             // shr     i1,i0,12
+	UML_LOAD(block, I1, table, I1, SIZE_DWORD, SCALE_x4);                   // load    i1,table[i1]
+	UML_CMP(block, I1, 0);                                                  // cmp     i1,0
+	UML_JMPc(block, COND_E, miss);                                          // jmp     miss,e
+	UML_ADD(block, I1, I1, I0);                                             // add     i1,i1,i0
+	if (store)
+	{
+		load_value();
+		UML_STORE(block, data.anchor - 1, I1, I2, size, SCALE_x1);          // store   [host],i2
+	}
+	else
+	{
+		UML_LOAD(block, I2, data.anchor - 1, I1, size, SCALE_x1);           // load    i2,[host]
+		store_register();
+	}
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[cycles]);   // sub     [cycles],[cycles],n
+	UML_JMP(block, complete);                                               // jmp     complete
+
+	UML_LABEL(block, miss);                                                 // miss:
+	UML_MOV(block, mem(&m_core->ea_tmp), I0);                               // mov     [ea_tmp],i0
+	UML_MOV(block, mem(&m_core->arg1), desc.segment);                       // mov     [arg1],segment
+	if (store)
+	{
+		load_value();
+		UML_MOV(block, mem(&m_core->arg0), I2);                             // mov     [arg0],i2
+		generate_call(block, bytes ? &i386_device::cfunc_access<uint8_t, true> : &i386_device::cfunc_access<uint32_t, true>);
+	}
+	else
+	{
+		generate_call(block, bytes ? &i386_device::cfunc_access<uint8_t, false> : &i386_device::cfunc_access<uint32_t, false>);
+	}
+	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_FAULT);                 // cmp     [drc_exit],fault
+	UML_JMPc(block, COND_E, slow);                                          // jmp     slow,e
+	if (!store)
+	{
+		UML_MOV(block, I2, mem(&m_core->arg0));                             // mov     i2,[arg0]
+		store_register();
+	}
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[cycles]);   // sub     [cycles],[cycles],n
+	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_NONE);                  // cmp     [drc_exit],none
+	UML_JMPc(block, COND_NE, slow);                                         // jmp     slow,ne
+
+	UML_LABEL(block, complete);                                             // complete:
+	if (!store && drc_verify_breaks(DRC_BREAK_LOAD))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), bytes ? reg : (reg * 4));      // mov     [ea_tmp],offset
 		generate_call(block, &i386_device::cfunc_verify_break_mov);         // callc   cfunc_verify_break_mov
 	}
 }
