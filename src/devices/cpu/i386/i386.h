@@ -477,7 +477,14 @@ protected:
 	uint32_t i386_translate(int segment, uint32_t ip, int rwn, int size = 1);
 	inline vtlb_entry get_permissions(uint32_t pte, int wp);
 	bool i386_translate_address(int intention, bool debug, offs_t *address, vtlb_entry *entry);
-	bool translate_address(int pl, int type, offs_t *address, uint32_t *error);
+	// The paging test is inlined into the callers; with paging off the linear address is the physical address
+	ATTR_FORCE_INLINE bool translate_address(int pl, int type, offs_t *address, uint32_t *error)
+	{
+		if (!(m_core->cr[0] & CR0_PG)) // Some (very few) old OS's won't work with this
+			return true;
+		return translate_paged_address(pl, type, address, error);
+	}
+	bool translate_paged_address(int pl, int type, offs_t *address, uint32_t *error);
 	void CHANGE_PC(uint32_t pc);
 	inline void NEAR_BRANCH(int32_t offs);
 	inline uint8_t FETCH();

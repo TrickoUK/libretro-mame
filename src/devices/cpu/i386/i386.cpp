@@ -308,12 +308,9 @@ bool i386_device::i386_translate_address(int intention, bool debug, offs_t *addr
 
 //#define TEST_TLB
 
-bool i386_device::translate_address(int pl, int type, offs_t *address, uint32_t *error)
+bool i386_device::translate_paged_address(int pl, int type, offs_t *address, uint32_t *error)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	if (!(m_core->cr[0] & CR0_PG)) // Some (very few) old OS's won't work with this
-		return true;
-
 	const vtlb_entry *table = vtlb_table();
 	offs_t index = *address >> 12;
 	vtlb_entry entry = table[index];
