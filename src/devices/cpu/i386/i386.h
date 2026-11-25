@@ -1678,7 +1678,15 @@ protected:
 	bool drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) const;
 	void generate_effective_address(drcuml_block &block, opcode_desc const &desc);
 	void generate_lea(drcuml_block &block, opcode_desc const &desc);
-	void generate_alu(drcuml_block &block, opcode_desc const &desc);
+	void generate_alu(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
+	void generate_extend(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
+	void generate_xchg(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
+	uint32_t drc_operand_cycles(unsigned memory_entry, unsigned register_entry) const;
+	void generate_operand_load(drcuml_block &block, opcode_desc const &desc, uml::operand_size size, bool sign, bool write, uml::code_label miss);
+	void generate_operand_store(drcuml_block &block, uml::operand_size size, uml::code_label &label);
+	void generate_direct_store(drcuml_block &block, uml::operand_size size, uml::parameter address, uml::parameter index, uml::code_label &label);
+	void generate_operand_miss(drcuml_block &block, opcode_desc const &desc, bool write, bool last, uml::code_label done, uml::code_label slow, uml::code_label miss, uml::code_label &label);
+	static void cfunc_page_miss(void *param);
 	void generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label done, uml::code_label &label);
 	void generate_register_mov(drcuml_block &block, opcode_desc const &desc);
 	void generate_slow_exit(drcuml_block &block);
@@ -1717,7 +1725,10 @@ protected:
 		DRC_BREAK_CARRY,
 		DRC_BREAK_STALE,
 		DRC_BREAK_COND,
-		DRC_BREAK_JCYCLES
+		DRC_BREAK_JCYCLES,
+		DRC_BREAK_RMW,
+		DRC_BREAK_RMWMISS,
+		DRC_BREAK_MCYCLES
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;
@@ -1733,6 +1744,8 @@ protected:
 	void drc_verify_break_save_flags();
 	void drc_verify_break_restore_flags();
 	void drc_verify_break_ea();
+	void drc_verify_break_rmw();
+	static void cfunc_verify_break_rmw(void *param);
 	void drc_verify_break_store(uint32_t &value) const;
 	template <typename Data> void drc_verify_store_start();
 	void drc_verify_store_end();

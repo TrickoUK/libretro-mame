@@ -14,13 +14,14 @@
 
     A block holds a straight sequence of instructions described by the front
     end.  MOV of 8 and 32 bits between registers, memory and immediates is
-    compiled, and so are LEA and the 8 and 32-bit forms of ADD, ADC, SUB,
-    SBB, CMP, AND, OR, XOR, TEST, INC, DEC, NEG and NOT whose operands are
-    registers and immediates, and the conditional jumps with 8 and 32-bit
-    displacements, all without prefixes.  Every other instruction is executed
-    with step(), the interpreter's per-instruction function, which fetches the
-    instruction from memory as it then is.  The block key is the linear
-    address of the first instruction together with the mode bits.
+    compiled, and so are LEA, the 8 and 32-bit forms of ADD, ADC, SUB, SBB,
+    CMP, AND, OR, XOR, TEST, INC, DEC, NEG and NOT with register, memory and
+    immediate operands, MOVZX and MOVSX, XCHG of a register with memory, and
+    the conditional jumps with 8 and 32-bit displacements, all without
+    prefixes.  Every other instruction is executed with step(), the
+    interpreter's per-instruction function, which fetches the instruction from
+    memory as it then is.  The block key is the linear address of the first
+    instruction together with the mode bits.
 
     Rules the blocks follow:
     - An instruction is started only while cycles are left, so a timeslice
@@ -63,11 +64,24 @@
       linear address.  Only DS and SS operands without prefixes are compiled.
     - Two tables indexed by linear page, one for reads and one for writes,
       give the host memory of a page.  An access goes straight to that memory
-      if it lies within one page that has an entry.  Every other access calls
-      a function which performs it as the interpreter does, with the segment
-      checks, so that faults, devices, accesses crossing pages and write taps
-      behave as there.  The function then enters the page in the table if all
-      of it is plain memory.
+      if it lies within one page that has an entry.  Every other access of a
+      MOV calls a function which performs it as the interpreter does, with the
+      segment checks, so that faults, devices, accesses crossing pages and
+      write taps behave as there.  The function then enters the page in the
+      table if all of it is plain memory.
+    - Any other instruction with a memory operand which cannot be accessed
+      directly is executed as a whole with step(), after the pages of the
+      address have been entered where they can be.  The order of its accesses,
+      the access checks of its handler, faults and device effects are then the
+      interpreter's.  The debugger would be told of such an instruction twice,
+      so it is not compiled while the debugger is enabled.
+    - An instruction which writes its memory operand goes straight to memory
+      only if the read and write entries of the page are the same, so that the
+      value read and the value written are in the same host memory.  XCHG is
+      locked on hardware when it has a memory operand; this is not modelled,
+      as in the interpreter.  An instruction with a LOCK prefix is stepped.
+    - A memory operand is read, the flags are stored, then memory is written,
+      and a register destination of XCHG is written last.
     - Page zero never has an entry, as the expand-down segments exclude
       offsets in it.
     - An entry reflects the A20 mask and the memory map, and the tables are
@@ -183,17 +197,23 @@ struct i386_device::drc_alu_form
 {
 	enum operation : uint8_t { ADD, ADC, SUB, SBB, AND, OR, XOR, NOT, INC, DEC };
 
+	// an operand is a register, as a byte or dword index, or one of these
+	static constexpr int IMMEDIATE = -1;
+	static constexpr int MEMORY = -2;
+
 	operation op;
 	bool bytes;         // operands of 8 rather than 32 bits
 	bool write;         // the result is written to the destination
 	bool clear_af;      // a logic operation which clears AF rather than leaving it
-	int dest;           // register receiving the result, as a byte or dword index
-	int first;          // register of the first operand, or -1 for the first immediate
-	int second;         // register of the second operand, or -1 for the second immediate
+	int dest;           // register receiving the result, or MEMORY
+	int first;          // first operand; the first immediate if IMMEDIATE
+	int second;         // second operand; the second immediate if IMMEDIATE
 	uint32_t imm_first;
 	uint32_t imm_second;
 	X86_CYCLES cycles;
+	X86_CYCLES register_cycles; // cycles of the form with a register in place of the memory operand
 
+	bool memory() const { return (dest == MEMORY) || (first == MEMORY) || (second == MEMORY); }
 	bool sets_flags() const { return op != NOT; }
 };
 
@@ -830,6 +850,22 @@ void i386_device::cfunc_access(void *param)
 }
 
 
+// Enters the pages of an address missed by a compiled instruction which the interpreter is to execute.  The linear
+// address is in ea_tmp, and arg1 is set if the instruction writes to it.
+void i386_device::cfunc_page_miss(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call(
+			[&cpu] ()
+			{
+				core_state const &core = *cpu.m_core;
+				cpu.drc_page_fill(core.ea_tmp, false);
+				if (core.arg1)
+					cpu.drc_page_fill(core.ea_tmp, true);
+			});
+}
+
+
 template <typename Data>
 void i386_device::cfunc_verify_store_start(void *param)
 {
@@ -856,6 +892,13 @@ void i386_device::cfunc_verify_break(void *param)
 {
 	i386_device &cpu = *static_cast<i386_device *>(param);
 	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_break(); });
+}
+
+
+void i386_device::cfunc_verify_break_rmw(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call([&cpu] () { cpu.drc_verify_break_rmw(); });
 }
 
 
@@ -1014,8 +1057,10 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 }
 
 
-// Decodes the compiled forms of the arithmetic and logic instructions, which have register and immediate operands and
-// no prefix, as the length shows.
+// Decodes the compiled forms of the arithmetic and logic instructions.  Each takes the cycle table entry that its
+// interpreter handler takes, which does not always follow the operand kinds: the immediate forms with a memory operand
+// take the entries of the register to memory forms.  The length shows that a form without a memory operand has no
+// prefix; the caller tests the prefixes of the forms with one.
 bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) const
 {
 	static constexpr drc_alu_form::operation ARITHMETIC[8] = {
@@ -1032,10 +1077,24 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 	form.clear_af = false;
 	form.imm_first = 0;
 	form.imm_second = 0;
-	form.second = -1;
-	form.cycles = CYCLES_ALU_REG_REG;
+	form.dest = form.first = form.second = drc_alu_form::IMMEDIATE;
+	form.cycles = form.register_cycles = CYCLES_ALU_REG_REG;
 
-	auto const rm = [&form, &fields] () { return form.bytes ? int(fields.rm.b) : int(fields.rm.d); };
+	auto const rm =
+			[&form, &fields, register_rm] ()
+			{
+				if (!register_rm)
+					return drc_alu_form::MEMORY;
+				return form.bytes ? int(fields.rm.b) : int(fields.rm.d);
+			};
+	// the entries of a form with a ModRM operand, according to whether that is a register or memory
+	auto const take =
+			[&form, register_rm] (X86_CYCLES register_entry, X86_CYCLES memory_entry)
+			{
+				form.register_cycles = register_entry;
+				form.cycles = register_rm ? register_entry : memory_entry;
+			};
+	auto const length_is = [&desc, register_rm] (unsigned length) { return !register_rm || (desc.length == length); };
 	auto const reg = [&form, &fields] () { return form.bytes ? int(fields.reg.b) : int(fields.reg.d); };
 	auto const accumulator = [&form] () { return form.bytes ? int(AL) : int(EAX); };
 
@@ -1063,8 +1122,11 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 			form.cycles = form.write ? CYCLES_ALU_IMM_ACC : CYCLES_CMP_IMM_ACC;
 			return desc.length == (form.bytes ? 2 : 5);
 		}
-		form.cycles = form.write ? CYCLES_ALU_REG_REG : CYCLES_CMP_REG_REG;
-		return register_rm && (desc.length == 2);
+		if (!form.write)
+			take(CYCLES_CMP_REG_REG, BIT(op, 1) ? CYCLES_CMP_MEM_REG : CYCLES_CMP_REG_MEM);
+		else
+			take(CYCLES_ALU_REG_REG, BIT(op, 1) ? CYCLES_ALU_MEM_REG : CYCLES_ALU_REG_MEM);
+		return length_is(2);
 	}
 	else if ((op >= 0x40) && (op <= 0x4f))
 	{
@@ -1087,8 +1149,11 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 		form.write = group != ARITHMETIC_CMP;
 		form.dest = form.first = rm();
 		form.imm_second = (op == 0x83) ? uint32_t(int32_t(int8_t(desc.immediate))) : desc.immediate;
-		form.cycles = form.write ? CYCLES_ALU_REG_REG : CYCLES_CMP_REG_REG;
-		return register_rm && (desc.length == ((op == 0x81) ? 6 : 3));
+		if (form.write)
+			take(CYCLES_ALU_REG_REG, CYCLES_ALU_REG_MEM);
+		else
+			take(CYCLES_CMP_REG_REG, CYCLES_CMP_REG_MEM);
+		return length_is((op == 0x81) ? 6 : 3);
 
 	case 0x84:
 	case 0x85:
@@ -1097,8 +1162,8 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 		form.write = false;
 		form.dest = form.first = rm();
 		form.second = reg();
-		form.cycles = CYCLES_TEST_REG_REG;
-		return register_rm && (desc.length == 2);
+		take(CYCLES_TEST_REG_REG, CYCLES_TEST_REG_MEM);
+		return length_is(2);
 
 	case 0xa8:
 	case 0xa9:
@@ -1121,18 +1186,18 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 			form.write = false;
 			form.clear_af = true;
 			form.imm_second = desc.immediate;
-			form.cycles = CYCLES_TEST_IMM_REG;
-			return register_rm && (desc.length == (form.bytes ? 3 : 6));
+			take(CYCLES_TEST_IMM_REG, CYCLES_TEST_IMM_MEM);
+			return length_is(form.bytes ? 3 : 6);
 		case 2:
 			form.op = drc_alu_form::NOT;
-			form.cycles = CYCLES_NOT_REG;
-			return register_rm && (desc.length == 2);
+			take(CYCLES_NOT_REG, CYCLES_NOT_MEM);
+			return length_is(2);
 		case 3:     // neg subtracts from zero
 			form.op = drc_alu_form::SUB;
-			form.first = -1;
+			form.first = drc_alu_form::IMMEDIATE;
 			form.second = rm();
-			form.cycles = CYCLES_NEG_REG;
-			return register_rm && (desc.length == 2);
+			take(CYCLES_NEG_REG, CYCLES_NEG_MEM);
+			return length_is(2);
 		default:
 			return false;
 		}
@@ -1143,8 +1208,11 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 		form.op = group ? drc_alu_form::DEC : drc_alu_form::INC;
 		form.dest = form.first = rm();
 		form.imm_second = 1;
-		form.cycles = group ? CYCLES_DEC_REG : CYCLES_INC_REG;
-		return register_rm && (group <= 1) && (desc.length == 2);
+		if (group)
+			take(CYCLES_DEC_REG, CYCLES_DEC_MEM);
+		else
+			take(CYCLES_INC_REG, CYCLES_INC_MEM);
+		return (group <= 1) && length_is(2);
 
 	default:
 		return false;
@@ -1153,11 +1221,22 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 
 
 // The compiled instructions are MOV of 8 and 32 bits between registers, memory and immediates, LEA, arithmetic and
-// logic on registers and immediates, and the conditional jumps, all without prefixes.
+// logic on registers, memory and immediates, MOVZX, MOVSX, XCHG with memory and the conditional jumps, all without
+// prefixes.
 bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 {
 	if (!desc.in_memory || (m_program->data_width() != 32) || !drc_can_bake_code())
 		return false;
+
+	// a prefix is recorded in one of these two fields
+	bool const unprefixed = !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT);
+
+	// a memory operand in the data or stack segment
+	bool const memory_operand = unprefixed && ((desc.segment == DS) || (desc.segment == SS));
+
+	// A miss of a memory operand of anything but MOV steps the whole instruction, which the debugger would then be
+	// told of twice
+	bool const steppable_operand = memory_operand && !debugger_enabled();
 
 	drc_alu_form form;
 	switch (desc.kind)
@@ -1165,22 +1244,21 @@ bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 	case opcode_desc::family::MOV:
 		break;
 	case opcode_desc::family::LEA:
-		return !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT) && (desc.opcode == 0x8d) && (desc.modrm < 0xc0);
+		return unprefixed && (desc.opcode == 0x8d) && (desc.modrm < 0xc0);
 	case opcode_desc::family::ALU:
 	case opcode_desc::family::TEST:
 	case opcode_desc::family::INCDEC:
-		return !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT) && drc_decode_alu(desc, form);
+		return unprefixed && drc_decode_alu(desc, form) && (!form.memory() || steppable_operand);
+	case opcode_desc::family::EXTEND:
+		return (desc.modrm >= 0xc0) ? (unprefixed && (desc.length == 3)) : steppable_operand;
+	case opcode_desc::family::XCHG:
+		return ((desc.opcode == 0x86) || (desc.opcode == 0x87)) && (desc.modrm < 0xc0) && steppable_operand;
 	case opcode_desc::family::JCC:
 		// the length shows that there is no prefix, such as a 16-bit operand size or a branch hint
-		return !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT)
-				&& (desc.length == ((desc.opcode < 0x80) ? 2 : 6));
+		return unprefixed && (desc.length == ((desc.opcode < 0x80) ? 2 : 6));
 	default:
 		return false;
 	}
-
-	// a memory operand in the data or stack segment; a prefix would be recorded in one of the other two fields
-	bool const memory_operand = !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT)
-			&& ((desc.segment == DS) || (desc.segment == SS));
 
 	switch (desc.opcode)
 	{
@@ -1256,6 +1334,16 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 			generate_jcc(block, desc, done, label);
 			return;
 		}
+		if (desc.kind == opcode_desc::family::EXTEND)
+		{
+			generate_extend(block, desc, last, done, slow, label);
+			return;
+		}
+		if (desc.kind == opcode_desc::family::XCHG)
+		{
+			generate_xchg(block, desc, last, done, slow, label);
+			return;
+		}
 		if (desc.kind != opcode_desc::family::MOV)
 		{
 			// a deliberate error: the flags of an instruction before a stepped one are lost
@@ -1265,7 +1353,7 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 					&& !last && !drc_compiles_natively(*desc.next());
 			if (lose_flags)
 				generate_call(block, &i386_device::cfunc_verify_break_save_flags);     // callc   cfunc_verify_break_save_flags
-			generate_alu(block, desc);
+			generate_alu(block, desc, last, done, slow, label);
 			if (lose_flags)
 				generate_call(block, &i386_device::cfunc_verify_break_restore_flags);  // callc   cfunc_verify_break_restore_flags
 			return;
@@ -1442,10 +1530,11 @@ void i386_device::generate_lea(drcuml_block &block, opcode_desc const &desc)
 }
 
 
-// Compiled arithmetic and logic on registers and immediates.  The operands are in i0 and i1 and the result in i2; i3 and
-// i4 are used to work out flags.  Each flag byte is stored with the value the interpreter's handler gives it.  Nothing
-// here can fault, call out or change the mode or the interrupt state.
-void i386_device::generate_alu(drcuml_block &block, opcode_desc const &desc)
+// Compiled arithmetic and logic.  The operands are in i0 and i1 and the result in i2; i3 and i4 are used to work out
+// flags.  A memory operand is read into i6 first, so that every form shares the flag path.  Each flag byte is stored with
+// the value the interpreter's handler gives it, before a result goes to memory.  A form without a memory operand cannot
+// fault, call out or change the mode or the interrupt state.
+void i386_device::generate_alu(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
 {
 	drc_alu_form form;
 	bool const decoded = drc_decode_alu(desc, form);
@@ -1459,6 +1548,12 @@ void i386_device::generate_alu(drcuml_block &block, opcode_desc const &desc)
 	bool const subtract = (form.op == drc_alu_form::SUB) || (form.op == drc_alu_form::SBB) || (form.op == drc_alu_form::DEC);
 	bool const carry_in = (form.op == drc_alu_form::ADC) || (form.op == drc_alu_form::SBB);
 	bool const carry_out = arithmetic && (form.op != drc_alu_form::INC) && (form.op != drc_alu_form::DEC);
+	bool const to_memory = form.write && (form.dest == drc_alu_form::MEMORY);
+	operand_size const size = form.bytes ? SIZE_BYTE : SIZE_DWORD;
+
+	uml::code_label const miss = form.memory() ? label++ : 0;
+	if (form.memory())
+		generate_operand_load(block, desc, size, false, to_memory, miss);
 
 	if (carry_in && drc_verify_breaks(DRC_BREAK_CARRY))
 		generate_call(block, &i386_device::cfunc_verify_break_carry);       // callc   cfunc_verify_break_carry
@@ -1466,7 +1561,9 @@ void i386_device::generate_alu(drcuml_block &block, opcode_desc const &desc)
 	auto const load_operand =
 			[this, &block, &form] (uml::parameter dest, int reg, uint32_t immediate)
 			{
-				if (reg < 0)
+				if (reg == drc_alu_form::MEMORY)
+					UML_MOV(block, dest, I6);                                           // mov     dest,i6
+				else if (reg == drc_alu_form::IMMEDIATE)
 					UML_MOV(block, dest, form.bytes ? (immediate & 0xff) : immediate);  // mov     dest,imm
 				else if (form.bytes)
 					UML_LOAD(block, dest, &m_core->reg.b[0], reg, SIZE_BYTE, SCALE_x1); // load    dest,reg8
@@ -1618,16 +1715,21 @@ void i386_device::generate_alu(drcuml_block &block, opcode_desc const &desc)
 		store_flag(m_core->PF, I3);
 	}
 
-	if (form.write)
+	if (to_memory)
+	{
+		generate_operand_store(block, size, label);
+	}
+	else if (form.write)
 	{
 		if (form.bytes)
 			UML_STORE(block, &m_core->reg.b[0], form.dest, I2, SIZE_BYTE, SCALE_x1);   // store   reg8,i2
 		else
 			UML_MOV(block, mem(&m_core->reg.d[form.dest]), I2);                        // mov     [reg],i2
 	}
-	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[form.cycles]);  // sub     [cycles],[cycles],n
+	uint32_t const cost = form.memory() ? drc_operand_cycles(form.cycles, form.register_cycles) : m_cycle_table_pm[form.cycles];
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), cost);      // sub     [cycles],[cycles],n
 
-	if (form.write && drc_verify_breaks(DRC_BREAK_ALU))
+	if (form.write && !to_memory && drc_verify_breaks(DRC_BREAK_ALU))
 	{
 		UML_MOV(block, mem(&m_core->ea_tmp), form.bytes ? form.dest : (form.dest * 4));  // mov     [ea_tmp],offset
 		generate_call(block, &i386_device::cfunc_verify_break_mov);         // callc   cfunc_verify_break_mov
@@ -1637,6 +1739,205 @@ void i386_device::generate_alu(drcuml_block &block, opcode_desc const &desc)
 		UML_MOV(block, mem(&m_core->ea_tmp), desc.pc % 6);                  // mov     [ea_tmp],flag
 		generate_call(block, &i386_device::cfunc_verify_break_flags);       // callc   cfunc_verify_break_flags
 	}
+
+	if (form.memory())
+		generate_operand_miss(block, desc, to_memory, last, done, slow, miss, label);
+}
+
+
+// Compiled MOVZX and MOVSX, from a register or memory of 8 or 16 bits to a 32-bit register.
+void i386_device::generate_extend(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
+{
+	bool const sign = BIT(desc.opcode, 3);
+	bool const words = BIT(desc.opcode, 0);
+	bool const memory = desc.modrm < 0xc0;
+	operand_size const size = words ? SIZE_WORD : SIZE_BYTE;
+	MODRM_TABLE const &fields = i386_MODRM_table[desc.modrm];
+	int const dest = fields.reg.d;
+
+	uml::code_label const miss = memory ? label++ : 0;
+	if (memory)
+	{
+		generate_operand_load(block, desc, size, sign, false, miss);
+	}
+	else
+	{
+		void const *const base = words ? static_cast<void const *>(&m_core->reg.w[0]) : static_cast<void const *>(&m_core->reg.b[0]);
+		int const source = words ? fields.rm.w : fields.rm.b;
+		memory_scale const scale = words ? SCALE_x2 : SCALE_x1;
+		if (sign)
+			UML_LOADS(block, I6, base, source, size, scale);                // loads   i6,reg
+		else
+			UML_LOAD(block, I6, base, source, size, scale);                 // load    i6,reg
+	}
+	UML_MOV(block, mem(&m_core->reg.d[dest]), I6);                          // mov     [reg],i6
+
+	X86_CYCLES const register_cycles = sign ? CYCLES_MOVSX_REG_REG : CYCLES_MOVZX_REG_REG;
+	uint32_t const cost = memory
+			? drc_operand_cycles(sign ? CYCLES_MOVSX_MEM_REG : CYCLES_MOVZX_MEM_REG, register_cycles)
+			: m_cycle_table_pm[register_cycles];
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), cost);      // sub     [cycles],[cycles],n
+
+	if (drc_verify_breaks(memory ? DRC_BREAK_LOAD : DRC_BREAK_MOV))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), dest * 4);                     // mov     [ea_tmp],offset
+		generate_call(block, &i386_device::cfunc_verify_break_mov);         // callc   cfunc_verify_break_mov
+	}
+
+	if (memory)
+		generate_operand_miss(block, desc, false, last, done, slow, miss, label);
+}
+
+
+// Compiled XCHG of a register with memory: memory is read, then written, and the register is written last.
+void i386_device::generate_xchg(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
+{
+	bool const bytes = desc.opcode == 0x86;
+	operand_size const size = bytes ? SIZE_BYTE : SIZE_DWORD;
+	int const reg = bytes ? i386_MODRM_table[desc.modrm].reg.b : i386_MODRM_table[desc.modrm].reg.d;
+
+	uml::code_label const miss = label++;
+	generate_operand_load(block, desc, size, false, true, miss);
+	if (bytes)
+		UML_LOAD(block, I2, &m_core->reg.b[0], reg, SIZE_BYTE, SCALE_x1);   // load    i2,reg8
+	else
+		UML_MOV(block, I2, mem(&m_core->reg.d[reg]));                       // mov     i2,[reg]
+	generate_operand_store(block, size, label);
+	if (bytes)
+		UML_STORE(block, &m_core->reg.b[0], reg, I6, SIZE_BYTE, SCALE_x1);  // store   reg8,i6
+	else
+		UML_MOV(block, mem(&m_core->reg.d[reg]), I6);                       // mov     [reg],i6
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), drc_operand_cycles(CYCLES_XCHG_REG_MEM, CYCLES_XCHG_REG_REG));  // sub     [cycles],[cycles],n
+
+	if (drc_verify_breaks(DRC_BREAK_LOAD))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), bytes ? reg : (reg * 4));      // mov     [ea_tmp],offset
+		generate_call(block, &i386_device::cfunc_verify_break_mov);         // callc   cfunc_verify_break_mov
+	}
+
+	generate_operand_miss(block, desc, true, last, done, slow, miss, label);
+}
+
+
+// The cycles taken by an instruction with a memory operand.  The deliberate error charges those of the register form
+// instead, or one more where the two are the same.
+uint32_t i386_device::drc_operand_cycles(unsigned memory_entry, unsigned register_entry) const
+{
+	uint32_t const cost = m_cycle_table_pm[memory_entry];
+	if (!drc_verify_breaks(DRC_BREAK_MCYCLES))
+		return cost;
+	uint32_t const other = m_cycle_table_pm[register_entry];
+	return (other != cost) ? other : (cost + 1);
+}
+
+
+// Reads the memory operand of a compiled instruction other than MOV.  The linear address is left in i0 and i7, the
+// index which reaches the host memory from the anchor in i5 and the value, extended to 32 bits, in i6.  Control goes to
+// the miss label, with the address in i0 and nothing changed, unless the operand lies within one page that can be
+// accessed directly: for an operand which is also written, the read and write entries of the page have to be the same,
+// which they are only where both reach the same host memory.
+void i386_device::generate_operand_load(drcuml_block &block, opcode_desc const &desc, uml::operand_size size, bool sign, bool write, uml::code_label miss)
+{
+	drc_data_pages const &data = *m_drc_data;
+
+	generate_effective_address(block, desc);
+	if (drc_verify_breaks(DRC_BREAK_EA))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), I0);                           // mov     [ea_tmp],i0
+		generate_call(block, &i386_device::cfunc_verify_break_ea);          // callc   cfunc_verify_break_ea
+		UML_MOV(block, I0, mem(&m_core->ea_tmp));                           // mov     i0,[ea_tmp]
+	}
+	UML_MOV(block, I7, I0);                                                 // mov     i7,i0
+
+	if (size != SIZE_BYTE)
+	{
+		UML_AND(block, I1, I0, 0xfff);                                      // and     i1,i0,0xfff
+		UML_CMP(block, I1, 0x1000 - ((size == SIZE_WORD) ? 2 : 4));         // cmp     i1,0x1000-size
+		UML_JMPc(block, COND_A, miss);                                      // jmp     miss,a
+	}
+	UML_SHR(block, I1, I0, 12);                                             // shr     i1,i0,12
+
+	// a deliberate error: a page that may only be read is written
+	bool const test_write = write && !drc_verify_breaks(DRC_BREAK_RMWMISS);
+	uint32_t const *const table = (test_write ? data.write : data.read).get();
+	UML_LOAD(block, I5, table, I1, SIZE_DWORD, SCALE_x4);                   // load    i5,table[i1]
+	UML_CMP(block, I5, 0);                                                  // cmp     i5,0
+	UML_JMPc(block, COND_E, miss);                                          // jmp     miss,e
+	if (test_write)
+	{
+		UML_LOAD(block, I1, data.read.get(), I1, SIZE_DWORD, SCALE_x4);     // load    i1,read[i1]
+		UML_CMP(block, I1, I5);                                             // cmp     i1,i5
+		UML_JMPc(block, COND_NE, miss);                                     // jmp     miss,ne
+	}
+	UML_ADD(block, I5, I5, I0);                                             // add     i5,i5,i0
+	if (sign)
+		UML_LOADS(block, I6, data.anchor - 1, I5, size, SCALE_x1);          // loads   i6,[host]
+	else
+		UML_LOAD(block, I6, data.anchor - 1, I5, size, SCALE_x1);           // load    i6,[host]
+}
+
+
+// writes i2 to the memory operand read by generate_operand_load()
+void i386_device::generate_operand_store(drcuml_block &block, uml::operand_size size, uml::code_label &label)
+{
+	// a deliberate error: the value read is written back
+	if (drc_verify_breaks(DRC_BREAK_RMW))
+	{
+		UML_MOV(block, mem(&m_core->arg0), I2);                             // mov     [arg0],i2
+		UML_MOV(block, mem(&m_core->arg1), I6);                             // mov     [arg1],i6
+		generate_call(block, &i386_device::cfunc_verify_break_rmw);         // callc   cfunc_verify_break_rmw
+		UML_MOV(block, I2, mem(&m_core->arg0));                             // mov     i2,[arg0]
+	}
+	generate_direct_store(block, size, I7, I5, label);
+}
+
+
+// Writes i2 to host memory, given the linear address and the index which reaches the host memory from the anchor.  The
+// verifier examines the entry and records the write before and after the store of a checked block.
+void i386_device::generate_direct_store(drcuml_block &block, uml::operand_size size, uml::parameter address, uml::parameter index, uml::code_label &label)
+{
+	drc_data_pages const &data = *m_drc_data;
+	uml::code_label const unrecorded = m_verifier ? label++ : 0;
+	if (m_verifier)
+	{
+		UML_CMP(block, mem(&m_core->verify_checking), 0);                   // cmp     [verify_checking],0
+		UML_JMPc(block, COND_E, unrecorded);                                // jmp     unrecorded,e
+		UML_MOV(block, mem(&m_core->ea_tmp), address);                      // mov     [ea_tmp],address
+		UML_MOV(block, mem(&m_core->arg0), I2);                             // mov     [arg0],i2
+		UML_MOV(block, mem(&m_core->arg1), index);                          // mov     [arg1],index
+		generate_call(block, (size == SIZE_BYTE) ? &i386_device::cfunc_verify_store_start<uint8_t> : &i386_device::cfunc_verify_store_start<uint32_t>);
+		UML_MOV(block, I2, mem(&m_core->arg0));                             // mov     i2,[arg0]
+		UML_LABEL(block, unrecorded);                                       // unrecorded:
+	}
+	UML_STORE(block, data.anchor - 1, index, I2, size, SCALE_x1);           // store   [host],i2
+	if (m_verifier)
+	{
+		uml::code_label const unchecked = label++;
+		UML_CMP(block, mem(&m_core->verify_checking), 0);                   // cmp     [verify_checking],0
+		UML_JMPc(block, COND_E, unchecked);                                 // jmp     unchecked,e
+		generate_call(block, &i386_device::cfunc_verify_store_end);         // callc   cfunc_verify_store_end
+		UML_LABEL(block, unchecked);                                        // unchecked:
+	}
+}
+
+
+// Ends a compiled instruction with a memory operand.  On a miss the pages of the address are entered in the tables if
+// they can be, and the interpreter executes the whole instruction, which keeps its order of accesses, its faults and
+// its effects on devices and compiled code.
+void i386_device::generate_operand_miss(drcuml_block &block, opcode_desc const &desc, bool write, bool last, uml::code_label done, uml::code_label slow, uml::code_label miss, uml::code_label &label)
+{
+	uml::code_label const complete = label++;
+	UML_JMP(block, complete);                                               // jmp     complete
+
+	UML_LABEL(block, miss);                                                 // miss:
+	UML_MOV(block, mem(&m_core->ea_tmp), I0);                               // mov     [ea_tmp],i0
+	UML_MOV(block, mem(&m_core->arg1), write ? 1 : 0);                      // mov     [arg1],write
+	generate_call(block, &i386_device::cfunc_page_miss);                    // callc   cfunc_page_miss
+	UML_MOV(block, mem(&m_core->eip), desc.pc);                             // mov     [eip],pc
+	UML_MOV(block, mem(&m_core->pc), desc.pc);                              // mov     [pc],pc
+	generate_step(block, desc, last, done, slow);
+
+	UML_LABEL(block, complete);                                             // complete:
 }
 
 
@@ -1817,28 +2118,7 @@ void i386_device::generate_memory_mov(drcuml_block &block, opcode_desc const &de
 	if (store)
 	{
 		load_value();
-		// the verifier examines the entry and records the write before and after the store of a checked block
-		uml::code_label const unrecorded = m_verifier ? label++ : 0;
-		if (m_verifier)
-		{
-			UML_CMP(block, mem(&m_core->verify_checking), 0);               // cmp     [verify_checking],0
-			UML_JMPc(block, COND_E, unrecorded);                            // jmp     unrecorded,e
-			UML_MOV(block, mem(&m_core->ea_tmp), I0);                       // mov     [ea_tmp],i0
-			UML_MOV(block, mem(&m_core->arg0), I2);                         // mov     [arg0],i2
-			UML_MOV(block, mem(&m_core->arg1), I1);                         // mov     [arg1],i1
-			generate_call(block, bytes ? &i386_device::cfunc_verify_store_start<uint8_t> : &i386_device::cfunc_verify_store_start<uint32_t>);
-			UML_MOV(block, I2, mem(&m_core->arg0));                         // mov     i2,[arg0]
-			UML_LABEL(block, unrecorded);                                   // unrecorded:
-		}
-		UML_STORE(block, data.anchor - 1, I1, I2, size, SCALE_x1);          // store   [host],i2
-		if (m_verifier)
-		{
-			uml::code_label const unchecked = label++;
-			UML_CMP(block, mem(&m_core->verify_checking), 0);               // cmp     [verify_checking],0
-			UML_JMPc(block, COND_E, unchecked);                             // jmp     unchecked,e
-			generate_call(block, &i386_device::cfunc_verify_store_end);     // callc   cfunc_verify_store_end
-			UML_LABEL(block, unchecked);                                    // unchecked:
-		}
+		generate_direct_store(block, size, I0, I1, label);
 	}
 	else
 	{

@@ -89,6 +89,15 @@
         jcycles  charges each way of a compiled conditional jump the cycles of
                  the other, and in checked blocks one more for a taken jump,
                  as the two are the same on some CPUs
+        rmw      writes back the value read by each compiled instruction of
+                 checked blocks which writes its memory operand, other than MOV
+        rmwmiss  lets such an instruction go straight to a page which has
+                 only a read table entry, such as one holding compiled code.
+                 This also applies in blocks that are not checked.
+        mcycles  charges each compiled instruction with a memory operand,
+                 other than MOV, the cycles of its register form, or one more
+                 where the two are the same.  This also applies in blocks that
+                 are not checked.
         nodrop   leaves the write table entry of a page that starts being
                  watched for writes to compiled code.  This also applies
                  without the verifier.
@@ -289,7 +298,10 @@ void i386_device::drc_verify_start()
 				{ "carry", DRC_BREAK_CARRY },
 				{ "stale", DRC_BREAK_STALE },
 				{ "cond", DRC_BREAK_COND },
-				{ "jcycles", DRC_BREAK_JCYCLES } };
+				{ "jcycles", DRC_BREAK_JCYCLES },
+				{ "rmw", DRC_BREAK_RMW },
+				{ "rmwmiss", DRC_BREAK_RMWMISS },
+				{ "mcycles", DRC_BREAK_MCYCLES } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
@@ -398,6 +410,15 @@ void i386_device::drc_verify_break_restore_flags()
 	uint8_t *const flags[6] = { &m_core->CF, &m_core->PF, &m_core->AF, &m_core->ZF, &m_core->SF, &m_core->OF };
 	for (int i = 0; i < 6; i++)
 		*flags[i] = v.saved_flags[i];
+}
+
+
+// replaces the value a compiled instruction writes to its memory operand, in arg0, with the value it read, in arg1
+void i386_device::drc_verify_break_rmw()
+{
+	drc_verifier const &v = *m_verifier;
+	if (v.recording && !v.unsafe)
+		m_core->arg0 = m_core->arg1;
 }
 
 
