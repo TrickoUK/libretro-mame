@@ -84,6 +84,11 @@
         stale    leaves the flags as they were before each compiled
                  instruction of checked blocks which sets them and is followed
                  by a stepped instruction
+        cond     inverts the condition of the compiled conditional jumps of
+                 checked blocks whose address is a multiple of three
+        jcycles  charges each way of a compiled conditional jump the cycles of
+                 the other, and in checked blocks one more for a taken jump,
+                 as the two are the same on some CPUs
         nodrop   leaves the write table entry of a page that starts being
                  watched for writes to compiled code.  This also applies
                  without the verifier.
@@ -282,7 +287,9 @@ void i386_device::drc_verify_start()
 				{ "alu", DRC_BREAK_ALU },
 				{ "flags", DRC_BREAK_FLAGS },
 				{ "carry", DRC_BREAK_CARRY },
-				{ "stale", DRC_BREAK_STALE } };
+				{ "stale", DRC_BREAK_STALE },
+				{ "cond", DRC_BREAK_COND },
+				{ "jcycles", DRC_BREAK_JCYCLES } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)

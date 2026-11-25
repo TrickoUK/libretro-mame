@@ -16,10 +16,11 @@
     end.  MOV of 8 and 32 bits between registers, memory and immediates is
     compiled, and so are LEA and the 8 and 32-bit forms of ADD, ADC, SUB,
     SBB, CMP, AND, OR, XOR, TEST, INC, DEC, NEG and NOT whose operands are
-    registers and immediates, all without prefixes.  Every other instruction
-    is executed with step(), the interpreter's per-instruction function, which
-    fetches the instruction from memory as it then is.  The block key is the
-    linear address of the first instruction together with the mode bits.
+    registers and immediates, and the conditional jumps with 8 and 32-bit
+    displacements, all without prefixes.  Every other instruction is executed
+    with step(), the interpreter's per-instruction function, which fetches the
+    instruction from memory as it then is.  The block key is the linear
+    address of the first instruction together with the mode bits.
 
     Rules the blocks follow:
     - An instruction is started only while cycles are left, so a timeslice
@@ -51,6 +52,11 @@
       32-bit logic takes ZF and SF from a compare of the result.  PF, AF and
       all flags of 8-bit operations are computed from the operands and the
       result.
+    - A compiled conditional jump tests the flag bytes as its interpreter
+      handler does.  A taken jump ends the block, and execution goes on to the
+      next instruction of the block otherwise.  Each of the two ways charges
+      the cycles of the handler.  The target is not checked against the
+      segment limit, as in the interpreter.
 
     Compiled memory accesses:
     - The segment of an operand has base zero, so the effective address is the
@@ -1146,8 +1152,8 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 }
 
 
-// The compiled instructions are MOV of 8 and 32 bits between registers, memory and immediates, LEA, and arithmetic and
-// logic on registers and immediates, all without prefixes.
+// The compiled instructions are MOV of 8 and 32 bits between registers, memory and immediates, LEA, arithmetic and
+// logic on registers and immediates, and the conditional jumps, all without prefixes.
 bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 {
 	if (!desc.in_memory || (m_program->data_width() != 32) || !drc_can_bake_code())
@@ -1164,6 +1170,10 @@ bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 	case opcode_desc::family::TEST:
 	case opcode_desc::family::INCDEC:
 		return !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT) && drc_decode_alu(desc, form);
+	case opcode_desc::family::JCC:
+		// the length shows that there is no prefix, such as a 16-bit operand size or a branch hint
+		return !desc.prefixes && (desc.override_segment == opcode_desc::NO_SEGMENT)
+				&& (desc.length == ((desc.opcode < 0x80) ? 2 : 6));
 	default:
 		return false;
 	}
@@ -1239,6 +1249,11 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 		if (desc.kind == opcode_desc::family::LEA)
 		{
 			generate_lea(block, desc);
+			return;
+		}
+		if (desc.kind == opcode_desc::family::JCC)
+		{
+			generate_jcc(block, desc, done, label);
 			return;
 		}
 		if (desc.kind != opcode_desc::family::MOV)
@@ -1622,6 +1637,89 @@ void i386_device::generate_alu(drcuml_block &block, opcode_desc const &desc)
 		UML_MOV(block, mem(&m_core->ea_tmp), desc.pc % 6);                  // mov     [ea_tmp],flag
 		generate_call(block, &i386_device::cfunc_verify_break_flags);       // callc   cfunc_verify_break_flags
 	}
+}
+
+
+// Compiled conditional jumps.  The condition is that of the interpreter's handler, worked out from the flag bytes: the
+// low bit of the opcode inverts the condition given by the other three bits of the low half.  A taken jump leaves the
+// block through the label at its end.  Nothing here can fault, call out or change the mode or the interrupt state.
+void i386_device::generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label done, uml::code_label &label)
+{
+	bool const short_form = desc.opcode < 0x80;
+	unsigned const condition = BIT(desc.opcode, 0, 4);
+
+	auto const load_flag =
+			[&block] (uml::parameter dest, uint8_t &flag)
+			{
+				UML_LOAD(block, dest, &flag, 0, SIZE_BYTE, SCALE_x1);               // load    dest,flag
+			};
+
+	// i0 is non-zero if the condition of the even opcode holds
+	switch (condition >> 1)
+	{
+	case 0: // o
+		load_flag(I0, m_core->OF);
+		break;
+	case 1: // b
+		load_flag(I0, m_core->CF);
+		break;
+	case 2: // z
+		load_flag(I0, m_core->ZF);
+		break;
+	case 3: // be
+		load_flag(I0, m_core->CF);
+		load_flag(I1, m_core->ZF);
+		UML_OR(block, I0, I0, I1);                                          // or      i0,i0,i1
+		break;
+	case 4: // s
+		load_flag(I0, m_core->SF);
+		break;
+	case 5: // p
+		load_flag(I0, m_core->PF);
+		break;
+	case 6: // l
+		load_flag(I0, m_core->SF);
+		load_flag(I1, m_core->OF);
+		UML_XOR(block, I0, I0, I1);                                         // xor     i0,i0,i1
+		break;
+	case 7: // le
+		load_flag(I0, m_core->SF);
+		load_flag(I1, m_core->OF);
+		UML_XOR(block, I0, I0, I1);                                         // xor     i0,i0,i1
+		load_flag(I1, m_core->ZF);
+		UML_OR(block, I0, I0, I1);                                          // or      i0,i0,i1
+		break;
+	}
+
+	// a deliberate error: the condition of some jumps, chosen by their address, is inverted in checked blocks
+	if (drc_verify_breaks(DRC_BREAK_COND) && !(desc.pc % 3))
+	{
+		UML_CMP(block, I0, 0);                                              // cmp     i0,0
+		UML_SETc(block, COND_NZ, I0);                                       // set     i0,nz
+		UML_XOR(block, I0, I0, mem(&m_core->verify_checking));              // xor     i0,i0,[verify_checking]
+	}
+
+	uint32_t taken = m_cycle_table_pm[short_form ? CYCLES_JCC_DISP8 : CYCLES_JCC_FULL_DISP];
+	uint32_t not_taken = m_cycle_table_pm[short_form ? CYCLES_JCC_DISP8_NOBRANCH : CYCLES_JCC_FULL_DISP_NOBRANCH];
+	bool const swap_cycles = drc_verify_breaks(DRC_BREAK_JCYCLES);
+	if (swap_cycles)
+		std::swap(taken, not_taken);
+
+	uml::code_label const untaken = label++;
+	UML_CMP(block, I0, 0);                                                  // cmp     i0,0
+	UML_JMPc(block, BIT(condition, 0) ? COND_NZ : COND_Z, untaken);         // jmp     untaken,z/nz
+
+	// the address and the instruction pointer are the same with a flat code segment
+	UML_MOV(block, mem(&m_core->eip), uint32_t(desc.targetpc));             // mov     [eip],target
+	UML_MOV(block, mem(&m_core->pc), uint32_t(desc.targetpc));              // mov     [pc],target
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), taken);      // sub     [cycles],[cycles],n
+	// a deliberate error: one more cycle, so that the swapped costs show on a CPU where both are the same
+	if (swap_cycles)
+		UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), mem(&m_core->verify_checking));
+	UML_JMP(block, done);                                                   // jmp     done
+
+	UML_LABEL(block, untaken);                                              // untaken:
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), not_taken);  // sub     [cycles],[cycles],n
 }
 
 

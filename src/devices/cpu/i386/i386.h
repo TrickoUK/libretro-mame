@@ -1679,6 +1679,7 @@ protected:
 	void generate_effective_address(drcuml_block &block, opcode_desc const &desc);
 	void generate_lea(drcuml_block &block, opcode_desc const &desc);
 	void generate_alu(drcuml_block &block, opcode_desc const &desc);
+	void generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label done, uml::code_label &label);
 	void generate_register_mov(drcuml_block &block, opcode_desc const &desc);
 	void generate_slow_exit(drcuml_block &block);
 	static void cfunc_step(void *param);
@@ -1714,7 +1715,9 @@ protected:
 		DRC_BREAK_ALU,
 		DRC_BREAK_FLAGS,
 		DRC_BREAK_CARRY,
-		DRC_BREAK_STALE
+		DRC_BREAK_STALE,
+		DRC_BREAK_COND,
+		DRC_BREAK_JCYCLES
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;
