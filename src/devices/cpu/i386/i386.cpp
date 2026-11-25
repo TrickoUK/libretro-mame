@@ -2963,6 +2963,97 @@ void i386_device::i386_set_a20_line(int state)
 	vtlb_flush_dynamic();
 }
 
+// Executes one instruction, including the interrupt and breakpoint checks that precede it and the trap and fault handling that follow it.
+void i386_device::step()
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	i386_check_irq_line();
+
+	// The LE and GE bits of DR7 aren't currently implemented because they could potentially require cycle-accurate emulation.
+	if((m_dr[7] & 0xff) != 0) // If all of the breakpoints are disabled, skip checking for instruction breakpoint hitting entirely.
+	for(int i = 0; i < 4; i++)
+	{
+		bool dri_enabled = (m_dr[7] & (1 << ((i << 1) + 1))) || (m_dr[7] & (1 << (i << 1))); // Check both local AND global enable bits for this breakpoint.
+		if(dri_enabled && !m_core->RF)
+		{
+			int breakpoint_type = (m_dr[7] >> (i << 2)) & 3;
+			int breakpoint_length = (m_dr[7] >> ((i << 2) + 2)) & 3;
+			if(breakpoint_type == 0)
+			{
+				uint32_t phys_addr = 0;
+				uint32_t error;
+				if(m_core->cr[0] & CR0_PG)
+				{
+					offs_t addr = m_dr[i];
+					phys_addr = translate_address(m_core->CPL, TR_FETCH, &addr, &error);
+					m_dr[i] = uint32_t(addr);
+				}
+				else
+				{
+					phys_addr = m_dr[i];
+				}
+				if(breakpoint_length != 0) // Not one byte in length? logerror it, I have no idea how this works on real processors.
+				{
+					LOGMASKED(LOG_INVALID_OPCODE, "i386: Breakpoint length not 1 byte on an instruction breakpoint\n");
+				}
+				if(m_core->pc == phys_addr)
+				{
+					// The processor never automatically clears bits in DR6. It only sets them.
+					m_dr[6] |= 1 << i;
+					i386_trap(1,0);
+					break;
+				}
+			}
+		}
+	}
+
+	m_core->operand_size = m_core->sreg[CS].d;
+	m_core->xmm_operand_size = 0;
+	m_core->address_size = m_core->sreg[CS].d;
+	m_core->operand_prefix = 0;
+	m_core->address_prefix = 0;
+
+	m_core->ext = 1;
+	int old_tf = m_core->TF;
+
+	m_core->segment_prefix = 0;
+	m_core->prev_eip = m_core->eip;
+
+	debugger_instruction_hook(m_core->pc);
+
+	if(m_core->delayed_interrupt_enable != 0)
+	{
+		m_core->IF = 1;
+		m_core->delayed_interrupt_enable = 0;
+	}
+#ifdef DEBUG_MISSING_OPCODE
+	m_opcode_bytes_length = 0;
+	m_opcode_pc = m_core->pc;
+	m_opcode_addrs[m_opcode_addrs_index] = m_opcode_pc;
+	m_opcode_addrs_index = (m_opcode_addrs_index + 1) & 15;
+#endif
+	try
+	{
+		i386_decode_opcode();
+		if(m_core->TF && old_tf)
+		{
+			m_core->prev_eip = m_core->eip;
+			m_core->ext = 1;
+			m_dr[6] |= (1 << 14); //Set BS bit of DR6.
+			i386_trap(1,0);
+		}
+		if(m_core->lock && (m_opcode != 0xf0))
+			m_core->lock = false;
+	}
+	catch(uint64_t e)
+	{
+		m_core->ext = 1;
+		i386_trap_with_error(e&0xffffffff,0,0,e>>32);
+	}
+	if(m_core->RF && m_core->auto_clear_RF) m_core->RF = 0;
+	if(!m_core->auto_clear_RF) m_core->auto_clear_RF = true;
+}
+
 void i386_device::execute_run()
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
@@ -2978,93 +3069,7 @@ void i386_device::execute_run()
 	}
 
 	while( m_core->cycles > 0 )
-	{
-		i386_check_irq_line();
-
-		// The LE and GE bits of DR7 aren't currently implemented because they could potentially require cycle-accurate emulation.
-		if((m_dr[7] & 0xff) != 0) // If all of the breakpoints are disabled, skip checking for instruction breakpoint hitting entirely.
-		for(int i = 0; i < 4; i++)
-		{
-			bool dri_enabled = (m_dr[7] & (1 << ((i << 1) + 1))) || (m_dr[7] & (1 << (i << 1))); // Check both local AND global enable bits for this breakpoint.
-			if(dri_enabled && !m_core->RF)
-			{
-				int breakpoint_type = (m_dr[7] >> (i << 2)) & 3;
-				int breakpoint_length = (m_dr[7] >> ((i << 2) + 2)) & 3;
-				if(breakpoint_type == 0)
-				{
-					uint32_t phys_addr = 0;
-					uint32_t error;
-					if(m_core->cr[0] & CR0_PG)
-					{
-						offs_t addr = m_dr[i];
-						phys_addr = translate_address(m_core->CPL, TR_FETCH, &addr, &error);
-						m_dr[i] = uint32_t(addr);
-					}
-					else
-					{
-						phys_addr = m_dr[i];
-					}
-					if(breakpoint_length != 0) // Not one byte in length? logerror it, I have no idea how this works on real processors.
-					{
-						LOGMASKED(LOG_INVALID_OPCODE, "i386: Breakpoint length not 1 byte on an instruction breakpoint\n");
-					}
-					if(m_core->pc == phys_addr)
-					{
-						// The processor never automatically clears bits in DR6. It only sets them.
-						m_dr[6] |= 1 << i;
-						i386_trap(1,0);
-						break;
-					}
-				}
-			}
-		}
-
-		m_core->operand_size = m_core->sreg[CS].d;
-		m_core->xmm_operand_size = 0;
-		m_core->address_size = m_core->sreg[CS].d;
-		m_core->operand_prefix = 0;
-		m_core->address_prefix = 0;
-
-		m_core->ext = 1;
-		int old_tf = m_core->TF;
-
-		m_core->segment_prefix = 0;
-		m_core->prev_eip = m_core->eip;
-
-		debugger_instruction_hook(m_core->pc);
-
-		if(m_core->delayed_interrupt_enable != 0)
-		{
-			m_core->IF = 1;
-			m_core->delayed_interrupt_enable = 0;
-		}
-#ifdef DEBUG_MISSING_OPCODE
-		m_opcode_bytes_length = 0;
-		m_opcode_pc = m_core->pc;
-		m_opcode_addrs[m_opcode_addrs_index] = m_opcode_pc;
-		m_opcode_addrs_index = (m_opcode_addrs_index + 1) & 15;
-#endif
-		try
-		{
-			i386_decode_opcode();
-			if(m_core->TF && old_tf)
-			{
-				m_core->prev_eip = m_core->eip;
-				m_core->ext = 1;
-				m_dr[6] |= (1 << 14); //Set BS bit of DR6.
-				i386_trap(1,0);
-			}
-			if(m_core->lock && (m_opcode != 0xf0))
-				m_core->lock = false;
-		}
-		catch(uint64_t e)
-		{
-			m_core->ext = 1;
-			i386_trap_with_error(e&0xffffffff,0,0,e>>32);
-		}
-		if(m_core->RF && m_core->auto_clear_RF) m_core->RF = 0;
-		if(!m_core->auto_clear_RF) m_core->auto_clear_RF = true;
-	}
+		step();
 }
 
 /*************************************************************************/
