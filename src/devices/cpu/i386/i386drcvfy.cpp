@@ -124,12 +124,13 @@
         x87state inverts a bit of an x87 register after checked blocks
         x87val   inverts the low bit of the registers written by each compiled
                  x87 instruction of checked blocks which writes any; of C0 in
-                 the status word after fcom and fcomp with a memory operand
+                 the status word after fcom and fcomp with a memory operand,
+                 and of the value to be written by fst and fstp to memory
         x87pe    clears the precision exception flag after each compiled x87
                  instruction of checked blocks other than fnstsw
         x87tag   undoes the tag word update of each such instruction; after
-                 fxch, fchs and fabs, inverts a bit of the tags of the
-                 registers named instead
+                 fxch, fchs, fabs and fst to memory, inverts a bit of the tags
+                 of the registers named instead
         x87cycles
                  takes one more cycle for each compiled x87 instruction of
                  checked blocks
@@ -144,15 +145,24 @@
                  instruction pointer after fxch, which leaves the data pointer)
         x87sf    leaves the SoftFloat inexact flag set after each compiled x87
                  instruction of checked blocks
-        x87ea    moves the effective address of the compiled x87 loads of
-                 checked blocks by four bytes
+        x87ea    moves the effective address of the compiled x87 loads and
+                 stores of checked blocks by four bytes
         x87dsel  records the data segment selector for a compiled x87
                  instruction of checked blocks whose operand is in the stack
                  segment
         x87dptr  records the offset of the operand of a compiled x87
                  instruction of checked blocks plus one
         x87miss  treats a miss of a compiled x87 load of checked blocks as a
-                 hit which reads zero, instead of executing it with step()
+                 hit which reads zero, and one of a store as a hit which writes
+                 nothing, instead of executing it with step().  This models a
+                 miss taken for a hit; no unchecked access is made.
+        x87store leaves out the write of the compiled x87 stores of checked
+                 blocks
+        x87sflag makes that write also where the instruction refuses it
+        x87pop   undoes the pop of the compiled fstp to memory of checked
+                 blocks
+        x87size  writes only four bytes for a compiled fst or fstp of a 64-bit
+                 operand of checked blocks
 
 ***************************************************************************/
 
@@ -217,10 +227,11 @@ struct i386_device::drc_verifier
 	// the arithmetic flags as they were before an instruction, for a deliberate error
 	uint8_t saved_flags[6] = { };
 
-	// the store being made by generated code: the two dwords it can reach and what they have to hold afterwards
+	// the store being made by generated code: the dwords it reaches and what they have to hold afterwards
 	bool store_pending = false;
-	uint32_t store_address[2] = { };
-	uint32_t store_result[2] = { };
+	unsigned store_dwords = 0;
+	uint32_t store_address[3] = { };
+	uint32_t store_result[3] = { };
 	bool remap = true;
 	// instructions executed when the block wrote to compiled code, zero if it did not
 	uint32_t code_written = 0;
@@ -373,7 +384,11 @@ void i386_device::drc_verify_start()
 				{ "x87ea", DRC_BREAK_X87EA },
 				{ "x87dsel", DRC_BREAK_X87DSEL },
 				{ "x87dptr", DRC_BREAK_X87DPTR },
-				{ "x87miss", DRC_BREAK_X87MISS } };
+				{ "x87miss", DRC_BREAK_X87MISS },
+				{ "x87store", DRC_BREAK_X87STORE },
+				{ "x87sflag", DRC_BREAK_X87SFLAG },
+				{ "x87pop", DRC_BREAK_X87POP },
+				{ "x87size", DRC_BREAK_X87SIZE } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
@@ -509,13 +524,20 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 	// the physical numbers of the top of stack before and after the instruction
 	int const top = BIT(status, X87_SW_TOP_SHIFT, 3);
 	int const new_top = BIT(core.x87_sw, X87_SW_TOP_SHIFT, 3);
+	// fst and fstp with a memory operand, and fstp alone
+	bool const store = (modrm < 0xc0) && ((opcode == 0xd9) || (opcode == 0xdd)) && ((BIT(modrm, 3, 3) == 2) || (BIT(modrm, 3, 3) == 3));
+	bool const store_pop = store && (BIT(modrm, 3, 3) == 3);
 
 	switch (v.sabotage)
 	{
 	case DRC_BREAK_X87VAL:
 		{
 			auto const invert = [&core] (int reg) { core.x87_reg[reg & 7].signif ^= 1; };
-			if ((opcode == 0xd8) && (modrm < 0xc0) && ((BIT(modrm, 3, 3) == 2) || (BIT(modrm, 3, 3) == 3)))
+			if (store)
+			{
+				core.x87_store_value ^= 1;      // the value to be written
+			}
+			else if ((opcode == 0xd8) && (modrm < 0xc0) && ((BIT(modrm, 3, 3) == 2) || (BIT(modrm, 3, 3) == 3)))
 			{
 				core.x87_sw ^= X87_SW_C0;       // fcom and fcomp write no register
 			}
@@ -546,7 +568,7 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 		break;
 
 	case DRC_BREAK_X87TAG:
-		if (fxch || sign)
+		if (fxch || sign || (store && !store_pop))
 		{
 			core.x87_tw ^= 1 << X87_TW_FIELD_SHIFT(top);
 			if (fxch && sti)
@@ -555,6 +577,14 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 		else if (!fnstsw)
 		{
 			core.x87_tw = tags;
+		}
+		break;
+
+	case DRC_BREAK_X87POP:
+		if (store_pop)
+		{
+			core.x87_tw = tags;
+			core.x87_sw = (core.x87_sw & ~(X87_SW_TOP_MASK << X87_SW_TOP_SHIFT)) | (status & (X87_SW_TOP_MASK << X87_SW_TOP_SHIFT));
 		}
 		break;
 
@@ -614,7 +644,7 @@ uint8_t *i386_device::drc_verify_host_page(offs_t address, bool write) const
 
 
 // Called before a store of a checked block that goes straight to memory.  The linear address is in ea_tmp, the value
-// in arg0 and the index which the store adds to the anchor in arg1.
+// in arg0 (for a quadword, in x87_store_value) and the index which the store adds to the anchor in arg1.
 template <typename Data>
 void i386_device::drc_verify_store_start()
 {
@@ -634,24 +664,34 @@ void i386_device::drc_verify_store_start()
 	}
 
 	if (v.sabotage == DRC_BREAK_STORE)
-		core.arg0 ^= 1;
+	{
+		if constexpr (sizeof(Data) == 8)
+			core.x87_store_value ^= 1;
+		else
+			core.arg0 ^= 1;
+	}
 
 	// make the write where the taps record it, note the result and take it back
-	v.store_address[0] = physical & ~offs_t(3);
-	v.store_address[1] = (physical + sizeof(Data) - 1) & ~offs_t(3);
-	uint32_t old[2];
+	offs_t const first = physical & ~offs_t(3);
+	v.store_dwords = ((((physical + sizeof(Data) - 1) & ~offs_t(3)) - first) >> 2) + 1;
+	uint32_t old[3];
 	v.recording = false;
-	for (int i = 0; i < 2; i++)
+	for (unsigned i = 0; i < v.store_dwords; i++)
+	{
+		v.store_address[i] = first + (i * 4);
 		old[i] = m_program->read_dword(v.store_address[i]);
+	}
 	v.recording = true;
 	if constexpr (sizeof(Data) == 1)
 		WRITE8(address, uint8_t(core.arg0));
+	else if constexpr (sizeof(Data) == 8)
+		WRITE64(address, core.x87_store_value);
 	else
 		WRITE32(address, core.arg0);
 	v.recording = false;
-	for (int i = 0; i < 2; i++)
+	for (unsigned i = 0; i < v.store_dwords; i++)
 		v.store_result[i] = m_program->read_dword(v.store_address[i]);
-	for (int i = 0; i < 2; i++)
+	for (unsigned i = 0; i < v.store_dwords; i++)
 		m_program->write_dword(v.store_address[i], old[i]);
 	v.recording = true;
 	v.store_pending = true;
@@ -659,6 +699,7 @@ void i386_device::drc_verify_store_start()
 
 template void i386_device::drc_verify_store_start<uint8_t>();
 template void i386_device::drc_verify_store_start<uint32_t>();
+template void i386_device::drc_verify_store_start<uint64_t>();
 
 
 // called after the store
@@ -671,7 +712,7 @@ void i386_device::drc_verify_store_end()
 
 	bool const recording = v.recording;
 	v.recording = false;
-	for (int i = 0; i < 2; i++)
+	for (unsigned i = 0; i < v.store_dwords; i++)
 	{
 		if (m_program->read_dword(v.store_address[i]) != v.store_result[i])
 		{
@@ -917,6 +958,8 @@ int i386_device::drc_verify_execute()
 				clear(offsetof(core_state, fault), sizeof(core_state::fault));
 				clear(offsetof(core_state, fault_code), sizeof(core_state::fault_code));
 				clear(offsetof(core_state, mode), sizeof(core_state::mode));
+				clear(offsetof(core_state, x87_store_value), sizeof(core_state::x87_store_value));
+				clear(offsetof(core_state, x87_store), sizeof(core_state::x87_store));
 				clear(offsetof(core_state, ea_tmp), sizeof(core_state::ea_tmp));
 				clear(offsetof(core_state, arg0), sizeof(core_state::arg0));
 				clear(offsetof(core_state, arg1), sizeof(core_state::arg1));

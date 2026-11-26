@@ -362,6 +362,8 @@ protected:
 		uint32_t x87_inst_ptr;
 		uint16_t x87_opcode;
 		// scratch and summary fields for generated code, zero while unused and not saved
+		uint64_t x87_store_value;   // converted by a compiled x87 store, for generated code to write
+		uint32_t x87_store;     // whether it is to be written
 		uint32_t mode;          // compile-time mode key of the running block
 		uint32_t ea_tmp;        // effective address passed between generated code and helpers
 		uint32_t arg0;          // helper call operands and results
@@ -1451,6 +1453,7 @@ protected:
 	void x87_write_stack(int i, extFloat80_t value, bool update_tag);
 	inline void x87_set_stack_underflow();
 	inline void x87_set_stack_overflow();
+	extFloat80_t x87_store_source();
 	int x87_inc_stack();
 	int x87_dec_stack();
 	int x87_ck_over_stack();
@@ -1534,10 +1537,14 @@ protected:
 	void x87_fild_m64int(uint8_t modrm);
 	void x87_fbld(uint8_t modrm);
 	void x87_fst_m32real(uint8_t modrm);
+	void x87_fst_m32real_core();
 	void x87_fst_m64real(uint8_t modrm);
+	void x87_fst_m64real_core();
 	void x87_fst_sti(uint8_t modrm);
 	void x87_fstp_m32real(uint8_t modrm);
+	void x87_fstp_m32real_core();
 	void x87_fstp_m64real(uint8_t modrm);
+	void x87_fstp_m64real_core();
 	void x87_fstp_m80real(uint8_t modrm);
 	void x87_fstp_sti(uint8_t modrm);
 	void x87_fstp_sti_core(uint8_t modrm);
@@ -1724,7 +1731,11 @@ protected:
 	template <uint8_t Opcode, typename Body> void drc_x87_run(uint8_t modrm, Body &&body);
 	template <void (i386_device::*Core)(uint8_t), uint8_t Opcode> static void cfunc_x87(void *param);
 	template <void (i386_device::*Core)(uint32_t), uint8_t Opcode> static void cfunc_x87_m32(void *param);
+	template <void (i386_device::*Core)(), uint8_t Opcode> static void cfunc_x87_store(void *param);
+	void drc_x87_record_operand(uint8_t modrm);
 	drc_x87_function drc_x87_helper(opcode_desc const &desc) const;
+	void generate_x87_store_lookup(drcuml_block &block, opcode_desc const &desc, uint32_t bytes, uml::code_label miss);
+	void generate_x87_store(drcuml_block &block, opcode_desc const &desc, uml::code_label &label);
 	void generate_x87(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
 	void generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label &label);
 	void generate_register_mov(drcuml_block &block, opcode_desc const &desc);
@@ -1788,7 +1799,11 @@ protected:
 		DRC_BREAK_X87EA,
 		DRC_BREAK_X87DSEL,
 		DRC_BREAK_X87DPTR,
-		DRC_BREAK_X87MISS
+		DRC_BREAK_X87MISS,
+		DRC_BREAK_X87STORE,
+		DRC_BREAK_X87SFLAG,
+		DRC_BREAK_X87POP,
+		DRC_BREAK_X87SIZE
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;

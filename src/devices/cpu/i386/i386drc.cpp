@@ -23,8 +23,8 @@
     Of the x87 instructions, FADDP ST(i),ST, FMUL ST,ST(i), FCOMPP,
     FNSTSW AX, FLD ST(i), FSTP ST(i) (DD D8+i), FXCH, FCHS, FABS, FLD1 and
     FLDZ are compiled, and so are FLD, FADD, FMUL, FCOM, FCOMP, FSUB, FSUBR,
-    FDIV and FDIVR with a 32-bit memory operand, as calls to the
-    interpreter's code.
+    FDIV and FDIVR with a 32-bit memory operand, and FST and FSTP with a 32
+    or 64-bit memory operand, as calls to the interpreter's code.
     Every other instruction is executed with step(), the interpreter's
     per-instruction function, which fetches the instruction from memory as it
     then is.  The block key is the linear address of the first instruction
@@ -148,6 +148,19 @@
       always reads it, which is safe only because an access that hits is to
       plain memory, with no side effect and no fault.  A miss executes the
       whole instruction with step(), before any state has changed.
+    - FST and FSTP to memory look up the whole operand for writing first, with
+      the table and tests of a compiled MOV to memory.  A miss, which includes
+      a page holding compiled code, executes the whole instruction with
+      step(), so that the write reaches the tap.  The called function converts
+      ST(0), tests for exceptions and pops, and leaves the value and whether
+      it is to be written; generated code then writes through the address
+      already looked up.
+    - That lookup cannot go stale before the write.  The function accesses no
+      memory, and the only thing it can reach outside the CPU is the FERR
+      output, which x87_check_exceptions(true) drives only when it also
+      refuses the write.  A line of the CPU which FERR changes is changed by a
+      scheduler timer.  The FERR output of the CPU of midqslvr is not
+      connected.
     - The compiled x87 memory path depends on paging never being compiled:
       an access found in the page tables cannot raise a page fault.
     - These instructions change no arithmetic flags.  FNSTSW AX writes AX
@@ -1038,19 +1051,48 @@ void i386_device::cfunc_x87_m32(void *param)
 						modrm,
 						[&cpu, &core, modrm] ()
 						{
-							uint8_t segment = uint8_t(core.arg0 >> 8);
-							uint32_t offset = core.ea_tmp;
-
-							// deliberate errors of the verifier
-							if (cpu.drc_verify_breaks(DRC_BREAK_X87DSEL) && core.verify_checking)
-								segment = DS;
-							if (cpu.drc_verify_breaks(DRC_BREAK_X87DPTR) && core.verify_checking)
-								offset++;
-
-							cpu.x87_record_operand(modrm, segment, offset);
+							cpu.drc_x87_record_operand(modrm);
 							(cpu.*Core)(core.arg1);
 						});
 			});
+}
+
+
+// Runs the core of an x87 store to memory.  The arguments are as for an instruction with a memory operand which is
+// read, without the value.  The core leaves the value to be written and whether to write it.
+template <void (i386_device::*Core)(), uint8_t Opcode>
+void i386_device::cfunc_x87_store(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call(
+			[&cpu] ()
+			{
+				uint8_t const modrm = uint8_t(cpu.m_core->arg0);
+				cpu.drc_x87_run<Opcode>(
+						modrm,
+						[&cpu, modrm] ()
+						{
+							cpu.drc_x87_record_operand(modrm);
+							(cpu.*Core)();
+						});
+			});
+}
+
+
+// sets the x87 pointer registers of an instruction with a memory operand, from what generated code left
+void i386_device::drc_x87_record_operand(uint8_t modrm)
+{
+	core_state const &core = *m_core;
+	uint8_t segment = uint8_t(core.arg0 >> 8);
+	uint32_t offset = core.ea_tmp;
+
+	// deliberate errors of the verifier
+	if (drc_verify_breaks(DRC_BREAK_X87DSEL) && core.verify_checking)
+		segment = DS;
+	if (drc_verify_breaks(DRC_BREAK_X87DPTR) && core.verify_checking)
+		offset++;
+
+	x87_record_operand(modrm, segment, offset);
 }
 
 
@@ -1114,6 +1156,10 @@ i386_device::drc_x87_function i386_device::drc_x87_helper(opcode_desc const &des
 	case 0xd9:
 		if ((modrm < 0xc0) && (reg == 0))   // fld m32real
 			form(m_opcode_table_x87_d9, &i386_device::x87_fld_m32real, &i386_device::cfunc_x87_m32<&i386_device::x87_fld_m32real_core, 0xd9>);
+		else if ((modrm < 0xc0) && (reg == 2))  // fst m32real
+			form(m_opcode_table_x87_d9, &i386_device::x87_fst_m32real, &i386_device::cfunc_x87_store<&i386_device::x87_fst_m32real_core, 0xd9>);
+		else if ((modrm < 0xc0) && (reg == 3))  // fstp m32real
+			form(m_opcode_table_x87_d9, &i386_device::x87_fstp_m32real, &i386_device::cfunc_x87_store<&i386_device::x87_fstp_m32real_core, 0xd9>);
 		else if (group == 0xc0)             // fld st(i)
 			form(m_opcode_table_x87_d9, &i386_device::x87_fld_sti, &i386_device::cfunc_x87<&i386_device::x87_fld_sti_core, 0xd9>);
 		else if (group == 0xc8)             // fxch st(i)
@@ -1128,7 +1174,11 @@ i386_device::drc_x87_function i386_device::drc_x87_helper(opcode_desc const &des
 			form(m_opcode_table_x87_d9, &i386_device::x87_fldz, &i386_device::cfunc_x87<&i386_device::x87_fldz_core, 0xd9>);
 		break;
 	case 0xdd:
-		if (group == 0xd8)                  // fstp st(i)
+		if ((modrm < 0xc0) && (reg == 2))   // fst m64real
+			form(m_opcode_table_x87_dd, &i386_device::x87_fst_m64real, &i386_device::cfunc_x87_store<&i386_device::x87_fst_m64real_core, 0xdd>);
+		else if ((modrm < 0xc0) && (reg == 3))  // fstp m64real
+			form(m_opcode_table_x87_dd, &i386_device::x87_fstp_m64real, &i386_device::cfunc_x87_store<&i386_device::x87_fstp_m64real_core, 0xdd>);
+		else if (group == 0xd8)             // fstp st(i)
 			form(m_opcode_table_x87_dd, &i386_device::x87_fstp_sti, &i386_device::cfunc_x87<&i386_device::x87_fstp_sti_core, 0xdd>);
 		break;
 	case 0xde:
@@ -1760,8 +1810,87 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 }
 
 
+// Looks up the memory operand of an x87 store, of the given size.  The address is left in i7 and the index which reaches
+// its host memory from the anchor in i5.  Control goes to the miss label unless all of the operand lies within one page
+// which has an entry for writes.  Nothing is changed.
+void i386_device::generate_x87_store_lookup(drcuml_block &block, opcode_desc const &desc, uint32_t bytes, uml::code_label miss)
+{
+	drc_data_pages const &data = *m_drc_data;
+
+	generate_effective_address(block, desc);
+	if (drc_verify_breaks(DRC_BREAK_EA) || drc_verify_breaks(DRC_BREAK_X87EA))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), I0);                           // mov     [ea_tmp],i0
+		generate_call(block, &i386_device::cfunc_verify_break_ea);          // callc   cfunc_verify_break_ea
+		UML_MOV(block, I0, mem(&m_core->ea_tmp));                           // mov     i0,[ea_tmp]
+	}
+	UML_MOV(block, I7, I0);                                                 // mov     i7,i0
+
+	UML_AND(block, I1, I0, 0xfff);                                          // and     i1,i0,0xfff
+	UML_CMP(block, I1, 0x1000 - bytes);                                     // cmp     i1,0x1000-size
+	UML_JMPc(block, COND_A, miss);                                          // jmp     miss,a
+	UML_SHR(block, I1, I0, 12);                                             // shr     i1,i0,12
+	UML_LOAD(block, I5, data.write.get(), I1, SIZE_DWORD, SCALE_x4);        // load    i5,write[i1]
+	UML_CMP(block, I5, 0);                                                  // cmp     i5,0
+	UML_JMPc(block, COND_E, miss);                                          // jmp     miss,e
+	UML_ADD(block, I5, I5, I0);                                             // add     i5,i5,i0
+}
+
+
+// writes the value left by the core of an x87 store to the operand looked up, unless the core refused the write
+void i386_device::generate_x87_store(drcuml_block &block, opcode_desc const &desc, uml::code_label &label)
+{
+	uml::code_label const write = label++;
+	uml::code_label const done = label++;
+
+	if (drc_verify_breaks(DRC_BREAK_X87STORE))
+	{
+		// a deliberate error: nothing is written by checked blocks
+		UML_CMP(block, mem(&m_core->verify_checking), 0);                   // cmp     [verify_checking],0
+		UML_JMPc(block, COND_NE, done);                                     // jmp     done,ne
+	}
+	if (drc_verify_breaks(DRC_BREAK_X87MISS))
+	{
+		// part of a deliberate error: a miss of a checked block arrives here without an index
+		UML_CMP(block, I5, 0);                                              // cmp     i5,0
+		UML_JMPc(block, COND_E, done);                                      // jmp     done,e
+	}
+	if (drc_verify_breaks(DRC_BREAK_X87SFLAG))
+	{
+		// a deliberate error: checked blocks write whether or not the core allows it
+		UML_CMP(block, mem(&m_core->verify_checking), 0);                   // cmp     [verify_checking],0
+		UML_JMPc(block, COND_NE, write);                                    // jmp     write,ne
+	}
+	UML_CMP(block, mem(&m_core->x87_store), 0);                             // cmp     [x87_store],0
+	UML_JMPc(block, COND_E, done);                                          // jmp     done,e
+	UML_LABEL(block, write);                                                // write:
+
+	if (desc.opcode == 0xd9)
+	{
+		UML_DMOV(block, I2, mem(&m_core->x87_store_value));                 // dmov    i2,[x87_store_value]
+		generate_direct_store(block, SIZE_DWORD, I7, I5, label);
+	}
+	else
+	{
+		if (drc_verify_breaks(DRC_BREAK_X87SIZE))
+		{
+			// a deliberate error: checked blocks write only the low half
+			uml::code_label const whole = label++;
+			UML_CMP(block, mem(&m_core->verify_checking), 0);               // cmp     [verify_checking],0
+			UML_JMPc(block, COND_E, whole);                                 // jmp     whole,e
+			UML_DMOV(block, I2, mem(&m_core->x87_store_value));             // dmov    i2,[x87_store_value]
+			generate_direct_store(block, SIZE_DWORD, I7, I5, label);
+			UML_JMP(block, done);                                           // jmp     done
+			UML_LABEL(block, whole);                                        // whole:
+		}
+		generate_direct_store(block, SIZE_QWORD, I7, I5, label);
+	}
+	UML_LABEL(block, done);                                                 // done:
+}
+
+
 // Compiled x87 instructions: a call to the core of the interpreter handler, which also charges the cycles.  A memory
-// operand is read here.  The instruction is executed with step() if it is to raise a fault, or if its operand cannot be
+// operand is read here before the call, or looked up before it and written after it.  The instruction is executed with step() if it is to raise a fault, or if its operand cannot be
 // accessed directly.
 void i386_device::generate_x87(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
 {
@@ -1769,6 +1898,8 @@ void i386_device::generate_x87(drcuml_block &block, opcode_desc const &desc, boo
 	uml::code_label const execute = label++;
 	uml::code_label const complete = label++;
 	bool const memory = desc.modrm < 0xc0;
+	unsigned const reg = BIT(desc.modrm, 3, 3);
+	bool const store = memory && ((desc.opcode == 0xd9) || (desc.opcode == 0xdd)) && ((reg == 2) || (reg == 3));
 	uml::code_label const miss = memory ? label++ : 0;
 	uml::code_label const call = memory ? label++ : 0;
 
@@ -1808,9 +1939,17 @@ void i386_device::generate_x87(drcuml_block &block, opcode_desc const &desc, boo
 
 	if (memory)
 	{
-		generate_operand_load(block, desc, SIZE_DWORD, false, false, miss);    // value in i6, address in i7
-		UML_LABEL(block, call);                                             // call:
-		UML_MOV(block, mem(&m_core->arg1), I6);                             // mov     [arg1],i6
+		if (store)
+		{
+			generate_x87_store_lookup(block, desc, (desc.opcode == 0xd9) ? 4 : 8, miss);    // address in i7, index in i5
+			UML_LABEL(block, call);                                         // call:
+		}
+		else
+		{
+			generate_operand_load(block, desc, SIZE_DWORD, false, false, miss);    // value in i6, address in i7
+			UML_LABEL(block, call);                                         // call:
+			UML_MOV(block, mem(&m_core->arg1), I6);                         // mov     [arg1],i6
+		}
 		UML_MOV(block, mem(&m_core->ea_tmp), I7);                           // mov     [ea_tmp],i7
 		UML_MOV(block, mem(&m_core->arg0), desc.modrm | (uint32_t(desc.segment) << 8));    // mov     [arg0],segment:modrm
 	}
@@ -1819,6 +1958,8 @@ void i386_device::generate_x87(drcuml_block &block, opcode_desc const &desc, boo
 		UML_MOV(block, mem(&m_core->arg0), desc.modrm);                     // mov     [arg0],modrm
 	}
 	generate_call(block, drc_x87_helper(desc));                             // callc   cfunc_x87
+	if (store)
+		generate_x87_store(block, desc, label);
 	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_NONE);                  // cmp     [drc_exit],none
 	UML_JMPc(block, COND_NE, slow);                                         // jmp     slow,ne
 	UML_JMP(block, complete);                                               // jmp     complete
@@ -1829,17 +1970,20 @@ void i386_device::generate_x87(drcuml_block &block, opcode_desc const &desc, boo
 		UML_LABEL(block, miss);                                             // miss:
 		if (drc_verify_breaks(DRC_BREAK_X87MISS))
 		{
-			// a deliberate error: a miss of a checked block is treated as a hit which reads zero
+			// a deliberate error: a miss of a checked block is treated as a hit which reads zero or writes nothing
 			uml::code_label const unchecked = label++;
 			UML_CMP(block, mem(&m_core->verify_checking), 0);               // cmp     [verify_checking],0
 			UML_JMPc(block, COND_E, unchecked);                             // jmp     unchecked,e
 			UML_MOV(block, I7, I0);                                         // mov     i7,i0
-			UML_MOV(block, I6, 0);                                          // mov     i6,0
+			if (store)
+				UML_MOV(block, I5, 0);                                      // mov     i5,0
+			else
+				UML_MOV(block, I6, 0);                                      // mov     i6,0
 			UML_JMP(block, call);                                           // jmp     call
 			UML_LABEL(block, unchecked);                                    // unchecked:
 		}
 		UML_MOV(block, mem(&m_core->ea_tmp), I0);                           // mov     [ea_tmp],i0
-		UML_MOV(block, mem(&m_core->arg1), 0);                              // mov     [arg1],read
+		UML_MOV(block, mem(&m_core->arg1), store ? 1 : 0);                  // mov     [arg1],write
 		generate_call(block, &i386_device::cfunc_page_miss);                // callc   cfunc_page_miss
 	}
 
@@ -2370,8 +2514,8 @@ void i386_device::generate_operand_store(drcuml_block &block, uml::operand_size 
 }
 
 
-// Writes i2 to host memory, given the linear address and the index which reaches the host memory from the anchor.  The
-// verifier examines the entry and records the write before and after the store of a checked block.
+// Writes i2, or for a quadword the value left by an x87 store, to host memory, given the linear address and the index
+// which reaches the host memory from the anchor.  The verifier examines the entry and records the write before and after the store of a checked block.
 void i386_device::generate_direct_store(drcuml_block &block, uml::operand_size size, uml::parameter address, uml::parameter index, uml::code_label &label)
 {
 	drc_data_pages const &data = *m_drc_data;
@@ -2381,13 +2525,22 @@ void i386_device::generate_direct_store(drcuml_block &block, uml::operand_size s
 		UML_CMP(block, mem(&m_core->verify_checking), 0);                   // cmp     [verify_checking],0
 		UML_JMPc(block, COND_E, unrecorded);                                // jmp     unrecorded,e
 		UML_MOV(block, mem(&m_core->ea_tmp), address);                      // mov     [ea_tmp],address
-		UML_MOV(block, mem(&m_core->arg0), I2);                             // mov     [arg0],i2
+		if (size != SIZE_QWORD)
+			UML_MOV(block, mem(&m_core->arg0), I2);                         // mov     [arg0],i2
 		UML_MOV(block, mem(&m_core->arg1), index);                          // mov     [arg1],index
-		generate_call(block, (size == SIZE_BYTE) ? &i386_device::cfunc_verify_store_start<uint8_t> : &i386_device::cfunc_verify_store_start<uint32_t>);
-		UML_MOV(block, I2, mem(&m_core->arg0));                             // mov     i2,[arg0]
+		generate_call(
+				block,
+				(size == SIZE_BYTE) ? &i386_device::cfunc_verify_store_start<uint8_t>
+				: (size == SIZE_QWORD) ? &i386_device::cfunc_verify_store_start<uint64_t>
+				: &i386_device::cfunc_verify_store_start<uint32_t>);
+		if (size != SIZE_QWORD)
+			UML_MOV(block, I2, mem(&m_core->arg0));                         // mov     i2,[arg0]
 		UML_LABEL(block, unrecorded);                                       // unrecorded:
 	}
-	UML_STORE(block, data.anchor - 1, index, I2, size, SCALE_x1);           // store   [host],i2
+	if (size == SIZE_QWORD)
+		UML_DSTORE(block, data.anchor - 1, index, mem(&m_core->x87_store_value), SIZE_QWORD, SCALE_x1);    // dstore  [host],[x87_store_value]
+	else
+		UML_STORE(block, data.anchor - 1, index, I2, size, SCALE_x1);       // store   [host],i2
 	if (m_verifier)
 	{
 		uml::code_label const unchecked = label++;

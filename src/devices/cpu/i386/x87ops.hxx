@@ -83,6 +83,19 @@ void i386_device::x87_set_stack_overflow()
 	m_core->x87_sw |= X87_SW_C1 | X87_SW_IE | X87_SW_SF;
 }
 
+// the value which a store to memory converts: ST(0), or the default NaN with stack underflow if it is empty
+extFloat80_t i386_device::x87_store_source()
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	if (X87_IS_ST_EMPTY(0))
+	{
+		x87_set_stack_underflow();
+		return fx80_inan;
+	}
+	m_core->x87_sw &= ~X87_SW_C1;
+	return ST(0);
+}
+
 int i386_device::x87_inc_stack()
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
@@ -3099,52 +3112,44 @@ void i386_device::x87_fbld(uint8_t modrm)
 void i386_device::x87_fst_m32real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t value;
-
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 1);
-	if (X87_IS_ST_EMPTY(0))
-	{
-		x87_set_stack_underflow();
-		value = fx80_inan;
-	}
-	else
-	{
-		m_core->x87_sw &= ~X87_SW_C1;
-		value = ST(0);
-	}
-
-	float32_t m32real = extF80_to_f32(value);
+	float32_t const m32real = extF80_to_f32(x87_store_source());
 	if (x87_check_exceptions(true))
 		WRITE32(ea, m32real.v);
 
 	CYCLES(7);
 }
 
+void i386_device::x87_fst_m32real_core()
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	float32_t const m32real = extF80_to_f32(x87_store_source());
+	m_core->x87_store_value = m32real.v;
+	m_core->x87_store = x87_check_exceptions(true);
+	CYCLES(7);
+}
+
 void i386_device::x87_fst_m64real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t value;
-
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 1);
-	if (X87_IS_ST_EMPTY(0))
-	{
-		x87_set_stack_underflow();
-		value = fx80_inan;
-	}
-	else
-	{
-		m_core->x87_sw &= ~X87_SW_C1;
-		value = ST(0);
-	}
-
-	float64_t m64real = extF80_to_f64(value);
+	float64_t const m64real = extF80_to_f64(x87_store_source());
 	if (x87_check_exceptions(true))
 		WRITE64(ea, m64real.v);
 
+	CYCLES(8);
+}
+
+void i386_device::x87_fst_m64real_core()
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	float64_t const m64real = extF80_to_f64(x87_store_source());
+	m_core->x87_store_value = m64real.v;
+	m_core->x87_store = x87_check_exceptions(true);
 	CYCLES(8);
 }
 
@@ -3179,23 +3184,10 @@ void i386_device::x87_fst_sti(uint8_t modrm)
 void i386_device::x87_fstp_m32real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t value;
-
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 1);
-	if (X87_IS_ST_EMPTY(0))
-	{
-		x87_set_stack_underflow();
-		value = fx80_inan;
-	}
-	else
-	{
-		m_core->x87_sw &= ~X87_SW_C1;
-		value = ST(0);
-	}
-
-	float32_t m32real = extF80_to_f32(value);
+	float32_t const m32real = extF80_to_f32(x87_store_source());
 	if (x87_check_exceptions(true))
 	{
 		WRITE32(ea, m32real.v);
@@ -3205,33 +3197,43 @@ void i386_device::x87_fstp_m32real(uint8_t modrm)
 	CYCLES(7);
 }
 
+void i386_device::x87_fstp_m32real_core()
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	float32_t const m32real = extF80_to_f32(x87_store_source());
+	m_core->x87_store_value = m32real.v;
+	m_core->x87_store = x87_check_exceptions(true);
+	if (m_core->x87_store)
+		x87_inc_stack();
+	CYCLES(7);
+}
+
 void i386_device::x87_fstp_m64real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t value;
-
 	if (x87_mf_fault())
 		return;
-	if (X87_IS_ST_EMPTY(0))
-	{
-		x87_set_stack_underflow();
-		value = fx80_inan;
-	}
-	else
-	{
-		m_core->x87_sw &= ~X87_SW_C1;
-		value = ST(0);
-	}
-
-
+	// unlike the other stores to memory, the stack is examined before the address is formed
+	extFloat80_t const value = x87_store_source();
 	uint32_t ea = Getx87EA(modrm, 1);
-	float64_t m64real = extF80_to_f64(value);
+	float64_t const m64real = extF80_to_f64(value);
 	if (x87_check_exceptions(true))
 	{
 		WRITE64(ea, m64real.v);
 		x87_inc_stack();
 	}
 
+	CYCLES(8);
+}
+
+void i386_device::x87_fstp_m64real_core()
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	float64_t const m64real = extF80_to_f64(x87_store_source());
+	m_core->x87_store_value = m64real.v;
+	m_core->x87_store = x87_check_exceptions(true);
+	if (m_core->x87_store)
+		x87_inc_stack();
 	CYCLES(8);
 }
 
