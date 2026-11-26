@@ -259,7 +259,9 @@ using namespace uml;
 namespace {
 
 // size of the code cache; the two-level block lookup table takes 512 KiB for each 64 KiB of linear address space holding code
-constexpr size_t DRC_CACHE_SIZE = 256 * 1024 * 1024;
+// NOTE: generated code reaches the CPU state, near the start of the cache, and the lookup table, at its end, with signed
+// 32-bit displacements from a register, so the cache must stay well under 2 GiB
+constexpr size_t DRC_CACHE_SIZE = 384 * 1024 * 1024;
 
 // the front end describes instructions starting within this many bytes of the first, and at most this many in a block
 constexpr uint32_t COMPILE_WINDOW_BYTES = 1024;
