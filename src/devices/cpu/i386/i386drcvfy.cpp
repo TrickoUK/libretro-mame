@@ -98,6 +98,23 @@
                  other than MOV, the cycles of its register form, or one more
                  where the two are the same.  This also applies in blocks that
                  are not checked.
+        target   adds one to the target of the direct jumps, calls and loops
+                 of checked blocks whose address is a multiple of three
+        retaddr  pushes a return address one byte further in the compiled
+                 calls of checked blocks
+        esp      moves ESP before the stack access of a compiled push or call
+                 is known to be possible, in checked blocks, which shows
+                 where the instruction is then executed with step()
+        ecx      leaves out the decrement of the compiled loops of checked
+                 blocks
+        noentry  starts a block of more than one instruction without testing
+                 for remaining cycles.  This also applies without the
+                 verifier, and is only seen without it, as the verifier
+                 returns after every block.
+        chainirq stays in generated code after a called function has left an
+                 interrupt pending or in the interrupt shadow.  This also
+                 applies without the verifier, and is only seen without it
+                 where execution goes on to another block.
         nodrop   leaves the write table entry of a page that starts being
                  watched for writes to compiled code.  This also applies
                  without the verifier.
@@ -301,7 +318,13 @@ void i386_device::drc_verify_start()
 				{ "jcycles", DRC_BREAK_JCYCLES },
 				{ "rmw", DRC_BREAK_RMW },
 				{ "rmwmiss", DRC_BREAK_RMWMISS },
-				{ "mcycles", DRC_BREAK_MCYCLES } };
+				{ "mcycles", DRC_BREAK_MCYCLES },
+				{ "target", DRC_BREAK_TARGET },
+				{ "retaddr", DRC_BREAK_RETADDR },
+				{ "esp", DRC_BREAK_ESP },
+				{ "ecx", DRC_BREAK_ECX },
+				{ "noentry", DRC_BREAK_NOENTRY },
+				{ "chainirq", DRC_BREAK_CHAINIRQ } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)

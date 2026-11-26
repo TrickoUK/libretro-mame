@@ -742,6 +742,15 @@ void i386_device::frontend::classify(opcode_desc &desc)
 		}
 		break;
 
+	case 0x8f:  // pop r/m
+		if (!reg)
+		{
+			desc.kind = family::PUSHPOP;
+			use_rm(32, false, true);
+			use_stack();
+		}
+		break;
+
 	case 0x90:
 		if (!(desc.prefixes & opcode_desc::PREFIX_REP))     // pause
 			desc.kind = family::NOP;
@@ -756,6 +765,12 @@ void i386_device::frontend::classify(opcode_desc &desc)
 		use_register(EAX, desc.width, op >= 0xa2, op < 0xa2);
 		use_segment(false);
 		desc.set_can_cause_exception();
+		break;
+
+	case 0xc9:  // leave
+		desc.kind = family::PUSHPOP;
+		use_register(EBP, 32, true, true);
+		use_stack();
 		break;
 
 	case 0xc6:

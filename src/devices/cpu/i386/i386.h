@@ -1650,6 +1650,8 @@ protected:
 	struct drc_data_pages;
 	std::shared_ptr<drc_data_pages> m_drc_data;
 	bool m_drc_break_nodrop = false;    // deliberate error: leaves write pointers to pages holding compiled code
+	bool m_drc_break_noentry = false;   // deliberate error: blocks start without testing for remaining cycles
+	bool m_drc_break_chainirq = false;  // deliberate error: a pending interrupt does not end generated code
 	void drc_pages_start();
 	void drc_pages_choose_anchor();
 	void drc_pages_flush();
@@ -1669,9 +1671,20 @@ protected:
 	void static_generate_out_of_cycles(drcuml_block &block);
 	void static_generate_fault_handler(drcuml_block &block);
 	void generate_call(drcuml_block &block, void (*function)(void *));
-	void generate_block_end(drcuml_block &block);
+	void generate_block_end(drcuml_block &block, uml::parameter address);
+	void generate_direct_transfer(drcuml_block &block, opcode_desc const &desc);
+	void generate_loop(drcuml_block &block, opcode_desc const &desc, uml::code_label &label);
+	void generate_page_lookup(drcuml_block &block, uml::parameter address, uml::parameter index, bool write, uml::code_label miss);
+	void generate_push_lookup(drcuml_block &block, uml::code_label miss);
+	void generate_stack_operand(drcuml_block &block, opcode_desc const &desc, bool write, uint32_t adjust, uml::code_label miss);
+	void generate_stack_miss(drcuml_block &block, opcode_desc const &desc, uml::code_label stack_miss, bool stack_write, uml::code_label operand_miss, bool operand_write, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
+	void generate_near_jump(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
+	void generate_near_call(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
+	void generate_near_return(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
+	void generate_push(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
+	void generate_pop(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
 	bool drc_compiles_natively(opcode_desc const &desc) const;
-	void generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set);
+	void generate_instruction(drcuml_block &block, opcode_desc const &desc, bool first, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set);
 	void generate_step(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow);
 	void generate_native_start(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set);
 	struct drc_alu_form;
@@ -1687,7 +1700,7 @@ protected:
 	void generate_direct_store(drcuml_block &block, uml::operand_size size, uml::parameter address, uml::parameter index, uml::code_label &label);
 	void generate_operand_miss(drcuml_block &block, opcode_desc const &desc, bool write, bool last, uml::code_label done, uml::code_label slow, uml::code_label miss, uml::code_label &label);
 	static void cfunc_page_miss(void *param);
-	void generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label done, uml::code_label &label);
+	void generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label &label);
 	void generate_register_mov(drcuml_block &block, opcode_desc const &desc);
 	void generate_slow_exit(drcuml_block &block);
 	static void cfunc_step(void *param);
@@ -1728,7 +1741,13 @@ protected:
 		DRC_BREAK_JCYCLES,
 		DRC_BREAK_RMW,
 		DRC_BREAK_RMWMISS,
-		DRC_BREAK_MCYCLES
+		DRC_BREAK_MCYCLES,
+		DRC_BREAK_TARGET,
+		DRC_BREAK_RETADDR,
+		DRC_BREAK_ESP,
+		DRC_BREAK_ECX,
+		DRC_BREAK_NOENTRY,
+		DRC_BREAK_CHAINIRQ
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;

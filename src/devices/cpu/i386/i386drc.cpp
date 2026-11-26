@@ -16,12 +16,14 @@
     end.  MOV of 8 and 32 bits between registers, memory and immediates is
     compiled, and so are LEA, the 8 and 32-bit forms of ADD, ADC, SUB, SBB,
     CMP, AND, OR, XOR, TEST, INC, DEC, NEG and NOT with register, memory and
-    immediate operands, MOVZX and MOVSX, XCHG of a register with memory, and
-    the conditional jumps with 8 and 32-bit displacements, all without
-    prefixes.  Every other instruction is executed with step(), the
-    interpreter's per-instruction function, which fetches the instruction from
-    memory as it then is.  The block key is the linear address of the first
-    instruction together with the mode bits.
+    immediate operands, MOVZX and MOVSX, XCHG of a register with memory, the
+    conditional jumps with 8 and 32-bit displacements, the near forms of JMP,
+    CALL and RET, LOOP, LOOPE, LOOPNE, JECXZ, PUSH of a register, memory or
+    immediate, POP to a register or memory, and LEAVE, all without prefixes.
+    Every other instruction is executed with step(), the interpreter's
+    per-instruction function, which fetches the instruction from memory as it
+    then is.  The block key is the linear address of the first instruction
+    together with the mode bits.
 
     Rules the blocks follow:
     - An instruction is started only while cycles are left, so a timeslice
@@ -34,12 +36,42 @@
       the address it was compiled at.  This ends the block at taken branches,
       and also when code executed by step() has been rewritten with a different
       length since it was described.
+    - A sequence is cut short if the longest instruction might not fit in what
+      is left of the UML instruction buffer.
     - No C++ exception propagates through generated code, which has no unwind
       information.  A called function runs its body through drc_guarded_call(),
       and generated code calls it through generate_call().  A guest fault
       that generated code is to deliver is caught by the function itself and
       recorded for the fault handler.  Any other exception is kept, generated
       code is left at once, and it is rethrown from the execution loop.
+
+    Going from block to block:
+    - A block ends with HASHJMP to the following block, with the target built
+      in for a direct jump, call or loop and taken from the instruction
+      pointer otherwise.  HASHJMP looks the target up in the block table when
+      it is executed, so removing a block from the table is all that is needed
+      to stop every other block reaching it.
+    - The first instruction of a block tests for remaining cycles like any
+      other.  This is the only test on the way round a loop which spans blocks,
+      including a loop of one block.
+    - Execution stays in generated code across blocks, so everything that the
+      interpreter loop acts on before an instruction has to force an exit.
+      Each of these changes only in a call made from generated code, after
+      which the exit request is tested, or is covered by the cycle test:
+      - The interrupt request, SMI, A20 and halt are changed by
+        execute_set_input().  set_input_line() reaches it through a scheduler
+        timer.  Setting that timer in a called function takes the remaining
+        cycles away, so the cycle test before the next instruction ends
+        generated code, and the timer expires before the next timeslice.
+      - IF, TF, RF, the interrupt shadow of STI and of loading SS, halt, the
+        LOCK flag, the debug registers, CR0 and the segment registers are
+        written by instructions executed with step() and by the delivery of a
+        fault.  drc_exit_request() tests them all, or the mode key.
+      - A change to the memory map and a write to compiled code happen in a
+        called function, which finds them in drc_exit_request().
+      - The debugger is enabled for the whole of a run.
+      This assumes that timers and devices other than those reached by a called
+      function run only between timeslices.
 
     Flags:
     - A compiled instruction stores each arithmetic flag byte which its
@@ -56,12 +88,37 @@
     - A compiled conditional jump tests the flag bytes as its interpreter
       handler does.  A taken jump ends the block, and execution goes on to the
       next instruction of the block otherwise.  Each of the two ways charges
-      the cycles of the handler.  The target is not checked against the
-      segment limit, as in the interpreter.
+      the cycles of the handler.
+
+    Compiled control transfers and stack operations:
+    - The code segment has base zero, so the instruction pointer is the linear
+      address.  No target is checked against the segment limit, as in the
+      interpreter.
+    - LOOP, LOOPE and LOOPNE decrement ECX whether or not they jump, and change
+      no flags.
+    - The mode key requires a 32-bit stack segment with base zero, so the stack
+      address is ESP, which wraps at 32 bits.  Generated stack code depends on
+      this.
+    - A push writes below ESP and then sets ESP.  PUSH ESP and a call through
+      ESP use its value from before the push.  A pop reads, sets ESP and then
+      writes its destination, so POP ESP leaves the value read, and the address
+      of a POP to memory is computed with the new ESP.  A RET with an
+      immediate adds it, sign extended, after the pop.
+    - All the memory an instruction needs is looked up in the page tables
+      before anything is changed.  If any of it cannot be accessed directly,
+      including a stack in a page which holds compiled code, the whole
+      instruction is executed with step(), which leaves ESP and EIP as the
+      interpreter would on a fault.  These instructions are not compiled while
+      the debugger is enabled.
 
     Compiled memory accesses:
     - The segment of an operand has base zero, so the effective address is the
       linear address.  Only DS and SS operands without prefixes are compiled.
+    - An access straight to memory cannot fault only because of this: the
+      segments are flat (see drc_mode()), page zero is never entered and an
+      access does not cross a page.  Compiling code with paging or with other
+      segments would require the access checks of GetEA(), which take whether
+      the access writes and its size, to be made in generated code.
     - Two tables indexed by linear page, one for reads and one for writes,
       give the host memory of a page.  An access goes straight to that memory
       if it lies within one page that has an entry.  Every other access of a
@@ -146,13 +203,13 @@ constexpr uint32_t COMPILE_MAX_SEQUENCE = 64;
 // longest range of guest bytes a block may cover, used when invalidating blocks that begin before a written range
 constexpr uint32_t COMPILE_MAX_SEQUENCE_BYTES = COMPILE_WINDOW_BYTES + 15;
 
-// UML instructions allowed for each instruction of a block (up to about 70 are generated for a memory access, with the
-// verifier, the debugger and a deliberate error) and for the rest of the block
-constexpr uint32_t COMPILE_UML_PER_INSTRUCTION = 96;
+// UML instructions kept free for one instruction of a block (about 100 are generated for the longest, a read-modify-write
+// of memory with the verifier and a deliberate error) and for the end of the block
+constexpr uint32_t COMPILE_UML_PER_INSTRUCTION = 160;
 constexpr uint32_t COMPILE_UML_PER_BLOCK = 32;
 
-// room for the UML instructions of the longest block
-constexpr uint32_t COMPILE_MAX_UML = COMPILE_UML_PER_INSTRUCTION * COMPILE_MAX_SEQUENCE + COMPILE_UML_PER_BLOCK;
+// size of the UML instruction buffer; a sequence which would not fit is ended early
+constexpr uint32_t COMPILE_MAX_UML = 8192;
 
 // pages of the data tables, and the pages from address zero searched for the largest range of memory
 constexpr uint32_t DATA_PAGES = 0x100000;
@@ -357,6 +414,9 @@ uint32_t i386_device::drc_mode() const
 				}
 			};
 
+	// NOTE: compiled memory accesses make no segment check.  They cannot fault only because these segments are flat,
+	// page zero is never entered in the page tables and an access does not cross a page.  Generated stack code also
+	// depends on SS being 32-bit, with ESP wrapping at 32 bits.
 	// a 16-bit stack segment uses SP rather than ESP, so it is not flat
 	if (flat_code && flat_data(DS) && flat_data(ES) && flat_data(SS) && core.sreg[SS].d)
 		mode |= MODE_FLAT;
@@ -587,9 +647,11 @@ void i386_device::drc_code_start()
 	if (interval)
 		m_drc_code->report_interval = m_drc_code->next_report = std::max(std::atoi(interval), 1);
 
-	// this deliberate error applies with and without the verifier
+	// these deliberate errors apply with and without the verifier
 	char const *const breakage = std::getenv("MAME_I386_DRC_VERIFY_BREAK");
 	m_drc_break_nodrop = breakage && (std::string_view(breakage) == "nodrop");
+	m_drc_break_noentry = breakage && (std::string_view(breakage) == "noentry");
+	m_drc_break_chainirq = breakage && (std::string_view(breakage) == "chainirq");
 
 	drc_pages_start();
 
@@ -749,7 +811,20 @@ uint32_t i386_device::drc_exit_request()
 	if (m_core->fault != NO_FAULT)
 		return DRC_EXIT_FAULT;
 	bool const code_modified = m_drc_code_modified && !drc_verify_breaks(DRC_BREAK_NOEXIT);
-	return (!drc_runnable() || m_drc_cache_dirty || code_modified) ? DRC_EXIT_INTERPRET : DRC_EXIT_NONE;
+	bool runnable = drc_runnable();
+	if (!runnable && m_drc_break_chainirq)
+	{
+		// a deliberate error: a pending interrupt and the interrupt shadow do not end generated code
+		core_state &core = *m_core;
+		uint8_t const interrupt_flag = core.IF;
+		auto const shadow = core.delayed_interrupt_enable;
+		core.IF = 0;
+		core.delayed_interrupt_enable = 0;
+		runnable = drc_eligible(core.mode);
+		core.IF = interrupt_flag;
+		core.delayed_interrupt_enable = shadow;
+	}
+	return (!runnable || m_drc_cache_dirty || code_modified) ? DRC_EXIT_INTERPRET : DRC_EXIT_NONE;
 }
 
 
@@ -990,7 +1065,7 @@ void i386_device::static_generate_fault_handler(drcuml_block &block)
 	generate_call(block, &i386_device::cfunc_deliver_fault);                // callc   cfunc_deliver_fault
 	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_NONE);                  // cmp     [drc_exit],none
 	block.append().exit(COND_NE, EXECUTE_INTERPRET);                        // exit    EXECUTE_INTERPRET,ne
-	generate_block_end(block);
+	generate_block_end(block, mem(&m_core->pc));
 }
 
 
@@ -1012,6 +1087,7 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 
 	// A full code cache aborts the compilation, which is repeated after a flush.  A block that needs more UML
 	// instructions than it has room for raises a fatal error instead, which is not caught here.
+	opcode_desc const *final = first;
 	bool succeeded = false;
 	while (!succeeded)
 	{
@@ -1022,17 +1098,25 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 			UML_HASH(block, mode, pc);                                      // hash    mode,pc
 			bool decode_state_set = false;
 			uml::code_label label = slow + 1;
+
+			// instructions which do nothing mark places in the buffer, to measure how much of it is used
+			uml::instruction *const start = &block.append();
+			start->nop();
 			for (opcode_desc const *desc = first; desc; desc = desc->next())
 			{
-				bool const last = desc->end_sequence() || !desc->next();
+				uml::instruction *const mark = &block.append();
+				mark->nop();
+				bool const full = (uint32_t(mark - start) + (2 * COMPILE_UML_PER_INSTRUCTION) + COMPILE_UML_PER_BLOCK) > COMPILE_MAX_UML;
+				bool const last = full || desc->end_sequence() || !desc->next();
 				assert(last || (desc->next()->pc == (desc->pc + desc->length)));
-				generate_instruction(block, *desc, last, done, slow, label, decode_state_set);
+				generate_instruction(block, *desc, desc == first, last, done, slow, label, decode_state_set);
+				final = desc;
 				if (last)
 					break;
 			}
 
 			UML_LABEL(block, done);                                         // done:
-			generate_block_end(block);
+			generate_block_end(block, mem(&m_core->pc));
 			UML_LABEL(block, slow);                                         // slow:
 			generate_slow_exit(block);
 
@@ -1051,7 +1135,7 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 	{
 		if (drc_compiles_natively(*desc))
 			drc_code_protect(*desc);
-		if (desc->end_sequence())
+		if (desc == final)
 			break;
 	}
 }
@@ -1221,8 +1305,8 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 
 
 // The compiled instructions are MOV of 8 and 32 bits between registers, memory and immediates, LEA, arithmetic and
-// logic on registers, memory and immediates, MOVZX, MOVSX, XCHG with memory and the conditional jumps, all without
-// prefixes.
+// logic on registers, memory and immediates, MOVZX, MOVSX, XCHG with memory, the conditional jumps, the near jumps,
+// calls and returns, the loops, PUSH, POP and LEAVE, all without prefixes.
 bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 {
 	if (!desc.in_memory || (m_program->data_width() != 32) || !drc_can_bake_code())
@@ -1235,8 +1319,11 @@ bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 	bool const memory_operand = unprefixed && ((desc.segment == DS) || (desc.segment == SS));
 
 	// A miss of a memory operand of anything but MOV steps the whole instruction, which the debugger would then be
-	// told of twice
+	// told of twice; the same goes for an instruction which uses the stack
 	bool const steppable_operand = memory_operand && !debugger_enabled();
+	bool const steppable_stack = unprefixed && !debugger_enabled();
+	bool const register_rm = desc.modrm >= 0xc0;
+	unsigned const group = BIT(desc.modrm, 3, 3);
 
 	drc_alu_form form;
 	switch (desc.kind)
@@ -1256,6 +1343,32 @@ bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 	case opcode_desc::family::JCC:
 		// the length shows that there is no prefix, such as a 16-bit operand size or a branch hint
 		return unprefixed && (desc.length == ((desc.opcode < 0x80) ? 2 : 6));
+	case opcode_desc::family::LOOP:
+		return unprefixed && (desc.length == 2);
+	case opcode_desc::family::JMP:
+		if (desc.opcode == 0xff)
+			return (group == 4) && (register_rm ? (unprefixed && (desc.length == 2)) : steppable_operand);
+		return unprefixed && (desc.length == ((desc.opcode == 0xeb) ? 2 : 5));
+	case opcode_desc::family::CALL:
+		if (desc.opcode == 0xff)
+			return (group == 2) && (register_rm ? (steppable_stack && (desc.length == 2)) : steppable_operand);
+		return steppable_stack && (desc.length == 5);
+	case opcode_desc::family::RET:
+		return steppable_stack && (desc.length == ((desc.opcode == 0xc2) ? 3 : 1));
+	case opcode_desc::family::PUSHPOP:
+		switch (desc.opcode)
+		{
+		case 0x68:
+			return steppable_stack && (desc.length == 5);
+		case 0x6a:
+			return steppable_stack && (desc.length == 2);
+		case 0x8f:
+		case 0xff:
+			return (group == ((desc.opcode == 0xff) ? 6 : 0))
+					&& (register_rm ? (steppable_stack && (desc.length == 2)) : steppable_operand);
+		default:    // 50-5f and c9
+			return steppable_stack && (desc.length == 1);
+		}
 	default:
 		return false;
 	}
@@ -1298,22 +1411,48 @@ void i386_device::generate_call(drcuml_block &block, void (*function)(void *))
 }
 
 
-// goes on to the block for the current mode and address
-void i386_device::generate_block_end(drcuml_block &block)
+// Goes on to the block at an address, which the instruction pointer must already hold.  Code is only generated and run
+// in one mode.
+void i386_device::generate_block_end(drcuml_block &block, uml::parameter address)
 {
 	// the verifier compares the state after each block
 	if (m_verifier)
 		UML_EXIT(block, EXECUTE_BLOCK_DONE);                                // exit    EXECUTE_BLOCK_DONE
 	else
-		UML_HASHJMP(block, mem(&m_core->mode), mem(&m_core->pc), *m_nocode); // hashjmp <mode>,<pc>,nocode
+		UML_HASHJMP(block, MODE_COMPILED, address, *m_nocode);              // hashjmp <mode>,address,nocode
+}
+
+
+// leaves the block for the target of a direct jump, call or loop
+void i386_device::generate_direct_transfer(drcuml_block &block, opcode_desc const &desc)
+{
+	// the address and the instruction pointer are the same with a flat code segment
+	uint32_t const target = desc.targetpc;
+	if (drc_verify_breaks(DRC_BREAK_TARGET) && !(desc.pc % 3))
+	{
+		// a deliberate error: the target of some transfers, chosen by their address, is one byte further in checked blocks
+		UML_ADD(block, mem(&m_core->eip), mem(&m_core->verify_checking), target);   // add     [eip],[verify_checking],target
+		UML_MOV(block, mem(&m_core->pc), mem(&m_core->eip));                // mov     [pc],[eip]
+	}
+	else
+	{
+		UML_MOV(block, mem(&m_core->eip), target);                          // mov     [eip],target
+		UML_MOV(block, mem(&m_core->pc), target);                           // mov     [pc],target
+	}
+	generate_block_end(block, target);
 }
 
 
 // Executes one instruction, which is started only while cycles are left.
-void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set)
+void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &desc, bool first, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set)
 {
-	UML_CMP(block, mem(&m_core->cycles), 0);                                // cmp     [cycles],0
-	UML_EXHc(block, COND_LE, *m_out_of_cycles, desc.pc);                    // exh     out_of_cycles,pc,le
+	// a deliberate error: a block starts without cycles left.  Blocks of one instruction keep the test, as without it a
+	// loop of one would never end.
+	if (!m_drc_break_noentry || !first || last)
+	{
+		UML_CMP(block, mem(&m_core->cycles), 0);                            // cmp     [cycles],0
+		UML_EXHc(block, COND_LE, *m_out_of_cycles, desc.pc);                // exh     out_of_cycles,pc,le
+	}
 
 	if (m_verifier)
 	{
@@ -1331,7 +1470,7 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 		}
 		if (desc.kind == opcode_desc::family::JCC)
 		{
-			generate_jcc(block, desc, done, label);
+			generate_jcc(block, desc, label);
 			return;
 		}
 		if (desc.kind == opcode_desc::family::EXTEND)
@@ -1342,6 +1481,34 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 		if (desc.kind == opcode_desc::family::XCHG)
 		{
 			generate_xchg(block, desc, last, done, slow, label);
+			return;
+		}
+		if (desc.kind == opcode_desc::family::LOOP)
+		{
+			generate_loop(block, desc, label);
+			return;
+		}
+		if (desc.kind == opcode_desc::family::JMP)
+		{
+			generate_near_jump(block, desc, last, done, slow, label);
+			return;
+		}
+		if (desc.kind == opcode_desc::family::CALL)
+		{
+			generate_near_call(block, desc, last, done, slow, label);
+			return;
+		}
+		if (desc.kind == opcode_desc::family::RET)
+		{
+			generate_near_return(block, desc, last, done, slow, label);
+			return;
+		}
+		if (desc.kind == opcode_desc::family::PUSHPOP)
+		{
+			if (((desc.opcode >= 0x58) && (desc.opcode <= 0x5f)) || (desc.opcode == 0x8f) || (desc.opcode == 0xc9))
+				generate_pop(block, desc, last, done, slow, label);
+			else
+				generate_push(block, desc, last, done, slow, label);
 			return;
 		}
 		if (desc.kind != opcode_desc::family::MOV)
@@ -1943,8 +2110,8 @@ void i386_device::generate_operand_miss(drcuml_block &block, opcode_desc const &
 
 // Compiled conditional jumps.  The condition is that of the interpreter's handler, worked out from the flag bytes: the
 // low bit of the opcode inverts the condition given by the other three bits of the low half.  A taken jump leaves the
-// block through the label at its end.  Nothing here can fault, call out or change the mode or the interrupt state.
-void i386_device::generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label done, uml::code_label &label)
+// block for its target.  Nothing here can fault, call out or change the mode or the interrupt state.
+void i386_device::generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label &label)
 {
 	bool const short_form = desc.opcode < 0x80;
 	unsigned const condition = BIT(desc.opcode, 0, 4);
@@ -2010,17 +2177,314 @@ void i386_device::generate_jcc(drcuml_block &block, opcode_desc const &desc, uml
 	UML_CMP(block, I0, 0);                                                  // cmp     i0,0
 	UML_JMPc(block, BIT(condition, 0) ? COND_NZ : COND_Z, untaken);         // jmp     untaken,z/nz
 
-	// the address and the instruction pointer are the same with a flat code segment
-	UML_MOV(block, mem(&m_core->eip), uint32_t(desc.targetpc));             // mov     [eip],target
-	UML_MOV(block, mem(&m_core->pc), uint32_t(desc.targetpc));              // mov     [pc],target
 	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), taken);      // sub     [cycles],[cycles],n
 	// a deliberate error: one more cycle, so that the swapped costs show on a CPU where both are the same
 	if (swap_cycles)
 		UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), mem(&m_core->verify_checking));
-	UML_JMP(block, done);                                                   // jmp     done
+	generate_direct_transfer(block, desc);
 
 	UML_LABEL(block, untaken);                                              // untaken:
 	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), not_taken);  // sub     [cycles],[cycles],n
+}
+
+
+// Compiled LOOP, LOOPE, LOOPNE and JECXZ.  The loops decrement ECX and jump if it is not zero, LOOPE and LOOPNE also
+// testing ZF; no flag changes.  Nothing here can fault, call out or change the mode or the interrupt state.
+void i386_device::generate_loop(drcuml_block &block, opcode_desc const &desc, uml::code_label &label)
+{
+	uml::code_label const untaken = label++;
+	uint32_t taken, not_taken;
+	if (desc.opcode == 0xe3)
+	{
+		taken = m_cycle_table_pm[CYCLES_JCXZ];
+		not_taken = m_cycle_table_pm[CYCLES_JCXZ_NOBRANCH];
+		UML_CMP(block, mem(&m_core->reg.d[ECX]), 0);                        // cmp     [ecx],0
+		UML_JMPc(block, COND_NZ, untaken);                                  // jmp     untaken,nz
+	}
+	else
+	{
+		X86_CYCLES const cycles = (desc.opcode == 0xe0) ? CYCLES_LOOPNZ : (desc.opcode == 0xe1) ? CYCLES_LOOPZ : CYCLES_LOOP;
+		taken = not_taken = m_cycle_table_pm[cycles];
+		if (drc_verify_breaks(DRC_BREAK_ECX))
+		{
+			// a deliberate error: ECX is not decremented in checked blocks
+			UML_XOR(block, I1, mem(&m_core->verify_checking), 1);           // xor     i1,[verify_checking],1
+			UML_SUB(block, mem(&m_core->reg.d[ECX]), mem(&m_core->reg.d[ECX]), I1);    // sub     [ecx],[ecx],i1
+		}
+		else
+		{
+			UML_SUB(block, mem(&m_core->reg.d[ECX]), mem(&m_core->reg.d[ECX]), 1);     // sub     [ecx],[ecx],1
+		}
+		UML_CMP(block, mem(&m_core->reg.d[ECX]), 0);                        // cmp     [ecx],0
+		UML_JMPc(block, COND_Z, untaken);                                   // jmp     untaken,z
+		if (desc.opcode != 0xe2)
+		{
+			UML_LOAD(block, I0, &m_core->ZF, 0, SIZE_BYTE, SCALE_x1);       // load    i0,ZF
+			UML_CMP(block, I0, 0);                                          // cmp     i0,0
+			UML_JMPc(block, (desc.opcode == 0xe0) ? COND_NZ : COND_Z, untaken);    // jmp     untaken,nz/z
+		}
+	}
+
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), taken);      // sub     [cycles],[cycles],n
+	generate_direct_transfer(block, desc);
+
+	UML_LABEL(block, untaken);                                              // untaken:
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), not_taken);  // sub     [cycles],[cycles],n
+}
+
+
+// Looks up the dword at the linear address in a register, which must not be i1.  The index which reaches its host memory
+// from the anchor is left in the index register.  Control goes to the miss label unless the dword lies within one page
+// which has an entry.
+void i386_device::generate_page_lookup(drcuml_block &block, uml::parameter address, uml::parameter index, bool write, uml::code_label miss)
+{
+	drc_data_pages const &data = *m_drc_data;
+	uint32_t const *const table = (write ? data.write : data.read).get();
+
+	UML_AND(block, I1, address, 0xfff);                                     // and     i1,address,0xfff
+	UML_CMP(block, I1, 0x1000 - 4);                                         // cmp     i1,0xffc
+	UML_JMPc(block, COND_A, miss);                                          // jmp     miss,a
+	UML_SHR(block, I1, address, 12);                                        // shr     i1,address,12
+	UML_LOAD(block, index, table, I1, SIZE_DWORD, SCALE_x4);                // load    index,table[i1]
+	UML_CMP(block, index, 0);                                               // cmp     index,0
+	UML_JMPc(block, COND_E, miss);                                          // jmp     miss,e
+	UML_ADD(block, index, index, address);                                  // add     index,index,address
+}
+
+
+// The address pushed to is left in i7 and its index in i5.  Nothing is changed.
+void i386_device::generate_push_lookup(drcuml_block &block, uml::code_label miss)
+{
+	UML_SUB(block, I7, mem(&m_core->reg.d[ESP]), 4);                        // sub     i7,[esp],4
+	if (drc_verify_breaks(DRC_BREAK_ESP))
+	{
+		// a deliberate error: ESP is moved before the access is known to be possible, in checked blocks
+		UML_SHL(block, I1, mem(&m_core->verify_checking), 2);               // shl     i1,[verify_checking],2
+		UML_SUB(block, mem(&m_core->reg.d[ESP]), mem(&m_core->reg.d[ESP]), I1);    // sub     [esp],[esp],i1
+	}
+	generate_page_lookup(block, I7, I5, true, miss);
+}
+
+
+// the linear address of the memory operand of a control transfer or stack operation, in i6, and its index, in i3
+void i386_device::generate_stack_operand(drcuml_block &block, opcode_desc const &desc, bool write, uint32_t adjust, uml::code_label miss)
+{
+	generate_effective_address(block, desc);
+	if (adjust)
+		UML_ADD(block, I0, I0, adjust);                                     // add     i0,i0,adjust
+	if (drc_verify_breaks(DRC_BREAK_EA))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), I0);                           // mov     [ea_tmp],i0
+		generate_call(block, &i386_device::cfunc_verify_break_ea);          // callc   cfunc_verify_break_ea
+		UML_MOV(block, I0, mem(&m_core->ea_tmp));                           // mov     i0,[ea_tmp]
+	}
+	UML_MOV(block, I6, I0);                                                 // mov     i6,i0
+	generate_page_lookup(block, I6, I3, write, miss);
+}
+
+
+// Where a control transfer or stack operation goes if the stack, or its memory operand, cannot be accessed directly: the
+// pages of the address in i7 or i6 are entered if they can be, and the interpreter executes the whole instruction.  A
+// label of zero means that the instruction has no such access.
+void i386_device::generate_stack_miss(drcuml_block &block, opcode_desc const &desc, uml::code_label stack_miss, bool stack_write, uml::code_label operand_miss, bool operand_write, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
+{
+	uml::code_label const execute = label++;
+	auto const enter =
+			[this, &block, execute] (uml::code_label miss, uml::parameter address, bool write)
+			{
+				if (!miss)
+					return;
+				UML_LABEL(block, miss);                                             // miss:
+				UML_MOV(block, mem(&m_core->ea_tmp), address);                      // mov     [ea_tmp],address
+				UML_MOV(block, mem(&m_core->arg1), write ? 1 : 0);                  // mov     [arg1],write
+				generate_call(block, &i386_device::cfunc_page_miss);                // callc   cfunc_page_miss
+				UML_JMP(block, execute);                                            // jmp     execute
+			};
+	enter(operand_miss, I6, operand_write);
+	enter(stack_miss, I7, stack_write);
+
+	UML_LABEL(block, execute);                                              // execute:
+	UML_MOV(block, mem(&m_core->eip), desc.pc);                             // mov     [eip],pc
+	UML_MOV(block, mem(&m_core->pc), desc.pc);                              // mov     [pc],pc
+	generate_step(block, desc, last, done, slow);
+}
+
+
+// Compiled near jumps: direct, or to an address from a register or memory.
+void i386_device::generate_near_jump(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
+{
+	if (desc.opcode != 0xff)
+	{
+		UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[(desc.opcode == 0xeb) ? CYCLES_JMP_SHORT : CYCLES_JMP]);  // sub     [cycles],[cycles],n
+		generate_direct_transfer(block, desc);
+		return;
+	}
+
+	bool const memory = desc.modrm < 0xc0;
+	uml::code_label const operand_miss = memory ? label++ : 0;
+	if (memory)
+	{
+		generate_stack_operand(block, desc, false, 0, operand_miss);
+		UML_LOAD(block, I4, m_drc_data->anchor - 1, I3, SIZE_DWORD, SCALE_x1);  // load    i4,[operand]
+	}
+	else
+	{
+		UML_MOV(block, I4, mem(&m_core->reg.d[i386_MODRM_table[desc.modrm].rm.d]));  // mov     i4,[reg]
+	}
+	UML_MOV(block, mem(&m_core->eip), I4);                                  // mov     [eip],i4
+	UML_MOV(block, mem(&m_core->pc), I4);                                   // mov     [pc],i4
+	uint32_t const cost = memory ? drc_operand_cycles(CYCLES_JMP_MEM, CYCLES_JMP_REG) : m_cycle_table_pm[CYCLES_JMP_REG];
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), cost);      // sub     [cycles],[cycles],n
+	generate_block_end(block, mem(&m_core->pc));
+
+	if (memory)
+		generate_stack_miss(block, desc, 0, false, operand_miss, false, last, done, slow, label);
+}
+
+
+// Compiled near calls: direct, or to an address from a register or memory.  The target is read before the return
+// address is pushed.
+void i386_device::generate_near_call(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
+{
+	bool const direct = desc.opcode == 0xe8;
+	bool const memory = !direct && (desc.modrm < 0xc0);
+	uml::code_label const operand_miss = memory ? label++ : 0;
+	uml::code_label const stack_miss = label++;
+
+	if (memory)
+		generate_stack_operand(block, desc, false, 0, operand_miss);
+	else if (!direct)
+		UML_MOV(block, I4, mem(&m_core->reg.d[i386_MODRM_table[desc.modrm].rm.d]));  // mov     i4,[reg]
+	generate_push_lookup(block, stack_miss);
+	if (memory)
+		UML_LOAD(block, I4, m_drc_data->anchor - 1, I3, SIZE_DWORD, SCALE_x1);  // load    i4,[operand]
+
+	uint32_t const next = desc.pc + desc.length;
+	if (drc_verify_breaks(DRC_BREAK_RETADDR))
+		UML_ADD(block, I2, mem(&m_core->verify_checking), next);            // add     i2,[verify_checking],next
+	else
+		UML_MOV(block, I2, next);                                           // mov     i2,next
+	generate_direct_store(block, SIZE_DWORD, I7, I5, label);
+	UML_MOV(block, mem(&m_core->reg.d[ESP]), I7);                           // mov     [esp],i7
+
+	if (direct)
+	{
+		UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[CYCLES_CALL]);  // sub     [cycles],[cycles],n
+		generate_direct_transfer(block, desc);
+	}
+	else
+	{
+		UML_MOV(block, mem(&m_core->eip), I4);                              // mov     [eip],i4
+		UML_MOV(block, mem(&m_core->pc), I4);                               // mov     [pc],i4
+		uint32_t const cost = memory ? drc_operand_cycles(CYCLES_CALL_MEM, CYCLES_CALL_REG) : m_cycle_table_pm[CYCLES_CALL_REG];
+		UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), cost);  // sub     [cycles],[cycles],n
+		generate_block_end(block, mem(&m_core->pc));
+	}
+
+	generate_stack_miss(block, desc, stack_miss, true, operand_miss, false, last, done, slow, label);
+}
+
+
+// Compiled near returns.  The immediate of C2 is added to ESP, sign extended, after the pop.
+void i386_device::generate_near_return(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
+{
+	bool const immediate = desc.opcode == 0xc2;
+	uml::code_label const stack_miss = label++;
+
+	UML_MOV(block, I7, mem(&m_core->reg.d[ESP]));                           // mov     i7,[esp]
+	generate_page_lookup(block, I7, I5, false, stack_miss);
+	UML_LOAD(block, I4, m_drc_data->anchor - 1, I5, SIZE_DWORD, SCALE_x1);  // load    i4,[stack]
+	uint32_t const release = 4 + (immediate ? uint32_t(int32_t(int16_t(desc.immediate))) : 0);
+	UML_ADD(block, mem(&m_core->reg.d[ESP]), I7, release);                  // add     [esp],i7,release
+	UML_MOV(block, mem(&m_core->eip), I4);                                  // mov     [eip],i4
+	UML_MOV(block, mem(&m_core->pc), I4);                                   // mov     [pc],i4
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[immediate ? CYCLES_RET_IMM : CYCLES_RET]);  // sub     [cycles],[cycles],n
+	generate_block_end(block, mem(&m_core->pc));
+
+	generate_stack_miss(block, desc, stack_miss, false, 0, false, last, done, slow, label);
+}
+
+
+// Compiled PUSH of a register, a memory operand or an immediate.  The value is that from before ESP changes.
+void i386_device::generate_push(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
+{
+	bool const immediate = (desc.opcode == 0x68) || (desc.opcode == 0x6a);
+	bool const memory = (desc.opcode == 0xff) && (desc.modrm < 0xc0);
+	uml::code_label const operand_miss = memory ? label++ : 0;
+	uml::code_label const stack_miss = label++;
+	uml::code_label const complete = label++;
+
+	if (memory)
+		generate_stack_operand(block, desc, false, 0, operand_miss);
+	generate_push_lookup(block, stack_miss);
+
+	// nothing above writes a register, apart from a deliberate error which moves ESP
+	if (memory)
+		UML_LOAD(block, I2, m_drc_data->anchor - 1, I3, SIZE_DWORD, SCALE_x1);  // load    i2,[operand]
+	else if (immediate)
+		UML_MOV(block, I2, (desc.opcode == 0x6a) ? uint32_t(int32_t(int8_t(desc.immediate))) : desc.immediate);  // mov     i2,imm
+	else
+	{
+		int const reg = (desc.opcode == 0xff) ? int(i386_MODRM_table[desc.modrm].rm.d) : int(desc.opcode & 7);
+		if (reg == ESP)
+			UML_ADD(block, I2, I7, 4);                                      // add     i2,i7,4
+		else
+			UML_MOV(block, I2, mem(&m_core->reg.d[reg]));                   // mov     i2,[reg]
+	}
+	generate_direct_store(block, SIZE_DWORD, I7, I5, label);
+	UML_MOV(block, mem(&m_core->reg.d[ESP]), I7);                           // mov     [esp],i7
+
+	uint32_t const cost = memory
+			? drc_operand_cycles(CYCLES_PUSH_RM, CYCLES_PUSH_RM)
+			: m_cycle_table_pm[immediate ? CYCLES_PUSH_IMM : (desc.opcode == 0xff) ? CYCLES_PUSH_RM : CYCLES_PUSH_REG_SHORT];
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), cost);      // sub     [cycles],[cycles],n
+	UML_JMP(block, complete);                                               // jmp     complete
+
+	generate_stack_miss(block, desc, stack_miss, true, operand_miss, false, last, done, slow, label);
+	UML_LABEL(block, complete);                                             // complete:
+}
+
+
+// Compiled POP to a register or memory, and LEAVE, which sets ESP to EBP and pops EBP.  ESP is written before the
+// destination, so a destination of ESP keeps the value read, and the address of a memory destination is computed with
+// the new ESP.
+void i386_device::generate_pop(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
+{
+	bool const leave = desc.opcode == 0xc9;
+	bool const memory = (desc.opcode == 0x8f) && (desc.modrm < 0xc0);
+	int const reg = leave ? int(EBP) : (desc.opcode == 0x8f) ? int(i386_MODRM_table[desc.modrm].rm.d) : int(desc.opcode & 7);
+	uml::code_label const operand_miss = memory ? label++ : 0;
+	uml::code_label const stack_miss = label++;
+	uml::code_label const complete = label++;
+
+	UML_MOV(block, I7, mem(&m_core->reg.d[leave ? EBP : ESP]));             // mov     i7,[esp]
+	generate_page_lookup(block, I7, I5, false, stack_miss);
+	if (memory)
+	{
+		// ESP can only be the base of an address, which takes a SIB byte
+		bool const stack_based = (BIT(desc.modrm, 0, 3) == 4) && (BIT(desc.sib, 0, 3) == ESP);
+		generate_stack_operand(block, desc, true, stack_based ? 4 : 0, operand_miss);
+	}
+	UML_LOAD(block, I2, m_drc_data->anchor - 1, I5, SIZE_DWORD, SCALE_x1);  // load    i2,[stack]
+	if (memory)
+		generate_direct_store(block, SIZE_DWORD, I6, I3, label);
+	UML_ADD(block, mem(&m_core->reg.d[ESP]), I7, 4);                        // add     [esp],i7,4
+	if (!memory)
+		UML_MOV(block, mem(&m_core->reg.d[reg]), I2);                       // mov     [reg],i2
+
+	uint32_t const cost = memory
+			? drc_operand_cycles(CYCLES_POP_RM, CYCLES_POP_RM)
+			: m_cycle_table_pm[leave ? CYCLES_LEAVE : (desc.opcode == 0x8f) ? CYCLES_POP_RM : CYCLES_POP_REG_SHORT];
+	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), cost);      // sub     [cycles],[cycles],n
+	if (!memory && drc_verify_breaks(DRC_BREAK_LOAD))
+	{
+		UML_MOV(block, mem(&m_core->ea_tmp), reg * 4);                      // mov     [ea_tmp],offset
+		generate_call(block, &i386_device::cfunc_verify_break_mov);         // callc   cfunc_verify_break_mov
+	}
+	UML_JMP(block, complete);                                               // jmp     complete
+
+	generate_stack_miss(block, desc, stack_miss, false, operand_miss, true, last, done, slow, label);
+	UML_LABEL(block, complete);                                             // complete:
 }
 
 
