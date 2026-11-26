@@ -1747,7 +1747,8 @@ protected:
 		DRC_BREAK_ESP,
 		DRC_BREAK_ECX,
 		DRC_BREAK_NOENTRY,
-		DRC_BREAK_CHAINIRQ
+		DRC_BREAK_CHAINIRQ,
+		DRC_BREAK_X87STATE
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;

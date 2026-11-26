@@ -121,6 +121,7 @@
         smc      ignores writes to the bytes of compiled instructions, which
                  leaves stale code running
         noexit   goes on with a block after it wrote to compiled code
+        x87state inverts a bit of an x87 register after checked blocks
 
 ***************************************************************************/
 
@@ -132,6 +133,7 @@
 
 #include <cstdlib>
 #include <string_view>
+#include <type_traits>
 
 
 namespace {
@@ -324,7 +326,8 @@ void i386_device::drc_verify_start()
 				{ "esp", DRC_BREAK_ESP },
 				{ "ecx", DRC_BREAK_ECX },
 				{ "noentry", DRC_BREAK_NOENTRY },
-				{ "chainirq", DRC_BREAK_CHAINIRQ } };
+				{ "chainirq", DRC_BREAK_CHAINIRQ },
+				{ "x87state", DRC_BREAK_X87STATE } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
@@ -740,6 +743,10 @@ int i386_device::drc_verify_execute()
 		return result;
 	}
 
+	// a deliberate error in the x87 state, made here as no compiled instruction changes it
+	if (v.sabotage == DRC_BREAK_X87STATE)
+		m_core->x87_reg[7].signif ^= 1;
+
 	// undo the block's writes, restore the state and run the same instructions in the interpreter
 	v.capture(v.after_block);
 	v.block_writes.swap(v.writes);
@@ -785,6 +792,18 @@ int i386_device::drc_verify_execute()
 				clear(offsetof(core_state, verify_pc), sizeof(core_state::verify_pc));
 				clear(offsetof(core_state, verify_checking), sizeof(core_state::verify_checking));
 				clear(offsetof(core_state, mode_dirty), sizeof(core_state::mode_dirty));
+
+				// the bytes which pad each 80-bit x87 register hold nothing
+				for (unsigned i = 0; i < std::extent_v<decltype(core_state::x87_reg)>; i++)
+				{
+					for (size_t b = 0; b < sizeof(extFloat80_t); b++)
+					{
+						bool const signif = (b - offsetof(extFloat80_t, signif)) < sizeof(extFloat80_t::signif);
+						bool const exponent = (b - offsetof(extFloat80_t, signExp)) < sizeof(extFloat80_t::signExp);
+						if (!signif && !exponent)
+							clear(offsetof(core_state, x87_reg) + (i * sizeof(extFloat80_t)) + b, 1);
+					}
+				}
 			};
 	clear_scratch(v.after_block);
 	clear_scratch(v.after_interpreter);
