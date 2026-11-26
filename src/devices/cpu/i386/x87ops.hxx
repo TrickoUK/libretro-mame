@@ -2866,11 +2866,16 @@ void i386_device::x87_fld_m80real(uint8_t modrm)
 
 void i386_device::x87_fld_sti(uint8_t modrm)
 {
+	if (x87_mf_fault())
+		return;
+	x87_fld_sti_core(modrm);
+}
+
+void i386_device::x87_fld_sti_core(uint8_t modrm)
+{
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
-	if (x87_mf_fault())
-		return;
 	if (x87_dec_stack())
 	{
 		m_core->x87_sw &= ~X87_SW_C1;
@@ -3197,12 +3202,17 @@ void i386_device::x87_fstp_m80real(uint8_t modrm)
 
 void i386_device::x87_fstp_sti(uint8_t modrm)
 {
+	if (x87_mf_fault())
+		return;
+	x87_fstp_sti_core(modrm);
+}
+
+void i386_device::x87_fstp_sti_core(uint8_t modrm)
+{
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 	extFloat80_t value;
 
-	if (x87_mf_fault())
-		return;
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -3471,12 +3481,17 @@ void i386_device::x87_fbstp(uint8_t modrm)
 
 void i386_device::x87_fld1(uint8_t modrm)
 {
+	if (x87_mf_fault())
+		return;
+	x87_fld1_core(modrm);
+}
+
+void i386_device::x87_fld1_core(uint8_t modrm)
+{
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 	int tag;
 
-	if (x87_mf_fault())
-		return;
 	if (x87_dec_stack())
 	{
 		m_core->x87_sw &= ~X87_SW_C1;
@@ -3697,12 +3712,17 @@ void i386_device::x87_fldln2(uint8_t modrm)
 
 void i386_device::x87_fldz(uint8_t modrm)
 {
+	if (x87_mf_fault())
+		return;
+	x87_fldz_core(modrm);
+}
+
+void i386_device::x87_fldz_core(uint8_t modrm)
+{
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 	int tag;
 
-	if (x87_mf_fault())
-		return;
 	if (x87_dec_stack())
 	{
 		value = fx80_zero;
@@ -3743,11 +3763,16 @@ void i386_device::x87_fnop(uint8_t modrm)
 
 void i386_device::x87_fchs(uint8_t modrm)
 {
+	if (x87_mf_fault())
+		return;
+	x87_fchs_core(modrm);
+}
+
+void i386_device::x87_fchs_core(uint8_t modrm)
+{
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
-	if (x87_mf_fault())
-		return;
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -3772,11 +3797,16 @@ void i386_device::x87_fchs(uint8_t modrm)
 
 void i386_device::x87_fabs(uint8_t modrm)
 {
+	if (x87_mf_fault())
+		return;
+	x87_fabs_core(modrm);
+}
+
+void i386_device::x87_fabs_core(uint8_t modrm)
+{
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	extFloat80_t value;
 
-	if (x87_mf_fault())
-		return;
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -5146,11 +5176,16 @@ void i386_device::x87_fxch(uint8_t modrm)
 
 void i386_device::x87_fxch_sti(uint8_t modrm)
 {
+	if (x87_mf_fault())
+		return;
+	x87_fxch_sti_core(modrm);
+}
+
+void i386_device::x87_fxch_sti_core(uint8_t modrm)
+{
 	[[maybe_unused]] core_state *const m_core = this->m_core;
 	int i = modrm & 7;
 
-	if (x87_mf_fault())
-		return;
 	if (X87_IS_ST_EMPTY(0))
 	{
 		ST(0) = fx80_inan;

@@ -1520,6 +1520,7 @@ protected:
 	void x87_fld_m64real(uint8_t modrm);
 	void x87_fld_m80real(uint8_t modrm);
 	void x87_fld_sti(uint8_t modrm);
+	void x87_fld_sti_core(uint8_t modrm);
 	void x87_fild_m16int(uint8_t modrm);
 	void x87_fild_m32int(uint8_t modrm);
 	void x87_fild_m64int(uint8_t modrm);
@@ -1531,6 +1532,7 @@ protected:
 	void x87_fstp_m64real(uint8_t modrm);
 	void x87_fstp_m80real(uint8_t modrm);
 	void x87_fstp_sti(uint8_t modrm);
+	void x87_fstp_sti_core(uint8_t modrm);
 	void x87_fist_m16int(uint8_t modrm);
 	void x87_fist_m32int(uint8_t modrm);
 	void x87_fistp_m16int(uint8_t modrm);
@@ -1538,15 +1540,19 @@ protected:
 	void x87_fistp_m64int(uint8_t modrm);
 	void x87_fbstp(uint8_t modrm);
 	void x87_fld1(uint8_t modrm);
+	void x87_fld1_core(uint8_t modrm);
 	void x87_fldl2t(uint8_t modrm);
 	void x87_fldl2e(uint8_t modrm);
 	void x87_fldpi(uint8_t modrm);
 	void x87_fldlg2(uint8_t modrm);
 	void x87_fldln2(uint8_t modrm);
 	void x87_fldz(uint8_t modrm);
+	void x87_fldz_core(uint8_t modrm);
 	void x87_fnop(uint8_t modrm);
 	void x87_fchs(uint8_t modrm);
+	void x87_fchs_core(uint8_t modrm);
 	void x87_fabs(uint8_t modrm);
+	void x87_fabs_core(uint8_t modrm);
 	void x87_fscale(uint8_t modrm);
 	void x87_frndint(uint8_t modrm);
 	void x87_fxtract(uint8_t modrm);
@@ -1592,6 +1598,7 @@ protected:
 	void x87_frstor(uint8_t modrm);
 	void x87_fxch(uint8_t modrm);
 	void x87_fxch_sti(uint8_t modrm);
+	void x87_fxch_sti_core(uint8_t modrm);
 	void x87_fstsw_ax(uint8_t modrm);
 	void x87_fstsw_m2byte(uint8_t modrm);
 	void x87_invalid(uint8_t modrm);

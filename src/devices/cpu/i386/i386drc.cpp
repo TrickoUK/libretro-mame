@@ -20,8 +20,9 @@
     conditional jumps with 8 and 32-bit displacements, the near forms of JMP,
     CALL and RET, LOOP, LOOPE, LOOPNE, JECXZ, PUSH of a register, memory or
     immediate, POP to a register or memory, and LEAVE, all without prefixes.
-    Of the x87 instructions, FADDP ST(i),ST, FMUL ST,ST(i), FCOMPP and
-    FNSTSW AX are compiled, as calls to the interpreter's code.
+    Of the x87 instructions, FADDP ST(i),ST, FMUL ST,ST(i), FCOMPP,
+    FNSTSW AX, FLD ST(i), FSTP ST(i) (DD D8+i), FXCH, FCHS, FABS, FLD1 and
+    FLDZ are compiled, as calls to the interpreter's code.
     Every other instruction is executed with step(), the interpreter's
     per-instruction function, which fetches the instruction from memory as it
     then is.  The block key is the linear address of the first instruction
@@ -122,6 +123,8 @@
       arithmetic, the x87 state, the SoftFloat flags and the FERR output are
       the handler's.  The core charges the cycles, so generated code charges
       none.
+    - A form is compiled only if the CPU's x87 opcode table gives the ModRM
+      byte to that handler.
     - The ModRM byte is built into the code and left in arg0.  The called
       function sets the opcode byte, from which the core forms the x87 opcode
       register, as generated code does not maintain it.
@@ -1000,24 +1003,56 @@ i386_device::drc_x87_function i386_device::drc_x87_helper(opcode_desc const &des
 	// the x87 opcodes are invalid on a CPU without an FPU
 	if (m_opcode_table1_32[desc.opcode] == &i386_device::i386_invalid)
 		return nullptr;
+
+	// a form is compiled only if the opcode table gives the ModRM byte to the handler whose core is called
+	uint8_t const modrm = desc.modrm;
+	uint8_t const group = modrm & 0xf8;
+	i386_modrm_func const *table = nullptr;
+	i386_modrm_func handler = nullptr;
+	drc_x87_function function = nullptr;
+	auto const form =
+			[&table, &handler, &function] (i386_modrm_func const *t, i386_modrm_func h, drc_x87_function f)
+			{
+				table = t;
+				handler = h;
+				function = f;
+			};
 	switch (desc.opcode)
 	{
 	case 0xd8:
-		if ((desc.modrm & 0xf8) == 0xc8)    // fmul st,st(i)
-			return &i386_device::cfunc_x87<&i386_device::x87_fmul_st_sti_core, 0xd8>;
+		if (group == 0xc8)                  // fmul st,st(i)
+			form(m_opcode_table_x87_d8, &i386_device::x87_fmul_st_sti, &i386_device::cfunc_x87<&i386_device::x87_fmul_st_sti_core, 0xd8>);
+		break;
+	case 0xd9:
+		if (group == 0xc0)                  // fld st(i)
+			form(m_opcode_table_x87_d9, &i386_device::x87_fld_sti, &i386_device::cfunc_x87<&i386_device::x87_fld_sti_core, 0xd9>);
+		else if (group == 0xc8)             // fxch st(i)
+			form(m_opcode_table_x87_d9, &i386_device::x87_fxch_sti, &i386_device::cfunc_x87<&i386_device::x87_fxch_sti_core, 0xd9>);
+		else if (modrm == 0xe0)             // fchs
+			form(m_opcode_table_x87_d9, &i386_device::x87_fchs, &i386_device::cfunc_x87<&i386_device::x87_fchs_core, 0xd9>);
+		else if (modrm == 0xe1)             // fabs
+			form(m_opcode_table_x87_d9, &i386_device::x87_fabs, &i386_device::cfunc_x87<&i386_device::x87_fabs_core, 0xd9>);
+		else if (modrm == 0xe8)             // fld1
+			form(m_opcode_table_x87_d9, &i386_device::x87_fld1, &i386_device::cfunc_x87<&i386_device::x87_fld1_core, 0xd9>);
+		else if (modrm == 0xee)             // fldz
+			form(m_opcode_table_x87_d9, &i386_device::x87_fldz, &i386_device::cfunc_x87<&i386_device::x87_fldz_core, 0xd9>);
+		break;
+	case 0xdd:
+		if (group == 0xd8)                  // fstp st(i)
+			form(m_opcode_table_x87_dd, &i386_device::x87_fstp_sti, &i386_device::cfunc_x87<&i386_device::x87_fstp_sti_core, 0xdd>);
 		break;
 	case 0xde:
-		if ((desc.modrm & 0xf8) == 0xc0)    // faddp st(i),st
-			return &i386_device::cfunc_x87<&i386_device::x87_faddp_core, 0xde>;
-		if (desc.modrm == 0xd9)             // fcompp
-			return &i386_device::cfunc_x87<&i386_device::x87_fcompp_core, 0xde>;
+		if (group == 0xc0)                  // faddp st(i),st
+			form(m_opcode_table_x87_de, &i386_device::x87_faddp, &i386_device::cfunc_x87<&i386_device::x87_faddp_core, 0xde>);
+		else if (modrm == 0xd9)             // fcompp
+			form(m_opcode_table_x87_de, &i386_device::x87_fcompp, &i386_device::cfunc_x87<&i386_device::x87_fcompp_core, 0xde>);
 		break;
 	case 0xdf:
-		if (desc.modrm == 0xe0)             // fnstsw ax, which has no test for a pending exception
-			return &i386_device::cfunc_x87<&i386_device::x87_fstsw_ax, 0xdf>;
+		if (modrm == 0xe0)                  // fnstsw ax, which has no test for a pending exception
+			form(m_opcode_table_x87_df, &i386_device::x87_fstsw_ax, &i386_device::cfunc_x87<&i386_device::x87_fstsw_ax, 0xdf>);
 		break;
 	}
-	return nullptr;
+	return (table && (table[modrm] == handler)) ? function : nullptr;
 }
 
 

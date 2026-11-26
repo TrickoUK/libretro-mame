@@ -122,11 +122,13 @@
                  leaves stale code running
         noexit   goes on with a block after it wrote to compiled code
         x87state inverts a bit of an x87 register after checked blocks
-        x87val   inverts the low bit of the register written by each compiled
-                 faddp and fmul of checked blocks
+        x87val   inverts the low bit of the registers written by each compiled
+                 x87 instruction of checked blocks which writes any
         x87pe    clears the precision exception flag after each compiled x87
                  instruction of checked blocks other than fnstsw
-        x87tag   undoes the tag word update of each such instruction
+        x87tag   undoes the tag word update of each such instruction; after
+                 fxch, fchs and fabs, inverts a bit of the tags of the
+                 registers named instead
         x87cycles
                  takes one more cycle for each compiled x87 instruction of
                  checked blocks
@@ -137,7 +139,8 @@
         x87opc   gives the compiled x87 instructions of checked blocks the
                  wrong opcode byte
         x87ptr   inverts a bit of the x87 data pointer after each compiled
-                 x87 instruction of checked blocks other than fnstsw
+                 x87 instruction of checked blocks other than fnstsw (of the
+                 instruction pointer after fxch, which leaves the data pointer)
         x87sf    leaves the SoftFloat inexact flag set after each compiled x87
                  instruction of checked blocks
 
@@ -485,17 +488,36 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 		return;
 	core_state &core = *m_core;
 	bool const fnstsw = opcode == 0xdf;
+	uint8_t const group = modrm & 0xf8;
+	int const sti = modrm & 7;
+	bool const fxch = (opcode == 0xd9) && (group == 0xc8);
+	bool const sign = (opcode == 0xd9) && ((modrm == 0xe0) || (modrm == 0xe1));   // fchs, fabs
+	// the physical numbers of the top of stack before and after the instruction
+	int const top = BIT(status, X87_SW_TOP_SHIFT, 3);
+	int const new_top = BIT(core.x87_sw, X87_SW_TOP_SHIFT, 3);
 
 	switch (v.sabotage)
 	{
 	case DRC_BREAK_X87VAL:
 		{
-			// faddp writes ST(i) as numbered before the pop, fmul writes ST(0)
-			bool const faddp = (opcode == 0xde) && ((modrm & 0xf8) == 0xc0);
-			if (faddp || (opcode == 0xd8))
+			auto const invert = [&core] (int reg) { core.x87_reg[reg & 7].signif ^= 1; };
+			if (((opcode == 0xde) && (group == 0xc0)) || (opcode == 0xdd))
 			{
-				int const top = BIT(status, X87_SW_TOP_SHIFT, 3);
-				core.x87_reg[(top + (faddp ? (modrm & 7) : 0)) & 7].signif ^= 1;
+				invert(top + sti);              // faddp and fstp write ST(i) as numbered before the pop
+			}
+			else if ((opcode == 0xd8) || sign)
+			{
+				invert(top);                    // fmul, fchs and fabs write ST(0)
+			}
+			else if (fxch)
+			{
+				invert(top);
+				if (sti)
+					invert(top + sti);
+			}
+			else if (opcode == 0xd9)
+			{
+				invert(new_top);                // fld, fld1 and fldz write the new ST(0)
 			}
 		}
 		break;
@@ -506,8 +528,16 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 		break;
 
 	case DRC_BREAK_X87TAG:
-		if (!fnstsw)
+		if (fxch || sign)
+		{
+			core.x87_tw ^= 1 << X87_TW_FIELD_SHIFT(top);
+			if (fxch && sti)
+				core.x87_tw ^= 1 << X87_TW_FIELD_SHIFT((top + sti) & 7);
+		}
+		else if (!fnstsw)
+		{
 			core.x87_tw = tags;
+		}
 		break;
 
 	case DRC_BREAK_X87CYCLES:
@@ -520,7 +550,9 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 		break;
 
 	case DRC_BREAK_X87PTR:
-		if (!fnstsw)
+		if (fxch)
+			core.x87_inst_ptr ^= 1;
+		else if (!fnstsw)
 			core.x87_data_ptr ^= 1;
 		break;
 
