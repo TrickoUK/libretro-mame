@@ -997,7 +997,8 @@ void i386_device::cfunc_x87(void *param)
 // the function which a compiled x87 instruction calls, or nullptr if the instruction is not compiled
 i386_device::drc_x87_function i386_device::drc_x87_helper(opcode_desc const &desc) const
 {
-	if (!m_x87_present)
+	// the x87 opcodes are invalid on a CPU without an FPU
+	if (m_opcode_table1_32[desc.opcode] == &i386_device::i386_invalid)
 		return nullptr;
 	switch (desc.opcode)
 	{
