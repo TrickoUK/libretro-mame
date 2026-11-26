@@ -1102,10 +1102,14 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 			// instructions which do nothing mark places in the buffer, to measure how much of it is used
 			uml::instruction *const start = &block.append();
 			start->nop();
+			[[maybe_unused]] uml::instruction const *previous = start;
 			for (opcode_desc const *desc = first; desc; desc = desc->next())
 			{
 				uml::instruction *const mark = &block.append();
 				mark->nop();
+				// the room kept free for an instruction covers what each one uses
+				assert(uint32_t(mark - previous) <= COMPILE_UML_PER_INSTRUCTION);
+				previous = mark;
 				bool const full = (uint32_t(mark - start) + (2 * COMPILE_UML_PER_INSTRUCTION) + COMPILE_UML_PER_BLOCK) > COMPILE_MAX_UML;
 				bool const last = full || desc->end_sequence() || !desc->next();
 				assert(last || (desc->next()->pc == (desc->pc + desc->length)));
@@ -1114,6 +1118,9 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 				if (last)
 					break;
 			}
+			uml::instruction *const end = &block.append();
+			end->nop();
+			assert(uint32_t(end - previous) <= COMPILE_UML_PER_INSTRUCTION);
 
 			UML_LABEL(block, done);                                         // done:
 			generate_block_end(block, mem(&m_core->pc));
