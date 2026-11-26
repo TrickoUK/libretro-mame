@@ -361,7 +361,8 @@ protected:
 		uint16_t x87_cs;
 		uint32_t x87_inst_ptr;
 		uint16_t x87_opcode;
-		// scratch and summary fields for generated code, zero while unused and not saved
+		// Scratch and summary fields for generated code.  They are not saved, and the verifier does not compare the
+		// scratch fields among them (such as x87_store, x87_store_value, ea_tmp and arg0).
 		uint64_t x87_store_value;   // converted by a compiled x87 store, for generated code to write
 		uint32_t x87_store;     // whether it is to be written
 		uint32_t mode;          // compile-time mode key of the running block

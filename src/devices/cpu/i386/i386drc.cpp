@@ -1890,8 +1890,8 @@ void i386_device::generate_x87_store(drcuml_block &block, opcode_desc const &des
 
 
 // Compiled x87 instructions: a call to the core of the interpreter handler, which also charges the cycles.  A memory
-// operand is read here before the call, or looked up before it and written after it.  The instruction is executed with step() if it is to raise a fault, or if its operand cannot be
-// accessed directly.
+// operand is read here before the call, or looked up before it and written after it.  The instruction is executed with
+// step() if it is to raise a fault, or if its operand cannot be accessed directly.
 void i386_device::generate_x87(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
 {
 	uml::code_label const fault = label++;
@@ -2515,7 +2515,8 @@ void i386_device::generate_operand_store(drcuml_block &block, uml::operand_size 
 
 
 // Writes i2, or for a quadword the value left by an x87 store, to host memory, given the linear address and the index
-// which reaches the host memory from the anchor.  The verifier examines the entry and records the write before and after the store of a checked block.
+// which reaches the host memory from the anchor.  The verifier examines the entry and records the write before and
+// after the store of a checked block.
 void i386_device::generate_direct_store(drcuml_block &block, uml::operand_size size, uml::parameter address, uml::parameter index, uml::code_label &label)
 {
 	drc_data_pages const &data = *m_drc_data;
