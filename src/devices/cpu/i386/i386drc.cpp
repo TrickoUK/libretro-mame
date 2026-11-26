@@ -20,6 +20,8 @@
     conditional jumps with 8 and 32-bit displacements, the near forms of JMP,
     CALL and RET, LOOP, LOOPE, LOOPNE, JECXZ, PUSH of a register, memory or
     immediate, POP to a register or memory, and LEAVE, all without prefixes.
+    Of the x87 instructions, FADDP ST(i),ST, FMUL ST,ST(i), FCOMPP and
+    FNSTSW AX are compiled, as calls to the interpreter's code.
     Every other instruction is executed with step(), the interpreter's
     per-instruction function, which fetches the instruction from memory as it
     then is.  The block key is the linear address of the first instruction
@@ -69,6 +71,9 @@
         fault.  drc_exit_request() tests them all, or the mode key.
       - A change to the memory map and a write to compiled code happen in a
         called function, which finds them in drc_exit_request().
+      - The FERR output of an x87 operation with an unmasked exception is
+        written in a called function.  A line of the CPU which it changes is
+        changed by a scheduler timer, as above.
       - The debugger is enabled for the whole of a run.
       This assumes that timers and devices other than those reached by a called
       function run only between timeslices.
@@ -110,6 +115,24 @@
       instruction is executed with step(), which leaves ESP and EIP as the
       interpreter would on a fault.  These instructions are not compiled while
       the debugger is enabled.
+
+    Compiled x87 instructions:
+    - A compiled x87 instruction calls the core of its interpreter handler,
+      which is the handler without the test for a pending x87 exception.  The
+      arithmetic, the x87 state, the SoftFloat flags and the FERR output are
+      the handler's.  The core charges the cycles, so generated code charges
+      none.
+    - The ModRM byte is built into the code and left in arg0.  The called
+      function sets the opcode byte, from which the core forms the x87 opcode
+      register, as generated code does not maintain it.
+    - Generated code first makes the tests made before the core runs: CR0.TS
+      and CR0.EM for #NM and, except for FNSTSW AX, a pending exception with
+      CR0.NE for #MF.  If either applies, the whole instruction is executed
+      with step(), which raises the fault.
+    - A core does not access memory and cannot fault.
+    - These instructions change no arithmetic flags.  FNSTSW AX writes AX
+      only.
+    - They are not compiled while the debugger is enabled.
 
     Compiled memory accesses:
     - The segment of an operand has base zero, so the effective address is the
@@ -179,6 +202,7 @@
 #include "i386.h"
 #include "i386priv.h"
 #include "i386drcfe.h"
+#include "x87priv.h"
 
 #include "cpu/drcumlsh.h"
 
@@ -941,6 +965,61 @@ void i386_device::cfunc_page_miss(void *param)
 }
 
 
+// Runs the core of an x87 instruction for compiled code.  The ModRM byte is in arg0, and Opcode is the first byte of
+// the instruction, which the cores read from the decode state to form the x87 opcode register.
+template <void (i386_device::*Core)(uint8_t), uint8_t Opcode>
+void i386_device::cfunc_x87(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call(
+			[&cpu] ()
+			{
+				core_state &core = *cpu.m_core;
+				uint8_t const modrm = uint8_t(core.arg0);
+				cpu.m_opcode = Opcode;
+
+				// for the deliberate errors of the verifier
+				uint16_t const status = core.x87_sw;
+				uint16_t const tags = core.x87_tw;
+				if (cpu.drc_verify_breaks(DRC_BREAK_X87OPC) && core.verify_checking)
+					cpu.m_opcode ^= 1;
+
+				[[maybe_unused]] uint32_t const eip = core.eip;
+				(cpu.*Core)(modrm);
+				assert((core.fault == NO_FAULT) && (core.eip == eip));
+
+				if (cpu.m_drc_verify_break)
+					cpu.drc_verify_break_x87(Opcode, modrm, status, tags);
+			});
+}
+
+
+// the function which a compiled x87 instruction calls, or nullptr if the instruction is not compiled
+i386_device::drc_x87_function i386_device::drc_x87_helper(opcode_desc const &desc) const
+{
+	if (!m_x87_present)
+		return nullptr;
+	switch (desc.opcode)
+	{
+	case 0xd8:
+		if ((desc.modrm & 0xf8) == 0xc8)    // fmul st,st(i)
+			return &i386_device::cfunc_x87<&i386_device::x87_fmul_st_sti_core, 0xd8>;
+		break;
+	case 0xde:
+		if ((desc.modrm & 0xf8) == 0xc0)    // faddp st(i),st
+			return &i386_device::cfunc_x87<&i386_device::x87_faddp_core, 0xde>;
+		if (desc.modrm == 0xd9)             // fcompp
+			return &i386_device::cfunc_x87<&i386_device::x87_fcompp_core, 0xde>;
+		break;
+	case 0xdf:
+		if (desc.modrm == 0xe0)             // fnstsw ax, which has no test for a pending exception
+			return &i386_device::cfunc_x87<&i386_device::x87_fstsw_ax, 0xdf>;
+		break;
+	}
+	return nullptr;
+}
+
+
 template <typename Data>
 void i386_device::cfunc_verify_store_start(void *param)
 {
@@ -1339,6 +1418,9 @@ bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 		break;
 	case opcode_desc::family::LEA:
 		return unprefixed && (desc.opcode == 0x8d) && (desc.modrm < 0xc0);
+	case opcode_desc::family::X87:
+		// the length shows that there is no prefix
+		return unprefixed && !debugger_enabled() && (desc.length == 2) && drc_x87_helper(desc);
 	case opcode_desc::family::ALU:
 	case opcode_desc::family::TEST:
 	case opcode_desc::family::INCDEC:
@@ -1475,6 +1557,11 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 			generate_lea(block, desc);
 			return;
 		}
+		if (desc.kind == opcode_desc::family::X87)
+		{
+			generate_x87(block, desc, last, done, slow, label);
+			return;
+		}
 		if (desc.kind == opcode_desc::family::JCC)
 		{
 			generate_jcc(block, desc, label);
@@ -1544,6 +1631,62 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 		generate_step(block, desc, last, done, slow);
 		decode_state_set = false;
 	}
+}
+
+
+// Compiled x87 instructions: a call to the core of the interpreter handler, which also charges the cycles.  The
+// instruction is executed with step() if it is to raise a fault.
+void i386_device::generate_x87(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
+{
+	uml::code_label const fault = label++;
+	uml::code_label const execute = label++;
+	uml::code_label const complete = label++;
+
+	// #NM
+	if (!drc_verify_breaks(DRC_BREAK_X87NM))
+	{
+		UML_TEST(block, mem(&m_core->cr[0]), CR0_TS | CR0_EM);              // test    [cr0],ts|em
+		UML_JMPc(block, COND_NZ, fault);                                    // jmp     fault,nz
+	}
+	else
+	{
+		// a deliberate error: the test is left out of checked blocks
+		UML_TEST(block, mem(&m_core->cr[0]), CR0_TS | CR0_EM);              // test    [cr0],ts|em
+		UML_JMPc(block, COND_Z, execute);                                   // jmp     execute,z
+		UML_CMP(block, mem(&m_core->verify_checking), 0);                   // cmp     [verify_checking],0
+		UML_JMPc(block, COND_E, fault);                                     // jmp     fault,e
+		UML_LABEL(block, execute);                                          // execute:
+	}
+
+	// #MF, which fnstsw does not raise
+	if (desc.opcode != 0xdf)
+	{
+		uml::code_label const clear = label++;
+		UML_LOAD(block, I0, &m_core->x87_sw, 0, SIZE_WORD, SCALE_x1);       // load    i0,[x87_sw]
+		UML_TEST(block, I0, X87_SW_ES);                                     // test    i0,es
+		UML_JMPc(block, COND_Z, clear);                                     // jmp     clear,z
+		if (drc_verify_breaks(DRC_BREAK_X87MF))
+		{
+			// a deliberate error: the test is left out of checked blocks
+			UML_CMP(block, mem(&m_core->verify_checking), 0);               // cmp     [verify_checking],0
+			UML_JMPc(block, COND_NE, clear);                                // jmp     clear,ne
+		}
+		UML_TEST(block, mem(&m_core->cr[0]), CR0_NE);                       // test    [cr0],ne
+		UML_JMPc(block, COND_NZ, fault);                                    // jmp     fault,nz
+		UML_LABEL(block, clear);                                            // clear:
+	}
+
+	UML_MOV(block, mem(&m_core->arg0), desc.modrm);                         // mov     [arg0],modrm
+	generate_call(block, drc_x87_helper(desc));                             // callc   cfunc_x87
+	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_NONE);                  // cmp     [drc_exit],none
+	UML_JMPc(block, COND_NE, slow);                                         // jmp     slow,ne
+	UML_JMP(block, complete);                                               // jmp     complete
+
+	UML_LABEL(block, fault);                                                // fault:
+	UML_MOV(block, mem(&m_core->eip), desc.pc);                             // mov     [eip],pc
+	UML_MOV(block, mem(&m_core->pc), desc.pc);                              // mov     [pc],pc
+	generate_step(block, desc, last, done, slow);
+	UML_LABEL(block, complete);                                             // complete:
 }
 
 

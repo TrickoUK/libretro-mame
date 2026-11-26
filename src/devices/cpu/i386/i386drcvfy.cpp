@@ -122,12 +122,31 @@
                  leaves stale code running
         noexit   goes on with a block after it wrote to compiled code
         x87state inverts a bit of an x87 register after checked blocks
+        x87val   inverts the low bit of the register written by each compiled
+                 faddp and fmul of checked blocks
+        x87pe    clears the precision exception flag after each compiled x87
+                 instruction of checked blocks other than fnstsw
+        x87tag   undoes the tag word update of each such instruction
+        x87cycles
+                 takes one more cycle for each compiled x87 instruction of
+                 checked blocks
+        x87mf    leaves out the test for a pending x87 exception before the
+                 compiled x87 instructions of checked blocks
+        x87nm    leaves out the test of CR0.TS and CR0.EM before them
+        x87ax    makes the compiled fnstsw of checked blocks write all of EAX
+        x87opc   gives the compiled x87 instructions of checked blocks the
+                 wrong opcode byte
+        x87ptr   inverts a bit of the x87 data pointer after each compiled
+                 x87 instruction of checked blocks other than fnstsw
+        x87sf    leaves the SoftFloat inexact flag set after each compiled x87
+                 instruction of checked blocks
 
 ***************************************************************************/
 
 #include "emu.h"
 #include "i386.h"
 #include "i386priv.h"
+#include "x87priv.h"
 
 #include "softfloat3/source/include/softfloat.h"
 
@@ -327,7 +346,17 @@ void i386_device::drc_verify_start()
 				{ "ecx", DRC_BREAK_ECX },
 				{ "noentry", DRC_BREAK_NOENTRY },
 				{ "chainirq", DRC_BREAK_CHAINIRQ },
-				{ "x87state", DRC_BREAK_X87STATE } };
+				{ "x87state", DRC_BREAK_X87STATE },
+				{ "x87val", DRC_BREAK_X87VAL },
+				{ "x87pe", DRC_BREAK_X87PE },
+				{ "x87tag", DRC_BREAK_X87TAG },
+				{ "x87cycles", DRC_BREAK_X87CYCLES },
+				{ "x87mf", DRC_BREAK_X87MF },
+				{ "x87nm", DRC_BREAK_X87NM },
+				{ "x87ax", DRC_BREAK_X87AX },
+				{ "x87opc", DRC_BREAK_X87OPC },
+				{ "x87ptr", DRC_BREAK_X87PTR },
+				{ "x87sf", DRC_BREAK_X87SF } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
@@ -445,6 +474,60 @@ void i386_device::drc_verify_break_rmw()
 	drc_verifier const &v = *m_verifier;
 	if (v.recording && !v.unsafe)
 		m_core->arg0 = m_core->arg1;
+}
+
+
+// disturbs what a compiled x87 instruction left, given the status and tag words from before it
+void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t status, uint16_t tags)
+{
+	drc_verifier const &v = *m_verifier;
+	if (!v.recording || v.unsafe)
+		return;
+	core_state &core = *m_core;
+	bool const fnstsw = opcode == 0xdf;
+
+	switch (v.sabotage)
+	{
+	case DRC_BREAK_X87VAL:
+		{
+			// faddp writes ST(i) as numbered before the pop, fmul writes ST(0)
+			bool const faddp = (opcode == 0xde) && ((modrm & 0xf8) == 0xc0);
+			if (faddp || (opcode == 0xd8))
+			{
+				int const top = BIT(status, X87_SW_TOP_SHIFT, 3);
+				core.x87_reg[(top + (faddp ? (modrm & 7) : 0)) & 7].signif ^= 1;
+			}
+		}
+		break;
+
+	case DRC_BREAK_X87PE:
+		if (!fnstsw)
+			core.x87_sw &= ~X87_SW_PE;
+		break;
+
+	case DRC_BREAK_X87TAG:
+		if (!fnstsw)
+			core.x87_tw = tags;
+		break;
+
+	case DRC_BREAK_X87CYCLES:
+		core.cycles -= 1;
+		break;
+
+	case DRC_BREAK_X87AX:
+		if (fnstsw)
+			core.reg.d[EAX] = core.x87_sw;
+		break;
+
+	case DRC_BREAK_X87PTR:
+		if (!fnstsw)
+			core.x87_data_ptr ^= 1;
+		break;
+
+	case DRC_BREAK_X87SF:
+		softfloat_exceptionFlags |= softfloat_flag_inexact;
+		break;
+	}
 }
 
 
@@ -743,7 +826,7 @@ int i386_device::drc_verify_execute()
 		return result;
 	}
 
-	// a deliberate error in the x87 state, made here as no compiled instruction changes it
+	// a deliberate error in the x87 state, whatever the instructions of the block
 	if (v.sabotage == DRC_BREAK_X87STATE)
 		m_core->x87_reg[7].signif ^= 1;
 

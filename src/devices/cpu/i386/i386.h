@@ -1466,6 +1466,7 @@ protected:
 	void x87_fadd_st_sti(uint8_t modrm);
 	void x87_fadd_sti_st(uint8_t modrm);
 	void x87_faddp(uint8_t modrm);
+	void x87_faddp_core(uint8_t modrm);
 	void x87_fiadd_m32int(uint8_t modrm);
 	void x87_fiadd_m16int(uint8_t modrm);
 	void x87_fsub_m32real(uint8_t modrm);
@@ -1499,6 +1500,7 @@ protected:
 	void x87_fmul_m32real(uint8_t modrm);
 	void x87_fmul_m64real(uint8_t modrm);
 	void x87_fmul_st_sti(uint8_t modrm);
+	void x87_fmul_st_sti_core(uint8_t modrm);
 	void x87_fmul_sti_st(uint8_t modrm);
 	void x87_fmulp(uint8_t modrm);
 	void x87_fimul_m32int(uint8_t modrm);
@@ -1573,6 +1575,7 @@ protected:
 	void x87_fucomi_sti(uint8_t modrm);
 	void x87_fucomip_sti(uint8_t modrm);
 	void x87_fcompp(uint8_t modrm);
+	void x87_fcompp_core(uint8_t modrm);
 	void x87_fucom_sti(uint8_t modrm);
 	void x87_fucomp_sti(uint8_t modrm);
 	void x87_fucompp(uint8_t modrm);
@@ -1700,6 +1703,10 @@ protected:
 	void generate_direct_store(drcuml_block &block, uml::operand_size size, uml::parameter address, uml::parameter index, uml::code_label &label);
 	void generate_operand_miss(drcuml_block &block, opcode_desc const &desc, bool write, bool last, uml::code_label done, uml::code_label slow, uml::code_label miss, uml::code_label &label);
 	static void cfunc_page_miss(void *param);
+	using drc_x87_function = void (*)(void *);
+	template <void (i386_device::*Core)(uint8_t), uint8_t Opcode> static void cfunc_x87(void *param);
+	drc_x87_function drc_x87_helper(opcode_desc const &desc) const;
+	void generate_x87(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
 	void generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label &label);
 	void generate_register_mov(drcuml_block &block, opcode_desc const &desc);
 	void generate_slow_exit(drcuml_block &block);
@@ -1748,7 +1755,17 @@ protected:
 		DRC_BREAK_ECX,
 		DRC_BREAK_NOENTRY,
 		DRC_BREAK_CHAINIRQ,
-		DRC_BREAK_X87STATE
+		DRC_BREAK_X87STATE,
+		DRC_BREAK_X87VAL,
+		DRC_BREAK_X87PE,
+		DRC_BREAK_X87TAG,
+		DRC_BREAK_X87CYCLES,
+		DRC_BREAK_X87MF,
+		DRC_BREAK_X87NM,
+		DRC_BREAK_X87AX,
+		DRC_BREAK_X87OPC,
+		DRC_BREAK_X87PTR,
+		DRC_BREAK_X87SF
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;
@@ -1763,6 +1780,7 @@ protected:
 	void drc_verify_break_carry();
 	void drc_verify_break_save_flags();
 	void drc_verify_break_restore_flags();
+	void drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t status, uint16_t tags);
 	void drc_verify_break_ea();
 	void drc_verify_break_rmw();
 	static void cfunc_verify_break_rmw(void *param);
