@@ -1715,6 +1715,7 @@ protected:
 	uint32_t drc_exit_request();
 	template <typename Body> void drc_guarded_call(Body &&body);
 	void drc_rethrow_exception();
+	void drc_presave();
 	void drc_compile_block(uint32_t mode, offs_t pc);
 	void execute_run_drc();
 	void static_generate_entry_point(drcuml_block &block);

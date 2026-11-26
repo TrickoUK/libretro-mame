@@ -2196,6 +2196,7 @@ void i386_device::i386_common_init()
 	{
 		drc_code_start();
 		drc_verify_start();
+		machine().save().register_presave(save_prepost_delegate(FUNC(i386_device::drc_presave), this));
 	}
 }
 

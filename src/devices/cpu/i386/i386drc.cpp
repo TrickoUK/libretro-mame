@@ -927,6 +927,18 @@ void i386_device::drc_rethrow_exception()
 }
 
 
+// A state is saved between timeslices, when everything the recompiler keeps outside the saved state has been dealt
+// with: a fault recorded by a called function has been delivered, an exception caught below generated code has been
+// thrown on, and no block is being checked by the verifier.  The state would lack the pending work if any of these were
+// not so, and could not be told from a good one afterwards, so this is tested in all builds.
+void i386_device::drc_presave()
+{
+	if ((m_core->fault != NO_FAULT) || m_drc_exception || m_core->verify_checking)
+		fatalerror("%s: state saved with work pending in the recompiler (fault %08x, exception %u, checking %u)\n",
+				tag(), m_core->fault, m_drc_exception ? 1 : 0, m_core->verify_checking);
+}
+
+
 void i386_device::cfunc_step(void *param)
 {
 	i386_device &cpu = *static_cast<i386_device *>(param);
