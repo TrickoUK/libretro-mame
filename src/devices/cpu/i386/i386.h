@@ -1700,6 +1700,9 @@ protected:
 	bool m_drc_break_nodrop = false;    // deliberate error: leaves write pointers to pages holding compiled code
 	bool m_drc_break_noentry = false;   // deliberate error: blocks start without testing for remaining cycles
 	bool m_drc_break_chainirq = false;  // deliberate error: a pending interrupt does not end generated code
+	bool m_drc_break_flushpages = false;    // deliberate error: a flush of the code cache keeps the data page tables
+	bool m_drc_break_flushtaps = false; // deliberate error: a flush of the code cache keeps the watched pages and taps
+	bool m_drc_break_noretry = false;   // deliberate error: a block stopped by a full cache is taken as compiled
 	void drc_pages_start();
 	void drc_pages_choose_anchor();
 	void drc_pages_flush();
@@ -1836,7 +1839,10 @@ protected:
 		DRC_BREAK_X87RC,
 		DRC_BREAK_X87NOPTE,
 		DRC_BREAK_X87WMF,
-		DRC_BREAK_X87HIGH
+		DRC_BREAK_X87HIGH,
+		DRC_BREAK_FLUSHPAGES,
+		DRC_BREAK_FLUSHTAPS,
+		DRC_BREAK_NORETRY
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;

@@ -436,8 +436,10 @@ void i386_device::drc_start()
 void i386_device::drc_flush_cache()
 {
 	m_drcuml->reset();
-	drc_code_clear();
-	drc_pages_flush();
+	if (!m_drc_break_flushtaps)
+		drc_code_clear();
+	if (!m_drc_break_flushpages)
+		drc_pages_flush();
 	drc_pages_choose_anchor();
 	m_drc_code->flushes++;
 
@@ -734,6 +736,9 @@ void i386_device::drc_code_start()
 	m_drc_break_nodrop = breakage && (std::string_view(breakage) == "nodrop");
 	m_drc_break_noentry = breakage && (std::string_view(breakage) == "noentry");
 	m_drc_break_chainirq = breakage && (std::string_view(breakage) == "chainirq");
+	m_drc_break_flushpages = breakage && (std::string_view(breakage) == "flushpages");
+	m_drc_break_flushtaps = breakage && (std::string_view(breakage) == "flushtaps");
+	m_drc_break_noretry = breakage && (std::string_view(breakage) == "noretry");
 
 	drc_pages_start();
 
@@ -1526,6 +1531,11 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 		}
 		catch (drcuml_block::abort_compilation const &)
 		{
+			if (m_drc_break_noretry)
+			{
+				succeeded = true;
+				continue;
+			}
 			if (flushed)
 				fatalerror("%s: the recompiler code cache is too small for the block at %08x\n", tag(), pc);
 			flushed = true;

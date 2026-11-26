@@ -118,6 +118,15 @@
         nodrop   leaves the write table entry of a page that starts being
                  watched for writes to compiled code.  This also applies
                  without the verifier.
+        flushpages
+                 keeps the entries of the data page tables when the code cache
+                 is flushed.  This also applies without the verifier.
+        flushtaps
+                 keeps the watched pages and their taps when the code cache is
+                 flushed.  This also applies without the verifier.
+        noretry  takes a block stopped by a full code cache as compiled,
+                 without a flush.  This also applies without the verifier, and
+                 is only seen where the cache fills.
         smc      ignores writes to the bytes of compiled instructions, which
                  leaves stale code running
         noexit   goes on with a block after it wrote to compiled code
@@ -401,7 +410,10 @@ void i386_device::drc_verify_start()
 				{ "x87rc", DRC_BREAK_X87RC },
 				{ "x87nopte", DRC_BREAK_X87NOPTE },
 				{ "x87wmf", DRC_BREAK_X87WMF },
-				{ "x87high", DRC_BREAK_X87HIGH } };
+				{ "x87high", DRC_BREAK_X87HIGH },
+				{ "flushpages", DRC_BREAK_FLUSHPAGES },
+				{ "flushtaps", DRC_BREAK_FLUSHTAPS },
+				{ "noretry", DRC_BREAK_NORETRY } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
