@@ -2060,6 +2060,15 @@ void i386_device::i386_postload()
 		i386_load_segment_descriptor(i);
 	CHANGE_PC(m_core->eip);
 	m_drc_cache_dirty = true;
+
+	// deliberate errors; other devices rebuild the memory map when a state is loaded, which would also flush the cache
+	if (m_drc_break_nopostflush)
+	{
+		m_drc_cache_dirty = false;
+		m_drc_load_unflushed = true;
+	}
+	if (m_drc_break_nomodekey)
+		m_core->mode_dirty = 0;
 }
 
 void i386_device::i386_common_init()

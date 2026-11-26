@@ -130,6 +130,15 @@
                  without a flush.  This also applies without the verifier, and
                  is only seen where the cache fills.  It is caught only by a
                  crash, so it shows only that the path runs.
+        nopostflush
+                 loads a state without flushing the code cache, ignoring also
+                 the changes of the memory map which other devices make then.
+                 This also applies without the verifier, which flushes the
+                 cache itself when the memory map changes.
+        nomodekey
+                 marks the mode key out of date neither when a state is loaded
+                 nor when a timeslice starts.  This also applies without the
+                 verifier.
         smc      ignores writes to the bytes of compiled instructions, which
                  leaves stale code running
         noexit   goes on with a block after it wrote to compiled code
@@ -416,7 +425,9 @@ void i386_device::drc_verify_start()
 				{ "x87high", DRC_BREAK_X87HIGH },
 				{ "flushpages", DRC_BREAK_FLUSHPAGES },
 				{ "flushtaps", DRC_BREAK_FLUSHTAPS },
-				{ "noretry", DRC_BREAK_NORETRY } };
+				{ "noretry", DRC_BREAK_NORETRY },
+				{ "nopostflush", DRC_BREAK_NOPOSTFLUSH },
+				{ "nomodekey", DRC_BREAK_NOMODEKEY } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)

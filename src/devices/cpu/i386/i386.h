@@ -1703,6 +1703,9 @@ protected:
 	bool m_drc_break_flushpages = false;    // deliberate error: a flush of the code cache keeps the data page tables
 	bool m_drc_break_flushtaps = false; // deliberate error: a flush of the code cache keeps the watched pages and taps
 	bool m_drc_break_noretry = false;   // deliberate error: a block stopped by a full cache is taken as compiled
+	bool m_drc_break_nopostflush = false;   // deliberate error: a loaded state does not flush the code cache
+	bool m_drc_break_nomodekey = false; // deliberate error: a loaded state and a new timeslice keep the mode key
+	bool m_drc_load_unflushed = false;  // for nopostflush: changes of the memory map made by the load are ignored
 	void drc_pages_start();
 	void drc_pages_choose_anchor();
 	void drc_pages_flush();
@@ -1843,7 +1846,9 @@ protected:
 		DRC_BREAK_X87HIGH,
 		DRC_BREAK_FLUSHPAGES,
 		DRC_BREAK_FLUSHTAPS,
-		DRC_BREAK_NORETRY
+		DRC_BREAK_NORETRY,
+		DRC_BREAK_NOPOSTFLUSH,
+		DRC_BREAK_NOMODEKEY
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;

@@ -741,13 +741,15 @@ void i386_device::drc_code_start()
 	m_drc_break_flushpages = breakage && (std::string_view(breakage) == "flushpages");
 	m_drc_break_flushtaps = breakage && (std::string_view(breakage) == "flushtaps");
 	m_drc_break_noretry = breakage && (std::string_view(breakage) == "noretry");
+	m_drc_break_nopostflush = breakage && (std::string_view(breakage) == "nopostflush");
+	m_drc_break_nomodekey = breakage && (std::string_view(breakage) == "nomodekey");
 
 	drc_pages_start();
 
 	m_drc_map_notifier = m_program->add_change_notifier(
 			[this] (read_or_write)
 			{
-				if (!m_drc_installing_taps)
+				if (!m_drc_installing_taps && !m_drc_load_unflushed)
 				{
 					m_drc_cache_dirty = true;
 					m_drc_code->map_changes++;
@@ -3310,7 +3312,9 @@ void i386_device::execute_run_drc()
 	core_state *const m_core = this->m_core;
 
 	// state may have been edited since the last timeslice
-	m_core->mode_dirty = 1;
+	if (!m_drc_break_nomodekey)
+		m_core->mode_dirty = 1;
+	m_drc_load_unflushed = false;
 
 	if (m_drc_code->report_interval && (machine().time().seconds() >= m_drc_code->next_report))
 	{
