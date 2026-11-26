@@ -1705,6 +1705,8 @@ protected:
 	bool m_drc_break_noretry = false;   // deliberate error: a block stopped by a full cache is taken as compiled
 	bool m_drc_break_nopostflush = false;   // deliberate error: a loaded state does not flush the code cache
 	bool m_drc_break_nomodekey = false; // deliberate error: a loaded state and a new timeslice keep the mode key
+	bool m_drc_in_code = false;         // generated code is running, or a function it calls
+	uint32_t m_drc_nmi_in_call = 0;     // NMIs delivered then
 	bool m_drc_load_unflushed = false;  // for nopostflush: changes of the memory map made by the load are ignored
 	void drc_pages_start();
 	void drc_pages_choose_anchor();

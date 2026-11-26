@@ -82,6 +82,25 @@
       - The debugger is enabled for the whole of a run.
       This assumes that timers and devices other than those reached by a called
       function run only between timeslices.
+    - set_input_line() does not call execute_set_input() itself:
+      set_state_synced() queues the event and asks the scheduler to
+      synchronize, and inserting that timer at the head of the timer list
+      aborts the timeslice, which zeroes the cycle count.  The cycle test
+      before the next instruction ends generated code, and the CPU is told of
+      the line before its next timeslice.  The exceptions are:
+      - A line with more than 32 events pending empties its queue within the
+        call, so execute_set_input() runs inside the called function.  The
+        interrupt, SMI, halt and A20 are still found by drc_exit_request().
+        NMI is not safe: execute_set_input() delivers it at once, changing the
+        instruction and stack pointers in the middle of an instruction, with or
+        without the recompiler.  Each occurrence during generated code is
+        counted and logged.  Reaching it takes 32 changes of the NMI line (the
+        channel check of the PIIX ISA bridge) before the scheduler runs.
+      - A line held until acknowledged (HOLD_LINE) is cleared within the call
+        of its acknowledge callback.  Interrupts are acknowledged when they
+        are delivered, and no block is entered then.
+      - abort_timeslice(), adjust_icount(), eat_cycles() and suspend() called
+        by a device only change the cycle count, which the cycle test sees.
 
     Flags:
     - A compiled instruction stores each arithmetic flag byte which its
@@ -862,11 +881,13 @@ void i386_device::drc_code_report(bool periodic)
 			"%s: recompiler at %.3f s: %u blocks, %u compiled instructions, %u flushes, %u compiles repeated for a full cache, "
 			"%u map changes, %u pages tapped, "
 			"%u writes to tapped pages, %u invalidations (%u by page, %u by 256-byte region), %u data pages entered, "
-			"%u out of reach, %u called reads, %u called writes, %u permanent cache bytes\n",
+			"%u out of reach, %u called reads, %u called writes, %u permanent cache bytes, "
+			"%u NMIs delivered inside a called function\n",
 			tag(), machine().time().as_double(), watch.blocks, watch.native, watch.flushes, watch.full_retries, watch.map_changes,
 			watch.page_installs,
 			watch.writes, watch.invalidations, watch.page_hits, watch.region_hits, data.fills,
-			data.unreachable, data.slow_reads, data.slow_writes, uint64_t(m_drcuml->cache_permanent_bytes()));
+			data.unreachable, data.slow_reads, data.slow_writes, uint64_t(m_drcuml->cache_permanent_bytes()),
+			m_drc_nmi_in_call);
 	if (periodic)
 		osd_printf_info("%s", line);
 	else
@@ -3341,7 +3362,9 @@ void i386_device::execute_run_drc()
 		// blocks containing rewritten bytes have been removed from the lookup, so new entry into the cache is safe
 		m_drc_code_modified = false;
 
+		m_drc_in_code = true;
 		int const result = m_verifier ? drc_verify_execute() : m_drcuml->execute(*m_entry);
+		m_drc_in_code = false;
 		drc_rethrow_exception();
 
 		switch (result)

@@ -2960,7 +2960,12 @@ void i386_device::execute_set_input(int irqline, int state)
 			return;
 		}
 		if ( state )
+		{
+			// only a full event queue gets here from a function called by generated code (see i386drc.cpp)
+			if (m_drc_in_code)
+				logerror("NMI delivered inside a called function (%u)\n", ++m_drc_nmi_in_call);
 			i386_trap(2, 1);
+		}
 	}
 	else
 	{
