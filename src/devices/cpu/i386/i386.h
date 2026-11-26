@@ -559,6 +559,7 @@ protected:
 	uint32_t GetNonTranslatedEA(uint8_t modrm,uint8_t *seg);
 	uint32_t GetEA(uint8_t modrm, int rwn, int size = 1);
 	uint32_t Getx87EA(uint8_t modrm, int rwn);
+	void x87_record_operand(uint8_t modrm, uint8_t segment, uint32_t ea);
 	void i386_check_sreg_validity(int reg);
 	// Defined only in the translation unit of i386.cpp
 	ATTR_FORCE_INLINE int i386_limit_check(int seg, uint32_t offset, int size = 1);
@@ -1462,6 +1463,7 @@ protected:
 	extFloat80_t x87_mul(extFloat80_t a, extFloat80_t b);
 	extFloat80_t x87_div(extFloat80_t a, extFloat80_t b);
 	void x87_fadd_m32real(uint8_t modrm);
+	void x87_fadd_m32real_core(uint32_t operand);
 	void x87_fadd_m64real(uint8_t modrm);
 	void x87_fadd_st_sti(uint8_t modrm);
 	void x87_fadd_sti_st(uint8_t modrm);
@@ -1470,6 +1472,7 @@ protected:
 	void x87_fiadd_m32int(uint8_t modrm);
 	void x87_fiadd_m16int(uint8_t modrm);
 	void x87_fsub_m32real(uint8_t modrm);
+	void x87_fsub_m32real_core(uint32_t operand);
 	void x87_fsub_m64real(uint8_t modrm);
 	void x87_fsub_st_sti(uint8_t modrm);
 	void x87_fsub_sti_st(uint8_t modrm);
@@ -1477,6 +1480,7 @@ protected:
 	void x87_fisub_m32int(uint8_t modrm);
 	void x87_fisub_m16int(uint8_t modrm);
 	void x87_fsubr_m32real(uint8_t modrm);
+	void x87_fsubr_m32real_core(uint32_t operand);
 	void x87_fsubr_m64real(uint8_t modrm);
 	void x87_fsubr_st_sti(uint8_t modrm);
 	void x87_fsubr_sti_st(uint8_t modrm);
@@ -1484,6 +1488,7 @@ protected:
 	void x87_fisubr_m32int(uint8_t modrm);
 	void x87_fisubr_m16int(uint8_t modrm);
 	void x87_fdiv_m32real(uint8_t modrm);
+	void x87_fdiv_m32real_core(uint32_t operand);
 	void x87_fdiv_m64real(uint8_t modrm);
 	void x87_fdiv_st_sti(uint8_t modrm);
 	void x87_fdiv_sti_st(uint8_t modrm);
@@ -1491,6 +1496,7 @@ protected:
 	void x87_fidiv_m32int(uint8_t modrm);
 	void x87_fidiv_m16int(uint8_t modrm);
 	void x87_fdivr_m32real(uint8_t modrm);
+	void x87_fdivr_m32real_core(uint32_t operand);
 	void x87_fdivr_m64real(uint8_t modrm);
 	void x87_fdivr_st_sti(uint8_t modrm);
 	void x87_fdivr_sti_st(uint8_t modrm);
@@ -1498,6 +1504,7 @@ protected:
 	void x87_fidivr_m32int(uint8_t modrm);
 	void x87_fidivr_m16int(uint8_t modrm);
 	void x87_fmul_m32real(uint8_t modrm);
+	void x87_fmul_m32real_core(uint32_t operand);
 	void x87_fmul_m64real(uint8_t modrm);
 	void x87_fmul_st_sti(uint8_t modrm);
 	void x87_fmul_st_sti_core(uint8_t modrm);
@@ -1517,6 +1524,7 @@ protected:
 	void x87_fcos(uint8_t modrm);
 	void x87_fsincos(uint8_t modrm);
 	void x87_fld_m32real(uint8_t modrm);
+	void x87_fld_m32real_core(uint32_t operand);
 	void x87_fld_m64real(uint8_t modrm);
 	void x87_fld_m80real(uint8_t modrm);
 	void x87_fld_sti(uint8_t modrm);
@@ -1571,9 +1579,11 @@ protected:
 	void x87_ficomp_m16int(uint8_t modrm);
 	void x87_ficomp_m32int(uint8_t modrm);
 	void x87_fcom_m32real(uint8_t modrm);
+	void x87_fcom_m32real_core(uint32_t operand);
 	void x87_fcom_m64real(uint8_t modrm);
 	void x87_fcom_sti(uint8_t modrm);
 	void x87_fcomp_m32real(uint8_t modrm);
+	void x87_fcomp_m32real_core(uint32_t operand);
 	void x87_fcomp_m64real(uint8_t modrm);
 	void x87_fcomp_sti(uint8_t modrm);
 	void x87_fcomi_sti(uint8_t modrm);
@@ -1711,7 +1721,9 @@ protected:
 	void generate_operand_miss(drcuml_block &block, opcode_desc const &desc, bool write, bool last, uml::code_label done, uml::code_label slow, uml::code_label miss, uml::code_label &label);
 	static void cfunc_page_miss(void *param);
 	using drc_x87_function = void (*)(void *);
+	template <uint8_t Opcode, typename Body> void drc_x87_run(uint8_t modrm, Body &&body);
 	template <void (i386_device::*Core)(uint8_t), uint8_t Opcode> static void cfunc_x87(void *param);
+	template <void (i386_device::*Core)(uint32_t), uint8_t Opcode> static void cfunc_x87_m32(void *param);
 	drc_x87_function drc_x87_helper(opcode_desc const &desc) const;
 	void generate_x87(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
 	void generate_jcc(drcuml_block &block, opcode_desc const &desc, uml::code_label &label);
@@ -1772,7 +1784,11 @@ protected:
 		DRC_BREAK_X87AX,
 		DRC_BREAK_X87OPC,
 		DRC_BREAK_X87PTR,
-		DRC_BREAK_X87SF
+		DRC_BREAK_X87SF,
+		DRC_BREAK_X87EA,
+		DRC_BREAK_X87DSEL,
+		DRC_BREAK_X87DPTR,
+		DRC_BREAK_X87MISS
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;

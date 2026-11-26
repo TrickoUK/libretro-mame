@@ -22,7 +22,9 @@
     immediate, POP to a register or memory, and LEAVE, all without prefixes.
     Of the x87 instructions, FADDP ST(i),ST, FMUL ST,ST(i), FCOMPP,
     FNSTSW AX, FLD ST(i), FSTP ST(i) (DD D8+i), FXCH, FCHS, FABS, FLD1 and
-    FLDZ are compiled, as calls to the interpreter's code.
+    FLDZ are compiled, and so are FLD, FADD, FMUL, FCOM, FCOMP, FSUB, FSUBR,
+    FDIV and FDIVR with a 32-bit memory operand, as calls to the
+    interpreter's code.
     Every other instruction is executed with step(), the interpreter's
     per-instruction function, which fetches the instruction from memory as it
     then is.  The block key is the linear address of the first instruction
@@ -126,13 +128,26 @@
     - A form is compiled only if the CPU's x87 opcode table gives the ModRM
       byte to that handler.
     - The ModRM byte is built into the code and left in arg0.  The called
-      function sets the opcode byte, from which the core forms the x87 opcode
-      register, as generated code does not maintain it.
+      function sets the opcode byte, from which the x87 opcode register is
+      formed, as generated code does not maintain it.
     - Generated code first makes the tests made before the core runs: CR0.TS
       and CR0.EM for #NM and, except for FNSTSW AX, a pending exception with
       CR0.NE for #MF.  If either applies, the whole instruction is executed
       with step(), which raises the fault.
-    - A core does not access memory and cannot fault.
+    - A core does not access memory and cannot fault.  Nothing called from
+      generated code may run Getx87EA(), i386_translate() or READ32(), which
+      throw on a fault.
+    - A 32-bit memory operand is read by generated code, as the operand of an
+      arithmetic instruction is.  The called function is given the value, and
+      the offset of the operand and its default segment (in the second byte of
+      arg0), from which it sets the x87 data pointer, data selector and opcode
+      registers as Getx87EA() does.  The selector is read when the instruction
+      is run.
+    - The interpreter reads the operand only if the instruction uses it (not
+      with ST(0) empty, or for FLD with the stack full).  Generated code
+      always reads it, which is safe only because an access that hits is to
+      plain memory, with no side effect and no fault.  A miss executes the
+      whole instruction with step(), before any state has changed.
     - These instructions change no arithmetic flags.  FNSTSW AX writes AX
       only.
     - They are not compiled while the debugger is enabled.
@@ -968,8 +983,30 @@ void i386_device::cfunc_page_miss(void *param)
 }
 
 
-// Runs the core of an x87 instruction for compiled code.  The ModRM byte is in arg0, and Opcode is the first byte of
-// the instruction, which the cores read from the decode state to form the x87 opcode register.
+// What the functions called for compiled x87 instructions share.  Opcode is the first byte of the instruction, which
+// is read from the decode state to form the x87 opcode register.  The body is that of the interpreter's handler.
+template <uint8_t Opcode, typename Body>
+void i386_device::drc_x87_run(uint8_t modrm, Body &&body)
+{
+	core_state &core = *m_core;
+	m_opcode = Opcode;
+
+	// for the deliberate errors of the verifier
+	uint16_t const status = core.x87_sw;
+	uint16_t const tags = core.x87_tw;
+	if (drc_verify_breaks(DRC_BREAK_X87OPC) && core.verify_checking)
+		m_opcode ^= 1;
+
+	[[maybe_unused]] uint32_t const eip = core.eip;
+	body();
+	assert((core.fault == NO_FAULT) && (core.eip == eip));
+
+	if (m_drc_verify_break)
+		drc_verify_break_x87(Opcode, modrm, status, tags);
+}
+
+
+// Runs the core of an x87 instruction without a memory operand.  The ModRM byte is in arg0.
 template <void (i386_device::*Core)(uint8_t), uint8_t Opcode>
 void i386_device::cfunc_x87(void *param)
 {
@@ -977,22 +1014,40 @@ void i386_device::cfunc_x87(void *param)
 	cpu.drc_guarded_call(
 			[&cpu] ()
 			{
+				uint8_t const modrm = uint8_t(cpu.m_core->arg0);
+				cpu.drc_x87_run<Opcode>(modrm, [&cpu, modrm] () { (cpu.*Core)(modrm); });
+			});
+}
+
+
+// Runs the core of an x87 instruction with a 32-bit memory operand, which generated code has read.  The ModRM byte and
+// the default segment of the operand are in the two low bytes of arg0, the value read is in arg1 and the offset of the
+// operand in ea_tmp.
+template <void (i386_device::*Core)(uint32_t), uint8_t Opcode>
+void i386_device::cfunc_x87_m32(void *param)
+{
+	i386_device &cpu = *static_cast<i386_device *>(param);
+	cpu.drc_guarded_call(
+			[&cpu] ()
+			{
 				core_state &core = *cpu.m_core;
 				uint8_t const modrm = uint8_t(core.arg0);
-				cpu.m_opcode = Opcode;
+				cpu.drc_x87_run<Opcode>(
+						modrm,
+						[&cpu, &core, modrm] ()
+						{
+							uint8_t segment = uint8_t(core.arg0 >> 8);
+							uint32_t offset = core.ea_tmp;
 
-				// for the deliberate errors of the verifier
-				uint16_t const status = core.x87_sw;
-				uint16_t const tags = core.x87_tw;
-				if (cpu.drc_verify_breaks(DRC_BREAK_X87OPC) && core.verify_checking)
-					cpu.m_opcode ^= 1;
+							// deliberate errors of the verifier
+							if (cpu.drc_verify_breaks(DRC_BREAK_X87DSEL) && core.verify_checking)
+								segment = DS;
+							if (cpu.drc_verify_breaks(DRC_BREAK_X87DPTR) && core.verify_checking)
+								offset++;
 
-				[[maybe_unused]] uint32_t const eip = core.eip;
-				(cpu.*Core)(modrm);
-				assert((core.fault == NO_FAULT) && (core.eip == eip));
-
-				if (cpu.m_drc_verify_break)
-					cpu.drc_verify_break_x87(Opcode, modrm, status, tags);
+							cpu.x87_record_operand(modrm, segment, offset);
+							(cpu.*Core)(core.arg1);
+						});
 			});
 }
 
@@ -1017,14 +1072,47 @@ i386_device::drc_x87_function i386_device::drc_x87_helper(opcode_desc const &des
 				handler = h;
 				function = f;
 			};
+	unsigned const reg = BIT(modrm, 3, 3);
 	switch (desc.opcode)
 	{
 	case 0xd8:
-		if (group == 0xc8)                  // fmul st,st(i)
+		if (modrm < 0xc0)                   // m32real
+		{
+			switch (reg)
+			{
+			case 0:     // fadd
+				form(m_opcode_table_x87_d8, &i386_device::x87_fadd_m32real, &i386_device::cfunc_x87_m32<&i386_device::x87_fadd_m32real_core, 0xd8>);
+				break;
+			case 1:     // fmul
+				form(m_opcode_table_x87_d8, &i386_device::x87_fmul_m32real, &i386_device::cfunc_x87_m32<&i386_device::x87_fmul_m32real_core, 0xd8>);
+				break;
+			case 2:     // fcom
+				form(m_opcode_table_x87_d8, &i386_device::x87_fcom_m32real, &i386_device::cfunc_x87_m32<&i386_device::x87_fcom_m32real_core, 0xd8>);
+				break;
+			case 3:     // fcomp
+				form(m_opcode_table_x87_d8, &i386_device::x87_fcomp_m32real, &i386_device::cfunc_x87_m32<&i386_device::x87_fcomp_m32real_core, 0xd8>);
+				break;
+			case 4:     // fsub
+				form(m_opcode_table_x87_d8, &i386_device::x87_fsub_m32real, &i386_device::cfunc_x87_m32<&i386_device::x87_fsub_m32real_core, 0xd8>);
+				break;
+			case 5:     // fsubr
+				form(m_opcode_table_x87_d8, &i386_device::x87_fsubr_m32real, &i386_device::cfunc_x87_m32<&i386_device::x87_fsubr_m32real_core, 0xd8>);
+				break;
+			case 6:     // fdiv
+				form(m_opcode_table_x87_d8, &i386_device::x87_fdiv_m32real, &i386_device::cfunc_x87_m32<&i386_device::x87_fdiv_m32real_core, 0xd8>);
+				break;
+			default:    // fdivr
+				form(m_opcode_table_x87_d8, &i386_device::x87_fdivr_m32real, &i386_device::cfunc_x87_m32<&i386_device::x87_fdivr_m32real_core, 0xd8>);
+				break;
+			}
+		}
+		else if (group == 0xc8)             // fmul st,st(i)
 			form(m_opcode_table_x87_d8, &i386_device::x87_fmul_st_sti, &i386_device::cfunc_x87<&i386_device::x87_fmul_st_sti_core, 0xd8>);
 		break;
 	case 0xd9:
-		if (group == 0xc0)                  // fld st(i)
+		if ((modrm < 0xc0) && (reg == 0))   // fld m32real
+			form(m_opcode_table_x87_d9, &i386_device::x87_fld_m32real, &i386_device::cfunc_x87_m32<&i386_device::x87_fld_m32real_core, 0xd9>);
+		else if (group == 0xc0)             // fld st(i)
 			form(m_opcode_table_x87_d9, &i386_device::x87_fld_sti, &i386_device::cfunc_x87<&i386_device::x87_fld_sti_core, 0xd9>);
 		else if (group == 0xc8)             // fxch st(i)
 			form(m_opcode_table_x87_d9, &i386_device::x87_fxch_sti, &i386_device::cfunc_x87<&i386_device::x87_fxch_sti_core, 0xd9>);
@@ -1428,7 +1516,7 @@ bool i386_device::drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) co
 
 // The compiled instructions are MOV of 8 and 32 bits between registers, memory and immediates, LEA, arithmetic and
 // logic on registers, memory and immediates, MOVZX, MOVSX, XCHG with memory, the conditional jumps, the near jumps,
-// calls and returns, the loops, PUSH, POP and LEAVE, all without prefixes.
+// calls and returns, the loops, PUSH, POP, LEAVE and the x87 forms of drc_x87_helper(), all without prefixes.
 bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 {
 	if (!desc.in_memory || (m_program->data_width() != 32) || !drc_can_bake_code())
@@ -1455,8 +1543,8 @@ bool i386_device::drc_compiles_natively(opcode_desc const &desc) const
 	case opcode_desc::family::LEA:
 		return unprefixed && (desc.opcode == 0x8d) && (desc.modrm < 0xc0);
 	case opcode_desc::family::X87:
-		// the length shows that there is no prefix
-		return unprefixed && !debugger_enabled() && (desc.length == 2) && drc_x87_helper(desc);
+		// without a memory operand, the length shows that there is no prefix
+		return (register_rm ? (unprefixed && !debugger_enabled() && (desc.length == 2)) : steppable_operand) && drc_x87_helper(desc);
 	case opcode_desc::family::ALU:
 	case opcode_desc::family::TEST:
 	case opcode_desc::family::INCDEC:
@@ -1670,13 +1758,17 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 }
 
 
-// Compiled x87 instructions: a call to the core of the interpreter handler, which also charges the cycles.  The
-// instruction is executed with step() if it is to raise a fault.
+// Compiled x87 instructions: a call to the core of the interpreter handler, which also charges the cycles.  A memory
+// operand is read here.  The instruction is executed with step() if it is to raise a fault, or if its operand cannot be
+// accessed directly.
 void i386_device::generate_x87(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label)
 {
 	uml::code_label const fault = label++;
 	uml::code_label const execute = label++;
 	uml::code_label const complete = label++;
+	bool const memory = desc.modrm < 0xc0;
+	uml::code_label const miss = memory ? label++ : 0;
+	uml::code_label const call = memory ? label++ : 0;
 
 	// #NM
 	if (!drc_verify_breaks(DRC_BREAK_X87NM))
@@ -1712,11 +1804,42 @@ void i386_device::generate_x87(drcuml_block &block, opcode_desc const &desc, boo
 		UML_LABEL(block, clear);                                            // clear:
 	}
 
-	UML_MOV(block, mem(&m_core->arg0), desc.modrm);                         // mov     [arg0],modrm
+	if (memory)
+	{
+		generate_operand_load(block, desc, SIZE_DWORD, false, false, miss);    // value in i6, address in i7
+		UML_LABEL(block, call);                                             // call:
+		UML_MOV(block, mem(&m_core->arg1), I6);                             // mov     [arg1],i6
+		UML_MOV(block, mem(&m_core->ea_tmp), I7);                           // mov     [ea_tmp],i7
+		UML_MOV(block, mem(&m_core->arg0), desc.modrm | (uint32_t(desc.segment) << 8));    // mov     [arg0],segment:modrm
+	}
+	else
+	{
+		UML_MOV(block, mem(&m_core->arg0), desc.modrm);                     // mov     [arg0],modrm
+	}
 	generate_call(block, drc_x87_helper(desc));                             // callc   cfunc_x87
 	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_NONE);                  // cmp     [drc_exit],none
 	UML_JMPc(block, COND_NE, slow);                                         // jmp     slow,ne
 	UML_JMP(block, complete);                                               // jmp     complete
+
+	if (memory)
+	{
+		// the page of the address is entered in the table if it can be, then the instruction is stepped
+		UML_LABEL(block, miss);                                             // miss:
+		if (drc_verify_breaks(DRC_BREAK_X87MISS))
+		{
+			// a deliberate error: a miss of a checked block is treated as a hit which reads zero
+			uml::code_label const unchecked = label++;
+			UML_CMP(block, mem(&m_core->verify_checking), 0);               // cmp     [verify_checking],0
+			UML_JMPc(block, COND_E, unchecked);                             // jmp     unchecked,e
+			UML_MOV(block, I7, I0);                                         // mov     i7,i0
+			UML_MOV(block, I6, 0);                                          // mov     i6,0
+			UML_JMP(block, call);                                           // jmp     call
+			UML_LABEL(block, unchecked);                                    // unchecked:
+		}
+		UML_MOV(block, mem(&m_core->ea_tmp), I0);                           // mov     [ea_tmp],i0
+		UML_MOV(block, mem(&m_core->arg1), 0);                              // mov     [arg1],read
+		generate_call(block, &i386_device::cfunc_page_miss);                // callc   cfunc_page_miss
+	}
 
 	UML_LABEL(block, fault);                                                // fault:
 	UML_MOV(block, mem(&m_core->eip), desc.pc);                             // mov     [eip],pc
@@ -2194,7 +2317,7 @@ void i386_device::generate_operand_load(drcuml_block &block, opcode_desc const &
 	drc_data_pages const &data = *m_drc_data;
 
 	generate_effective_address(block, desc);
-	if (drc_verify_breaks(DRC_BREAK_EA))
+	if (drc_verify_breaks(DRC_BREAK_EA) || ((desc.kind == opcode_desc::family::X87) && drc_verify_breaks(DRC_BREAK_X87EA)))
 	{
 		UML_MOV(block, mem(&m_core->ea_tmp), I0);                           // mov     [ea_tmp],i0
 		generate_call(block, &i386_device::cfunc_verify_break_ea);          // callc   cfunc_verify_break_ea

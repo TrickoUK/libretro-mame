@@ -123,7 +123,8 @@
         noexit   goes on with a block after it wrote to compiled code
         x87state inverts a bit of an x87 register after checked blocks
         x87val   inverts the low bit of the registers written by each compiled
-                 x87 instruction of checked blocks which writes any
+                 x87 instruction of checked blocks which writes any; of C0 in
+                 the status word after fcom and fcomp with a memory operand
         x87pe    clears the precision exception flag after each compiled x87
                  instruction of checked blocks other than fnstsw
         x87tag   undoes the tag word update of each such instruction; after
@@ -143,6 +144,15 @@
                  instruction pointer after fxch, which leaves the data pointer)
         x87sf    leaves the SoftFloat inexact flag set after each compiled x87
                  instruction of checked blocks
+        x87ea    moves the effective address of the compiled x87 loads of
+                 checked blocks by four bytes
+        x87dsel  records the data segment selector for a compiled x87
+                 instruction of checked blocks whose operand is in the stack
+                 segment
+        x87dptr  records the offset of the operand of a compiled x87
+                 instruction of checked blocks plus one
+        x87miss  treats a miss of a compiled x87 load of checked blocks as a
+                 hit which reads zero, instead of executing it with step()
 
 ***************************************************************************/
 
@@ -359,7 +369,11 @@ void i386_device::drc_verify_start()
 				{ "x87ax", DRC_BREAK_X87AX },
 				{ "x87opc", DRC_BREAK_X87OPC },
 				{ "x87ptr", DRC_BREAK_X87PTR },
-				{ "x87sf", DRC_BREAK_X87SF } };
+				{ "x87sf", DRC_BREAK_X87SF },
+				{ "x87ea", DRC_BREAK_X87EA },
+				{ "x87dsel", DRC_BREAK_X87DSEL },
+				{ "x87dptr", DRC_BREAK_X87DPTR },
+				{ "x87miss", DRC_BREAK_X87MISS } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
@@ -501,7 +515,11 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 	case DRC_BREAK_X87VAL:
 		{
 			auto const invert = [&core] (int reg) { core.x87_reg[reg & 7].signif ^= 1; };
-			if (((opcode == 0xde) && (group == 0xc0)) || (opcode == 0xdd))
+			if ((opcode == 0xd8) && (modrm < 0xc0) && ((BIT(modrm, 3, 3) == 2) || (BIT(modrm, 3, 3) == 3)))
+			{
+				core.x87_sw ^= X87_SW_C0;       // fcom and fcomp write no register
+			}
+			else if (((opcode == 0xde) && (group == 0xc0)) || (opcode == 0xdd))
 			{
 				invert(top + sti);              // faddp and fstp write ST(i) as numbered before the pop
 			}

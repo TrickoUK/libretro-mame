@@ -168,13 +168,20 @@ uint32_t i386_device::Getx87EA(uint8_t modrm, int rwn)
 	uint32_t ea;
 	modrm_to_EA(modrm, &ea, &segment);
 	uint32_t ret = i386_translate(segment, ea, rwn);
+	x87_record_operand(modrm, segment, ea);
+	return ret;
+}
+
+// the x87 opcode, data pointer and data selector of an instruction with a memory operand at an offset in a segment
+void i386_device::x87_record_operand(uint8_t modrm, uint8_t segment, uint32_t ea)
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	m_core->x87_ds = m_core->sreg[segment].selector;
 	if (PROTECTED_MODE && !V8086_MODE)
 		m_core->x87_data_ptr = ea;
 	else
 		m_core->x87_data_ptr = ea + (m_core->x87_ds << 4);
 	m_core->x87_opcode = ((m_opcode << 8) | modrm) & 0x7ff;
-	return ret;
 }
 
 int i386_device::x87_check_exceptions(bool store)
@@ -399,11 +406,19 @@ extFloat80_t i386_device::x87_div(extFloat80_t a, extFloat80_t b)
 void i386_device::x87_fadd_m32real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t result;
-
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
+	// the operand is read unless ST(0) is empty
+	uint32_t const operand = X87_IS_ST_EMPTY(0) ? 0 : READ32(ea);
+	x87_fadd_m32real_core(operand);
+}
+
+void i386_device::x87_fadd_m32real_core(uint32_t operand)
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	extFloat80_t result;
+
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -411,7 +426,7 @@ void i386_device::x87_fadd_m32real(uint8_t modrm)
 	}
 	else
 	{
-		float32_t m32real{ READ32(ea) };
+		float32_t m32real{ operand };
 
 		extFloat80_t a = ST(0);
 		extFloat80_t b = f32_to_extF80(m32real);
@@ -683,11 +698,19 @@ void i386_device::x87_fiadd_m16int(uint8_t modrm)
 void i386_device::x87_fsub_m32real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t result;
-
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
+	// the operand is read unless ST(0) is empty
+	uint32_t const operand = X87_IS_ST_EMPTY(0) ? 0 : READ32(ea);
+	x87_fsub_m32real_core(operand);
+}
+
+void i386_device::x87_fsub_m32real_core(uint32_t operand)
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	extFloat80_t result;
+
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -695,7 +718,7 @@ void i386_device::x87_fsub_m32real(uint8_t modrm)
 	}
 	else
 	{
-		float32_t m32real{ READ32(ea) };
+		float32_t m32real{ operand };
 
 		extFloat80_t a = ST(0);
 		extFloat80_t b = f32_to_extF80(m32real);
@@ -962,11 +985,19 @@ void i386_device::x87_fisub_m16int(uint8_t modrm)
 void i386_device::x87_fsubr_m32real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t result;
-
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
+	// the operand is read unless ST(0) is empty
+	uint32_t const operand = X87_IS_ST_EMPTY(0) ? 0 : READ32(ea);
+	x87_fsubr_m32real_core(operand);
+}
+
+void i386_device::x87_fsubr_m32real_core(uint32_t operand)
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	extFloat80_t result;
+
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -974,7 +1005,7 @@ void i386_device::x87_fsubr_m32real(uint8_t modrm)
 	}
 	else
 	{
-		float32_t m32real{ READ32(ea) };
+		float32_t m32real{ operand };
 
 		extFloat80_t a = f32_to_extF80(m32real);
 		extFloat80_t b = ST(0);
@@ -1241,11 +1272,19 @@ void i386_device::x87_fisubr_m16int(uint8_t modrm)
 void i386_device::x87_fdiv_m32real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t result;
-
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
+	// the operand is read unless ST(0) is empty
+	uint32_t const operand = X87_IS_ST_EMPTY(0) ? 0 : READ32(ea);
+	x87_fdiv_m32real_core(operand);
+}
+
+void i386_device::x87_fdiv_m32real_core(uint32_t operand)
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	extFloat80_t result;
+
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -1253,7 +1292,7 @@ void i386_device::x87_fdiv_m32real(uint8_t modrm)
 	}
 	else
 	{
-		float32_t m32real{ READ32(ea) };
+		float32_t m32real{ operand };
 
 		extFloat80_t a = ST(0);
 		extFloat80_t b = f32_to_extF80(m32real);
@@ -1524,11 +1563,19 @@ void i386_device::x87_fidiv_m16int(uint8_t modrm)
 void i386_device::x87_fdivr_m32real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t result;
-
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
+	// the operand is read unless ST(0) is empty
+	uint32_t const operand = X87_IS_ST_EMPTY(0) ? 0 : READ32(ea);
+	x87_fdivr_m32real_core(operand);
+}
+
+void i386_device::x87_fdivr_m32real_core(uint32_t operand)
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	extFloat80_t result;
+
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -1536,7 +1583,7 @@ void i386_device::x87_fdivr_m32real(uint8_t modrm)
 	}
 	else
 	{
-		float32_t m32real{ READ32(ea) };
+		float32_t m32real{ operand };
 
 		extFloat80_t a = f32_to_extF80(m32real);
 		extFloat80_t b = ST(0);
@@ -1808,11 +1855,19 @@ void i386_device::x87_fidivr_m16int(uint8_t modrm)
 void i386_device::x87_fmul_m32real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t result;
-
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
+	// the operand is read unless ST(0) is empty
+	uint32_t const operand = X87_IS_ST_EMPTY(0) ? 0 : READ32(ea);
+	x87_fmul_m32real_core(operand);
+}
+
+void i386_device::x87_fmul_m32real_core(uint32_t operand)
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	extFloat80_t result;
+
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -1820,7 +1875,7 @@ void i386_device::x87_fmul_m32real(uint8_t modrm)
 	}
 	else
 	{
-		float32_t m32real{ READ32(ea) };
+		float32_t m32real{ operand };
 
 		extFloat80_t a = ST(0);
 		extFloat80_t b = f32_to_extF80(m32real);
@@ -2768,14 +2823,22 @@ void i386_device::x87_fsincos(uint8_t modrm)
 void i386_device::x87_fld_m32real(uint8_t modrm)
 {
 	[[maybe_unused]] core_state *const m_core = this->m_core;
-	extFloat80_t value;
-
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
+	// the operand is read unless the stack is full
+	uint32_t const operand = X87_IS_ST_EMPTY(7) ? READ32(ea) : 0;
+	x87_fld_m32real_core(operand);
+}
+
+void i386_device::x87_fld_m32real_core(uint32_t operand)
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
+	extFloat80_t value;
+
 	if (x87_ck_over_stack())
 	{
-		float32_t m32real{ READ32(ea) };
+		float32_t m32real{ operand };
 
 		value = f32_to_extF80(m32real);
 
@@ -4186,6 +4249,19 @@ void i386_device::x87_fcom_m32real(uint8_t modrm)
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
+	uint32_t operand = 0;
+	if (!X87_IS_ST_EMPTY(0))
+	{
+		// the condition codes are clear while the operand is read, which a page fault handler can see
+		m_core->x87_sw &= ~(X87_SW_C3 | X87_SW_C2 | X87_SW_C1 | X87_SW_C0);
+		operand = READ32(ea);
+	}
+	x87_fcom_m32real_core(operand);
+}
+
+void i386_device::x87_fcom_m32real_core(uint32_t operand)
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -4195,7 +4271,7 @@ void i386_device::x87_fcom_m32real(uint8_t modrm)
 	{
 		m_core->x87_sw &= ~(X87_SW_C3 | X87_SW_C2 | X87_SW_C1 | X87_SW_C0);
 
-		float32_t m32real{ READ32(ea) };
+		float32_t m32real{ operand };
 
 		extFloat80_t a = ST(0);
 		extFloat80_t b = f32_to_extF80(m32real);
@@ -4308,6 +4384,19 @@ void i386_device::x87_fcomp_m32real(uint8_t modrm)
 	if (x87_mf_fault())
 		return;
 	uint32_t ea = Getx87EA(modrm, 0);
+	uint32_t operand = 0;
+	if (!X87_IS_ST_EMPTY(0))
+	{
+		// the condition codes are clear while the operand is read, which a page fault handler can see
+		m_core->x87_sw &= ~(X87_SW_C3 | X87_SW_C2 | X87_SW_C1 | X87_SW_C0);
+		operand = READ32(ea);
+	}
+	x87_fcomp_m32real_core(operand);
+}
+
+void i386_device::x87_fcomp_m32real_core(uint32_t operand)
+{
+	[[maybe_unused]] core_state *const m_core = this->m_core;
 	if (X87_IS_ST_EMPTY(0))
 	{
 		x87_set_stack_underflow();
@@ -4317,7 +4406,7 @@ void i386_device::x87_fcomp_m32real(uint8_t modrm)
 	{
 		m_core->x87_sw &= ~(X87_SW_C3 | X87_SW_C2 | X87_SW_C1 | X87_SW_C0);
 
-		float32_t m32real{ READ32(ea) };
+		float32_t m32real{ operand };
 
 		extFloat80_t a = ST(0);
 		extFloat80_t b = f32_to_extF80(m32real);
