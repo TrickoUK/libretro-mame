@@ -362,8 +362,9 @@ protected:
 		uint32_t x87_inst_ptr;
 		uint16_t x87_opcode;
 		// Scratch and summary fields for generated code.  They are not saved, and the verifier does not compare the
-		// scratch fields among them (such as x87_store, x87_store_value, ea_tmp and arg0).
+		// scratch fields among them (such as x87_store, x87_store_value, x87_operand, ea_tmp and arg0).
 		uint64_t x87_store_value;   // converted by a compiled x87 store, for generated code to write
+		uint64_t x87_operand;   // the 64-bit memory operand of a compiled x87 instruction
 		uint32_t x87_store;     // whether it is to be written
 		uint32_t mode;          // compile-time mode key of the running block
 		uint32_t ea_tmp;        // effective address passed between generated code and helpers
@@ -1469,6 +1470,7 @@ protected:
 	void x87_fadd_m32real(uint8_t modrm);
 	void x87_fadd_m32real_core(uint32_t operand);
 	void x87_fadd_m64real(uint8_t modrm);
+	void x87_fadd_m64real_core(uint64_t operand);
 	void x87_fadd_st_sti(uint8_t modrm);
 	void x87_fadd_sti_st(uint8_t modrm);
 	void x87_faddp(uint8_t modrm);
@@ -1478,14 +1480,17 @@ protected:
 	void x87_fsub_m32real(uint8_t modrm);
 	void x87_fsub_m32real_core(uint32_t operand);
 	void x87_fsub_m64real(uint8_t modrm);
+	void x87_fsub_m64real_core(uint64_t operand);
 	void x87_fsub_st_sti(uint8_t modrm);
 	void x87_fsub_sti_st(uint8_t modrm);
 	void x87_fsubp(uint8_t modrm);
+	void x87_fsubp_core(uint8_t modrm);
 	void x87_fisub_m32int(uint8_t modrm);
 	void x87_fisub_m16int(uint8_t modrm);
 	void x87_fsubr_m32real(uint8_t modrm);
 	void x87_fsubr_m32real_core(uint32_t operand);
 	void x87_fsubr_m64real(uint8_t modrm);
+	void x87_fsubr_m64real_core(uint64_t operand);
 	void x87_fsubr_st_sti(uint8_t modrm);
 	void x87_fsubr_sti_st(uint8_t modrm);
 	void x87_fsubrp(uint8_t modrm);
@@ -1494,26 +1499,32 @@ protected:
 	void x87_fdiv_m32real(uint8_t modrm);
 	void x87_fdiv_m32real_core(uint32_t operand);
 	void x87_fdiv_m64real(uint8_t modrm);
+	void x87_fdiv_m64real_core(uint64_t operand);
 	void x87_fdiv_st_sti(uint8_t modrm);
 	void x87_fdiv_sti_st(uint8_t modrm);
 	void x87_fdivp(uint8_t modrm);
+	void x87_fdivp_core(uint8_t modrm);
 	void x87_fidiv_m32int(uint8_t modrm);
 	void x87_fidiv_m16int(uint8_t modrm);
 	void x87_fdivr_m32real(uint8_t modrm);
 	void x87_fdivr_m32real_core(uint32_t operand);
 	void x87_fdivr_m64real(uint8_t modrm);
+	void x87_fdivr_m64real_core(uint64_t operand);
 	void x87_fdivr_st_sti(uint8_t modrm);
 	void x87_fdivr_sti_st(uint8_t modrm);
 	void x87_fdivrp(uint8_t modrm);
+	void x87_fdivrp_core(uint8_t modrm);
 	void x87_fidivr_m32int(uint8_t modrm);
 	void x87_fidivr_m16int(uint8_t modrm);
 	void x87_fmul_m32real(uint8_t modrm);
 	void x87_fmul_m32real_core(uint32_t operand);
 	void x87_fmul_m64real(uint8_t modrm);
+	void x87_fmul_m64real_core(uint64_t operand);
 	void x87_fmul_st_sti(uint8_t modrm);
 	void x87_fmul_st_sti_core(uint8_t modrm);
 	void x87_fmul_sti_st(uint8_t modrm);
 	void x87_fmulp(uint8_t modrm);
+	void x87_fmulp_core(uint8_t modrm);
 	void x87_fimul_m32int(uint8_t modrm);
 	void x87_fimul_m16int(uint8_t modrm);
 	void x87_fprem(uint8_t modrm);
@@ -1530,12 +1541,15 @@ protected:
 	void x87_fld_m32real(uint8_t modrm);
 	void x87_fld_m32real_core(uint32_t operand);
 	void x87_fld_m64real(uint8_t modrm);
+	void x87_fld_m64real_core(uint64_t operand);
 	void x87_fld_m80real(uint8_t modrm);
 	void x87_fld_sti(uint8_t modrm);
 	void x87_fld_sti_core(uint8_t modrm);
 	void x87_fild_m16int(uint8_t modrm);
 	void x87_fild_m32int(uint8_t modrm);
+	void x87_fild_m32int_core(uint32_t operand);
 	void x87_fild_m64int(uint8_t modrm);
+	void x87_fild_m64int_core(uint64_t operand);
 	void x87_fbld(uint8_t modrm);
 	void x87_fst_m32real(uint8_t modrm);
 	void x87_fst_m32real_core();
@@ -1554,6 +1568,8 @@ protected:
 	void x87_fistp_m16int(uint8_t modrm);
 	void x87_fistp_m32int(uint8_t modrm);
 	void x87_fistp_m64int(uint8_t modrm);
+	void x87_fistp_m64int_core();
+	int64_t x87_fistp_m64int_value();
 	void x87_fbstp(uint8_t modrm);
 	void x87_fld1(uint8_t modrm);
 	void x87_fld1_core(uint8_t modrm);
@@ -1589,10 +1605,12 @@ protected:
 	void x87_fcom_m32real(uint8_t modrm);
 	void x87_fcom_m32real_core(uint32_t operand);
 	void x87_fcom_m64real(uint8_t modrm);
+	void x87_fcom_m64real_core(uint64_t operand);
 	void x87_fcom_sti(uint8_t modrm);
 	void x87_fcomp_m32real(uint8_t modrm);
 	void x87_fcomp_m32real_core(uint32_t operand);
 	void x87_fcomp_m64real(uint8_t modrm);
+	void x87_fcomp_m64real_core(uint64_t operand);
 	void x87_fcomp_sti(uint8_t modrm);
 	void x87_fcomi_sti(uint8_t modrm);
 	void x87_fcomip_sti(uint8_t modrm);
@@ -1609,7 +1627,9 @@ protected:
 	void x87_ffree(uint8_t modrm);
 	void x87_finit(uint8_t modrm);
 	void x87_fldcw(uint8_t modrm);
+	void x87_fldcw_core(uint32_t operand);
 	void x87_fstcw(uint8_t modrm);
+	void x87_fstcw_core();
 	void x87_fldenv(uint8_t modrm);
 	void x87_fstenv(uint8_t modrm);
 	void x87_fsave(uint8_t modrm);
@@ -1732,9 +1752,17 @@ protected:
 	template <uint8_t Opcode, typename Body> void drc_x87_run(uint8_t modrm, Body &&body);
 	template <void (i386_device::*Core)(uint8_t), uint8_t Opcode> static void cfunc_x87(void *param);
 	template <void (i386_device::*Core)(uint32_t), uint8_t Opcode> static void cfunc_x87_m32(void *param);
-	template <void (i386_device::*Core)(), uint8_t Opcode> static void cfunc_x87_store(void *param);
+	template <void (i386_device::*Core)(uint64_t), uint8_t Opcode> static void cfunc_x87_m64(void *param);
+	template <void (i386_device::*Core)(), uint8_t Opcode, bool Record = true> static void cfunc_x87_store(void *param);
 	void drc_x87_record_operand(uint8_t modrm);
 	drc_x87_function drc_x87_helper(opcode_desc const &desc) const;
+	// the memory operand of a compiled x87 instruction: its size in bytes, zero without one, and whether it is written
+	struct drc_x87_access
+	{
+		unsigned bytes;
+		bool store;
+	};
+	static drc_x87_access drc_x87_memory(uint8_t opcode, uint8_t modrm);
 	void generate_x87_store_lookup(drcuml_block &block, opcode_desc const &desc, uint32_t bytes, uml::code_label miss);
 	void generate_x87_store(drcuml_block &block, opcode_desc const &desc, uml::code_label &label);
 	void generate_x87(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label);
@@ -1804,7 +1832,11 @@ protected:
 		DRC_BREAK_X87STORE,
 		DRC_BREAK_X87SFLAG,
 		DRC_BREAK_X87POP,
-		DRC_BREAK_X87SIZE
+		DRC_BREAK_X87SIZE,
+		DRC_BREAK_X87RC,
+		DRC_BREAK_X87NOPTE,
+		DRC_BREAK_X87WMF,
+		DRC_BREAK_X87HIGH
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;
@@ -1829,6 +1861,8 @@ protected:
 	template <typename Data> static void cfunc_verify_store_start(void *param);
 	static void cfunc_verify_store_end(void *param);
 	static void cfunc_verify_break_ea(void *param);
+	void drc_verify_break_rounding();
+	static void cfunc_verify_break_rounding(void *param);
 	uint8_t *drc_verify_host_page(offs_t address, bool write) const;
 	bool drc_verify_breaks(int kind) const;
 	void drc_verify_code_written();

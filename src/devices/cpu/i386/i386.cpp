@@ -2658,6 +2658,7 @@ void i386_device::zero_state()
 	m_core->lf_cf_in = 0;
 	m_core->mode = 0;
 	m_core->x87_store_value = 0;
+	m_core->x87_operand = 0;
 	m_core->x87_store = 0;
 	m_core->ea_tmp = 0;
 	m_core->arg0 = 0;

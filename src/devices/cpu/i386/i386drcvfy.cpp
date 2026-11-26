@@ -125,7 +125,8 @@
         x87val   inverts the low bit of the registers written by each compiled
                  x87 instruction of checked blocks which writes any; of C0 in
                  the status word after fcom and fcomp with a memory operand,
-                 and of the value to be written by fst and fstp to memory
+                 of the control word after fldcw, and of the value to be
+                 written by fst, fstp, fistp and fnstcw to memory
         x87pe    clears the precision exception flag after each compiled x87
                  instruction of checked blocks other than fnstsw
         x87tag   undoes the tag word update of each such instruction; after
@@ -159,10 +160,18 @@
         x87store leaves out the write of the compiled x87 stores of checked
                  blocks
         x87sflag makes that write also where the instruction refuses it
-        x87pop   undoes the pop of the compiled fstp to memory of checked
-                 blocks
-        x87size  writes only four bytes for a compiled fst or fstp of a 64-bit
-                 operand of checked blocks
+        x87pop   undoes the pop of the compiled fstp and fistp to memory of
+                 checked blocks
+        x87size  writes only four bytes for a compiled store of a 64-bit
+                 operand of checked blocks, and one byte for fnstcw
+        x87high  reads the high half of the 64-bit operand of a compiled x87
+                 instruction of checked blocks as zero
+        x87rc    changes the SoftFloat rounding mode after the compiled fldcw
+                 of checked blocks
+        x87nopte records the x87 opcode, data pointer and data selector for
+                 the compiled fnstcw of checked blocks
+        x87wmf   makes a pending exception stop the compiled fnstcw of checked
+                 blocks, as a test for #MF would, with nothing done
 
 ***************************************************************************/
 
@@ -388,7 +397,11 @@ void i386_device::drc_verify_start()
 				{ "x87store", DRC_BREAK_X87STORE },
 				{ "x87sflag", DRC_BREAK_X87SFLAG },
 				{ "x87pop", DRC_BREAK_X87POP },
-				{ "x87size", DRC_BREAK_X87SIZE } };
+				{ "x87size", DRC_BREAK_X87SIZE },
+				{ "x87rc", DRC_BREAK_X87RC },
+				{ "x87nopte", DRC_BREAK_X87NOPTE },
+				{ "x87wmf", DRC_BREAK_X87WMF },
+				{ "x87high", DRC_BREAK_X87HIGH } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
@@ -516,7 +529,7 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 	if (!v.recording || v.unsafe)
 		return;
 	core_state &core = *m_core;
-	bool const fnstsw = opcode == 0xdf;
+	bool const fnstsw = (opcode == 0xdf) && (modrm == 0xe0);
 	uint8_t const group = modrm & 0xf8;
 	int const sti = modrm & 7;
 	bool const fxch = (opcode == 0xd9) && (group == 0xc8);
@@ -524,9 +537,13 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 	// the physical numbers of the top of stack before and after the instruction
 	int const top = BIT(status, X87_SW_TOP_SHIFT, 3);
 	int const new_top = BIT(core.x87_sw, X87_SW_TOP_SHIFT, 3);
-	// fst and fstp with a memory operand, and fstp alone
-	bool const store = (modrm < 0xc0) && ((opcode == 0xd9) || (opcode == 0xdd)) && ((BIT(modrm, 3, 3) == 2) || (BIT(modrm, 3, 3) == 3));
-	bool const store_pop = store && (BIT(modrm, 3, 3) == 3);
+	// the forms with a memory operand
+	bool const memory = modrm < 0xc0;
+	unsigned const reg = BIT(modrm, 3, 3);
+	bool const store = drc_x87_memory(opcode, modrm).store;
+	bool const store_pop = store && ((opcode == 0xdf) || (reg == 3));
+	bool const arithmetic = memory && ((opcode == 0xd8) || (opcode == 0xdc));
+	bool const fldcw = memory && (opcode == 0xd9) && (reg == 5);
 
 	switch (v.sabotage)
 	{
@@ -537,17 +554,25 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 			{
 				core.x87_store_value ^= 1;      // the value to be written
 			}
-			else if ((opcode == 0xd8) && (modrm < 0xc0) && ((BIT(modrm, 3, 3) == 2) || (BIT(modrm, 3, 3) == 3)))
+			else if (arithmetic && ((reg == 2) || (reg == 3)))
 			{
 				core.x87_sw ^= X87_SW_C0;       // fcom and fcomp write no register
 			}
-			else if (((opcode == 0xde) && (group == 0xc0)) || (opcode == 0xdd))
+			else if (arithmetic || ((opcode == 0xd8) || sign))
 			{
-				invert(top + sti);              // faddp and fstp write ST(i) as numbered before the pop
+				invert(top);                    // arithmetic, fchs and fabs write ST(0)
 			}
-			else if ((opcode == 0xd8) || sign)
+			else if (fldcw)
 			{
-				invert(top);                    // fmul, fchs and fabs write ST(0)
+				core.x87_cw ^= 1;
+			}
+			else if (memory)
+			{
+				invert(new_top);                // the loads write the new ST(0)
+			}
+			else if (((opcode == 0xde) && (modrm != 0xd9)) || (opcode == 0xdd))
+			{
+				invert(top + sti);              // faddp, fstp and the like write ST(i) as numbered before the pop
 			}
 			else if (fxch)
 			{
@@ -608,6 +633,15 @@ void i386_device::drc_verify_break_x87(uint8_t opcode, uint8_t modrm, uint16_t s
 		softfloat_exceptionFlags |= softfloat_flag_inexact;
 		break;
 	}
+}
+
+
+// changes the rounding mode of SoftFloat: to the nearest even and towards zero change places, and down and up
+void i386_device::drc_verify_break_rounding()
+{
+	drc_verifier const &v = *m_verifier;
+	if (v.recording && !v.unsafe)
+		softfloat_roundingMode ^= 1;
 }
 
 
@@ -684,6 +718,8 @@ void i386_device::drc_verify_store_start()
 	v.recording = true;
 	if constexpr (sizeof(Data) == 1)
 		WRITE8(address, uint8_t(core.arg0));
+	else if constexpr (sizeof(Data) == 2)
+		WRITE16(address, uint16_t(core.arg0));
 	else if constexpr (sizeof(Data) == 8)
 		WRITE64(address, core.x87_store_value);
 	else
@@ -698,6 +734,7 @@ void i386_device::drc_verify_store_start()
 }
 
 template void i386_device::drc_verify_store_start<uint8_t>();
+template void i386_device::drc_verify_store_start<uint16_t>();
 template void i386_device::drc_verify_store_start<uint32_t>();
 template void i386_device::drc_verify_store_start<uint64_t>();
 
@@ -959,6 +996,7 @@ int i386_device::drc_verify_execute()
 				clear(offsetof(core_state, fault_code), sizeof(core_state::fault_code));
 				clear(offsetof(core_state, mode), sizeof(core_state::mode));
 				clear(offsetof(core_state, x87_store_value), sizeof(core_state::x87_store_value));
+				clear(offsetof(core_state, x87_operand), sizeof(core_state::x87_operand));
 				clear(offsetof(core_state, x87_store), sizeof(core_state::x87_store));
 				clear(offsetof(core_state, ea_tmp), sizeof(core_state::ea_tmp));
 				clear(offsetof(core_state, arg0), sizeof(core_state::arg0));
