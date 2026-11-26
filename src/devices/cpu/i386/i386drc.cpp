@@ -757,6 +757,9 @@ void i386_device::drc_code_start()
 	m_drc_break_nodrop = breakage && (std::string_view(breakage) == "nodrop");
 	m_drc_break_noentry = breakage && (std::string_view(breakage) == "noentry");
 	m_drc_break_chainirq = breakage && (std::string_view(breakage) == "chainirq");
+	m_drc_break_callcycle = breakage && (std::string_view(breakage) == "callcycle");
+	m_drc_break_dirtyexit = breakage && (std::string_view(breakage) == "dirtyexit");
+	m_drc_break_faultext = breakage && (std::string_view(breakage) == "faultext");
 	m_drc_break_flushpages = breakage && (std::string_view(breakage) == "flushpages");
 	m_drc_break_flushtaps = breakage && (std::string_view(breakage) == "flushtaps");
 	m_drc_break_noretry = breakage && (std::string_view(breakage) == "noretry");
@@ -938,7 +941,8 @@ uint32_t i386_device::drc_exit_request()
 		core.IF = interrupt_flag;
 		core.delayed_interrupt_enable = shadow;
 	}
-	return (!runnable || m_drc_cache_dirty || code_modified) ? DRC_EXIT_INTERPRET : DRC_EXIT_NONE;
+	bool const dirty = m_drc_cache_dirty && !m_drc_break_dirtyexit;     // a deliberate error: no exit for a flush
+	return (!runnable || dirty || code_modified) ? DRC_EXIT_INTERPRET : DRC_EXIT_NONE;
 }
 
 
@@ -995,7 +999,7 @@ void i386_device::cfunc_deliver_fault(void *param)
 				uint32_t const error = cpu.m_core->fault_code;
 
 				cpu.m_core->fault = NO_FAULT;
-				cpu.m_core->ext = 1;
+				cpu.m_core->ext = cpu.m_drc_break_faultext ? 0 : 1;     // 0, a deliberate error, is a software interrupt
 				cpu.i386_trap_with_error(fault, 0, 0, error);
 
 				// as at the end of an instruction
@@ -1910,6 +1914,15 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 		UML_CMP(block, mem(&m_core->cycles), 0);                            // cmp     [cycles],0
 		UML_EXHc(block, COND_LE, *m_out_of_cycles, desc.pc);                // exh     out_of_cycles,pc,le
 	}
+	if (first)
+		m_drc_skip_label = 0;
+	if (m_drc_skip_label)
+	{
+		// a deliberate error: where a called function returns to, past the test for remaining cycles
+		UML_LABEL(block, m_drc_skip_label);                                 // skip:
+		m_drc_skip_label = 0;
+	}
+	m_drc_skip_next = (m_drc_break_callcycle && !last) ? ++m_drc_skip_count : 0;
 
 	if (m_verifier)
 	{
@@ -1997,6 +2010,7 @@ void i386_device::generate_instruction(drcuml_block &block, opcode_desc const &d
 	else
 	{
 		generate_step(block, desc, last, done, slow);
+		generate_skip_cycle_test(block);
 		decode_state_set = false;
 	}
 }
@@ -2211,6 +2225,17 @@ void i386_device::generate_x87(drcuml_block &block, opcode_desc const &desc, boo
 	UML_MOV(block, mem(&m_core->pc), desc.pc);                              // mov     [pc],pc
 	generate_step(block, desc, last, done, slow);
 	UML_LABEL(block, complete);                                             // complete:
+}
+
+
+// A deliberate error: the path through a called function skips the test for remaining cycles of the next instruction.
+void i386_device::generate_skip_cycle_test(drcuml_block &block)
+{
+	if (m_drc_skip_next)
+	{
+		m_drc_skip_label = 0x10000000 + m_drc_skip_next;
+		UML_JMP(block, m_drc_skip_label);                                   // jmp     skip
+	}
 }
 
 
@@ -3302,6 +3327,7 @@ void i386_device::generate_memory_mov(drcuml_block &block, opcode_desc const &de
 	UML_SUB(block, mem(&m_core->cycles), mem(&m_core->cycles), m_cycle_table_pm[cycles]);   // sub     [cycles],[cycles],n
 	UML_CMP(block, mem(&m_core->drc_exit), DRC_EXIT_NONE);                  // cmp     [drc_exit],none
 	UML_JMPc(block, COND_NE, slow);                                         // jmp     slow,ne
+	generate_skip_cycle_test(block);
 
 	UML_LABEL(block, complete);                                             // complete:
 	if (!store && drc_verify_breaks(DRC_BREAK_LOAD))

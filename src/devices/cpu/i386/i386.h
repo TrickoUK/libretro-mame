@@ -1700,6 +1700,12 @@ protected:
 	bool m_drc_break_nodrop = false;    // deliberate error: leaves write pointers to pages holding compiled code
 	bool m_drc_break_noentry = false;   // deliberate error: blocks start without testing for remaining cycles
 	bool m_drc_break_chainirq = false;  // deliberate error: a pending interrupt does not end generated code
+	bool m_drc_break_callcycle = false; // deliberate error: no test for remaining cycles after a called function
+	bool m_drc_break_dirtyexit = false; // deliberate error: a pending flush does not end generated code
+	bool m_drc_break_faultext = false;  // deliberate error: faults are delivered as software interrupts
+	uint32_t m_drc_skip_count = 0;      // for callcycle: the labels it makes, the one for this instruction and the one
+	uint32_t m_drc_skip_next = 0;       // jumped to and not yet placed
+	uint32_t m_drc_skip_label = 0;
 	bool m_drc_break_flushpages = false;    // deliberate error: a flush of the code cache keeps the data page tables
 	bool m_drc_break_flushtaps = false; // deliberate error: a flush of the code cache keeps the watched pages and taps
 	bool m_drc_break_noretry = false;   // deliberate error: a block stopped by a full cache is taken as compiled
@@ -1743,6 +1749,7 @@ protected:
 	bool drc_compiles_natively(opcode_desc const &desc) const;
 	void generate_instruction(drcuml_block &block, opcode_desc const &desc, bool first, bool last, uml::code_label done, uml::code_label slow, uml::code_label &label, bool &decode_state_set);
 	void generate_step(drcuml_block &block, opcode_desc const &desc, bool last, uml::code_label done, uml::code_label slow);
+	void generate_skip_cycle_test(drcuml_block &block);
 	void generate_native_start(drcuml_block &block, opcode_desc const &desc, bool &decode_state_set);
 	struct drc_alu_form;
 	bool drc_decode_alu(opcode_desc const &desc, drc_alu_form &form) const;
@@ -1850,6 +1857,9 @@ protected:
 		DRC_BREAK_FLUSHTAPS,
 		DRC_BREAK_NORETRY,
 		DRC_BREAK_NOPOSTFLUSH,
+		DRC_BREAK_CALLCYCLE,
+		DRC_BREAK_DIRTYEXIT,
+		DRC_BREAK_FAULTEXT,
 		DRC_BREAK_NOMODEKEY
 	};
 	struct drc_verifier;

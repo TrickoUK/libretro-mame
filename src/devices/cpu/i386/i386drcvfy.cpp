@@ -427,6 +427,9 @@ void i386_device::drc_verify_start()
 				{ "flushtaps", DRC_BREAK_FLUSHTAPS },
 				{ "noretry", DRC_BREAK_NORETRY },
 				{ "nopostflush", DRC_BREAK_NOPOSTFLUSH },
+				{ "callcycle", DRC_BREAK_CALLCYCLE },
+				{ "dirtyexit", DRC_BREAK_DIRTYEXIT },
+				{ "faultext", DRC_BREAK_FAULTEXT },
 				{ "nomodekey", DRC_BREAK_NOMODEKEY } };
 		for (auto const &[name, kind] : NAMES)
 		{
