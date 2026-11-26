@@ -148,6 +148,8 @@
       always reads it, which is safe only because an access that hits is to
       plain memory, with no side effect and no fault.  A miss executes the
       whole instruction with step(), before any state has changed.
+    - The compiled x87 memory path depends on paging never being compiled:
+      an access found in the page tables cannot raise a page fault.
     - These instructions change no arithmetic flags.  FNSTSW AX writes AX
       only.
     - They are not compiled while the debugger is enabled.
