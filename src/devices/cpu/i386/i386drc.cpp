@@ -247,6 +247,7 @@
 
 #include "cpu/drcumlsh.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <string_view>
@@ -262,6 +263,12 @@ namespace {
 // NOTE: generated code reaches the CPU state, near the start of the cache, and the lookup table, at its end, with signed
 // 32-bit displacements from a register, so the cache must stay well under 2 GiB
 constexpr size_t DRC_CACHE_SIZE = 384 * 1024 * 1024;
+
+// Limits in MiB of the size given by MAME_I386_DRC_CACHE_MB, a variable for testing what happens when the cache fills.
+// The smallest holds the lookup table for one 64 KiB region of code (about 4 MiB) and the static code; the largest keeps
+// the cache within reach of the displacements.
+constexpr int DRC_CACHE_MIN_MB = 8;
+constexpr int DRC_CACHE_MAX_MB = 1024;
 
 // the front end describes instructions starting within this many bytes of the first, and at most this many in a block
 constexpr uint32_t COMPILE_WINDOW_BYTES = 1024;
@@ -360,6 +367,7 @@ struct i386_device::drc_code_watch
 	uint64_t blocks = 0;
 	uint64_t native = 0;
 	uint64_t flushes = 0;
+	uint64_t full_retries = 0;      // compilations stopped by a full cache and repeated after a flush
 	uint64_t map_changes = 0;
 	uint64_t page_installs = 0;
 	uint64_t writes = 0;
@@ -402,7 +410,14 @@ void i386_device::drc_start()
 	// the near area of the code cache has a fixed size of 128 KiB, shared with the recompiler's own near data
 	static_assert(sizeof(core_state) <= 4 * 1024);
 
-	m_drcuml = std::make_unique<drcuml_state>(*this, DRC_CACHE_SIZE);
+	size_t cache_size = DRC_CACHE_SIZE;
+	char const *const cache_mb = std::getenv("MAME_I386_DRC_CACHE_MB");
+	if (cache_mb)
+	{
+		cache_size = size_t(std::clamp(std::atoi(cache_mb), DRC_CACHE_MIN_MB, DRC_CACHE_MAX_MB)) * 1024 * 1024;
+		osd_printf_warning("%s: recompiler code cache of %u MiB\n", tag(), uint32_t(cache_size >> 20));
+	}
+	m_drcuml = std::make_unique<drcuml_state>(*this, cache_size);
 	m_drcuml->initialize(0, MODE_COUNT, 32, 0, COMPILE_MAX_SEQUENCE_BYTES);
 
 	m_core = m_drcuml->cache_alloc_near<core_state>();
@@ -835,10 +850,12 @@ void i386_device::drc_code_report(bool periodic)
 	drc_code_watch const &watch = *m_drc_code;
 	drc_data_pages const &data = *m_drc_data;
 	auto const line = util::string_format(
-			"%s: recompiler at %.3f s: %u blocks, %u compiled instructions, %u flushes, %u map changes, %u pages tapped, "
+			"%s: recompiler at %.3f s: %u blocks, %u compiled instructions, %u flushes, %u compiles repeated for a full cache, "
+			"%u map changes, %u pages tapped, "
 			"%u writes to tapped pages, %u invalidations (%u by page, %u by 256-byte region), %u data pages entered, "
 			"%u out of reach, %u called reads, %u called writes\n",
-			tag(), machine().time().as_double(), watch.blocks, watch.native, watch.flushes, watch.map_changes, watch.page_installs,
+			tag(), machine().time().as_double(), watch.blocks, watch.native, watch.flushes, watch.full_retries, watch.map_changes,
+			watch.page_installs,
 			watch.writes, watch.invalidations, watch.page_hits, watch.region_hits, data.fills,
 			data.unreachable, data.slow_reads, data.slow_writes);
 	if (periodic)
@@ -1460,10 +1477,12 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 	uml::code_label const done = 1;
 	uml::code_label const slow = 2;
 
-	// A full code cache aborts the compilation, which is repeated after a flush.  A block that needs more UML
-	// instructions than it has room for raises a fatal error instead, which is not caught here.
+	// A full code cache aborts the compilation, which is repeated after a flush.  The cache is too small if it aborts
+	// again, as only the static code is then in it besides the lookup table.  A block that needs more UML instructions
+	// than it has room for raises a fatal error instead, which is not caught here.
 	opcode_desc const *final = first;
 	bool succeeded = false;
+	bool flushed = false;
 	while (!succeeded)
 	{
 		try
@@ -1507,6 +1526,10 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 		}
 		catch (drcuml_block::abort_compilation const &)
 		{
+			if (flushed)
+				fatalerror("%s: the recompiler code cache is too small for the block at %08x\n", tag(), pc);
+			flushed = true;
+			m_drc_code->full_retries++;
 			drc_flush_cache();
 		}
 	}
