@@ -123,10 +123,13 @@
                  is flushed.  This also applies without the verifier.
         flushtaps
                  keeps the watched pages and their taps when the code cache is
-                 flushed.  This also applies without the verifier.
+                 flushed.  This also applies without the verifier, and is only
+                 run without it, as the verifier's handling of a change of the
+                 memory map drops the taps.
         noretry  takes a block stopped by a full code cache as compiled,
                  without a flush.  This also applies without the verifier, and
-                 is only seen where the cache fills.
+                 is only seen where the cache fills.  It is caught only by a
+                 crash, so it shows only that the path runs.
         smc      ignores writes to the bytes of compiled instructions, which
                  leaves stale code running
         noexit   goes on with a block after it wrote to compiled code

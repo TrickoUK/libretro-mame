@@ -265,8 +265,10 @@ namespace {
 constexpr size_t DRC_CACHE_SIZE = 384 * 1024 * 1024;
 
 // Limits in MiB of the size given by MAME_I386_DRC_CACHE_MB, a variable for testing what happens when the cache fills.
-// The smallest holds the lookup table for one 64 KiB region of code (about 4 MiB) and the static code; the largest keeps
-// the cache within reach of the displacements.
+// A flush discards the code only.  The tables of the block lookup are permanent: they are reused but never returned, so
+// the room left for code after a flush is the cache less the near area, the static code and the tables for the largest
+// number of 64 KiB regions of code and of modes that have been in use together.  The smallest limit holds the tables for
+// one region (about 4 MiB) and the static code; the largest keeps the cache within reach of the displacements.
 constexpr int DRC_CACHE_MIN_MB = 8;
 constexpr int DRC_CACHE_MAX_MB = 1024;
 
@@ -858,11 +860,11 @@ void i386_device::drc_code_report(bool periodic)
 			"%s: recompiler at %.3f s: %u blocks, %u compiled instructions, %u flushes, %u compiles repeated for a full cache, "
 			"%u map changes, %u pages tapped, "
 			"%u writes to tapped pages, %u invalidations (%u by page, %u by 256-byte region), %u data pages entered, "
-			"%u out of reach, %u called reads, %u called writes\n",
+			"%u out of reach, %u called reads, %u called writes, %u permanent cache bytes\n",
 			tag(), machine().time().as_double(), watch.blocks, watch.native, watch.flushes, watch.full_retries, watch.map_changes,
 			watch.page_installs,
 			watch.writes, watch.invalidations, watch.page_hits, watch.region_hits, data.fills,
-			data.unreachable, data.slow_reads, data.slow_writes);
+			data.unreachable, data.slow_reads, data.slow_writes, uint64_t(m_drcuml->cache_permanent_bytes()));
 	if (periodic)
 		osd_printf_info("%s", line);
 	else
@@ -1483,8 +1485,9 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 	uml::code_label const slow = 2;
 
 	// A full code cache aborts the compilation, which is repeated after a flush.  The cache is too small if it aborts
-	// again, as only the static code is then in it besides the lookup table.  A block that needs more UML instructions
-	// than it has room for raises a fatal error instead, which is not caught here.
+	// again, as only the static code is then in it besides the permanent tables of the block lookup: either the block does
+	// not fit in what these leave, or they have filled the cache.  A block that needs more UML instructions than it has
+	// room for raises a fatal error instead, which is not caught here.
 	opcode_desc const *final = first;
 	bool succeeded = false;
 	bool flushed = false;
@@ -1537,7 +1540,8 @@ void i386_device::drc_compile_block(uint32_t mode, offs_t pc)
 				continue;
 			}
 			if (flushed)
-				fatalerror("%s: the recompiler code cache is too small for the block at %08x\n", tag(), pc);
+				fatalerror("%s: no room in the recompiler code cache for the block at %08x after a flush: the cache is too small for the block, "
+						"or the lookup tables for the code regions and modes used so far fill it\n", tag(), pc);
 			flushed = true;
 			m_drc_code->full_retries++;
 			drc_flush_cache();

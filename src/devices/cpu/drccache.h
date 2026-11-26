@@ -55,6 +55,7 @@ public:
 	drccodeptr near() const { return m_near; }
 	drccodeptr top() const { return m_top; }
 	uint32_t flush_count() const { return m_flush_count; }
+	std::size_t permanent_bytes() const { return (m_near + m_size) - m_end; } // allocations at the end, kept by a flush
 
 	// pointer checking
 	bool contains_pointer(void const *ptr) const noexcept { return ((drccodeptr)ptr >= m_near) && ((drccodeptr)ptr < m_near + m_size); }

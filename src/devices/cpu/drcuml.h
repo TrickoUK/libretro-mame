@@ -222,6 +222,7 @@ public:
 
 	// back-end interface
 	void get_backend_info(drcbe_info &info) const { m_beintf->get_info(info); }
+	std::size_t cache_permanent_bytes() const { return m_cache.permanent_bytes(); }
 	bool hash_exists(u32 mode, u32 pc) const { return m_beintf->hash_exists(mode, pc); }
 	void hash_invalidate_range(u32 pcstart, u32 pcend) { m_beintf->hash_invalidate_range(pcstart, pcend); }
 	hash_codeptr hash_get_codeptr(u32 mode, u32 pc) const { return m_beintf->hash_get_codeptr(mode, pc); }
