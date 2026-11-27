@@ -1868,6 +1868,7 @@ protected:
 	void drc_verify_map();
 	void drc_verify_prepare();
 	int drc_verify_execute();
+	void drc_verify_block_end();
 	void drc_verify_break();
 	void drc_verify_instruction();
 	void drc_verify_break_mov();

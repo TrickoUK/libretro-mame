@@ -47,7 +47,8 @@
     left to the interpreter, or after the code cache had to be flushed.
     In every block, checked or not, each instruction must be started at the
     address it was compiled at, and the cached mode key must agree with the
-    segment registers and CR0.
+    segment registers and CR0.  A block which ends by going on to the next must
+    leave the CPU in a state in which that may run from the code cache.
 
     To show that errors are detected, MAME_I386_DRC_VERIFY_BREAK selects a
     deliberate error made by the generated code of every block:
@@ -826,6 +827,19 @@ void i386_device::drc_verify_code_written()
 	drc_verifier &v = *m_verifier;
 	if (v.recording && !v.code_written)
 		v.code_written = m_core->verify_count;
+}
+
+
+// Called where a block has ended by going on to the next, which normal execution does without a test: the CPU must
+// still be in a state in which it may run from the code cache.
+void i386_device::drc_verify_block_end()
+{
+	drc_verifier &v = *m_verifier;
+	if (drc_eligible(drc_mode()))
+		return;
+	if (v.mismatched < VERIFY_REPORT_LIMIT)
+		osd_printf_error("%s: DRC verify at %08X: the block before went on where it must exit\n", tag(), m_core->pc);
+	v.mismatched++;
 }
 
 

@@ -3413,8 +3413,12 @@ void i386_device::execute_run_drc()
 			drc_flush_cache();
 			break;
 
-		case EXECUTE_INTERPRET:
 		case EXECUTE_BLOCK_DONE:
+			// generated code returns here between blocks under the verifier only
+			drc_verify_block_end();
+			break;
+
+		case EXECUTE_INTERPRET:
 		case EXECUTE_EXCEPTION:
 			break;
 		}
