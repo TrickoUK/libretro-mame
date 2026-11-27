@@ -136,8 +136,9 @@
                  tests for an exit after a called function with the mode key as
                  it was before the call.  This also applies without the
                  verifier, which sees it where the block goes on to the next
-                 (a change of PE, or of a segment register other than SS, whose
-                 load ends generated code through the interrupt shadow).
+                 (a change of PE or of a segment register).  A load of SS with
+                 interrupts enabled ends generated code all the same, through
+                 the interrupt shadow.
         noa20alias
                  with A20 gated off, does not discard the blocks 1 MB above a
                  write to compiled code, which fetch the written bytes.  This
