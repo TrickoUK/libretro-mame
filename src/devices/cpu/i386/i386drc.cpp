@@ -765,6 +765,9 @@ void i386_device::drc_code_start()
 	m_drc_break_callcycle = breakage && (std::string_view(breakage) == "callcycle");
 	m_drc_break_dirtyexit = breakage && (std::string_view(breakage) == "dirtyexit");
 	m_drc_break_faultext = breakage && (std::string_view(breakage) == "faultext");
+	m_drc_break_staleexit = breakage && (std::string_view(breakage) == "staleexit");
+	m_drc_break_noa20alias = breakage && (std::string_view(breakage) == "noa20alias");
+	m_drc_break_noa20flush = breakage && (std::string_view(breakage) == "noa20flush");
 	m_drc_break_flushpages = breakage && (std::string_view(breakage) == "flushpages");
 	m_drc_break_flushtaps = breakage && (std::string_view(breakage) == "flushtaps");
 	m_drc_break_noretry = breakage && (std::string_view(breakage) == "noretry");
@@ -871,7 +874,7 @@ void i386_device::drc_code_written(uint32_t address, uint32_t lanes)
 	// blocks are looked up by linear address, which equals the physical address apart from the A20 mask; this also
 	// removes the blocks that begin up to the longest block before the first byte
 	m_drcuml->hash_invalidate_range(first, last);
-	if (!BIT(m_core->a20_mask, 20) && !BIT(first, 20))
+	if (!BIT(m_core->a20_mask, 20) && !BIT(first, 20) && !m_drc_break_noa20alias)
 		m_drcuml->hash_invalidate_range(first | 0x100000, last | 0x100000);
 
 	m_drc_code->invalidations++;
@@ -933,7 +936,8 @@ uint32_t i386_device::drc_exit_request()
 	if (m_core->fault != NO_FAULT)
 		return DRC_EXIT_FAULT;
 	bool const code_modified = m_drc_code_modified && !drc_verify_breaks(DRC_BREAK_NOEXIT);
-	bool runnable = drc_runnable();
+	// a deliberate error: the mode key is not brought up to date, so a change of the mode does not end generated code
+	bool runnable = m_drc_break_staleexit ? drc_eligible(m_core->mode) : drc_runnable();
 	if (!runnable && m_drc_break_chainirq)
 	{
 		// a deliberate error: a pending interrupt and the interrupt shadow do not end generated code

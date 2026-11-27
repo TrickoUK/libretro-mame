@@ -1703,6 +1703,9 @@ protected:
 	bool m_drc_break_callcycle = false; // deliberate error: no test for remaining cycles after a called function
 	bool m_drc_break_dirtyexit = false; // deliberate error: a pending flush does not end generated code
 	bool m_drc_break_faultext = false;  // deliberate error: faults are delivered as software interrupts
+	bool m_drc_break_staleexit = false; // deliberate error: the exit test after a called function uses the old mode key
+	bool m_drc_break_noa20alias = false;    // deliberate error: a write leaves the blocks 1 MB above it with A20 off
+	bool m_drc_break_noa20flush = false;    // deliberate error: a change of the A20 mask does not flush the code cache
 	uint32_t m_drc_skip_count = 0;      // for callcycle: the labels it makes, the one for this instruction and the one
 	uint32_t m_drc_skip_next = 0;       // jumped to and not yet placed
 	uint32_t m_drc_skip_label = 0;
@@ -1860,7 +1863,10 @@ protected:
 		DRC_BREAK_CALLCYCLE,
 		DRC_BREAK_DIRTYEXIT,
 		DRC_BREAK_FAULTEXT,
-		DRC_BREAK_NOMODEKEY
+		DRC_BREAK_NOMODEKEY,
+		DRC_BREAK_STALEEXIT,
+		DRC_BREAK_NOA20ALIAS,
+		DRC_BREAK_NOA20FLUSH
 	};
 	struct drc_verifier;
 	std::shared_ptr<drc_verifier> m_verifier;

@@ -3012,7 +3012,8 @@ void i386_device::i386_set_a20_line(int state)
 	// TODO: how does A20M and the tlb interact
 	vtlb_flush_dynamic();
 	// the A20 mask changes which bytes a linear address fetches
-	m_drc_cache_dirty = true;
+	if (!m_drc_break_noa20flush)    // a deliberate error
+		m_drc_cache_dirty = true;
 }
 
 // Executes one instruction, including the interrupt and breakpoint checks that precede it and the trap and fault handling that follow it.

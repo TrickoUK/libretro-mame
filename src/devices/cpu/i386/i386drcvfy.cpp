@@ -132,6 +132,19 @@
                  without the verifier.  It is only seen where the fault is
                  taken above ring 0, as the privilege level of the gate is
                  then tested.
+        staleexit
+                 tests for an exit after a called function with the mode key as
+                 it was before the call.  This also applies without the
+                 verifier, which sees it where the block goes on to the next
+                 (a change of PE, or of a segment register other than SS, whose
+                 load ends generated code through the interrupt shadow).
+        noa20alias
+                 with A20 gated off, does not discard the blocks 1 MB above a
+                 write to compiled code, which fetch the written bytes.  This
+                 also applies without the verifier.
+        noa20flush
+                 changes the A20 mask without flushing the code cache or the
+                 page tables.  This also applies without the verifier.
         nodrop   leaves the write table entry of a page that starts being
                  watched for writes to compiled code.  This also applies
                  without the verifier.
@@ -447,7 +460,10 @@ void i386_device::drc_verify_start()
 				{ "callcycle", DRC_BREAK_CALLCYCLE },
 				{ "dirtyexit", DRC_BREAK_DIRTYEXIT },
 				{ "faultext", DRC_BREAK_FAULTEXT },
-				{ "nomodekey", DRC_BREAK_NOMODEKEY } };
+				{ "nomodekey", DRC_BREAK_NOMODEKEY },
+				{ "staleexit", DRC_BREAK_STALEEXIT },
+				{ "noa20alias", DRC_BREAK_NOA20ALIAS },
+				{ "noa20flush", DRC_BREAK_NOA20FLUSH } };
 		for (auto const &[name, kind] : NAMES)
 		{
 			if (name == breakage)
