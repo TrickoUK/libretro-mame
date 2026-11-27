@@ -306,6 +306,11 @@ constexpr uint32_t COMPILE_UML_PER_BLOCK = 32;
 // size of the UML instruction buffer; a sequence which would not fit is ended early
 constexpr uint32_t COMPILE_MAX_UML = 8192;
 
+// NOTE: the labels of a block are numbered from 1 upwards, a few for each of its instructions.  The deliberate error
+// callcycle numbers its labels from here, clear of those.
+constexpr uint32_t CALLCYCLE_LABEL_BASE = 0x10000000;
+static_assert(CALLCYCLE_LABEL_BASE > COMPILE_MAX_UML);
+
 // pages of the data tables, and the pages from address zero searched for the largest range of memory
 constexpr uint32_t DATA_PAGES = 0x100000;
 constexpr uint32_t DATA_ANCHOR_PAGES = 0x10000;
@@ -2233,7 +2238,7 @@ void i386_device::generate_skip_cycle_test(drcuml_block &block)
 {
 	if (m_drc_skip_next)
 	{
-		m_drc_skip_label = 0x10000000 + m_drc_skip_next;
+		m_drc_skip_label = CALLCYCLE_LABEL_BASE + m_drc_skip_next;
 		UML_JMP(block, m_drc_skip_label);                                   // jmp     skip
 	}
 }

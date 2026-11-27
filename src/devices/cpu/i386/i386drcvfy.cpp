@@ -115,6 +115,22 @@
                  interrupt pending or in the interrupt shadow.  This also
                  applies without the verifier, and is only seen without it
                  where execution goes on to another block.
+        callcycle
+                 goes on after a called function to the next instruction of
+                 the block past its test for remaining cycles.  This also
+                 applies without the verifier.  It is not seen after port
+                 instructions, which end their block, so that the next test is
+                 the first of a block and is always made.
+        dirtyexit
+                 stays in generated code after a called function has left the
+                 code cache to be flushed.  This also applies without the
+                 verifier, and is only seen without it, as a checked block is
+                 left at its end, where the flush happens.
+        faultext delivers the faults of compiled instructions as software
+                 interrupts, with the external flag clear.  This also applies
+                 without the verifier.  It is only seen where the fault is
+                 taken above ring 0, as the privilege level of the gate is
+                 then tested.
         nodrop   leaves the write table entry of a page that starts being
                  watched for writes to compiled code.  This also applies
                  without the verifier.
