@@ -402,7 +402,6 @@ anmlbskta
 anoworld
 anpanman2
 anpanman2a
-anpanmct
 anteater
 anteaterg
 anteatergg
@@ -1831,7 +1830,6 @@ clubpacma
 cluclu
 cmagica
 cmanhat
-cmcwa
 cmissnx
 cmltgame
 cmmb103
@@ -2119,7 +2117,6 @@ crzrallyg
 crzrallyrf
 crzyddz
 crzytaxi
-cscaoysd
 csclub
 csclub1
 csclub1d
@@ -2326,15 +2323,12 @@ dbz
 dbz2
 dbz2bl
 dbza
-dbzbgck
-dbzbgck10
 dbzvrvs
 dcclub
 dcclubfd
 dcclubj
 dcfish
 dcheese
-dchopper
 dcon
 dday
 ddayc
@@ -4154,7 +4148,6 @@ ginganin
 ginganina
 ginkun
 gjspace
-gkitarou
 gladiatr
 glass
 glass10
@@ -4606,7 +4599,6 @@ gwarrior
 gwasu
 gwing2
 gwinggen
-gyakyu
 gypsyjug
 gyrodine
 gyrodinet
@@ -4758,7 +4750,6 @@ hhunter
 hidctch2
 hidctch2a
 hidctch3
-hideseek
 hidnc2k
 hidnctch
 hidnctcha
@@ -4792,6 +4783,7 @@ hitme1
 hitnmiss
 hitnmiss2
 hkuranai
+hlqqq
 hmcompm2
 hmcompmx
 hmgeo
@@ -5404,7 +5396,6 @@ kf2k3pcb
 kf2k3pl
 kf2k3upl
 kf2k5uni
-kghmytda
 kick
 kick4csh
 kickball
@@ -7914,7 +7905,6 @@ plycntrchtrk
 plycntre3
 plygonet
 pmonster
-pmsgk
 pnchmn
 pnchmn2
 pnchmna
@@ -8074,6 +8064,7 @@ ppresent
 pprobe
 ppsatan
 ppspeed
+ppstatn
 prc28su
 prc297wi
 prc297wia
@@ -9053,7 +9044,6 @@ satansat
 satansata
 satansatind
 sathena
-satoyama
 satsf3d
 saturnzi
 saurnfrnt
@@ -12428,7 +12418,6 @@ yorijori
 yosakdon
 yosakdona
 youjyudn
-youkai
 youkaidk1
 youkaidk2
 youma
@@ -12437,7 +12426,6 @@ youmab
 youmab2
 youmat
 yoyospel
-yujogs
 yukiwo
 yukon
 yukon1
@@ -12511,7 +12499,6 @@ znpwfvt
 zoar
 zodiack
 zoidiexp
-zoids
 zoidsinf
 zokuoten
 zokuotena

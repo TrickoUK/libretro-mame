@@ -2,51 +2,33 @@
 // copyright-holders:Nathan Woods, Peter Trauner, Angelo Salese
 /**************************************************************************************************
 
-    Video Graphics Adapter (VGA) section
+Video Graphics Adapter (VGA) section
 
-    Nathan Woods    npwoods@mess.org
-    Peter Trauner   PeT mess@utanet.at
+TODO:
+- https://github.com/mamedev/mame/issues/12068
+- MAME 0.01: fix -novesa 92 Hz refresh rate bug. Sets mode 13h thru Allegro then overlays with
+  a peculiar setup to obtain either 224x288 or 256x256 modes, regardless of -scanlines being set
+  or not.
 
-    ega/vga
-    64k (early ega 16k) words of 32 bit memory
+Notes:
+- The VGA standard is compatible with MDA, CGA, Hercules, EGA
+  (MDA, EGA, Hercules not real register compatible)
+- several vga cards drive also MDA, CGA, EGA monitors, some vga cards have register compatible
+  MDA, CGA, Hercules modes;
+- SVGA is not a real interface but more like an overlay of the VGA standard that individual
+  manufacturers put together and which eventually became the VESA consortium.
+  It has incidentally a couple points in common across families but it's otherwise mostly a
+  commercial naming rather than a real physical change over the bus slot.
+  In the end we may not even need this extra device but rather move "SVGA mode"
+  responsibility to RAMDACs.
 
-    TODO:
-    - modernize (in progress);
-    - Make RAMDAC a subclassable entity;
-    \- Clients needs to be able to swap that to SVGA extensions of the original 6bpp;
-    - Attribute from graphics to text mode in DOS doesn't restore properly, particularly if you
-      have a custom background color defined (verify);
-    - Improve debugging;
-    - Make a VGA bus slot option, already needed by 3dfx Voodoo and other similar cards;
-    - Verify how CAD ISA cards needs to r/w the VRAM space (uPD7220, HD63484, others);
+References:
+- http://www.osdever.net/FreeVGA/vga/vga.htm
 
-    per-game issues (very outdated, to be moved to SW list/to device files if necessary):
-    - The Incredible Machine: fix partial updates
-    - MAME 0.01: fix 92 Hz refresh rate bug (uses VESA register?).
-    - Virtual Pool: ET4k unrecognized;
-    - California Chase (calchase): various gfx bugs, CPU related?
-    - Jazz Jackrabbit: status bar is very jerky, but main screen scrolling is fine?
-    - Catacombs: weird resolution (untested)
+ROM declarations (move to pc_vga_oak):
 
-    Notes:
-    - The VGA standard is compatible with MDA, CGA, Hercules, EGA
-      (MDA, EGA, Hercules not real register compatible)
-    - several vga cards drive also MDA, CGA, EGA monitors, some vga cards have register compatible
-      MDA, CGA, Hercules modes;
-    - SVGA is not a real interface but more like an overlay of the VGA standard that individual
-      manufacturers put together and which eventually became the VESA consortium.
-      It has incidentally a couple points in common across families but it's otherwise mostly a
-      commercial naming rather than a real physical change over the bus slot.
-      In the end we may not even need this extra device but rather move "SVGA mode"
-      responsibility to RAMDACs.
-
-    References:
-    - http://www.osdever.net/FreeVGA/vga/vga.htm
-
-    ROM declarations (move to pc_vga_oak):
-
-    (oti 037 chip)
-    ROM_LOAD("oakvga.bin", 0xc0000, 0x8000, CRC(318c5f43) SHA1(2aeb6cf737fd87dfd08c9f5b5bc421fcdbab4ce9) )
+(oti 037 chip)
+ROM_LOAD("oakvga.bin", 0xc0000, 0x8000, CRC(318c5f43) SHA1(2aeb6cf737fd87dfd08c9f5b5bc421fcdbab4ce9) )
 
 ***************************************************************************************************/
 
@@ -54,6 +36,12 @@
 #include "pc_vga.h"
 
 #include "screen.h"
+
+// screen setup changes, sorta akin to how an OSSC would print one.
+// So stick to ~5 seconds, popmessage timing gymnastic not enough,
+// user positioning corner & prettier (separate) UI box TBD.
+#define LIVE_CRTC_SETUP 0
+#include "ui/uimain.h"
 
 #define LOG_WARN      (1U << 1)
 #define LOG_REGS      (1U << 2) // deprecated
@@ -68,6 +56,7 @@
 #define LOGREGS(...)           LOGMASKED(LOG_REGS, __VA_ARGS__)
 #define LOGDSW(...)            LOGMASKED(LOG_DSW, __VA_ARGS__)
 #define LOGCRTC(...)           LOGMASKED(LOG_CRTC, __VA_ARGS__)
+
 
 /***************************************************************************
 
@@ -502,7 +491,6 @@ void vga_device::sequencer_data_w(offs_t offset, u8 data)
 	// TODO: temporary cheat for read-back
 	vga.sequencer.data[vga.sequencer.index] = data;
 	space(SEQ_REG).write_byte(vga.sequencer.index, data);
-	recompute_params();
 }
 
 u8 vga_device::ramdac_mask_r(offs_t offset)
@@ -959,6 +947,8 @@ void vga_device::crtc_map(address_map &map)
 			return res;
 		}),
 		NAME([this](offs_t offset, u8 data) {
+			if (vga.crtc.sync_en != BIT(data, 7))
+				recompute_params();
 			vga.crtc.sync_en = BIT(data, 7);
 			vga.crtc.word_mode = BIT(data, 6);
 			vga.crtc.aw = BIT(data, 5);
@@ -1134,6 +1124,7 @@ void vga_device::sequencer_map(address_map &map)
 	map(0x01, 0x01).lw8(
 		NAME([this] (offs_t offset, u8 data) {
 			vga.sequencer.data[1] = data;
+			recompute_params();
 		})
 	);
 	map(0x02, 0x02).lw8(
@@ -1372,12 +1363,19 @@ void vga_device::vga_vh_text(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 	}
 }
 
+// Modes 0Dh, 0Eh, 10h, 12h
+// fn is a misnomer, essentially handles 16 colors modes
+// i.e. what turbocpp has support of in graphics.h
 void vga_device::vga_vh_ega(bitmap_rgb32 &bitmap,  const rectangle &cliprect)
 {
 	const int height = vga.crtc.maximum_scan_line * (vga.crtc.scan_doubling + 1);
-	const int LINES = (vga.crtc.vert_disp_end + 1) * (get_interlace_mode() + 1);
+	// - tim has a V display end of 479 but a V blank start of 399
+	const int LINES = std::min<uint16_t>(vga.crtc.vert_disp_end + 1, vga.crtc.vert_blank_start) * (get_interlace_mode() + 1);
 	const int EGA_COLUMNS = vga.crtc.horz_disp_end + 1;
 	int pel_shift = (vga.attribute.pel_shift & 7);
+
+	// TODO: figure out color it takes (attribute [0] or [0x11]?)
+	bitmap.fill(0, cliprect);
 
 	for (int addr = vga.crtc.start_addr, line = 0; line < LINES; line += height, addr += offset())
 	{
@@ -1420,7 +1418,7 @@ void vga_device::vga_vh_ega(bitmap_rgb32 &bitmap,  const rectangle &cliprect)
 	}
 }
 
-// In mode 13h (256 colors) every pixel actually double height/width
+// Mode 13h (256 colors) every pixel actually double height/width
 // i.e. a 320x200 is really 640x400
 void vga_device::vga_vh_vga(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
@@ -1498,6 +1496,7 @@ void vga_device::vga_vh_vga(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 	}
 }
 
+// Modes 04h and 05h
 void vga_device::vga_vh_cga(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
 	const int LINES = (vga.crtc.vert_disp_end + 1) * (get_interlace_mode() + 1);
@@ -1529,6 +1528,7 @@ void vga_device::vga_vh_cga(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 	}
 }
 
+// Modes 06h and 11h
 void vga_device::vga_vh_mono(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
 	const int LINES = (vga.crtc.vert_disp_end + 1) * (get_interlace_mode() + 1);
@@ -1566,9 +1566,9 @@ void vga_device::palette_update()
 	{
 		set_pen_color(
 			i,
-			pal6bit(vga.dac.color[3*(i & vga.dac.mask) + 0] & 0x3f),
-			pal6bit(vga.dac.color[3*(i & vga.dac.mask) + 1] & 0x3f),
-			pal6bit(vga.dac.color[3*(i & vga.dac.mask) + 2] & 0x3f)
+			pal6bit(vga.dac.color[3 * (i & vga.dac.mask) + 0] & 0x3f),
+			pal6bit(vga.dac.color[3 * (i & vga.dac.mask) + 1] & 0x3f),
+			pal6bit(vga.dac.color[3 * (i & vga.dac.mask) + 2] & 0x3f)
 		);
 	}
 }
@@ -1578,31 +1578,6 @@ uint8_t vga_device::pc_vga_choosevideomode()
 {
 	if (!vga.crtc.sync_en || BIT(vga.sequencer.data[1], 5))
 		return SCREEN_OFF;
-
-	// TODO: this is the wrong place to
-	if (vga.dac.dirty)
-	{
-		palette_update();
-		vga.dac.dirty = 0;
-	}
-
-	// TODO: Mode Control bit 6 unused, also cache and cleanup
-	if (vga.attribute.data[0x10] & 0x80)
-	{
-		for (int i=0; i<16;i++)
-		{
-			vga.pens[i] = pen((vga.attribute.data[i]&0x0f)
-										|((vga.attribute.data[0x14]&0xf)<<4));
-		}
-	}
-	else
-	{
-		for (int i=0; i<16;i++)
-		{
-			vga.pens[i] = pen((vga.attribute.data[i]&0x3f)
-										|((vga.attribute.data[0x14]&0xc)<<4));
-		}
-	}
 
 	// !GRAPHIC_MODE
 	if (!vga.gc.alpha_dis)
@@ -1654,29 +1629,50 @@ void vga_device::recompute_params_clock(int divisor, int xtal)
 {
 	assert(divisor > 0);
 	assert(xtal > 0);
-	int vblank_period, hblank_period;
-	// if not in graphic mode and not Clocking Mode bit 0 select 9 dots per charset
-	uint8_t hclock_m = !vga.gc.alpha_dis && !BIT(vga.sequencer.data[1], 0) ? 9 : 8;
-	int pixel_clock;
 
 	/* safety check */
 	if(!vga.crtc.horz_disp_end || !vga.crtc.vert_disp_end || !vga.crtc.horz_total || !vga.crtc.vert_total)
 		return;
 
+	// if not in graphic mode and not Clocking Mode bit 0 select 9 dots per charset
+	const uint8_t hclock_m = !vga.gc.alpha_dis && !BIT(vga.sequencer.data[1], 0) ? 9 : 8;
+	// TODO: we are ought to bump the display bitmap rather than do this
+	const float horz_clocks = (float)(hclock_m) / divisor;
+	const int htotal_period = (vga.crtc.horz_total + 5) * horz_clocks;
+
 	const u8 is_interlace_mode = get_interlace_mode() + 1;
+	const int vtotal_period = (vga.crtc.vert_total + 2) * is_interlace_mode;
+	const int display_pixels = ((vga.crtc.horz_disp_end + 1) * horz_clocks);
 	const int display_lines = vga.crtc.vert_disp_end * is_interlace_mode;
 
-	rectangle visarea(0, ((vga.crtc.horz_disp_end + 1) * ((float)(hclock_m)/divisor))-1, 0, display_lines);
-
-	vblank_period = (vga.crtc.vert_total + 2) * is_interlace_mode;
-	hblank_period = ((vga.crtc.horz_total + 5) * ((float)(hclock_m)/divisor));
+	rectangle visarea(0, display_pixels - 1, 0, display_lines);
 
 	// TODO: improve/complete clocking modes
-	pixel_clock = xtal >> BIT(vga.sequencer.data[1], 3);
+	const int pixel_clock = xtal >> BIT(vga.sequencer.data[1], 3);
+	attotime refresh  = attotime::from_ticks(htotal_period * vtotal_period, pixel_clock);
 
-	attotime refresh  = attotime::from_ticks(hblank_period * vblank_period, pixel_clock);
-	screen().configure((hblank_period), (vblank_period), visarea, refresh );
-	m_vblank_timer->adjust( screen().time_until_pos(vga.crtc.vert_blank_start + vga.crtc.vert_blank_end) );
+	screen().configure(htotal_period, vtotal_period, visarea, refresh);
+
+	// TODO: the significant other has to learn that this is an ugly short-circuit
+	// fails in tvga9000 15bpp test
+	assert(htotal_period > display_pixels);
+	assert(vtotal_period > display_lines);
+
+	if (LIVE_CRTC_SETUP)
+	{
+		// how a monitor can stand selected refresh rate wildly depends on type employed.
+		// 50 ~ 85 Hz for pure VGA, for VESA max can go up to roughly 120 to 200 Hz,
+		// assume anything beyond these ranges a bug (can tell if the UI becomes super
+		// unresponsive, check "System Information" in UI menu).
+		// NOTE: the adapter itself has to stand the extra bandwidth strain thru MCLK too
+		machine().ui().popup_time(5, "%dx%d-%c %.2f kHz %.2f Hz\n%dx%d%-22s"
+			, htotal_period, vtotal_period, get_interlace_mode() ? 'i' : 'p'
+			, attotime::from_ticks(htotal_period, pixel_clock).as_khz(), refresh.as_hz()
+			, display_pixels, display_lines + 1, "\u00A0"
+		);
+	}
+
+	m_vblank_timer->adjust(vga.crtc.sync_en ? screen().time_until_pos(vga.crtc.vert_blank_start) : attotime::never, 0 );
 }
 
 // TODO: rename me
@@ -1700,6 +1696,7 @@ uint8_t vga_device::vga_vblank()
 	vpos = screen().vpos();
 
 	/* check if we are under vblank period */
+	// TODO: should be + 2 already, probably bad on interlace
 	if(vblank_end > vga.crtc.vert_total)
 	{
 		vblank_end -= vga.crtc.vert_total;
@@ -1873,19 +1870,49 @@ void vga_device::mem_linear_w(offs_t offset, uint8_t data)
 	vga.memory[offset % vga.svga_intf.vram_size] = data;
 }
 
-/* VBLANK callback, start address definitely updates AT vblank, not before. */
 TIMER_CALLBACK_MEMBER(vga_device::vblank_timer_cb)
 {
-	vga.crtc.start_addr = latch_start_addr();
-	vga.attribute.pel_shift = vga.attribute.pel_shift_latch;
+	// shouldn't be here if monitor isn't synced
+	if (!vga.crtc.sync_en)
+		return;
 
-	if (vga.crtc.irq_latch == 0 && vga.crtc.irq_disable == 0)
+	int vsync = param;
+
+	if (vsync)
 	{
-		vga.crtc.irq_latch = 1;
-		m_vsync_cb(1);
-	}
+		// start address and PEL shifting happens at vsync, not before
+		vga.crtc.start_addr = latch_start_addr();
+		vga.attribute.pel_shift = vga.attribute.pel_shift_latch;
 
-	m_vblank_timer->adjust( screen().time_until_pos(vga.crtc.vert_blank_start + vga.crtc.vert_blank_end) );
+		if (vga.crtc.irq_latch == 0 && vga.crtc.irq_disable == 0)
+		{
+			vga.crtc.irq_latch = 1;
+			m_vsync_cb(1);
+		}
+
+		m_vblank_timer->adjust( screen().time_until_pos(vga.crtc.vert_blank_start), 0 );
+	}
+	else
+	{
+		// palette updating, done for convenience at the start of vblank
+		// TBD if colors can change midframe, if true then we need a roundtrip in drawing routines
+		// and probably is implementation specific ...
+		if (vga.dac.dirty)
+		{
+			palette_update();
+			vga.dac.dirty = 0;
+		}
+
+		// TODO: Mode Control bit 6 unused, also cache and cleanup
+		const u8 attr_p54s = BIT(vga.attribute.data[0x10], 7);
+		const u8 attr_base_mask = attr_p54s ? 0x0f : 0x3f;
+		const u8 attr_sel_mask = attr_p54s ? 0xf : 0xc;
+		const u8 attr_color_select = (vga.attribute.data[0x14] & attr_sel_mask) << 4;
+		for (int i = 0; i < 16; i++)
+			vga.pens[i] = pen((vga.attribute.data[i] & attr_base_mask) | attr_color_select);
+
+		m_vblank_timer->adjust( screen().time_until_pos(vga.crtc.vert_blank_start + vga.crtc.vert_blank_end), 1 );
+	}
 }
 
 // ISA bus bindings
@@ -2173,29 +2200,6 @@ uint8_t svga_device::pc_vga_choosevideomode()
 {
 	if (!vga.crtc.sync_en || BIT(vga.sequencer.data[1], 5))
 		return SCREEN_OFF;
-
-	if (vga.dac.dirty)
-	{
-		palette_update();
-		vga.dac.dirty = 0;
-	}
-
-	if (vga.attribute.data[0x10] & 0x80)
-	{
-		for (int i=0; i<16;i++)
-		{
-			vga.pens[i] = pen((vga.attribute.data[i]&0x0f)
-										|((vga.attribute.data[0x14]&0xf)<<4));
-		}
-	}
-	else
-	{
-		for (int i=0; i<16;i++)
-		{
-			vga.pens[i] = pen((vga.attribute.data[i]&0x3f)
-										|((vga.attribute.data[0x14]&0xc)<<4));
-		}
-	}
 
 	if (svga.rgb32_en)
 	{

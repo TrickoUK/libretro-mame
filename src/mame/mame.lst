@@ -18820,6 +18820,7 @@ phatt
 procuss
 proteus1
 proteusxr
+proteusxrpl
 vintkeys
 
 @source:ensoniq/enmirage.cpp
@@ -21801,6 +21802,9 @@ fl7_500_gs12
 fl7_500_gs13
 fl7_500_gs14
 fl7_500_gs15
+fl7_500_gs16
+fl7_500_gs17
+fl7_500_gs18
 fl7_1000
 fl7_2000
 fl7_2k16
@@ -22014,6 +22018,7 @@ lhb3
 lhbv33c
 nkishusp
 ryukobou
+ryukobouv30
 sdmg2641c
 tygn
 vbowl
@@ -22183,10 +22188,10 @@ cjddzsp122cn
 cjddzsp126cn
 cjddzsp127cn
 cjdh2
-cjdh2a
-cjdh2b
-cjdh2c
-cjdh2d
+cjdh2_215cn
+cjdh2_311cn
+cjdh2_311cna
+cjdh2_311cnb
 cjjl
 cjgdy
 dahuaxy
@@ -26637,6 +26642,9 @@ pootan
 pooyan
 pooyans
 
+@source:konami/ppstatn.cpp
+ppstatn
+
 @source:konami/qdrmfgp.cpp
 qdrmfgp
 qdrmfgp2
@@ -30625,6 +30633,22 @@ fun4a
 @source:misc/banpresto_bpsc68000.cpp
 csdaruma
 lnumbers
+
+@source:misc/banpresto_tomy_h8s.cpp
+anpanmct
+cmcwa
+cscaoysd
+dbzbgck
+dbzbgck10
+dchopper
+gkitarou
+gyakyu
+kghmytda
+pmsgk
+satoyama
+youkai
+yujogs
+zoids
 
 @source:misc/beaminv.cpp
 beaminv
@@ -36227,6 +36251,7 @@ lxccplan
 lxcmc250
 lxcmcy
 lxcmcyba
+lxcmcybao
 lxcmcybt
 lxcmcyco
 lxcmcycr
@@ -44026,22 +44051,6 @@ aws220
 @source:skeleton/ax20.cpp
 ax20
 
-@source:skeleton/banpresto_tomy_h8s.cpp
-anpanmct
-cmcwa
-cscaoysd
-dbzbgck
-dbzbgck10
-dchopper
-gkitarou
-gyakyu
-kghmytda
-pmsgk
-satoyama
-youkai
-yujogs
-zoids
-
 @source:skeleton/basf7100.cpp
 basf7120
 
@@ -45827,6 +45836,7 @@ trea2000
 treacity
 treacity202
 treamary
+trsocean121s
 wtrnymph
 xiaoao
 xplan
@@ -48651,6 +48661,7 @@ discpal
 disppal
 lexiseal
 lexizeus
+maxicybr
 pokermor
 pokmax20
 vgcaplet
@@ -48893,7 +48904,7 @@ epo_pabj
 epo_sskj
 epo_ssk2
 
-@source:tvgames/xavix_2000.cpp
+@source:tvgames/xavix_xavix2000.cpp
 ban_omt
 ban_onep
 drgqst
@@ -48913,7 +48924,7 @@ ttv_mx
 ttv_sw
 ttv_swj
 
-@source:tvgames/xavix_2002.cpp
+@source:tvgames/xavix_superxavix.cpp
 anpanmdx
 apmj2009
 ban_bkgj
@@ -48935,6 +48946,7 @@ epo_kabj
 epo_ntpj
 epo_rgfj
 epo_tfit
+hkdraw
 maxheart
 mrangbat
 ndpbj

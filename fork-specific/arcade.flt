@@ -879,6 +879,7 @@ konami/parodius.cpp
 konami/pingpong.cpp
 konami/plygonet.cpp
 konami/pooyan.cpp
+konami/ppstatn.cpp
 konami/rockrage.cpp
 konami/rocnrope.cpp
 konami/rollerg.cpp
@@ -1030,7 +1031,6 @@ misc/gumbo.cpp
 misc/gunpey.cpp
 misc/haiwei.cpp
 misc/hapyfish.cpp
-misc/hideseek.cpp
 misc/hitpoker.cpp
 misc/homedata.cpp
 misc/homedata_v.cpp  // [HELPER]
@@ -1694,7 +1694,6 @@ sigma/spiders.cpp
 sigma/spiders_a.cpp  // [HELPER]
 skeleton/alfaskop_s41_kb.cpp  // [HELPER]
 skeleton/aws_kb.cpp  // [HELPER]
-skeleton/banpresto_tomy_h8s.cpp
 skeleton/basf7100_kbd.cpp  // [HELPER]
 skeleton/biorhythm.cpp
 skeleton/biorhythm_fp.cpp
@@ -2358,10 +2357,10 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -cjddzsp126cn
 -cjddzsp127cn
 -cjdh2
--cjdh2a
--cjdh2b
--cjdh2c
--cjdh2d
+-cjdh2_215cn
+-cjdh2_311cn
+-cjdh2_311cna
+-cjdh2_311cnb
 -cjffruit
 -cjgdy
 -cjjl
@@ -2701,7 +2700,6 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -hjingia
 -hkagerou
 -hlddz
--hlqqq
 -hnageman
 -hnkochou
 -hnoridur
@@ -3464,6 +3462,7 @@ zaccaria/zaccaria_a.cpp  // [HELPER]
 -ryouran
 -ryourano
 -ryukobou
+-ryukobouv30
 -ryuuha
 -safemon
 -safemonn

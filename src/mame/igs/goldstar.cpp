@@ -446,7 +446,8 @@ class cmaster_state : public goldstar_state
 {
 public:
 	cmaster_state(const machine_config &mconfig, device_type type, const char *tag) :
-		goldstar_state(mconfig, type, tag)
+		goldstar_state(mconfig, type, tag),
+		m_cmtetbank(*this, "cmtetbank")
 	{ }
 
 	void amaztsk(machine_config &config) ATTR_COLD;
@@ -482,10 +483,12 @@ public:
 	void init_cll() ATTR_COLD;
 	void init_cm() ATTR_COLD;
 	void init_cm99() ATTR_COLD;
+	void init_cm99hc() ATTR_COLD;
 	void init_cmast91() ATTR_COLD;
 	void init_cmezspina() ATTR_COLD;
 	void init_cmpacmanb() ATTR_COLD;
 	void init_cmpap() ATTR_COLD;
+	void init_cmtetrisb() ATTR_COLD;
 	void init_cmtetrisc() ATTR_COLD;
 	void init_cmtetrisd() ATTR_COLD;
 	void init_cmtetriskr() ATTR_COLD;
@@ -531,11 +534,14 @@ public:
 	void init_wcat3a() ATTR_COLD;
 	template <uint8_t Xor_value> void init_tsk() ATTR_COLD;
 	void coincount_w(uint8_t data);
+	DECLARE_INPUT_CHANGED_MEMBER(cmtetrisb_switch_tetris);
 
 protected:
 	virtual void video_start() override ATTR_COLD;
 
 	DECLARE_MACHINE_START(cm99);
+	DECLARE_MACHINE_START(cmtetrisb);
+	DECLARE_MACHINE_RESET(cmtetrisb);
 
 	void cm_map(address_map &map) ATTR_COLD;
 
@@ -558,6 +564,14 @@ private:
 	void pkm_reel_reg_w(uint8_t data);
 	void anhs_reel_reg_w(uint8_t data);
 	void bank_set_w(offs_t offset, uint8_t data);
+	void cm99_outport0_w(uint8_t data);
+	void cm99_vblank_irq(int state);
+	uint8_t m_cm99_irq_enable = 1U;
+	uint8_t m_cm99_bank_seq_idx = 0U;
+	uint8_t m_cm99_bank_seq1 = 0U;
+	uint8_t m_cm99_bank_seq5 = 0U;
+	void set_cmtetrisb_mode(uint8_t mode);
+	void cmtetrisb_f8_w(uint8_t data);
 
 	uint32_t screen_update_amaztsk(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	uint32_t screen_update_amcoe1a(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
@@ -579,7 +593,9 @@ private:
 	void clb_map(address_map &map) ATTR_COLD;
 	void cm_portmap(address_map &map) ATTR_COLD;
 	void cm99_map(address_map &map) ATTR_COLD;
+	void cm99_portmap(address_map &map) ATTR_COLD;
 	void cmast91_portmap(address_map &map) ATTR_COLD;
+	void cmtetrisb_map(address_map &map) ATTR_COLD;
 	void cmtetrisb_portmap(address_map &map) ATTR_COLD;
 	void cmtetriskr_portmap(address_map &map) ATTR_COLD;
 	void cmv4zg_portmap(address_map &map) ATTR_COLD;
@@ -599,6 +615,10 @@ private:
 	void ramdac_map(address_map &map) ATTR_COLD;
 	void wcat3a_map(address_map &map) ATTR_COLD;
 	void wcat3a_portmap(address_map &map) ATTR_COLD;
+
+	optional_memory_bank m_cmtetbank;
+	uint8_t m_cmtetrisb_mode = 0;
+	uint8_t m_cmtetrisb_f2 = 0;
 
 	// installed by various driver init handlers to get stuff to work
 	template <uint8_t V> uint8_t fixedval_r() { return V; }
@@ -1109,9 +1129,67 @@ MACHINE_START_MEMBER(cmaster_state, cm99)
 	cmaster_state::machine_start();
 
 	uint8_t *ROM = memregion("maincpu")->base();
-	membank("bank1")->configure_entry(0, &ROM[0x04000]);
-	membank("bank1")->configure_entry(1, &ROM[0x08000]);
-	membank("bank1")->set_entry(0);
+	for (int i = 0; i < 32; i++)
+	{
+		membank("bank1")->configure_entry(i, &ROM[i * 0x800]);
+		membank("bank2")->configure_entry(i, &ROM[i * 0x800]);
+		membank("bank3")->configure_entry(i, &ROM[i * 0x800]);
+		membank("bank4")->configure_entry(i, &ROM[i * 0x800]);
+	}
+	membank("bank1")->set_entry(0x4000 / 0x800);
+	membank("bank2")->set_entry(0x4800 / 0x800);
+	membank("bank3")->set_entry(0x5000 / 0x800);
+	membank("bank4")->set_entry(0x5800 / 0x800);
+
+	m_cm99_irq_enable = 1U;
+	m_cm99_bank_seq_idx = 0U;
+	m_cm99_bank_seq1 = 0U;
+	m_cm99_bank_seq5 = 0U;
+
+	save_item(NAME(m_cm99_irq_enable));
+	save_item(NAME(m_cm99_bank_seq_idx));
+	save_item(NAME(m_cm99_bank_seq1));
+	save_item(NAME(m_cm99_bank_seq5));
+}
+
+
+void cmaster_state::set_cmtetrisb_mode(uint8_t mode)
+{
+	m_cmtetrisb_mode = mode & 1;
+	m_cmtetbank->set_entry(m_cmtetrisb_mode);
+	m_tile_bank = m_cmtetrisb_mode;
+	if (m_fg_tilemap)
+		m_fg_tilemap->mark_all_dirty();
+}
+
+MACHINE_START_MEMBER(cmaster_state, cmtetrisb)
+{
+	m_cmtetbank->configure_entries(0, 2, memregion("maincpu")->base(), 0x8000);
+	save_item(NAME(m_cmtetrisb_mode));
+	save_item(NAME(m_cmtetrisb_f2));
+}
+
+MACHINE_RESET_MEMBER(cmaster_state, cmtetrisb)
+{
+	set_cmtetrisb_mode(0);
+}
+
+void cmaster_state::cmtetrisb_f8_w(uint8_t data)
+{
+	if (!m_cmtetrisb_mode)
+	{
+		set_cmtetrisb_mode(1);
+		m_maincpu->pulse_input_line(INPUT_LINE_RESET, attotime::zero);
+	}
+}
+
+INPUT_CHANGED_MEMBER(cmaster_state::cmtetrisb_switch_tetris)
+{
+	if (!newval && m_cmtetrisb_mode)
+	{
+		set_cmtetrisb_mode(0);
+		m_maincpu->pulse_input_line(INPUT_LINE_RESET, attotime::zero);
+	}
 }
 
 
@@ -1669,7 +1747,8 @@ uint32_t goldstar_state::screen_update_goldstar(screen_device &screen, bitmap_rg
 	if (!(m_enable_reg & 0x01))
 		return 0;
 
-	if (m_enable_reg & 0x10)
+//	if (m_enable_reg & 0x10)
+	if (m_bg_tilemap && (m_enable_reg & 0x10))
 	{
 		for (int i = 0; i < 64; i++)
 			m_bg_tilemap->set_scrolly(i, m_bg_scroll[i]);
@@ -2648,6 +2727,13 @@ void cmaster_state::outport0_w(uint8_t data)
 	m_enable_reg = data;
 }
 
+void cmaster_state::cm99_outport0_w(uint8_t data)
+{
+	// Bit 0 masks VBLANK IRQs (cleared on ISR entry, set on exit) rather than blanking video
+	m_cm99_irq_enable = BIT(data, 0);
+	m_enable_reg = data | 0x01;
+}
+
 void cmaster_state::chyangb_outport0_w(uint8_t data)
 {
 //  popmessage("outport %02x",data);
@@ -3571,33 +3657,81 @@ void cmaster_state::anhs_reel_reg_w(uint8_t data)
 
 void cmaster_state::bank_set_w(offs_t offset, uint8_t data)
 {
-	uint8_t sw = offset >> 8;
+	uint16_t pc = m_maincpu->pc();
 
-	// need to check a nvram value
-	uint8_t *nvram_ptr = (uint8_t*)memshare("nvram")->ptr();
-	uint8_t val = nvram_ptr[0x700];
-	logerror("bank_set_w: offs:%04x - sw:%02x - 0xd700:%02x\n", offset, sw, val);  // nvram $d700
-
-	uint8_t *rom = memregion("maincpu")->base();
-	uint8_t var = rom[0xd700];
-	logerror("bank_set_w: offs:%04x - sw:%02x - 0xd700:%02x\n", offset, sw, var);
-
-	switch(sw)
+	if (offset >= 0x4000 && offset <= 0x4003)
 	{
-		case 0x00 :
-		case 0x07 :
-		case 0x41 :
-		case 0x43 :
-		case 0x44 :
-		case 0x47 : logerror("no bank yet\n"); break;
-		case 0x40 : membank("bank1")->set_entry(0); break;
-		case 0x81 : membank("bank1")->set_entry(1); break;
-		case 0x82 : membank("bank1")->set_entry(0); break;
-		case 0x84 : membank("bank1")->set_entry(1); break;
-		case 0x87 : membank("bank1")->set_entry(0); break;
-		case 0x89 : membank("bank1")->set_entry(1); break;
+		membank("bank1")->set_entry(0x4000 / 0x800);
+		membank("bank2")->set_entry(0x4800 / 0x800);
+		membank("bank3")->set_entry(0x5000 / 0x800);
+		membank("bank4")->set_entry(0x5800 / 0x800);
+		m_cm99_bank_seq_idx = 0;
+		return;
 	}
-	//8100 8230 8902, 8700 4100, 4432, 708, 38, 0, 4780, 843a, 4300, 843a
+
+	if (pc != 0x0320 && pc != 0x0326)
+		return;
+
+	if (m_cm99_bank_seq_idx == 0)
+	{
+		if (data != 0x05)
+			return;
+	}
+	else if (m_cm99_bank_seq_idx == 1)
+	{
+		m_cm99_bank_seq1 = data;
+	}
+	else if (m_cm99_bank_seq_idx == 5)
+	{
+		m_cm99_bank_seq5 = data;
+	}
+
+	m_cm99_bank_seq_idx++;
+	if (m_cm99_bank_seq_idx == 16)
+	{
+		int b1 = 0x4000 / 0x800;
+		int b2 = 0x4800 / 0x800;
+		int b3 = 0x5000 / 0x800;
+		int b4 = 0x5800 / 0x800;
+
+		switch (m_cm99_bank_seq1)
+		{
+			case 0x20: // Mode A = 0x01 (Attract / Reset)
+				b1 = 0x8000 / 0x800;
+				break;
+			case 0x02: // Mode A = 0x02 (Play Mode & IRQ handlers)
+				b3 = 0x9000 / 0x800;
+				b4 = 0x9800 / 0x800;
+				break;
+			case 0x01:
+				if (m_cm99_bank_seq5 == 0x22) // Mode A = 0x03 (After Reel Spin / Win Check)
+				{
+					b3 = 0xc000 / 0x800;
+				}
+				// else seq5 == 0x24: Mode A = 0x12 (Default 0x4000..0x5FFF)
+				break;
+			case 0x23: // Mode A = 0x04 (Double-Up)
+				b1 = 0xb000 / 0x800;
+				break;
+			case 0x22: // Mode A = 0x05 (Double-Up Exit)
+				b1 = 0xa000 / 0x800;
+				break;
+			case 0x04: // Mode A = 0x11 (Bet / Start Idle Loop)
+				b1 = 0x1000 / 0x800;
+				b3 = 0x1000 / 0x800;
+				break;
+			case 0x27: // Mode A = 0x10 (Default 0x4000..0x5FFF)
+			default:
+				break;
+		}
+
+		membank("bank1")->set_entry(b1);
+		membank("bank2")->set_entry(b2);
+		membank("bank3")->set_entry(b3);
+		membank("bank4")->set_entry(b4);
+
+		m_cm99_bank_seq_idx = 0;
+	}
 }
 
 
@@ -4178,7 +4312,10 @@ void cmaster_state::cm99_map(address_map &map)
 	//cm_map(map);
 	map(0x0000, 0xcfff).w(FUNC(cmaster_state::bank_set_w));
 	map(0x0000, 0x3fff).rom();
-	map(0x4000, 0x5fff).bankr("bank1");
+	map(0x4000, 0x47ff).bankr("bank1");
+	map(0x4800, 0x4fff).bankr("bank2");
+	map(0x5000, 0x57ff).bankr("bank3");
+	map(0x5800, 0x5fff).bankr("bank4");
 	map(0x6000, 0xcfff).rom();
 
 	map(0xd000, 0xd7ff).ram().share("nvram");
@@ -4352,6 +4489,40 @@ void cmast97_state::cmast97_map(address_map &map)
 	m_gfx_view[1](0xfe00, 0xfe7f).ram().share(m_reel_scroll[0]);  // girl action
 }
 
+void cmaster_state::cmtetrisb_map(address_map &map)
+{
+	cm_map(map);
+	map(0x0000, 0x7fff).bankr(m_cmtetbank).nopw();
+	map(0x8000, 0xcfff).noprw();
+}
+
+void cmaster_state::cmtetrisb_portmap(address_map &map)
+{
+	cm_portmap(map);
+
+	// AMUS89 REV.0 daughterboard uses discrete input buffers
+	// instead of programmable 8255 PPIs
+	map(0x04, 0x04).portr("IN0");
+	map(0x05, 0x05).portr("IN1");
+	map(0x06, 0x06).portr("IN2");
+	map(0x07, 0x07).nopw();
+	map(0x08, 0x08).portr("DSW1");
+	map(0x09, 0x09).portr("DSW2");
+	map(0x0a, 0x0a).portr("DSW3");
+	map(0x0b, 0x0b).nopw();
+
+    // if tetris mode, then disable girls
+	map(0x10, 0x10).lw8(NAME([this](uint8_t data) { outport0_w(m_cmtetrisb_mode ? data : (data & ~0x0c)); }));
+
+	map(0x80, 0x81).w("ym2413", FUNC(ym2413_device::write));
+
+	// 4-bit shifter for tile attribute process
+	map(0xf2, 0xf2).lr8(NAME([this]() -> uint8_t { return (m_cmtetrisb_f2 & 0x0f) << 4; })).lw8(NAME([this](uint8_t data) { m_cmtetrisb_f2 = data; }));
+
+	// handling of a15 + reset to switch games
+	map(0xf8, 0xf8).w(FUNC(cmaster_state::cmtetrisb_f8_w));
+}
+
 void cmaster_state::nfm_map(address_map &map)
 {
 	map(0x0000, 0xd7ff).rom().nopw();
@@ -4414,6 +4585,13 @@ void cmaster_state::cm_portmap(address_map &map)
 	map(0x14, 0x14).w(FUNC(cmaster_state::girl_scroll_w));
 }
 
+void cmaster_state::cm99_portmap(address_map &map)
+{
+	cm_portmap(map);
+
+	map(0x10, 0x10).w(FUNC(cmaster_state::cm99_outport0_w));
+	map(0x38, 0x38).lr8(NAME([]() -> uint8_t { return 0x06; }));  // top7a protection check at $8f9a
+}
 
 void cmaster_state::reelm_portmap(address_map &map)
 {
@@ -7433,40 +7611,20 @@ INPUT_PORTS_END
 
 
 static INPUT_PORTS_START( cmast99 )
-/*
-    PORT_START("IN0")  // called "PLAYER" in input test
-    PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_A) PORT_NAME("Player: 1")
-    PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_S) PORT_NAME("Player: 2")
-    PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_D) PORT_NAME("Player: 3")
-    PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_F) PORT_NAME("Player: 4")
-    PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_G) PORT_NAME("Player: 5")
-    PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_H) PORT_NAME("Player: 6")
-    PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_J) PORT_NAME("Player: 7")
-    PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_K) PORT_NAME("Player: 8")
-
-    PORT_START("IN1")  // called "COIN" in input test
-    PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_1) PORT_NAME("Coin: 1")
-    PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_2) PORT_NAME("Coin: 2")
-    PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_3) PORT_NAME("Coin: 3")
-    PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_4) PORT_NAME("Coin: 4")
-    PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_COIN1 ) PORT_IMPULSE(2) PORT_NAME("Coin A")
-    PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_COIN2 ) PORT_IMPULSE(2) PORT_NAME("Coin B")
-    PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_GAMBLE_KEYIN )
-    PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_COIN3 ) PORT_IMPULSE(2) PORT_NAME("Coin C")
-
-    PORT_START("IN2")  // called "TEST" in input test
-    PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_1_PAD) PORT_NAME("Test: 1-Pad")
-    PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_2_PAD) PORT_NAME("Test: 2-Pad")
-    PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_3_PAD) PORT_NAME("Test: 3-Pad")
-    PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_4_PAD) PORT_NAME("Test: 4-Pad")
-    PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_5_PAD) PORT_NAME("Test: 5-Pad")
-    PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_6_PAD) PORT_NAME("Test: 6-Pad")
-    PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_SERVICE1 )       PORT_NAME("Settings / Port Test")
-    PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_GAMBLE_BOOK )    PORT_NAME("Stats / Palette Test")
-*/
 	PORT_INCLUDE( cmv4_player )
 
+	PORT_MODIFY("IN0")
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_GAMBLE_HIGH ) PORT_CODE(KEYCODE_B) PORT_NAME("Big")
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_GAMBLE_D_UP ) PORT_CODE(KEYCODE_C) PORT_NAME("D-UP")
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_GAMBLE_TAKE ) PORT_CODE(KEYCODE_X) PORT_NAME("Take")
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_GAMBLE_LOW )  PORT_CODE(KEYCODE_V) PORT_NAME("Small / Info")
+
 	PORT_INCLUDE( cmv4_coins )
+
+	PORT_MODIFY("IN1")
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_SLOT_STOP2 ) PORT_CODE(KEYCODE_K) PORT_CODE(KEYCODE_2_PAD) PORT_NAME("Stop 2")
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_SLOT_STOP1 ) PORT_CODE(KEYCODE_J) PORT_CODE(KEYCODE_1_PAD) PORT_NAME("Stop 1")
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_SLOT_STOP3 ) PORT_CODE(KEYCODE_L) PORT_CODE(KEYCODE_3_PAD) PORT_NAME("Stop 3")
 
 	PORT_INCLUDE( cmv4_service )
 
@@ -14950,11 +15108,11 @@ static INPUT_PORTS_START( cmtetris )
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_UNKNOWN )
 	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_SLOT_STOP2 )    PORT_CODE(KEYCODE_C) PORT_CODE(KEYCODE_RIGHT) PORT_NAME("Stop 2 / Big / Right")
-	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_SLOT_STOP1 )    PORT_CODE(KEYCODE_X)                         PORT_NAME("Stop 1 / D-UP")
-	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_SLOT_STOP_ALL ) PORT_CODE(KEYCODE_Z) PORT_CODE(KEYCODE_UP)   PORT_NAME("Stop All / Take / Up")
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_SLOT_STOP1 )    PORT_CODE(KEYCODE_X)                          PORT_NAME("Stop 1 / D-UP")
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_SLOT_STOP_ALL ) PORT_CODE(KEYCODE_Z) PORT_CODE(KEYCODE_UP)    PORT_NAME("Stop All / Take / Up")
 	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_GAMBLE_BET )
-	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_SLOT_STOP3 )    PORT_CODE(KEYCODE_V) PORT_CODE(KEYCODE_LEFT) PORT_NAME("Stop 3 / Small / Info / Left")
-	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_START1 )        PORT_CODE(KEYCODE_1) PORT_CODE(KEYCODE_DOWN) PORT_NAME("Start / Down")
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_SLOT_STOP3 )    PORT_CODE(KEYCODE_V) PORT_CODE(KEYCODE_LEFT)  PORT_NAME("Stop 3 / Small / Info / Left")
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_START1 )        PORT_CODE(KEYCODE_1) PORT_CODE(KEYCODE_DOWN)  PORT_NAME("Start / Down")
 
 	PORT_START("IN1")
 	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_OTHER )         PORT_CODE(KEYCODE_K) PORT_NAME("Hidden switch for Cherry Master")
@@ -15030,6 +15188,24 @@ static INPUT_PORTS_START( cmtetris )
 	// Display Of Doll At All Fr. Bonus not checked
 	// DSW5-7 listed as unused
 	// Test Mode For Disp. Of Doll not working
+INPUT_PORTS_END
+
+static INPUT_PORTS_START( cmtetrisb )
+	PORT_INCLUDE( cmtetris )
+
+	PORT_MODIFY("IN0")
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_SLOT_STOP2 )    PORT_CODE(KEYCODE_C) PORT_CODE(KEYCODE_LEFT)  PORT_NAME("Stop 2 / Big / Right")
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_SLOT_STOP1 )    PORT_CODE(KEYCODE_X) PORT_CODE(KEYCODE_DOWN)  PORT_NAME("Stop 1 / D-UP")
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_SLOT_STOP_ALL ) PORT_CODE(KEYCODE_Z)                          PORT_NAME("Stop All / Take / Up")
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_GAMBLE_BET )
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_SLOT_STOP3 )    PORT_CODE(KEYCODE_V) PORT_CODE(KEYCODE_RIGHT) PORT_NAME("Stop 3 / Small / Info / Left")
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_START1 )        PORT_CODE(KEYCODE_1) PORT_CODE(KEYCODE_UP)    PORT_NAME("Start / Down")
+
+	PORT_MODIFY("IN1")
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_K) PORT_NAME("Hidden switch for Tetris") PORT_CHANGED_MEMBER(DEVICE_SELF, FUNC(cmaster_state::cmtetrisb_switch_tetris), 0)
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_L) PORT_NAME("Hidden switch for Cherry Master")
 INPUT_PORTS_END
 
 
@@ -15442,18 +15618,45 @@ INPUT_PORTS_END
 static INPUT_PORTS_START( lucky8tet )
 	PORT_INCLUDE( lucky8 )
 
+	PORT_MODIFY("IN0")  // b800
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_UNKNOWN )
+	PORT_BIT( 0x04, IP_ACTIVE_LOW, IPT_BUTTON6 ) PORT_CODE(KEYCODE_B) PORT_CODE(KEYCODE_RIGHT) PORT_NAME("P1 - Big / Switch Controls")
+	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_BUTTON4 ) PORT_CODE(KEYCODE_C)                          PORT_NAME("P1 - Double-Up")
+	PORT_BIT( 0x10, IP_ACTIVE_LOW, IPT_BUTTON5 ) PORT_CODE(KEYCODE_V) PORT_CODE(KEYCODE_UP)    PORT_NAME("P1 - Take Score")
+	PORT_BIT( 0x20, IP_ACTIVE_LOW, IPT_BUTTON1 ) PORT_CODE(KEYCODE_Z)                          PORT_NAME("P1 - Bet")
+	PORT_BIT( 0x40, IP_ACTIVE_LOW, IPT_BUTTON3 ) PORT_CODE(KEYCODE_N) PORT_CODE(KEYCODE_LEFT)  PORT_NAME("P1 - Small / Info")
+	PORT_BIT( 0x80, IP_ACTIVE_LOW, IPT_BUTTON2 ) PORT_CODE(KEYCODE_X) PORT_CODE(KEYCODE_DOWN)  PORT_NAME("P1 - Start")
+
 	PORT_MODIFY("IN3")  // b810
-	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_R) PORT_NAME("Switch to Tetris")
-	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_T) PORT_NAME("Switch to Lucky 8 Lines")
-	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_4) PORT_NAME("Tetris Coin In")
+	PORT_BIT( 0x01, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_K) PORT_NAME("Hidden switch for Tetris")
+	PORT_BIT( 0x02, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_L) PORT_NAME("Hidden switch for Lucky 8 Lines")
+ 	PORT_BIT( 0x08, IP_ACTIVE_LOW, IPT_OTHER ) PORT_CODE(KEYCODE_J) PORT_NAME("Tetris Coin In")
+ 
+	PORT_MODIFY("DSW1")
+	PORT_DIPNAME( 0x10, 0x10, "Double Up Game Payout Rate" ) PORT_DIPLOCATION("DSW1:5")      // ROM table @ 0x089F
+	PORT_DIPSETTING(    0x10, "60%" )
+	PORT_DIPSETTING(    0x00, "75%" )
+
+	PORT_MODIFY("DSW2")
+	PORT_DIPNAME( 0x07, 0x07, "Main Game Payout Rate" )     PORT_DIPLOCATION("DSW2:1,2,3")  // ROM table @ 0x088F
+	PORT_DIPSETTING(    0x07, "58%" )
+	PORT_DIPSETTING(    0x06, "62%" )
+	PORT_DIPSETTING(    0x05, "66%" )
+	PORT_DIPSETTING(    0x04, "70%" )
+	PORT_DIPSETTING(    0x03, "74%" )
+	PORT_DIPSETTING(    0x02, "78%" )
+	PORT_DIPSETTING(    0x01, "82%" )
+	PORT_DIPSETTING(    0x00, "86%" )
 
 	PORT_START("DB_DIP")
-	PORT_DIPNAME(0x03, 0x03, "Maximum Bet") PORT_DIPLOCATION("DB_DIP:1,2")  // MCU port 3.0-3.1
-	PORT_DIPSETTING(0x00, "8")
-	PORT_DIPSETTING(0x01, "16")
-	PORT_DIPSETTING(0x02, "32")
-	PORT_DIPSETTING(0x03, "64")
-	PORT_DIPNAME(0x0c, 0x0c, "DIP2 (TBD)")  PORT_DIPLOCATION("DB_DIP:3,4")  // MCU port 0.2-0.3
+	PORT_DIPNAME( 0x01, 0x01, DEF_STR( Unknown ) )    PORT_DIPLOCATION("DB_DIP:1")  // MCU P3.0
+	PORT_DIPSETTING(    0x01, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME( 0x02, 0x02, DEF_STR( Unknown ) )    PORT_DIPLOCATION("DB_DIP:2")  // MCU P3.1
+	PORT_DIPSETTING(    0x02, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+	PORT_DIPNAME(0x0c, 0x0c, "DIP2 (TBD)")            PORT_DIPLOCATION("DB_DIP:3,4")  // MCU port 0.2-0.3
 	PORT_DIPSETTING(0x00, "0")
 	PORT_DIPSETTING(0x04, "1")
 	PORT_DIPSETTING(0x08, "2")
@@ -16434,13 +16637,40 @@ void cmaster_state::cmfb55(machine_config &config)
 	m_gfxdecode->set_info(gfx_cmfb55);
 }
 
+
+void cmaster_state::cm99_vblank_irq(int state)
+{
+	if (state && m_cm99_irq_enable)
+		m_maincpu->set_input_line(0, HOLD_LINE);
+}
+
 void cmaster_state::cm99(machine_config &config)
 {
 	cm(config);
+
 	m_maincpu->set_addrmap(AS_PROGRAM, &cmaster_state::cm99_map);
+	m_maincpu->set_addrmap(AS_IO, &cmaster_state::cm99_portmap);
+	subdevice<screen_device>("screen")->screen_vblank().set(FUNC(cmaster_state::cm99_vblank_irq));
 
 	MCFG_MACHINE_START_OVERRIDE(cmaster_state, cm99)
 }
+
+
+void cmaster_state::cmtetrisb(machine_config &config)
+{
+	cm(config);
+
+	m_maincpu->set_clock(12_MHz_XTAL / 2); // AMUS89 REV.0 daughterboard: Z0840006PSC + 12 MHz XTAL
+	m_maincpu->set_addrmap(AS_PROGRAM, &cmaster_state::cmtetrisb_map);
+	m_maincpu->set_addrmap(AS_IO, &cmaster_state::cmtetrisb_portmap);
+
+	MCFG_MACHINE_START_OVERRIDE(cmaster_state, cmtetrisb)
+	MCFG_MACHINE_RESET_OVERRIDE(cmaster_state, cmtetrisb)
+
+	// 3567 HX881(1) (YM2413 clone) + 3.579545 MHz XTAL on daughterboard
+	YM2413(config, "ym2413", 3.579545_MHz_XTAL).add_route(ALL_OUTPUTS, "mono", 0.75);
+}
+
 
 void cmaster_state::reelmg(machine_config &config)
 {
@@ -21131,7 +21361,7 @@ ROM_START( cmast99d )
 ROM_END
 
 /*
-  Cherry Master '99 (Cleco, Hand Count?)
+  Cherry Master '99 (Cleco, Hand Count)
   Taiwanese bootleg.
 
   Different bankswitching?
@@ -21453,7 +21683,7 @@ ROM_START( texas99e )
 ROM_END
 
 /*
-  Texas '99 (Cleco, Hand Count?)
+  Texas '99 (Cleco, Hand Count)
   Taiwanese bootleg. Same as cmast99hc.
 
   Different bankswitching?
@@ -21563,11 +21793,9 @@ ROM_START( aplan )  // Has "DYNA QL-1  V1.01" string.
 ROM_END
 
 /*
+  Jin Ji Bao Xi (金雞報喜, Top-7)
   DYNA QL-1  V7.07 string, but not original.
-  Utech Top-7v8.8 05/26/1993 string.
-
-  According to pics also sports a
-  金鸡报喜 (Jin Ji Bao Xi) title screen
+  Utech Top-7 v8.8 05/26/1993 string.
 
 */
 ROM_START( top7 )
@@ -21594,7 +21822,7 @@ ROM_START( top7 )
 	ROM_LOAD( "1.u9",  0x6000, 0x2000, CRC(12f9071f) SHA1(92f13ba8dffce56934b110da73c41f8aa7151e81) )
 
 	ROM_REGION( 0x10000, "user1", 0 )
-	ROM_FILL( 0x0000, 0x10000, 0xff )  // U53 (girl bitmaps) not populated
+	ROM_FILL( 0x0000, 0x10000, 0x00 )  // U53 (girl bitmaps) not populated (filled with 00 to get a black square)
 
 	ROM_REGION( 0x200, "proms", 0 )
 	ROM_LOAD( "82s129.u84", 0x0000, 0x0100, CRC(0489b760) SHA1(78f8632b17a76335183c5c204cdec856988368b0) )
@@ -21639,7 +21867,7 @@ ROM_START( top7a )
 	ROM_LOAD( "1.u9",  0x6000, 0x2000, CRC(12f9071f) SHA1(92f13ba8dffce56934b110da73c41f8aa7151e81) )
 
 	ROM_REGION( 0x10000, "user1", 0 )
-	ROM_FILL( 0x0000, 0x10000, 0xff )  // U53 (girl bitmaps) not populated
+	ROM_FILL( 0x0000, 0x10000, 0x00 )  // U53 (girl bitmaps) not populated (filled with 00 to get a black square)
 
 	ROM_REGION( 0x200, "proms", 0 )
 	ROM_LOAD( "82s129.u84", 0x0000, 0x0100, CRC(0489b760) SHA1(78f8632b17a76335183c5c204cdec856988368b0) )
@@ -29549,9 +29777,6 @@ ROM_END
   The game runs in the blue old cherry master hardware,
   with a daughterboard placed in the Z80 socket.
 
-  The program is partially decrypted and needs more work.
-
-
   Daughterboard specs:
 
   Silkscreened: AMUS89 REV.0
@@ -29566,14 +29791,10 @@ ROM_END
   1x 12.000 MHz. crystal.
   1x 3.579545 MHz. crystal.
 
-
   About the unknown IC....
-
   HX881 is known as U3567, U3567 is a YM2413 clone.
-  YM2413 is 18 pins, but the SOP package is 24 pins.
-  Because of the dual amp, this might support it being a sound chip.
-  Probably tracing pin connections to the HX881 will confirm it.
 
+  --------------------------------------------------
 
   Hidden Switch:
 
@@ -29587,8 +29808,6 @@ ROM_END
 
   The other button, adds GND to the edge connector 7 (solder side):
   PPI pin 19 (PB1), to switch to Cherry Master game.
-
-  Need proper implementation.
 
 */
 ROM_START( cmtetrisb )
@@ -29612,17 +29831,9 @@ ROM_START( cmtetrisb )
 	ROM_REGION( 0x10000, "user1", 0 )
 	ROM_LOAD( "rom8.u53",  0x0000, 0x10000, CRC(e92443d3) SHA1(4b6ca4521841610054165f085ae05510e77af191) )
 
-	// dumper said that proms are common cmv4.
-	// with the following scheme, colors are close to the original.
-	// degradee on tetris title is not green.
-	// the circles screen is color perfect.
 	ROM_REGION( 0x200, "proms", 0 )
-	ROM_LOAD( "82s129.u84", 0x0020, 0x0060, CRC(0489b760) SHA1(78f8632b17a76335183c5c204cdec856988368b0) )
-	ROM_CONTINUE(           0x0000, 0x0020 )
-	ROM_CONTINUE(           0x0080, 0x0080 )
-	ROM_LOAD( "82s129.u79", 0x0120, 0x0060, CRC(21eb5b19) SHA1(9b8425bdb97f11f4855c998c7792c3291fd07470) )
-	ROM_CONTINUE(           0x0100, 0x0020 )
-	ROM_CONTINUE(           0x0180, 0x0080 )
+	ROM_LOAD( "82s129.u84", 0x0000, 0x0100, CRC(0489b760) SHA1(78f8632b17a76335183c5c204cdec856988368b0) )
+	ROM_LOAD( "82s129.u79", 0x0100, 0x0100, CRC(21eb5b19) SHA1(9b8425bdb97f11f4855c998c7792c3291fd07470) )
 
 	ROM_REGION( 0x100, "proms2", 0 )
 	ROM_LOAD( "82s129.u43", 0x0000, 0x0100, CRC(50ec383b) SHA1(ae95b92bd3946b40134bcdc22708d5c6b0f4c23e) )
@@ -32031,6 +32242,93 @@ ROM_START( fl7_500_gs15 )  // Serial 000000125873.
 
 	ROM_REGION( 0x8000, "gfx2", 0 )
 	ROM_LOAD( "fl7_gs15.u3",   0x0000, 0x8000, CRC(a45c6616) SHA1(8defce87f9470a9fff25e9b89d0609dccb92acd8) )
+
+	// Proper bipolar PROM dump
+	ROM_REGION( 0x200, "proms", 0 )
+	ROM_LOAD( "am27s29.u1", 0x0000, 0x0100, CRC(3fe7e369) SHA1(cf4ae287cb58581a4bf9e9ff1994426461fb38cc) )
+	ROM_CONTINUE(           0x0000, 0x0100)  // palette data is stored in the second half.
+
+	ROM_REGION(0x8, "fl7w4_id", 0)  // Electronic Serial. Hand built to match our ROM set
+	ROM_LOAD( "ds1994l-f5_500.bin", 0x0000, 0x0008, CRC(b34d646f) SHA1(bcd6c4475412ecb1904b6732cf44e8f6bfce9d90) )
+ROM_END
+
+/*
+  Flaming 7's
+  Cyberdyne Systems.
+
+  Cyberdyne Systems 7V5.00 (CB500), 500 bonus.
+  Custom Hardware.
+
+  GS16: Infinity, Diamond Doubles, Cherry Bonus, All Sevens.
+
+*/
+ROM_START( fl7_500_gs16 )  // Serial 000000125873.
+	ROM_REGION( 0x8000, "maincpu", 0 )
+	ROM_LOAD( "500-main.u22",  0x0000, 0x8000, CRC(e2c82c67) SHA1(951b0044de9b6104f51aa5a3176d0ea475415f7c) )
+
+	ROM_REGION( 0x20000, "gfx1", 0 )
+	ROM_LOAD( "27c1001.u6",  0x00000, 0x20000, CRC(00eac3c1) SHA1(1a955f8bc044e17f0885b4b126a66d7ad191e410) )
+
+	ROM_REGION( 0x8000, "gfx2", 0 )
+	ROM_LOAD( "fl7_gs16.u3",   0x0000, 0x8000, CRC(3eef065a) SHA1(217e6c291405e6d958f9a7f93609e83c3e443e8a) )
+
+	// Proper bipolar PROM dump
+	ROM_REGION( 0x200, "proms", 0 )
+	ROM_LOAD( "am27s29.u1", 0x0000, 0x0100, CRC(3fe7e369) SHA1(cf4ae287cb58581a4bf9e9ff1994426461fb38cc) )
+	ROM_CONTINUE(           0x0000, 0x0100)  // palette data is stored in the second half.
+
+	ROM_REGION(0x8, "fl7w4_id", 0)  // Electronic Serial. Hand built to match our ROM set
+	ROM_LOAD( "ds1994l-f5_500.bin", 0x0000, 0x0008, CRC(b34d646f) SHA1(bcd6c4475412ecb1904b6732cf44e8f6bfce9d90) )
+ROM_END
+
+/*
+  Flaming 7's
+  Cyberdyne Systems.
+
+  Cyberdyne Systems 7V5.00 (CB500), 500 bonus.
+  Custom Hardware.
+
+  GS17: Jackpot Junction, Diamonds 7's, Cherry Bonus, Nevada Numbers.
+
+*/
+ROM_START( fl7_500_gs17 )  // Serial 000000125873.
+	ROM_REGION( 0x8000, "maincpu", 0 )
+	ROM_LOAD( "500-main.u22",  0x0000, 0x8000, CRC(e2c82c67) SHA1(951b0044de9b6104f51aa5a3176d0ea475415f7c) )
+
+	ROM_REGION( 0x20000, "gfx1", 0 )
+	ROM_LOAD( "27c1001.u6",  0x00000, 0x20000, CRC(00eac3c1) SHA1(1a955f8bc044e17f0885b4b126a66d7ad191e410) )
+
+	ROM_REGION( 0x8000, "gfx2", 0 )
+	ROM_LOAD( "fl7_gs17.u3",   0x0000, 0x8000, CRC(2ef9479d) SHA1(bfa198e2121444106dbcdbb41030e4c2a587cad5) )
+
+	// Proper bipolar PROM dump
+	ROM_REGION( 0x200, "proms", 0 )
+	ROM_LOAD( "am27s29.u1", 0x0000, 0x0100, CRC(3fe7e369) SHA1(cf4ae287cb58581a4bf9e9ff1994426461fb38cc) )
+	ROM_CONTINUE(           0x0000, 0x0100)  // palette data is stored in the second half.
+
+	ROM_REGION(0x8, "fl7w4_id", 0)  // Electronic Serial. Hand built to match our ROM set
+	ROM_LOAD( "ds1994l-f5_500.bin", 0x0000, 0x0008, CRC(b34d646f) SHA1(bcd6c4475412ecb1904b6732cf44e8f6bfce9d90) )
+ROM_END
+
+/*
+  Flaming 7's
+  Cyberdyne Systems.
+
+  Cyberdyne Systems 7V5.00 (CB500), 500 bonus.
+  Custom Hardware.
+
+  GS18: Jokers Wild, Deuces Wild, Cherry Bonus, Nevada Numbers.
+
+*/
+ROM_START( fl7_500_gs18 )  // Serial 000000125873.
+	ROM_REGION( 0x8000, "maincpu", 0 )
+	ROM_LOAD( "500-main.u22",  0x0000, 0x8000, CRC(e2c82c67) SHA1(951b0044de9b6104f51aa5a3176d0ea475415f7c) )
+
+	ROM_REGION( 0x20000, "gfx1", 0 )
+	ROM_LOAD( "27c1001.u6",  0x00000, 0x20000, CRC(00eac3c1) SHA1(1a955f8bc044e17f0885b4b126a66d7ad191e410) )
+
+	ROM_REGION( 0x8000, "gfx2", 0 )
+	ROM_LOAD( "fl7_gs18.u3",   0x0000, 0x8000, CRC(501b1461) SHA1(8907d587c473ff60008c4bac49b21d8e1e7ac2cd) )
 
 	// Proper bipolar PROM dump
 	ROM_REGION( 0x200, "proms", 0 )
@@ -35242,7 +35540,66 @@ void cmaster_state::init_cm99()
 {
 	init_cmv4();
 
-	// intended, for specific game init.
+//  840d:  lda  a, ($d4b6)
+//  8410:  or   a
+//  8411:  jp   nz, $0000
+
+//  Jumping to the D-UP attract instead of reset
+
+	uint8_t *rom = memregion("maincpu")->base();
+	if (rom[0x8411] == 0xc2 && rom[0x8412] == 0x00 && rom[0x8413] == 0x00)
+	{
+		rom[0x8412] = 0x09;
+		rom[0x8413] = 0x04;
+	}
+}
+
+void cmaster_state::init_cm99hc()
+{
+	init_cm99();
+
+    // Bypassing the missing external Hand Count module, mapped in 9140-92FF (0xFF in original dump)
+	uint8_t *rom = memregion("maincpu")->base();
+	rom[0x9140] = 0xc9;                                                 // ret
+	rom[0x91d0] = 0x21; rom[0x91d1] = 0x23; rom[0x91d2] = 0xd0; rom[0x91d3] = 0xc9; // ld hl,$D023 ; ret
+	rom[0x9200] = 0x32; rom[0x9201] = 0x00; rom[0x9202] = 0xd7; rom[0x9203] = 0xc9; // ld ($D700),a ; ret
+	rom[0x9210] = 0x32; rom[0x9211] = 0x34; rom[0x9212] = 0xd4; rom[0x9213] = 0xc9; // ld ($D434),a ; ret
+	rom[0x9230] = 0xc9;                                                 // ret
+	rom[0x9240] = 0xc3; rom[0x9241] = 0xf8; rom[0x9242] = 0x0d;         // jp $0DF8
+	rom[0x9260] = 0xf5; rom[0x9261] = 0xe6; rom[0x9262] = 0x07;         // push af ; and $07
+	rom[0x9263] = 0xc3; rom[0x9264] = 0x99; rom[0x9265] = 0x0a;         // jp $0A99
+	rom[0x92a0] = 0xf1; rom[0x92a1] = 0xc9;                             // pop af ; ret
+	rom[0x92b0] = 0xdd; rom[0x92b1] = 0x7e; rom[0x92b2] = 0x00; rom[0x92b3] = 0xc9; // ld a,(ix+0) ; ret
+}
+
+void cmaster_state::init_cmtetrisb()
+{
+	// 0x0000-0x7fff: Tetris (unencrypted)
+	// 0x8000-0xffff: Cherry Master (encrypted)
+
+	static constexpr uint8_t blk_map[8] = { 0, 4, 3, 7, 1, 6, 2, 5 };
+
+	uint8_t *const ROM = memregion("maincpu")->base() + 0x8000;
+	std::vector<uint8_t> dec(0x8000);
+
+	for (offs_t i = 0; i < 0x8000; i++)
+	{
+		uint8_t val = ROM[i];
+		offs_t dst = (blk_map[i >> 12] << 12) | (i & 0x0fff);
+
+		if (!BIT(i, 12))
+		{
+			// 0x0000-0x3fff of CM: swap A6/A5/A4 and apply non-linear data bitswap/XOR
+			dst = (dst & 0x7000) | (bitswap<12>(i, 11, 10, 9, 8, 7, 5, 4, 6, 3, 2, 1, 0) ^ 0x030);
+			val = BIT(val, 1)
+				? (bitswap<8>(val, 5, 4, 6, 7, 3, 0, 1, 2) ^ 0x9c)
+				: (bitswap<8>(val, 2, 0, 4, 6, 7, 3, 1, 5) ^ 0xac);
+		}
+
+		dec[dst] = val;
+	}
+
+	std::copy_n(dec.begin(), 0x8000, ROM);
 }
 
 
@@ -35294,7 +35651,6 @@ GAME(  1994, chryangla,  ncb3,     chryangla,ncb3,     cb3_state,      init_chry
 // looks like a hack of Cherry Bonus 3
 GAME(  1994, chryangl,   ncb3,     chryangl,  chryangl,  cmaster_state, init_chryangl,  ROT0, "bootleg (G.C.I.)", "Cherry Angel (set 1)",                        MACHINE_NOT_WORKING | MACHINE_UNEMULATED_PROTECTION ) // SKY SUPERCB 1.0 string, playable, but still has protections
 GAME(  1994, chryanglb,  ncb3,     chryanglb, chryanglb, cmaster_state, init_chryanglb, ROT0, "bootleg",          "Cherry Angel (set 2)",                        MACHINE_NOT_WORKING | MACHINE_UNEMULATED_PROTECTION ) // ANGEL TL+YF 1.00 string, playable, but still has protections
-
 
 // cherry master hardware has a rather different mem map, but is basically the same
 GAMEL( 198?, cmv823,     0,        cm,       cmv801,   cmaster_state,  init_cmv823,    ROT0, "Corsica",           "Cherry Master (ED-96, Corsica CM v8.23)",     0,                   layout_cmv4 )  // encrypted
@@ -35358,6 +35714,9 @@ GAMEL( 199?, hamhouse,   cmaster,  cm,       cmaster,  cmaster_state,  init_hamh
 GAMEL( 199?, hamhouse9,  cmaster,  cm,       cmaster,  cmaster_state,  init_hamhouse9, ROT0, "bootleg",           "Hamburger House 9",                           0,                   layout_cmaster )
 GAMEL( 199?, alienatt,   cmaster,  cm,       cmv4,     cmaster_state,  init_alienatt,  ROT0, "bootleg",           "Allien Attack (Game FBV2, ver.T)",            0,                   layout_cmv4 )
 
+GAME(  1995, tcl,        0,        tcl,      tcl,      tcl_state,      init_tcl,       ROT0, "Uniwang",           "Qi Wang Zhengba",                                 MACHINE_NOT_WORKING )   // protection partially reconstructed
+
+
 // sets with internal settings and no use of DSW banks
 GAMEL( 1991, cmv4zg,     cmv4,     cmv4zg,   cm_nodsw, cmaster_state,  empty_init,     ROT0, "hack",              "Cherry Bonus III (Ziogas V4.1 hack, set 1)",  0,                   layout_cmv4 ) // uses default NVRAM
 GAMEL( 1991, cmv4zga,    cmv4,     cmv4zg,   cm_nodsw, cmaster_state,  empty_init,     ROT0, "hack",              "Cherry Bonus III (Ziogas V4.1 hack, set 2)",  0,                   layout_cmv4 ) // uses default NVRAM
@@ -35367,6 +35726,7 @@ GAMEL( 1992, reelmagica, cmaster,  cm,       cm_nodsw, cmaster_state,  init_reel
 GAMEL( 1992, rm_7bonus,  cmaster,  cm,       cm_nodsw, cmaster_state,  init_rm7b,      ROT0, "hack",              "Cherry Bonus III (Reel Magic 7 bonus, set 1)", 0,                  layout_cmaster ) // needs layout
 GAMEL( 1992, rm_7bonusa, cmaster,  cm,       cm_nodsw, cmaster_state,  init_rm7b,      ROT0, "hack",              "Cherry Bonus III (Reel Magic 7 bonus, set 2)", 0,                  layout_cmaster ) // needs layout
 GAMEL( 1992, cb3micro,   cmv4,     cm,       cm_nodsw, cmaster_state,  empty_init,     ROT0, "Micronic",          "Cherry Bonus III (Micronic v1.2, hack)",      0,                   layout_cmv4 ) // needs layout
+
 
 // poker master type sets
 GAMEL( 1991, tonypok,    0,         cm,        tonypok,   cmaster_state, init_tonypok,   ROT0, "Corsica",            "Poker Master (Tony-Poker V3.A, hack?)",        0 ,              layout_tonypok )
@@ -35383,6 +35743,7 @@ GAME(  1997, crazybonb,  0,         crazybonb, crazybonb, cmaster_state, init_cr
 GAME(  1993, missbingoc, crazybonb, crazybonb, crazybonb, cmaster_state, init_crazybonb, ROT0, "bootleg",            "Miss Bingo (Crazy Bonus DB, dual game)",       MACHINE_UNEMULATED_PROTECTION ) // same program as crazybonb
 
 GAME(  199?, chthree,    cmaster,   cm,        cmaster,   cmaster_state, init_chthree,   ROT0, "Promat",             "Channel Three",                                0 ) // hack of cmaster, still shows DYNA CM-1 V1.01 in book-keeping
+
 
 // Dyna D9101 PCB
 GAMEL( 1991, eldoraddoa,  0         , animalhs, eldoradoa, cmaster_state, init_eldoraddoa, ROT0, "Dyna",               "El Dorado (Dyna D9101 HW, V1.4D)",                 0,             layout_animalhs )
@@ -35402,24 +35763,26 @@ GAMEL( 1996, cmast97b,    cmast97,    cmast97,  cmast97a, cmast97_state,  empty_
 GAMEL( 1996, cmast97i,    cmast97,    cmast97,  cmast97i, cmast97_state,  empty_init,      ROT0, "Dyna",               "Cheri Mondo '97 (V1.4I)",                    0,                   layout_cmast97 )
 GAMEL( 1997, jpknight,    0,          jpknight, cmast97a, cmast97_state,  empty_init,      ROT0, "Dyna / R-Stone",     "Jackpot Knight (V1.1)",                      0,                   layout_cmast97 ) // check inputs
 
-// Dyna CM99 hardware (dynamic banking)
-GAMEL( 1999, cmast99,    0,        cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "Dyna",              "Cherry Master '99 (QL-1 V9B.00)",             MACHINE_NOT_WORKING,   layout_cmv4 )
-GAMEL( 1999, cmast99b,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Cherry Master '99 (QQ-1 V9B.00, bootleg)",    MACHINE_NOT_WORKING,   layout_cmv4 )
-GAMEL( 1999, cmast99c,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Cherry Master '99 (QQ-1 V9B.00, Cleco)",      MACHINE_NOT_WORKING,   layout_cmv4 )
-GAMEL( 1999, cmast99d,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Cherry Master '99 (QL-1 V9B.00, USA long PCB)", MACHINE_NOT_WORKING, layout_cmv4 )
-GAMEL( 1999, cmast99hc,  cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Cherry Master '99 (QL-1 V9B.00, Cleco, Hand Count?)", MACHINE_NOT_WORKING, layout_cmv4 ) // different bankswitching? see the ROM load notes
-GAMEL( 1998, texas99,    cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Texas '99 (QL-1 V9B.00)",                     MACHINE_NOT_WORKING,   layout_cmv4 ) // similar to cmast99
-GAMEL( 1998, texas99b,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Texas '99 (QQ-1 V9B.00, bootleg)",            MACHINE_NOT_WORKING,   layout_cmv4 ) // similar to cmast99b
-GAMEL( 1998, texas99c,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Texas '99 (QQ-1 V9B.00, Cleco)",              MACHINE_NOT_WORKING,   layout_cmv4 )
-GAMEL( 1998, texas99d,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Texas '99 (QL-1 V9B.00, USA long PCB)",       MACHINE_NOT_WORKING,   layout_cmv4 )
-GAMEL( 1998, texas99e,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "Kolom",             "New Texas '99 (QL-1 V9B.00, Kolom V1)",       MACHINE_NOT_WORKING,   layout_cmv4 ) // DB with MCU... see the ROM load notes
-GAMEL( 1998, texas99hc,  cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Texas '99 (QL-1 V9B.00, Cleco, Hand Count?)", MACHINE_NOT_WORKING,   layout_cmv4 ) // different bankswitching? see the ROM load notes
-GAME(  1993, aplan,      0,        cm,       cmast99,  cmaster_state,  init_cmv4,      ROT0, "WeaShing H.K.",     "A-Plan",                                      MACHINE_NOT_WORKING )   // doesn't boot, not investigated yet
-GAME(  1999, top7,       0,        cm,       cmast99,  cmaster_state,  empty_init,     ROT0, "bootleg (UTech)",   "Top-7 (V8.8, set 1)",                         MACHINE_NOT_WORKING )   // doesn't boot, not investigated yet
-GAME(  1999, top7a,      top7,     cm,       cmast99,  cmaster_state,  empty_init,     ROT0, "bootleg (UTech)",   "Top-7 (V8.8, set 2)",                         MACHINE_NOT_WORKING )   // doesn't boot, not investigated yet
-GAME(  1996, war3cb,     0,        cm,       cmast99,  cmaster_state,  empty_init,     ROT0, "S.B.E.",            "War III Cherry Best",                         MACHINE_NOT_WORKING )   // different portmap?
 
-GAME(  1995, tcl,        0,        tcl,      tcl,      tcl_state,      init_tcl,       ROT0, "Uniwang",           "Qi Wang Zhengba",                             MACHINE_NOT_WORKING )   // protection partially reconstructed
+// Dyna CM99 hardware (dynamic banking)
+// (need 3-stops layout, and check missing lamps)
+GAMEL( 1999, cmast99,    0,        cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "Dyna",              "Cherry Master '99 (QL-1 V9B.00)",                 0,                   layout_cmv4 )
+GAMEL( 1999, cmast99b,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Cherry Master '99 (QQ-1 V9B.00, bootleg)",        0,                   layout_cmv4 )
+GAMEL( 1999, cmast99c,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Cherry Master '99 (QQ-1 V9B.00, Cleco)",          0,                   layout_cmv4 )
+GAMEL( 1999, cmast99d,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Cherry Master '99 (QL-1 V9B.00, USA long PCB)",   0,                   layout_cmv4 )
+GAMEL( 1999, cmast99hc,  cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99hc,    ROT0, "bootleg",           "Cherry Master '99 (QL-1 V9B.00, Cleco, Hand Count)", 0,                layout_cmv4 ) // lacks hand count module, injected
+GAMEL( 1998, texas99,    cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Texas '99 (QL-1 V9B.00)",                         0,                   layout_cmv4 ) // similar to cmast99
+GAMEL( 1998, texas99b,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Texas '99 (QQ-1 V9B.00, bootleg)",                0,                   layout_cmv4 ) // similar to cmast99b
+GAMEL( 1998, texas99c,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Texas '99 (QQ-1 V9B.00, Cleco)",                  0,                   layout_cmv4 )
+GAMEL( 1998, texas99d,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg",           "Texas '99 (QL-1 V9B.00, USA long PCB)",           0,                   layout_cmv4 )
+GAMEL( 1998, texas99e,   cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "Kolom",             "New Texas '99 (QL-1 V9B.00, Kolom V1)",           MACHINE_NOT_WORKING, layout_cmv4 ) // DB with MCU... see the ROM load notes
+GAMEL( 1998, texas99hc,  cmast99,  cm99,     cmast99,  cmaster_state,  init_cm99hc,    ROT0, "bootleg",           "Texas '99 (QL-1 V9B.00, Cleco, Hand Count)",      0,                   layout_cmv4 ) // lacks hand count module, injected
+
+GAME(  1993, aplan,      0,        cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "WeaShing H.K.",     "A-Plan",                                          MACHINE_NOT_WORKING )   // doesn't boot, not investigated yet
+GAMEL( 1999, top7,       0,        cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg (UTech)",   "Jin Ji Bao Xi (Top-7, V8.8, set 1)",              0,                   layout_cmv4 ) // Jin Ji Bao Xi (金雞報喜, Top-7)
+GAMEL( 1999, top7a,      top7,     cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "bootleg (UTech)",   "Jin Ji Bao Xi (Top-7, V8.8, set 2)",              0,                   layout_cmv4 ) // Jin Ji Bao Xi (金雞報喜, Top-7)
+GAME(  1996, war3cb,     0,        cm99,     cmast99,  cmaster_state,  init_cm99,      ROT0, "S.B.E.",            "War III Cherry Best",                             MACHINE_NOT_WORKING )   // different portmap?
+
 
 // --- Wing W-4 hardware ---
 GAMEL( 1989, lucky8,     0,        lucky8,   lucky8,   wingco_state,   empty_init,     ROT0, "Wing Co., Ltd.",       "New Lucky 8 Lines (set 1, W-4)",                           0,                      layout_lucky8 )    // 2 control sets...
@@ -35485,6 +35848,34 @@ GAMEL( 1993, bingowng,   0,        bingowng, bingowng, wingco_state,   empty_ini
 GAMEL( 1993, bingownga,  bingowng, bingownga,bingownga,wingco_state,   empty_init,     ROT0, "Wing Co., Ltd.",       "Bingo (set 2)",                                            0,                     layout_bingowng )
 
 GAME(  2002, mbs2euro,   0,        mbstar,   mbstar,   wingco_state,   init_mbs2,      ROT0, "Auto-Data Graz",       "Mega Bonus Star II (Euro, Millennium Edition)",            MACHINE_NOT_WORKING )  // need more work in memory map, inputs, and reels alignment.
+
+// --- Wing W-6 hardware ---
+GAMEL( 1986, feverch,    0,        feverch,  feverch,  wingco_state,   empty_init,     ROT0, "Wing Co., Ltd.",    "Fever Chance (W-6, Japan, set 1)",                         0,          layout_lucky8 )
+GAMEL( 1986, fevercha,   feverch,  feverch,  feverch,  wingco_state,   empty_init,     ROT0, "Wing Co., Ltd.",    "Fever Chance (W-6, Japan, set 2)",                         0,          layout_lucky8 )
+GAMEL( 1986, feverchb,   feverch,  feverchb, feverch,  wingco_state,   init_feverchb,  ROT0, "Wing Co., Ltd.",    "Fever Chance (W-6, Japan, MC-8123)",                       0,          layout_lucky8 )
+GAMEL( 1986, feverchc,   feverch,  feverchb, feverch,  wingco_state,   init_feverchc,  ROT0, "Wing Co., Ltd.",    "Fever Chance (W-6, Japan, MC-8123, New Lucky 8 Lines title)", 0,       layout_lucky8 )
+GAMEL( 1986, feverchtw,  feverch,  feverch,  feverch,  wingco_state,   empty_init,     ROT0, "Yamate",            "Fever Chance (W-6, Taiwan)",                               0,          layout_lucky8 )
+GAMEL( 1986, feverchw4,  feverch,  fevchw4,  lucky8b,  wingco_state,   empty_init,     ROT0, "bootleg",           "Fever Chance (W-6, cross-system for W-4)",                 0,          layout_lucky8p1 )
+
+// --- Wing W-7 hardware ---
+GAMEL( 1991, megaline,   0,        megaline, megaline, wingco_state,   init_mgln,      ROT0, "Fun World",         "Mega Lines (Wing W-7 System)",                             0,          layout_megaline )
+GAMEL( 1986, skillch,    0,        megaline, megaline, wingco_state,   init_skch,      ROT0, "Wing Co., Ltd.",    "Skill Chance (W-7, set 1, 62-98 main)",                    0,          layout_skillch )
+GAMEL( 1986, skillcha,   skillch,  megaline, skillcha, wingco_state,   init_skcha,     ROT0, "Wing Co., Ltd.",    "Skill Chance (W-7, set 2, 53-98 main)",                    0,          layout_skillcha )
+GAMEL( 1986, skillchb,   skillch,  megaline, megaline, wingco_state,   init_skchb,     ROT0, "Wing Co., Ltd.",    "Skill Chance (W-7, set 3, 62-98 main)",                    0,          layout_skillcha )
+
+// --- Wing W-8 hardware ---
+GAMEL( 1990, bonusch,    0,        bonusch,  bonusch,  unkch_state,    init_bonch,     ROT0, "Wing Co., Ltd.",    "Bonus Chance (W-8, set 1)",                                0,          layout_bonusch )  // M80C51F MCU
+GAMEL( 1990, bonuscha,   bonusch,  bonusch,  bonusch,  unkch_state,    init_boncha,    ROT0, "Wing Co., Ltd.",    "Bonus Chance (W-8, set 2)",                                0,          layout_bonusch )  // M80C51F MCU
+
+
+// --- Magical Odds hardware ---
+GAME(  1992, magodds,    0,        magodds,  magodds,  wingco_state,   empty_init,     ROT0, "Pal Company / Micro Manufacturing Inc.", "Magical Odds (set 1)",                             0 )
+GAME(  1992, magoddsa,   magodds,  magodds,  magodds,  wingco_state,   empty_init,     ROT0, "Pal Company / Micro Manufacturing Inc.", "Magical Odds (set 2)",                             0 )
+GAME(  1992, magoddsb,   magodds,  magodds,  magodds,  wingco_state,   empty_init,     ROT0, "Pal Company / Micro Manufacturing Inc.", "Magical Odds (set 3)",                             0 )
+GAME(  1991, magoddsc,   magodds,  magodds,  magoddsc, wingco_state,   init_magoddsc,  ROT0, "Pal Company",                            "Magical Odds (set 4, custom encrypted CPU block)", MACHINE_WRONG_COLORS | MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
+GAME(  1991, magoddsd,   magodds,  magodds,  magoddsc, wingco_state,   init_magoddsc,  ROT0, "Pal Company",                            "Magical Odds (set 5, custom encrypted CPU block)", MACHINE_WRONG_COLORS | MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
+GAME(  199?, mtonic,     0,        magodds,  magodds,  wingco_state,   init_magoddsc,  ROT0, "Pal Company",                            "Magical Tonic",                                    MACHINE_WRONG_COLORS | MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
+GAME(  199?, mtonic2,    0,        mtonic2,  magodds,  wingco_state,   init_magoddsc,  ROT0, "Pal Company",                            "Magical Tonic Part 2 (ver 007)",                   MACHINE_WRONG_COLORS | MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
 
 
 // --- Flaming 7's hardware (W-4 custom derivative) ---
@@ -35557,40 +35948,14 @@ GAME(  199?, fl7_500_gs12, fl7_50, flaming7, flaming7, wingco_state,   init_flam
 GAME(  199?, fl7_500_gs13, fl7_50, flaming7, flaming7, wingco_state,   init_flaming7,  ROT0, "Cyberdyne Systems", "Flaming 7's (500 bonus, GS13: Hollywood Nights, Dynamite Diamonds, Cherry Bonus, Nevada Numbers)",     0 )
 GAME(  199?, fl7_500_gs14, fl7_50, flaming7, flaming7, wingco_state,   init_flaming7,  ROT0, "Cyberdyne Systems", "Flaming 7's (500 bonus, GS14: House of Fury, Diamonds 7's, Cherry Bonus, Nevada Numbers)",             0 )
 GAME(  199?, fl7_500_gs15, fl7_50, flaming7, flaming7, wingco_state,   init_flaming7,  ROT0, "Cyberdyne Systems", "Flaming 7's (500 bonus, GS15: Independence Day, Diamonds 7's, Cherry Bonus, Nevada Numbers)",          0 )
+GAME(  199?, fl7_500_gs16, fl7_50, flaming7, flaming7, wingco_state,   init_flaming7,  ROT0, "Cyberdyne Systems", "Flaming 7's (500 bonus, GS16: Infinity, Diamond Doubles, Cherry Bonus, All Sevens)",                   0 )
+GAME(  199?, fl7_500_gs17, fl7_50, flaming7, flaming7, wingco_state,   init_flaming7,  ROT0, "Cyberdyne Systems", "Flaming 7's (500 bonus, GS17: Jackpot Junction, Diamonds 7's, Cherry Bonus, Nevada Numbers)",          0 )
+GAME(  199?, fl7_500_gs18, fl7_50, flaming7, flaming7, wingco_state,   init_flaming7,  ROT0, "Cyberdyne Systems", "Flaming 7's (500 bonus, GS18: Jokers Wild, Deuces Wild, Cherry Bonus, Nevada Numbers)",                0 )
 
 // special 7 sets
 GAME(  199?, special7,   0,        flam7_tw, flaming7, wingco_state,   init_special7,  ROT0, "unknown",           "Special 7 (Taiwanese Hardware, encrypted, set 1)",         0 )
 GAME(  199?, special7a,  special7, flam7_tw, flaming7, wingco_state,   init_special7,  ROT0, "unknown",           "Special 7 (Taiwanese Hardware, encrypted, set 2)",         0 )
 GAME(  199?, special7b,  special7, flam7_tw, flaming7, wingco_state,   init_special7,  ROT0, "unknown",           "Special 7 (Taiwanese Hardware, encrypted, set 3)",         0 )
-
-
-// --- Wing W-6 hardware ---
-GAMEL( 1986, feverch,    0,        feverch,  feverch,  wingco_state,   empty_init,     ROT0, "Wing Co., Ltd.",    "Fever Chance (W-6, Japan, set 1)",                         0,          layout_lucky8 )
-GAMEL( 1986, fevercha,   feverch,  feverch,  feverch,  wingco_state,   empty_init,     ROT0, "Wing Co., Ltd.",    "Fever Chance (W-6, Japan, set 2)",                         0,          layout_lucky8 )
-GAMEL( 1986, feverchb,   feverch,  feverchb, feverch,  wingco_state,   init_feverchb,  ROT0, "Wing Co., Ltd.",    "Fever Chance (W-6, Japan, MC-8123)",                       0,          layout_lucky8 )
-GAMEL( 1986, feverchc,   feverch,  feverchb, feverch,  wingco_state,   init_feverchc,  ROT0, "Wing Co., Ltd.",    "Fever Chance (W-6, Japan, MC-8123, New Lucky 8 Lines title)", 0,       layout_lucky8 )
-GAMEL( 1986, feverchtw,  feverch,  feverch,  feverch,  wingco_state,   empty_init,     ROT0, "Yamate",            "Fever Chance (W-6, Taiwan)",                               0,          layout_lucky8 )
-GAMEL( 1986, feverchw4,  feverch,  fevchw4,  lucky8b,  wingco_state,   empty_init,     ROT0, "bootleg",           "Fever Chance (W-6, cross-system for W-4)",                 0,          layout_lucky8p1 )
-
-// --- Wing W-7 hardware ---
-GAMEL( 1991, megaline,   0,        megaline, megaline, wingco_state,   init_mgln,      ROT0, "Fun World",         "Mega Lines (Wing W-7 System)",                             0,          layout_megaline )
-GAMEL( 1986, skillch,    0,        megaline, megaline, wingco_state,   init_skch,      ROT0, "Wing Co., Ltd.",    "Skill Chance (W-7, set 1, 62-98 main)",                    0,          layout_skillch )
-GAMEL( 1986, skillcha,   skillch,  megaline, skillcha, wingco_state,   init_skcha,     ROT0, "Wing Co., Ltd.",    "Skill Chance (W-7, set 2, 53-98 main)",                    0,          layout_skillcha )
-GAMEL( 1986, skillchb,   skillch,  megaline, megaline, wingco_state,   init_skchb,     ROT0, "Wing Co., Ltd.",    "Skill Chance (W-7, set 3, 62-98 main)",                    0,          layout_skillcha )
-
-// --- Wing W-8 hardware ---
-GAMEL( 1990, bonusch,    0,        bonusch,  bonusch,  unkch_state,    init_bonch,     ROT0, "Wing Co., Ltd.",    "Bonus Chance (W-8, set 1)",                                0,          layout_bonusch )  // M80C51F MCU
-GAMEL( 1990, bonuscha,   bonusch,  bonusch,  bonusch,  unkch_state,    init_boncha,    ROT0, "Wing Co., Ltd.",    "Bonus Chance (W-8, set 2)",                                0,          layout_bonusch )  // M80C51F MCU
-
-
-// --- Magical Odds hardware ---
-GAME(  1992, magodds,    0,        magodds,  magodds,  wingco_state,   empty_init,     ROT0, "Pal Company / Micro Manufacturing Inc.", "Magical Odds (set 1)",                             0 )
-GAME(  1992, magoddsa,   magodds,  magodds,  magodds,  wingco_state,   empty_init,     ROT0, "Pal Company / Micro Manufacturing Inc.", "Magical Odds (set 2)",                             0 )
-GAME(  1992, magoddsb,   magodds,  magodds,  magodds,  wingco_state,   empty_init,     ROT0, "Pal Company / Micro Manufacturing Inc.", "Magical Odds (set 3)",                             0 )
-GAME(  1991, magoddsc,   magodds,  magodds,  magoddsc, wingco_state,   init_magoddsc,  ROT0, "Pal Company",                            "Magical Odds (set 4, custom encrypted CPU block)", MACHINE_WRONG_COLORS | MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
-GAME(  1991, magoddsd,   magodds,  magodds,  magoddsc, wingco_state,   init_magoddsc,  ROT0, "Pal Company",                            "Magical Odds (set 5, custom encrypted CPU block)", MACHINE_WRONG_COLORS | MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
-GAME(  199?, mtonic,     0,        magodds,  magodds,  wingco_state,   init_magoddsc,  ROT0, "Pal Company",                            "Magical Tonic",                                    MACHINE_WRONG_COLORS | MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
-GAME(  199?, mtonic2,    0,        mtonic2,  magodds,  wingco_state,   init_magoddsc,  ROT0, "Pal Company",                            "Magical Tonic Part 2 (ver 007)",                   MACHINE_WRONG_COLORS | MACHINE_NOT_WORKING | MACHINE_NO_SOUND )
 
 
 // --- Amcoe games ---
@@ -35601,7 +35966,6 @@ GAMEL( 1997, schery97a,  schery97, amcoe1,   schery97,  cmaster_state,  init_sch
 GAMEL( 1998, skill98,    0,        amcoe1,   schery97,  cmaster_state,  init_skill98,   ROT0, "Amcoe",   "Skill '98 (Talking ver. s98-1.33)",                            0,                 layout_skill98 )
 GAMEL( 1997, pokonl97,   0,        amcoe1,   pokonl97,  cmaster_state,  init_po33,      ROT0, "Amcoe",   "Poker Only '97 (Talking ver. 3.3)",                            0,                 layout_pokonl97 )
 GAME(  1998, match98,    0,        amcoe1a,  match98,   cmaster_state,  init_match133,  ROT0, "Amcoe",   "Match '98 (ver. 1.33)",                                        0 )
-
 
 // The Sub-PCB has a printed sticker denoting C1, C2, D or DK for the type of FPGA decryption chip used.
 // There is known to be a special IOWA version running on the Texas C2 hardware with roms FB96P IA,
@@ -35644,7 +36008,6 @@ GAMEL( 1996, roypok96,   0,        amcoe2,   roypok96,  cmaster_state,  init_rp3
 GAMEL( 1996, roypok96a,  roypok96, amcoe2,   roypok96a, cmaster_state,  init_rp36,       ROT0, "Amcoe",   "Royal Poker '96 (set 2, v98-3.6)",                             0,                 layout_roypok96 )
 GAMEL( 1996, roypok96b,  roypok96, amcoe2,   roypok96a, cmaster_state,  init_rp36c3,     ROT0, "Amcoe",   "Royal Poker '96 (set 3, v98-3.6?)",                            0,                 layout_roypok96 )
 GAME(  1996, roypok96c,  roypok96, amcoe2,   roypok96a, cmaster_state,  init_rp96sub,    ROT0, "Amcoe",   "Royal Poker '96 (set 4, C3 board)",                            MACHINE_NOT_WORKING )
-
 
 // These all appear to be graphic hacks of 'New Fruit Bonus '96', they can run with the same program ROM
 // some sets are messy and appear to have mismatched graphic roms, they need to be sorted out properly.
@@ -35705,7 +36068,7 @@ GAMEL( 198?, cmpacmana,  cmpacman, cm,        cmpacman, cmaster_state,  init_cm,
 GAMEL( 198?, cmpacmanb,  cmpacman, cm,        cmpacman, cmaster_state,  init_cmpacmanb, ROT0, "<unknown>",               "Super Pacman (v1.2) + Cherry Master (Corsica, v8.31, encrypted)",          0,                                              layout_cmpacman ) // need to press K to switch between games...
 GAMEL( 198?, cmtetris,   0,        cm,        cmtetris, cmaster_state,  init_cm,        ROT0, "<unknown>",               "Tetris + Cherry Master (Corsica, v8.01, unencrypted, set 1)",              0,                                              layout_cmpacman ) // need to press K/L to switch between games...
 GAMEL( 198?, cmtetrisa,  cmtetris, cm,        cmtetris, cmaster_state,  init_cm,        ROT0, "<unknown>",               "Tetris + Cherry Master (Corsica, v8.01, unencrypted, set 2)",              0,                                              layout_cmpacman )
-GAMEL( 198?, cmtetrisb,  cmtetris, cm,        cmtetris, cmaster_state,  init_cm,        ROT0, "<unknown>",               "Tetris + Cherry Master (+K, Canada Version, encrypted)",                   MACHINE_NOT_WORKING,                            layout_cmpacman ) // different Tetris game. incomplete program decryption. press insert to throttle and see the attract running.
+GAMEL( 198?, cmtetrisb,  cmtetris, cmtetrisb, cmtetrisb, cmaster_state, init_cmtetrisb, ROT0, "<unknown>",               "Tetris + Cherry Master (+K, Canada Version, encrypted)",                   0,                                              layout_cmpacman ) // need to press K/L to switch between games...
 GAMEL( 198?, cmtetrisc,  cmtetris, cm,        cmtetris, cmaster_state,  init_cmtetrisc, ROT0, "<unknown>",               "Tetris + Cherry Master (Corsica, v8.01, encrypted)",                       0,                                              layout_cmpacman )
 GAMEL( 198?, cmtetrisd,  cmtetris, cm,        cmtetris, cmaster_state,  init_cmtetrisd, ROT0, "bootleg (Aidonis Games)", "Tetris + Cherry Master (Aidonis Games bootleg)",                           0,                                              layout_cmpacman ) // seems to have been hacked to run the slot game as default, see 0x8ba8
 GAMEL( 198?, cmtetrise,  cmtetris, cm,        cmtetris, cmaster_state,  empty_init,     ROT0, "bootleg",                 "Tetris + Cherry Master (unencrypted bootleg, set 1)",                      0,                                              layout_cmpacman ) // seems to have been hacked to run the slot game as default, see 0x8ba8

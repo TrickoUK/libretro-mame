@@ -121,6 +121,7 @@ public:
 	void xiaoao(machine_config &config) ATTR_COLD;
 	void saklove(machine_config &config) ATTR_COLD;
 	void mtrain(machine_config &config) ATTR_COLD;
+	void strain(machine_config &config) ATTR_COLD;
 	void tbonusal(machine_config &config) ATTR_COLD;
 	void humlan(machine_config &config) ATTR_COLD;
 	void queenbn(machine_config &config) ATTR_COLD;
@@ -132,9 +133,7 @@ public:
 	void jgaoshou(machine_config &config) ATTR_COLD;
 	void trea2000(machine_config &config) ATTR_COLD;
 
-	void init_wtrnymph() ATTR_COLD;
-	void init_mtrain() ATTR_COLD;
-	void init_tbonusal() ATTR_COLD;
+	void init_strain() ATTR_COLD;
 
 protected:
 	virtual void video_start() override ATTR_COLD;
@@ -234,6 +233,7 @@ private:
 	void mtrain_io(address_map &map) ATTR_COLD;
 	void mtrain_base_map(address_map &map) ATTR_COLD;
 	void mtrain_map(address_map &map) ATTR_COLD;
+	void strain_map(address_map &map) ATTR_COLD;
 	void tbonusal_map(address_map &map) ATTR_COLD;
 	void new2001_map(address_map &map) ATTR_COLD;
 	void ramdac_map(address_map &map) ATTR_COLD;
@@ -1205,8 +1205,7 @@ void subsino2_state::mtrain_tilesize_w(uint8_t data)
 
 void subsino2_state::mtrain_base_map(address_map &map)
 {
-	map(0x06000, 0x0d7ff).rom().region("program", 0x8100);
-
+	map(0x06000, 0x0d7ff).ram();
 	map(0x0d800, 0x0dfff).ram().share("nvram");   // battery
 
 	map(0x0e000, 0x0efff).w(FUNC(subsino2_state::mtrain_videoram_w));
@@ -1223,7 +1222,7 @@ void subsino2_state::mtrain_base_map(address_map &map)
 	map(0x0f162, 0x0f162).w("ramdac", FUNC(ramdac_device::mask_w));
 	map(0x0f168, 0x0f168).w(FUNC(subsino2_state::mtrain_tilesize_w));
 
-	map(0x10000, 0x180ff).rom().region("program", 0);
+	map(0x10000, 0x1ffff).rom().region("program", 0);
 }
 
 void subsino2_state::mtrain_map(address_map &map)
@@ -1236,6 +1235,30 @@ void subsino2_state::tbonusal_map(address_map &map)
 {
 	mtrain_base_map(map);
 	map(0x0f166, 0x0f167).w("ymsnd", FUNC(ym3812_device::write));
+}
+
+void subsino2_state::strain_map(address_map &map) // until internal ROM is dumped
+{
+	map(0x06000, 0x0d7ff).rom().region("program", 0x8100);
+
+	map(0x0d800, 0x0dfff).ram().share("nvram");   // battery
+
+	map(0x0e000, 0x0efff).w(FUNC(subsino2_state::mtrain_videoram_w));
+
+	map(0x0f11f, 0x0f11f).w(FUNC(subsino2_state::ss9601_disable_w));
+	map(0x0f120, 0x0f125).w(FUNC(subsino2_state::ss9601_scroll_w));
+
+	map(0x0f12f, 0x0f12f).w(FUNC(subsino2_state::ss9601_byte_lo_w));
+
+	map(0x0f140, 0x0f15f).rw("io", FUNC(ss9602_device::read), FUNC(ss9602_device::write));
+
+	map(0x0f160, 0x0f160).w("ramdac", FUNC(ramdac_device::index_w));
+	map(0x0f161, 0x0f161).w("ramdac", FUNC(ramdac_device::pal_w));
+	map(0x0f162, 0x0f162).w("ramdac", FUNC(ramdac_device::mask_w));
+	map(0x0f164, 0x0f164).rw(m_oki, FUNC(okim6295_device::read), FUNC(okim6295_device::write));
+	map(0x0f168, 0x0f168).w(FUNC(subsino2_state::mtrain_tilesize_w));
+
+	map(0x10000, 0x180ff).rom().region("program", 0);
 }
 
 void subsino2_state::mtrain_io(address_map &map)
@@ -2998,6 +3021,13 @@ void subsino2_state::mtrain(machine_config &config)
 	m_oki->add_route(ALL_OUTPUTS, "mono", 1.0);
 }
 
+void subsino2_state::strain(machine_config &config)
+{
+	mtrain(config);
+
+	m_maincpu->set_addrmap(AS_PROGRAM, &subsino2_state::strain_map);
+}
+
 void subsino2_state::tbonusal(machine_config &config)
 {
 	mtrain(config);
@@ -3441,10 +3471,7 @@ ROM_END
 
 ROM_START( queenbee124a )
 	ROM_REGION( 0x100000, "maincpu", 0 ) // H8/3044
-	// the H8 on this PCB is marked "SUBSINO SS2000 / 6433044A54F" and its internal ROM hasn't been
-	// dumped: the CRC-16 table at 0x100e is built with a different polynomial there, so the external ROM checksum check at
-	// 0x000344 fails and the game hangs. bp 340,1,{ER6=00082e1e;g} bypasses it for now.
-	ROM_LOAD( "ss9689_6433044a22f.u16",        0x000000, 0x008000, BAD_DUMP CRC(ece09075) SHA1(a8bc3aa44f30a6f919f4151c6093fb52e5da2f40) )
+	ROM_LOAD( "ss2000_6433044a54f.u16",        0x000000, 0x008000, CRC(9d84197c) SHA1(5a9c1e3163861c5190ebdbd88624bc54ff329d48) )
 	ROM_LOAD( "queen_bee_c2_alpha1_v124a.u21", 0x080000, 0x040000, CRC(d771d5b0) SHA1(a5dc0b05f612e05e151ea3041440e9b53f813058) )
 	ROM_FILL(                                  0x0c0000, 0x040000, 0xff )
 
@@ -3775,7 +3802,7 @@ ROM_END
 
 ROM_START( mtrain )
 	ROM_REGION( 0x4000, "maincpu", 0 )
-	HD647180X_FAKE_INTERNAL_ROM
+	ROM_LOAD( "ss-9600", 0x0000, 0x4000, CRC(11b7a336) SHA1(7da603e52a9fe0eafdbbcd3a8d833703ec366362) )
 
 	ROM_REGION( 0x10000, "program", 0 )
 	// code starts at 0x8100!
@@ -3804,7 +3831,7 @@ ROM_END
 
 ROM_START( mtraina )
 	ROM_REGION( 0x4000, "maincpu", 0 )
-	HD647180X_FAKE_INTERNAL_ROM
+	ROM_LOAD( "ss-9600", 0x0000, 0x4000, CRC(11b7a336) SHA1(7da603e52a9fe0eafdbbcd3a8d833703ec366362) )
 
 	ROM_REGION( 0x10000, "program", 0 )
 	// code starts at 0x8100!
@@ -3833,7 +3860,7 @@ ROM_END
 
 ROM_START( strain )
 	ROM_REGION( 0x4000, "maincpu", 0 )
-	HD647180X_FAKE_INTERNAL_ROM
+	HD647180X_FAKE_INTERNAL_ROM // expects a different internal ROM than the other Z180-based sets, so not SS-9600
 
 	ROM_REGION( 0x10000, "program", 0 )
 	// code starts at 0x8100!
@@ -3855,10 +3882,37 @@ ROM_START( strain )
 	ROM_LOAD( "ds2430a.bin", 0x00, 0x28, CRC(133705eb) SHA1(974b7fd5f7eaa84c4ba2a5ba9e014ac459fa7d23) BAD_DUMP ) // handcrafted to pass protection check
 ROM_END
 
+ROM_START( trsocean121s ) // all ROM labels unreadable
+	ROM_REGION( 0x4000, "maincpu", 0 )
+	ROM_LOAD( "ss-9600", 0x0000, 0x4000, CRC(11b7a336) SHA1(7da603e52a9fe0eafdbbcd3a8d833703ec366362) )
+
+	ROM_REGION( 0x10000, "program", 0 )
+	ROM_LOAD( "tms27c512.u17", 0x00000, 0x10000, CRC(6f2b8f11) SHA1(d90a126750eadbd6490b897a2e24c781ba78f6a0) )
+
+	ROM_REGION( 0x100000, "tilemap", 0 )
+	ROM_LOAD32_BYTE( "mx27c2000.u2", 0x00000, 0x40000, CRC(e33900b7) SHA1(7f68dd7062f239443bb63881dec719e802b16dce) )
+	ROM_LOAD32_BYTE( "mx27c2000.u3", 0x00002, 0x40000, CRC(59a08a1a) SHA1(ac6ed20b87872adf8b71a76ac4bc1a34d24a032c) )
+	ROM_LOAD32_BYTE( "mx27c2000.u4", 0x00001, 0x40000, CRC(acff69fd) SHA1(3597e42c551928f30e521a70edba1bef463faa06) )
+	ROM_LOAD32_BYTE( "m27c2001.u5",  0x00003, 0x40000, CRC(53cbf474) SHA1(610b14e628d3fa6762e6158c46898641d706c351) )
+
+	ROM_REGION( 0x80000, "oki", 0 )
+	ROM_LOAD( "m27c2001.u27", 0x00000, 0x40000, CRC(943ac197) SHA1(4880aca75a135d1932eb8c4de05013b0b60069e9) )
+	ROM_RELOAD(               0x40000, 0x40000 )
+
+	ROM_REGION( 0x117, "plds", 0 )
+	ROM_LOAD( "gal16v8d.u6",  0x000, 0x117, NO_DUMP )
+	ROM_LOAD( "gal16v8d.u18", 0x000, 0x117, NO_DUMP )
+	ROM_LOAD( "gal16v8d.u19", 0x000, 0x117, NO_DUMP )
+	ROM_LOAD( "gal16v8d.u26", 0x000, 0x117, NO_DUMP )
+	ROM_LOAD( "gal16v8d.u31", 0x000, 0x117, NO_DUMP )
+
+	ROM_REGION( 0x28, "eeprom", 0 )
+	ROM_LOAD( "ds2430a.bin", 0x00, 0x28, BAD_DUMP CRC(34b22796) SHA1(c859a3a9709793840058993464204a910df7cb44) ) // AI-generated
+ROM_END
 
 /***************************************************************************
 
-  Decryption of mtrain (same as crsbingo)
+  Decryption of strain (same as crsbingo)
 
   Notes:
 
@@ -3873,16 +3927,15 @@ ROM_END
 
 ***************************************************************************/
 
-void subsino2_state::init_mtrain()
+void subsino2_state::init_strain()
 {
 	subsino_decrypt(memregion("program")->base() + 0x8100, crsbingo_bitswaps, crsbingo_xors, 0x7f00);
 }
 
 
-
 ROM_START( tbonusal )
 	ROM_REGION( 0x4000, "maincpu", 0 )
-	HD647180X_FAKE_INTERNAL_ROM
+	ROM_LOAD( "ss-9600", 0x0000, 0x4000, CRC(11b7a336) SHA1(7da603e52a9fe0eafdbbcd3a8d833703ec366362) )
 
 	ROM_REGION( 0x1a000, "program", 0 )
 	// code starts at 0x8100
@@ -3908,11 +3961,6 @@ ROM_START( tbonusal )
 	ROM_REGION( 0x28, "eeprom", 0 )
 	ROM_LOAD( "ds2430a.bin", 0x00, 0x28, CRC(7c832409) SHA1(fe16074490fe4edab2be2de5fa83941dac9969b0) BAD_DUMP ) // handcrafted to pass protection check
 ROM_END
-
-void subsino2_state::init_tbonusal()
-{
-	subsino_decrypt(memregion("program")->base() + 0x8100, sharkpy_bitswaps, sharkpy_xors, 0x7f00);
-}
 
 
 /***************************************************************************
@@ -4254,7 +4302,7 @@ Same PCB as Magic Train
 
 ROM_START( wtrnymph )
 	ROM_REGION( 0x4000, "maincpu", 0 )
-	HD647180X_FAKE_INTERNAL_ROM
+	ROM_LOAD( "ss-9600", 0x0000, 0x4000, CRC(11b7a336) SHA1(7da603e52a9fe0eafdbbcd3a8d833703ec366362) )
 
 	ROM_REGION( 0x10000, "program", 0 )
 	// code starts at 0x8100!
@@ -4281,15 +4329,10 @@ ROM_START( wtrnymph )
 	ROM_LOAD( "ds2430a.bin", 0x00, 0x28, CRC(1b585f27) SHA1(ee89dfc731d867507c15009910e9f743c652a399) BAD_DUMP ) // handcrafted to pass protection check
 ROM_END
 
-void subsino2_state::init_wtrnymph()
-{
-	subsino_decrypt(memregion("program")->base() + 0x8100, victor5_bitswaps, victor5_xors, 0x7f00);
-}
-
 // runs on the same original PCB as mtrain, wtrnymph. All labels are hand-written and the copyright is Subsino 1981. Is this an hack?
 ROM_START( blushark )
 	ROM_REGION( 0x4000, "maincpu", 0 )
-	HD647180X_FAKE_INTERNAL_ROM
+	ROM_LOAD( "ss-9600", 0x0000, 0x4000, CRC(11b7a336) SHA1(7da603e52a9fe0eafdbbcd3a8d833703ec366362) )
 
 	ROM_REGION( 0x10000, "program", 0 )
 	// code starts at 0x8100!
@@ -4335,10 +4378,7 @@ ROM_END
 
 ROM_START( bigboss )
 	ROM_REGION( 0x100000, "maincpu", 0 ) // H8/3044
-	// the H8 on this PCB is marked "SUBSINO CP002 / 6433044A63F" and its internal ROM hasn't been
-	// dumped: the CRC-16 table at 0x100e is built with a different polynomial there, so the external ROM checksum check at
-	// 0x000344 fails and the game hangs. bp 340,1,{ER6=00080458;g} bypasses it for now.
-	ROM_LOAD( "ss9689_6433044a22f.u16", 0x000000, 0x008000, BAD_DUMP CRC(ece09075) SHA1(a8bc3aa44f30a6f919f4151c6093fb52e5da2f40) )
+	ROM_LOAD( "sp002_6433044a3ff.u16",     0x000000, 0x008000, CRC(6a00871f) SHA1(9d9e595baef4f9b331a2787a0e9976321ea346e7) )
 	ROM_LOAD( "big_boss_alpha_1_v108.u21", 0x080000, 0x040000, CRC(6fe041bd) SHA1(40d535978f5537e90f53bc4003fb3e7cb165b913) )
 	ROM_RELOAD(                            0x0c0000, 0x040000 )
 
@@ -4356,10 +4396,7 @@ ROM_END
 // 董事长 (Dǒngshìzhǎng)
 ROM_START( dongshiz ) // default password is all bet
 	ROM_REGION( 0x100000, "maincpu", 0 ) // H8/3044
-	// the H8 on this PCB is different (probably the same as bigboss)and its internal ROM hasn't been
-	// dumped:  the CRC-16 table at 0x100e is built with a different polynomial there, so the external ROM checksum check at
-	// 0x000344 fails and the game hangs. bp 340,1,{ER6=00081f78;g} bypasses it for now.
-	ROM_LOAD( "ss9689_6433044a22f.u16", 0x000000, 0x008000, BAD_DUMP CRC(ece09075) SHA1(a8bc3aa44f30a6f919f4151c6093fb52e5da2f40) )
+	ROM_LOAD( "sp002_6433044a3ff.u16",   0x000000, 0x008000, CRC(6a00871f) SHA1(9d9e595baef4f9b331a2787a0e9976321ea346e7) )
 	ROM_LOAD( "mrboss_china_1_v212.u21", 0x080000, 0x040000, CRC(6148ea97) SHA1(7231b470b6279315e94f26ea7729340854f339a7) )
 	ROM_RELOAD(                          0x0c0000, 0x040000 )
 
@@ -4370,7 +4407,7 @@ ROM_START( dongshiz ) // default password is all bet
 	ROM_REGION( 0x100000, "ss9x04", 0 )
 	ROM_LOAD( "mrboss_china_2_v300.u9", 0x000000, 0x100000, BAD_DUMP CRC(165f31ae) SHA1(1a0e63e63ce953271e980a66ab2f31f3c830da5a) )
 
-	ROM_REGION( 0x28, "eeprom", 0 ) // bp 340,1,{ER6=00081f78;g} can be used to bypass the failing check for now
+	ROM_REGION( 0x28, "eeprom", 0 )
 	ROM_LOAD( "ds2430.u3", 0x00, 0x28, BAD_DUMP CRC(b653cf03) SHA1(6b64dbe6c58a38b63ce7971964f2f8cafd19844e) ) // the '64-bit registration number' (0x20-0x27) is all 0xff
 	ROM_FILL(              0x20, 0x01, 0x14 ) // return correct device ID for now
 	ROM_FILL(              0x27, 0x01, 0x1d ) // return expected checksum for now
@@ -4379,15 +4416,17 @@ ROM_END
 } // anonymous namespace
 
 
-GAME( 1997, mtrain,      0,        mtrain,   mtrain,   subsino2_state, init_mtrain,   ROT0, "Subsino",                          "Magic Train (Ver. 1.4)",                0 )  // inside the program ROM says 1997, but on screen shows 1996
-GAME( 1996, mtraina,     mtrain,   mtrain,   mtrain,   subsino2_state, init_mtrain,   ROT0, "Subsino",                          "Magic Train (Ver. 1.31)",               0 )
+GAME( 1997, mtrain,      0,        mtrain,   mtrain,   subsino2_state, empty_init,    ROT0, "Subsino",                          "Magic Train (Ver. 1.4)",                0 )  // inside the program ROM says 1997, but on screen shows 1996
+GAME( 1996, mtraina,     mtrain,   mtrain,   mtrain,   subsino2_state, empty_init,    ROT0, "Subsino",                          "Magic Train (Ver. 1.31)",               0 )
 
-GAME( 1996, strain,      0,        mtrain,   strain,   subsino2_state, init_mtrain,   ROT0, "Subsino",                          "Super Train (Ver. 1.9)",                MACHINE_NOT_WORKING )
+GAME( 1996, strain,      0,        strain,   strain,   subsino2_state, init_strain,   ROT0, "Subsino",                          "Super Train (Ver. 1.9)",                MACHINE_NOT_WORKING )
 
-GAME( 1995, tbonusal,    0,        tbonusal, tbonusal, subsino2_state, init_tbonusal, ROT0, "Subsino (American Alpha license)", "Treasure Bonus (American Alpha, Ver. 1.6)", MACHINE_NOT_WORKING )
+GAME( 1995, tbonusal,    0,        tbonusal, tbonusal, subsino2_state, empty_init,    ROT0, "Subsino (American Alpha license)", "Treasure Bonus (American Alpha, Ver. 1.6)", MACHINE_NOT_WORKING )
 
-GAME( 1996, wtrnymph,    0,        mtrain,   wtrnymph, subsino2_state, init_wtrnymph, ROT0, "Subsino",                          "Water-Nymph (Ver. 1.4)",                0 )
-GAME( 199?, blushark,    wtrnymph, mtrain,   wtrnymph, subsino2_state, init_wtrnymph, ROT0, "hack?",                            "Blue Shark (Subsino, Ver. 1.0)",        MACHINE_NOT_WORKING )
+GAME( 1996, wtrnymph,    0,        mtrain,   wtrnymph, subsino2_state, empty_init,    ROT0, "Subsino",                          "Water-Nymph (Ver. 1.4)",                0 )
+GAME( 199?, blushark,    wtrnymph, mtrain,   wtrnymph, subsino2_state, empty_init,    ROT0, "hack?",                            "Blue Shark (Subsino, Ver. 1.0)",        MACHINE_NOT_WORKING )
+
+GAME( 1996, trsocean121s,trsocean, mtrain,   wtrnymph, subsino2_state, empty_init,    ROT0, "Subsino",                          "Treasure Ocean (Ver. 1.21-S)",          MACHINE_NOT_WORKING ) // needs inputs checking
 
 GAME( 1998, expcard,     0,        expcard,  expcard,  subsino2_state, empty_init,    ROT0, "Subsino (American Alpha license)", "Express Card / Top Card (Ver. 1.5)",    0 )
 GAME( 1999, jgaoshou,    expcard,  jgaoshou, jgaoshou, subsino2_state, empty_init,    ROT0, "Subsino",                          "Jiyou Gaoshou (China, Ver 1.2)",        MACHINE_IMPERFECT_GRAPHICS ) // missing GFX ROM
